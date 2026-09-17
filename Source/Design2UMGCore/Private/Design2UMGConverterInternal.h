@@ -47,7 +47,6 @@ namespace Design2UMGConverterInternal
 	{
 		TSharedPtr<FDesignNode> Expanded;
 		bool bResolved = false;
-		bool bFitContentPrecomputed = false;
 	};
 
 	struct FRefExpansionCache

@@ -129,7 +129,7 @@ namespace ParserSharedSemantics
 
 	// Fills a 2x3 affine image transform from a JSON matrix of two 3-element rows.
 	// The parsers differ in how they coerce each element (flexible numeric strings vs
-	// raw AsNumber), so the caller supplies the per-element numeric accessor.
+	// numeric values), so the caller supplies a success-reporting numeric accessor.
 	template <typename ReadNumberFn>
 	bool TryParseImageTransformMatrix(
 		const TArray<TSharedPtr<FJsonValue>>& Matrix,
@@ -141,19 +141,31 @@ namespace ParserSharedSemantics
 			return false;
 		}
 
-		const TArray<TSharedPtr<FJsonValue>>& Row0 = Matrix[0]->AsArray();
-		const TArray<TSharedPtr<FJsonValue>>& Row1 = Matrix[1]->AsArray();
-		if (Row0.Num() != 3 || Row1.Num() != 3)
+		float Parsed[2][3];
+		for (int32 RowIndex = 0; RowIndex < UE_ARRAY_COUNT(Parsed); ++RowIndex)
 		{
-			return false;
+			const TArray<TSharedPtr<FJsonValue>>* Row = nullptr;
+			if (!Matrix[RowIndex].IsValid() || !Matrix[RowIndex]->TryGetArray(Row)
+				|| Row->Num() != UE_ARRAY_COUNT(Parsed[RowIndex]))
+			{
+				return false;
+			}
+			for (int32 Column = 0; Column < UE_ARRAY_COUNT(Parsed[RowIndex]); ++Column)
+			{
+				if (!(*Row)[Column].IsValid() || !ReadNumber((*Row)[Column], Parsed[RowIndex][Column])
+					|| !FMath::IsFinite(Parsed[RowIndex][Column]))
+				{
+					return false;
+				}
+			}
 		}
 
-		ReadNumber(Row0[0], OutTransform.A);
-		ReadNumber(Row0[1], OutTransform.B);
-		ReadNumber(Row0[2], OutTransform.TX);
-		ReadNumber(Row1[0], OutTransform.C);
-		ReadNumber(Row1[1], OutTransform.D);
-		ReadNumber(Row1[2], OutTransform.TY);
+		OutTransform.A = Parsed[0][0];
+		OutTransform.B = Parsed[0][1];
+		OutTransform.TX = Parsed[0][2];
+		OutTransform.C = Parsed[1][0];
+		OutTransform.D = Parsed[1][1];
+		OutTransform.TY = Parsed[1][2];
 		return true;
 	}
 }

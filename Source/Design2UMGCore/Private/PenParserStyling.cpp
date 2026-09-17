@@ -7,6 +7,8 @@
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 #include "ParserSharedSemantics.h"
+#include "Design2UMGLog.h"
+#include "UMGValueParsing.h"
 
 namespace PenParser
 {
@@ -504,12 +506,20 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		if (!TryGetResolvedNumberField(Obj, TEXT("opacity"), Resolver, Result.Image.Opacity))
 			Result.Image.Opacity = Result.Opacity;
 		const TSharedPtr<FJsonValue>& TransformField = Obj->TryGetField(TEXT("imageTransform"));
-		if (TransformField.IsValid() && TransformField->Type == EJson::Array)
+		if (TransformField.IsValid())
 		{
-			ParserSharedSemantics::TryParseImageTransformMatrix(
-				TransformField->AsArray(),
-				[](const TSharedPtr<FJsonValue>& Value, float& OutNumber) { TryGetNumberValueFlexible(Value, OutNumber); },
-				Result.Image.Transform);
+			const TArray<TSharedPtr<FJsonValue>>* Matrix = nullptr;
+			if (!TransformField->TryGetArray(Matrix) || !ParserSharedSemantics::TryParseImageTransformMatrix(
+				*Matrix,
+				[](const TSharedPtr<FJsonValue>& Value, float& OutNumber)
+				{
+					return Value->Type == EJson::String
+						? FUMGValueParser::TryParseFloat(Value->AsString(), OutNumber)
+						: Value->Type == EJson::Number && Value->TryGetNumber(OutNumber);
+				}, Result.Image.Transform))
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Invalid imageTransform; expected a 2x3 matrix of finite numbers. Ignoring transform."));
+			}
 		}
 		return Result;
 	}

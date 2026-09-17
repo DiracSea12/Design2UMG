@@ -5,6 +5,7 @@
 #include "GradientMaterialParams.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
+#include "UMGValueParsing.h"
 
 namespace
 {
@@ -116,18 +117,20 @@ FString Design2UMGWidgetNodeAccess::SerializeImageTransform(const FUMGVisualBrus
 bool Design2UMGWidgetNodeAccess::TryParseImageTransform(const FString& Value, FUMGVisualBrushData::FImageTransformData& OutTransform)
 {
 	TArray<FString> Parts;
-	Value.ParseIntoArray(Parts, TEXT(","), true);
-	if (Parts.Num() != 6)
+	Value.ParseIntoArray(Parts, TEXT(","), false);
+	float Parsed[6];
+	if (Parts.Num() != UE_ARRAY_COUNT(Parsed))
 	{
 		return false;
 	}
-
-	OutTransform.A = FCString::Atof(*Parts[0].TrimStartAndEnd());
-	OutTransform.B = FCString::Atof(*Parts[1].TrimStartAndEnd());
-	OutTransform.TX = FCString::Atof(*Parts[2].TrimStartAndEnd());
-	OutTransform.C = FCString::Atof(*Parts[3].TrimStartAndEnd());
-	OutTransform.D = FCString::Atof(*Parts[4].TrimStartAndEnd());
-	OutTransform.TY = FCString::Atof(*Parts[5].TrimStartAndEnd());
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Parsed); ++Index)
+	{
+		if (!FUMGValueParser::TryParseFloat(Parts[Index], Parsed[Index]))
+		{
+			return false;
+		}
+	}
+	OutTransform = { Parsed[0], Parsed[1], Parsed[2], Parsed[3], Parsed[4], Parsed[5] };
 	return true;
 }
 

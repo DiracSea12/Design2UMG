@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGImageCropUtils.h"
+#include "Design2UMGLog.h"
 
 #include "ProceduralShapeGenerator.h"
 #include "DesignImageResourceLimits.h"
@@ -30,13 +31,17 @@ bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCr
 	{
 		OutRequest.Transform = Node.Brush.Image.Transform.GetValue();
 	}
-	else if (Node.WidgetStyle.ImageTransform.IsSet()
-		&& Design2UMGWidgetNodeAccess::TryParseImageTransform(Node.WidgetStyle.ImageTransform.GetValue(), OutRequest.Transform))
-	{
-	}
 	else
 	{
-		return false;
+		if (!Node.WidgetStyle.ImageTransform.IsSet())
+		{
+			return false;
+		}
+		if (!Design2UMGWidgetNodeAccess::TryParseImageTransform(Node.WidgetStyle.ImageTransform.GetValue(), OutRequest.Transform))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("UMGImageCropUtils: Invalid image transform '%s'; skipping crop."), *Node.WidgetStyle.ImageTransform.GetValue());
+			return false;
+		}
 	}
 
 	const float CropWidth = Node.WidgetStyle.WidthOverride.Get(64.0f);

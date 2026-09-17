@@ -20,6 +20,10 @@ namespace FUMGValueParser
 	DESIGN2UMGCORE_API EVerticalAlignment ToSlateVerticalAlignment(EUMGSlotVerticalAlignment Value);
 	DESIGN2UMGCORE_API bool IsFillSizeRule(EUMGSlotSizeRule Value);
 	DESIGN2UMGCORE_API ESlateVisibility ParseVisibility(const FString& Str);
+	// Accept a complete, finite decimal number; leave OutValue unchanged on failure.
+	DESIGN2UMGCORE_API bool TryParseFloat(const FString& Value, float& OutValue);
+	// Two comma-separated finite components; leave OutValue unchanged on failure.
+	DESIGN2UMGCORE_API bool TryParseVector2D(const FString& Str, FVector2D& OutValue);
 	DESIGN2UMGCORE_API FVector2D ParseVector2D(const FString& Str, FVector2D Default = FVector2D::ZeroVector);
 	DESIGN2UMGCORE_API bool IsNearlyEqualMargin(const FMargin& A, const FMargin& B);
 }

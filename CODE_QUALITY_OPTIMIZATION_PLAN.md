@@ -37,7 +37,7 @@
 | PR-02 | `VERIFIED` | Reimport 破坏性替换改为 Prepare → Validate → Commit |
 | PR-03 | `VERIFIED` | Import / Reimport / Save 结果状态统一 |
 | PR-04 | `VERIFIED` | Degradation / Warning / Partial Sync 诊断闭环 |
-| PR-05 | `NOT_STARTED` | 删除确定无效复杂度并修严输入解析 |
+| PR-05 | `VERIFIED` | 删除确定无效复杂度并修严输入解析 |
 | PR-06 | `NOT_STARTED` | Typed Payload 与内部 JSON/String 胶水收敛 |
 | PR-07 | `NOT_STARTED` | 单次树索引与身份歧义检测 |
 | PR-08 | `NOT_STARTED` | Core / Editor 小切口解耦 |
@@ -533,7 +533,7 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 
 # PR-05：删除确定无效复杂度并修严输入解析
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P0 / 发布前必须完成
 
@@ -548,15 +548,15 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 - `Source/Design2UMGCore/Private/Design2UMGConverterInternal.h`
 - `Source/Design2UMGCore/Private/Design2UMGConverterFlowChildPreResolution.cpp`
 
-- [ ] 重新确认该字段仍只被写入、不影响业务决策。
-- [ ] 删除字段、`MarkFitContentPrecomputed()` 及只为维护该状态存在的调用。
-- [ ] 保留有实际作用的 `ExpansionCache / SnapshotAliases / ThemeSignature`。
-- [ ] 运行 ref expansion、fit-content、flow、wrap/grid 相关回归。
+- [x] 重新确认该字段仍只被写入、不影响业务决策。
+- [x] 删除字段、`MarkFitContentPrecomputed()` 及只为维护该状态存在的调用。
+- [x] 保留有实际作用的 `ExpansionCache / SnapshotAliases / ThemeSignature`。
+- [x] 运行 ref expansion、fit-content、flow、wrap/grid 相关回归。
 
 ## 行动项 B：简化怪异控制流
 
-- [ ] 将 `UMGJsonParser.cpp` 中空 `if` + IIFE side-effect lambda 改为普通清晰控制流。
-- [ ] 搜索类似无收益“聪明代码”，只清理有明确可读性收益且无行为变化的实例。
+- [x] 将 `UMGJsonParser.cpp` 中空 `if` + IIFE side-effect lambda 改为普通清晰控制流。
+- [x] 搜索类似无收益“聪明代码”，只清理有明确可读性收益且无行为变化的实例。
 
 ## 行动项 C：TryParse 真正验证输入
 
@@ -565,21 +565,78 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 - `Source/Design2UMGCore/Private/UMGWidgetNodeAccess.cpp`
 - `Source/Design2UMGEditor/Private/UMGJsonParser.cpp`
 
-- [ ] `TryParseImageTransform` 检查每个 component 真正成功解析。
-- [ ] 拒绝 NaN / Inf 等非有限值。
-- [ ] Corner radii 等相似手工数字解析执行同样审计。
-- [ ] 坏输入返回失败并进入现有 diagnostic/log 规则，不静默转成零。
+- [x] `TryParseImageTransform` 检查每个 component 真正成功解析。
+- [x] 拒绝 NaN / Inf 等非有限值。
+- [x] Corner radii 等相似手工数字解析执行同样审计。
+- [x] 坏输入返回失败并进入现有 diagnostic/log 规则，不静默转成零。
 
 ## 完成条件
 
-- [ ] `bFitContentPrecomputed` 及其维护路径完全删除。
-- [ ] 不存在已知空 `if` + 副作用 lambda 控制流。
-- [ ] `TryParse*` 的返回值真正代表完整解析成功。
-- [ ] 相关单元测试和全量正式回归无退步。
+- [x] `bFitContentPrecomputed` 及其维护路径完全删除。
+- [x] 不存在已知空 `if` + 副作用 lambda 控制流。
+- [x] `TryParse*` 的返回值真正代表完整解析成功。
+- [x] 相关单元测试和全量正式回归无退步。
 
 ## 会话记录
 
-尚无。
+2026-09-18：开始基线 `50f18d777c30ee03deb5b3782286588179a4d7c1`。保留进入时 PR-04 的全部未提交修改和 `.workbuddy/`，仅实施 PR-05。已核实无效状态写入链、数字解析及真实验证入口；进入快照与后续证据保存于 `Saved/PR05/20260918/`。
+
+
+2026-09-18：PR-05 实施完成并通过验证，沿用既有两项已批准视觉例外；本阶段没有新增或扩大退步。
+
+- **无效状态删除**：当前源码确认 `bFitContentPrecomputed` 的唯一读取只用于保护它自身的赋值。删除字段、私有维护函数和全部五处维护调用，三个 resolver lambda 直接返回工作副本；`ExpansionCache / SnapshotAliases / ThemeSignature / bResolved`、实际 fit-content 测量和工作副本语义保持不变。
+- **控制流与解析**：JSON 的空 `if` + 副作用 IIFE、裁剪入口的空成功分支改为普通控制流。现有 `FUMGValueParser` 增加一个共享 `TryParseFloat`，使用 `std::from_chars` 校验完整消费、float 可表示性和有限性；变换、二维向量、圆角及边距共用此语义，分割时保留空分量。非法变换不部分写回，非法可选边距不伪装成显式零，现有默认值与 typed transform 优先级保留；消费入口使用现有日志分类报告错误。未新增生产文件、schema 字段或特殊 case 分支。
+- **行为测试**：新增 `Design2UMG.NumericParsing.*` 六项测试，覆盖六个变换分量、JSON 两个变换入口、两类圆角、六个边距入口、二维向量和实际裁剪请求。涵盖空分量、尾随垃圾、不完整指数、NaN/Inf、溢出、合法符号/指数/零值、失败后输出保持及 typed 优先级。先在原生产实现运行初始五项测试复现缺陷；测试中的正负零期望差异已纠正，未放宽坏输入断言。
+- **真实验证**：`FPSRoguelikeEditor Win64 Development` 构建成功；focused **6/6**、全插件 **609/609**（原有 603 项 + 新增 6 项）成功，编辑器退出码均为 **0**，测试集合完整且无重复。ref / fit-content / flow / wrap / grid / snapshot 相关测试包含在全插件执行中。
+- **完整 81-case**：自动发现 **39 Pencil + 42 Figma**，无 include/exclude 筛选，包含 `figma_figma-export_source` 与 `pen_pencil-welcome_step-2-frame`。正式 reference 仍为 `review-batch-transaction-full-20260915`，相邻代码结果对照为 `pr04-review-closure-full81-20260917`。本次 **81 张 candidate PNG 的 SHA-256 全部一致，四项误差指标逐 case 差值全为 0**；输入/参考身份、生成、结构、尺寸与确定性兼容检查通过。原始 gate 仍为 **79 passed + 2 既有批准例外**：`pen_pencil-shadcn_shadcn-design-system-components`、`pen_pencil-welcome_step-1-frame`；保留 batch exit **2** 和 editor exits **0/0**，不将其表述为 81/81 零失败。
+- **完整性与自审**：生产代码修改 9 个现有文件，净增 14 行；只新增一个行为测试文件。冻结后的 **398 份源码及 2 个 DLL** 保持一致，**248 项输入/参考/全局索引保护文件** 哈希未变；前四阶段的既有修改保留，未 staging、未 commit、HEAD 未变。UTF-8 无 BOM 与 `git diff --check` 通过。自审未发现本阶段遗留的已知功能问题；实际构建验证范围为当前 Windows/Win64 工程。
+
+证据：`Saved/PR05/20260918/` 中的 `before.*`、`pr05-source.diff`、`red-tests-*`、`build-01-*`、`focused-01-*`、`all-tests-*`、`full81-*`、`scope-assessment.json`、`automation-assessment.json`、`full81-assessment.json`、`final-integrity.json`、`self-review.md` 与可重跑的 `assess.py`。本次完整回归输出：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr05-full81-20260918`。
+
+### 2026-09-18 自我审查：撤回完整覆盖结论，待边界收口
+
+本次重新读取当前源码及全部 PR-05 差异，并用未修改的插件 DLL 在真实 `FPSRoguelike.uproject` 执行额外边界输入。A/B 已完成；C 的指定字符串函数实现有效，但以下遗漏使“所有 TryParse 完整成功、坏输入有诊断”的结论不能成立，故状态回退为 `IN_PROGRESS`。此前构建、609项自动化及81-case结果保留，不否认其真实性。
+
+- 源端 `TryParseImageTransformMatrix` 仅检查2×3形状，分量读取失败不传播且未检查有限性。真实Pencil输入 `[[2,"bad",3],[4,5,6]]` 成功且无warning、得到 `2,0,3,4,5,6`；`[[2,0,1e39],[0,1,0]]` 得到 `inf`。typed传递不会经过此次加严的字符串函数。
+- `ParseVector2D` 的失败默认值仍被JSON消费者写为已设置属性；`RenderTransformScale:"bad,2"` 和 `"1,,2"` 实际均成为 `(0,0)`，虽然记录warning，仍会被后续属性应用消费。
+- 变换和两类圆角的错误JSON类型在 `TryGetString` 失败后被静默略过；实际数组输入返回成功且无warning。新增测试均以字符串传入这些字段，没有覆盖该类型错误。
+- 相关审计遗留：`OutlineCornerRadius:1e39`、`RenderAngle:1e39` 实际进入数据结构成为非有限值且无warning。这不是本轮新增回归；上次实现明确限定字符串切片，不能将其推广成所有数字入口已安全。应收口同类圆角并明确其他原生数值字段的处理范围，不直接扩大为全局数字读取重写。
+
+本次只更新记录，**未修改生产源码、既有测试和插件DLL，未暂存或提交**。独立诊断调用器及13组输入观察保存在 `Saved/PR05/self-review-20260918/`；最终 `probe-results.json`、`probe-editor.log`、`probe-process.json` 为实际证据，进程exit0。源端实际复现的是Pencil路径；Figma路径仅审阅源码，不冒充运行结果。未额外渲染异常输入或声称复现崩溃。
+
+原验证重新审计：609/609及原603个测试ID完整；81张PNG重新计算SHA-256均与PR04一致，四项指标逐项差值0，原始79通过+2既有批准例外未变，batch exit2/editor exits0/0。没有重新执行609项全插件测试或81-case渲染。完整代码质量判断、最小收口方向和验证边界见 `review.md`，原证据复核见 `evidence-audit.json`。
+
+### 2026-09-18 自审缺口收口（已验证，最新验收依据）
+
+用户要求重新收尾后，本次在进入时全部未提交修改上处理 R1-R4，未重做 A/B 或扩展到后续阶段。开始及结束 HEAD 均为 `50f18d777c30ee03deb5b3782286588179a4d7c1`；未暂存、未提交。之前的完成记录、撤回结论和失败证据保留，以下是本阶段最新验收结果。
+
+**本次实现**：
+- 源端矩阵复用现有 `TryParseImageTransformMatrix`，验证真实2×3结构、每个读取结果和分量有限性；六项全部成功后才写回。Pencil/Figma各自在源入口报告非法变换，失败不会生成半有效矩阵。Pencil既有数值字符串使用已有严格词法；Figma数值分量不再隐式接受bool等错误类型。没有把矩阵先拼字符串，也没有在后续裁剪器增加源特判。
+- `TryParseVector2D` 向调用者提供成功/失败事实，原默认值接口委托同一实现。JSON共13个向量入口已迁移：12个可选属性失败后不标记present，非可选阴影offset保留原默认值。真实TextBlock原缩放在非法输入下保持不变，显式`0,0`仍正常应用。
+- 两个变换入口及两类圆角区分字段缺失和字段错误类型；null、数组、对象、bool、number和空字符串均有诊断并不设置非法属性。缺失字段仍正常，不增加任何兼容格式。
+- 局部有限数值读取只收口已复现的`OutlineCornerRadius`和`RenderAngle`。以double检查有限性和float范围；负圆角判定仍在缩窄前，`-1e-50`不会成为显式零圆角。全局`DesignJsonUtils`和其他原生数值字段的转换策略未改，不把这两项修复描述成全插件数值协议重写。
+
+**本次额外修正的测试盲点**：UE预期日志集合使用TSet，循环内重复注册同一模式会替换并重置计数。初版错误类型测试因最后一个输入产生日志而掩盖了前面的漏报。现已在原6项及新增测试中对每种模式一次登记精确总数；原坏输入与行为断言均保留，没有把诊断要求改为“出现过一次即可”。
+
+**变更规模**：本次收口修改6个既有生产文件（净增69行），修改既有Editor数值测试并新增一个Core源矩阵测试文件。整个PR-05相对最初进入状态累计14个源码文件：12个既有生产文件、2个测试文件，生产代码净增83行。没有新增生产文件、模块、schema字段、状态管理器或通用解析框架。完整增量分别见`closure-source.diff`和`phase05-total.diff`。
+
+| 检查 | 本次实际结果 | 证据（`Saved/PR05/closure-20260918/`） |
+|---|---|---|
+| 缺口红测 | 加强后的测试在修改前生产代码中，原6项成功、新增6项全部失败；editor255，预期日志计数准确揭示漏报 | `red-build-02-*`、`red-tests-02-*`、`red-02-source.json` |
+| 最终真实项目构建 | `FPSRoguelikeEditor Win64 Development`成功，exit0 | `build-01-*`、`build-assessment.json` |
+| 针对性行为测试 | 12/12，完成标记和editor均0；包括真实Pencil/Figma解析、13个向量消费位置、实际控件缩放及诊断计数 | `focused-01-*` |
+| 全插件自动化 | **615/615**，原609个测试ID全部保留，新增6项；NumericParsing12/12、SafeReimportQA50/50；完成标记及editor0 | `all-tests-*`、`automation-assessment.json` |
+| 完整81-case | 39 Pencil+42 Figma，无筛选；**81张candidate PNG与收尾前逐张SHA-256相同，四项误差指标逐例差值均0**；源/参考身份、结构/尺寸/产物有效，editor0/0 | `full81-*`、`full81-assessment.json` |
+| 原始正式及历史门禁 | **79通过+原批准2例外**，batch2，历史阻塞原因和退步明细完全不变，无新增或扩大退步；未修改原始验收器、阈值或登记基线 | 运行目录的`summary.json`、`validation_against_historical_best.json` |
+| 最终完整性 | 399源码及2DLL与冻结指纹一致，248保护文件未变；进入时其他修改保留，其他阶段正文未改；UTF-8无BOM、diff检查通过 | `final-source.json`、`final-binaries.json`、`final-integrity.json` |
+
+新增六项为 `NumericParsing.SourceMatrixAtomic / PenImageMatrix / FigmaImageMatrix / VectorJsonPresence / JsonWrongTypes / FiniteScalars`。红绿验证并未替换有效输入的既有回归保障：完整测试和81-case均在最终源码/二进制冻结后真实重新执行，而不是复用上次通过的运行结果。
+
+正式reference仍为`review-batch-transaction-full-20260915`；相邻实现对照为`pr05-full81-20260918`。本次完整运行：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr05-closure-full81-20260918`。原两项例外仍仅为`pen_pencil-shadcn_shadcn-design-system-components`与`pen_pencil-welcome_step-1-frame`，指标及历史明细未扩大，**不将79/81原始门禁表述成零例外全绿**。
+
+**四项自审结论**：实现只在真实解析/消费边界收口，复用已有能力而非追加平台化抽象；R1-R4已闭环，A/B原成果保留；数值词法、源矩阵语义和Editor字段消费的职责边界清楚，不靠下游补特殊值；针对性、全插件和完整视觉验证后未发现本阶段遗留的已知阻塞问题。实际验证仅为本机Windows/Win64；外部任意手工typed IR、其他原生数值字段及全JSON-schema校验不在本次范围，不宣称所有输入边界均已全面加固。
+
+证据入口：`Saved/PR05/closure-20260918/verification.json`，详细自审见`self-review.md`，`assess.py`可重新读取原始结果并核对图片/源码/二进制/保护文件。所有实际构建、测试、视觉命令均保存在各自`*-command.json`，统一使用现有`G:/UE5/FPSRoguelike/FPSRoguelike.uproject`。本阶段按既有批准例外口径恢复`VERIFIED`；其他阶段状态不变。
 
 ---
 

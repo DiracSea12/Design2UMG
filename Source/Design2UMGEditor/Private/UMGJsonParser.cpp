@@ -18,50 +18,73 @@
 
 namespace
 {
-	// Parse Padding values from a single-value or an "L,T,R,B" string.
-	FMargin ParsePaddingValue(const TSharedPtr<FJsonValue>& Value)
-	{
-		if (Value->Type == EJson::String)
-		{
-			TArray<FString> Parts;
-			Value->AsString().ParseIntoArray(Parts, TEXT(","));
-			if (Parts.Num() == 4)
-			{
-				return FMargin(
-					FCString::Atof(*Parts[0].TrimStartAndEnd()),
-					FCString::Atof(*Parts[1].TrimStartAndEnd()),
-					FCString::Atof(*Parts[2].TrimStartAndEnd()),
-					FCString::Atof(*Parts[3].TrimStartAndEnd())
-				);
-			}
-			if (Parts.Num() == 1)
-			{
-				return FMargin(FCString::Atof(*Parts[0].TrimStartAndEnd()));
-			}
-		}
-
-		return FMargin(0);
-	}
-
 	bool TryParseVector4(const FString& Value, FVector4& OutValue)
 	{
 		TArray<FString> Parts;
-		Value.ParseIntoArray(Parts, TEXT(","), true);
-		if (Parts.Num() != 4)
+		Value.ParseIntoArray(Parts, TEXT(","), false);
+		float Parsed[4];
+		if (Parts.Num() != UE_ARRAY_COUNT(Parsed))
 		{
 			return false;
 		}
-
-		float Parsed[4] = {};
 		for (int32 Index = 0; Index < UE_ARRAY_COUNT(Parsed); ++Index)
 		{
-			if (!LexTryParseString(Parsed[Index], *Parts[Index].TrimStartAndEnd()))
+			if (!FUMGValueParser::TryParseFloat(Parts[Index], Parsed[Index]))
 			{
 				return false;
 			}
 		}
 		OutValue = FVector4(Parsed[0], Parsed[1], Parsed[2], Parsed[3]);
 		return true;
+	}
+
+	TOptional<FVector2D> ParseVector2DValue(const TSharedPtr<FJsonValue>& Value, const TCHAR* Field)
+	{
+		FVector2D Parsed;
+		if (Value->Type == EJson::String && FUMGValueParser::TryParseVector2D(Value->AsString(), Parsed))
+		{
+			return Parsed;
+		}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid vector for %s; expected a string of two finite numbers."), Field);
+		return {};
+	}
+
+	// Keep double precision for pre-narrowing rules such as the negative radius sentinel.
+	bool TryGetFiniteFloatField(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, double& OutValue)
+	{
+		const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(Object, Field);
+		if (!Value.IsValid())
+		{
+			return false;
+		}
+		double Parsed;
+		if (Value->TryGetNumber(Parsed) && FMath::IsFinite(Parsed) && FMath::Abs(Parsed) <= MAX_flt)
+		{
+			OutValue = Parsed;
+			return true;
+		}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid %s; expected a finite float-range number."), Field);
+		return false;
+	}
+
+	TOptional<FMargin> ParsePaddingValue(const TSharedPtr<FJsonValue>& Value, const TCHAR* Field)
+	{
+		if (Value->Type == EJson::String)
+		{
+			const FString Str = Value->AsString();
+			float Uniform;
+			if (FUMGValueParser::TryParseFloat(Str, Uniform))
+			{
+				return FMargin(Uniform);
+			}
+			FVector4 Sides;
+			if (TryParseVector4(Str, Sides))
+			{
+				return FMargin(Sides.X, Sides.Y, Sides.Z, Sides.W);
+			}
+		}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid padding for %s; expected one or four finite numbers."), Field);
+		return {};
 	}
 
 }
@@ -222,31 +245,39 @@ void FUMGJsonParser::ParseWidgetStylePayload(const TSharedPtr<FJsonObject>& Node
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::Padding); JsonValue.IsValid())
 		{
-			OutWidgetStyle.Padding = ParsePaddingValue(JsonValue);
+			OutWidgetStyle.Padding = ParsePaddingValue(JsonValue, UMGPropertyKeys::Padding);
 		}
-		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::InnerSlotPadding, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::InnerSlotPadding); JsonValue.IsValid())
 		{
-			OutWidgetStyle.InnerSlotPadding = FUMGValueParser::ParseVector2D(Str);
+			OutWidgetStyle.InnerSlotPadding = ParseVector2DValue(JsonValue, UMGPropertyKeys::InnerSlotPadding);
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::SlotPadding); JsonValue.IsValid())
 		{
-			OutWidgetStyle.SlotPadding = ParsePaddingValue(JsonValue);
+			OutWidgetStyle.SlotPadding = ParsePaddingValue(JsonValue, UMGPropertyKeys::SlotPadding);
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::StrokePadding); JsonValue.IsValid())
 		{
-			OutWidgetStyle.StrokePadding = ParsePaddingValue(JsonValue);
+			OutWidgetStyle.StrokePadding = ParsePaddingValue(JsonValue, UMGPropertyKeys::StrokePadding);
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::StrokeMargin); JsonValue.IsValid())
 		{
-			OutWidgetStyle.StrokeMargin = ParsePaddingValue(JsonValue);
+			OutWidgetStyle.StrokeMargin = ParsePaddingValue(JsonValue, UMGPropertyKeys::StrokeMargin);
 		}
 		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageMode, Str))
 		{
 			OutWidgetStyle.ImageMode = Str;
 		}
-		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageTransform, Str))
+		if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::ImageTransform); TransformValue.IsValid())
 		{
-			OutWidgetStyle.ImageTransform = Str;
+			FUMGVisualBrushData::FImageTransformData Transform;
+			if (TransformValue->Type == EJson::String && Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformValue->AsString(), Transform))
+			{
+				OutWidgetStyle.ImageTransform = TransformValue->AsString();
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform; ignoring value."));
+			}
 		}
 		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::Stretch, Str))
 		{
@@ -386,7 +417,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		FString Str;
 		// Negative radius is the legacy "unset" encoding; keep it out of the
 		// optional so IsSet() preserves the old >= 0 consumer contract.
-		if (DesignJsonUtils::TryGetNumber(*BrushObject, UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
+		if (TryGetFiniteFloatField(*BrushObject, UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
 			OutBrush.OutlineCornerRadius = (float)Val;
 		if (DesignJsonUtils::TryGetFloat(*BrushObject, UMGPropertyKeys::OutlineThickness, FloatVal))
 		{
@@ -394,7 +425,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		}
 		if (const TSharedPtr<FJsonValue> Margin = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::BrushMargin); Margin.IsValid())
 		{
-			OutBrush.Margin = ParsePaddingValue(Margin);
+			OutBrush.Margin = ParsePaddingValue(Margin, UMGPropertyKeys::BrushMargin);
 		}
 		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::DrawAs, Str))
 		{
@@ -424,21 +455,16 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		{
 			OutBrush.TexturePath = Str;
 		}
-		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::CornerRadii, Str))
+		if (const TSharedPtr<FJsonValue> RadiiValue = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::CornerRadii); RadiiValue.IsValid())
 		{
-			TArray<FString> Parts;
-			Str.ParseIntoArray(Parts, TEXT(","));
-			if (Parts.Num() == 4)
+			FVector4 Radii;
+			if (RadiiValue->Type != EJson::String || !TryParseVector4(RadiiValue->AsString(), Radii))
 			{
-				const FVector4 Radii(
-					FCString::Atof(*Parts[0]), FCString::Atof(*Parts[1]),
-					FCString::Atof(*Parts[2]), FCString::Atof(*Parts[3]));
-				// Legacy "unset" contract only tested the first component for
-				// negativity; keep that exact behavior for IsSet().
-				if (Radii.X >= 0.0f)
-				{
-					OutBrush.CornerRadii = Radii;
-				}
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.CornerRadii; ignoring value."));
+			}
+			else if (Radii.X >= 0.0f)
+			{
+				OutBrush.CornerRadii = Radii;
 			}
 		}
 		const TSharedPtr<FJsonObject>* ImageObject = nullptr;
@@ -452,18 +478,17 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.Image.Mode = Str;
 			}
-			if (DesignJsonUtils::TryGetString(*ImageObject, UMGJsonKeys::Transform, Str)
-				&& [&]()
-				{
-					FUMGVisualBrushData::FImageTransformData Transform;
-					if (!Design2UMGWidgetNodeAccess::TryParseImageTransform(Str, Transform))
-					{
-						return false;
-					}
-					OutBrush.Image.Transform = Transform;
-					return true;
-				}())
+			if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*ImageObject, UMGJsonKeys::Transform); TransformValue.IsValid())
 			{
+				FUMGVisualBrushData::FImageTransformData Transform;
+				if (TransformValue->Type == EJson::String && Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformValue->AsString(), Transform))
+				{
+					OutBrush.Image.Transform = Transform;
+				}
+				else
+				{
+					UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Image.Transform; ignoring value."));
+				}
 			}
 		}
 		FString BrushTextureDiagnostic;
@@ -483,21 +508,21 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.Gradient.Rotation = FloatVal;
 			}
-			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::StartPoint, Str))
+			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::StartPoint); JsonValue.IsValid())
 			{
-				OutBrush.Gradient.StartPoint = FUMGValueParser::ParseVector2D(Str, FVector2D::ZeroVector);
+				OutBrush.Gradient.StartPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::StartPoint);
 			}
-			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::EndPoint, Str))
+			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::EndPoint); JsonValue.IsValid())
 			{
-				OutBrush.Gradient.EndPoint = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 0.0f));
+				OutBrush.Gradient.EndPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::EndPoint);
 			}
-			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::Center, Str))
+			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Center); JsonValue.IsValid())
 			{
-				OutBrush.Gradient.Center = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
+				OutBrush.Gradient.Center = ParseVector2DValue(JsonValue, UMGJsonKeys::Center);
 			}
-			if (DesignJsonUtils::TryGetString(*GradientObject, UMGJsonKeys::Size, Str))
+			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Size); JsonValue.IsValid())
 			{
-				OutBrush.Gradient.Size = FUMGValueParser::ParseVector2D(Str, FVector2D(1.0f, 1.0f));
+				OutBrush.Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
 			}
 			if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(*GradientObject, UMGJsonKeys::Stops))
 			{
@@ -553,17 +578,17 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		{
 			OutEffect.TextureParameter = Str;
 		}
-		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectBlurUVStep, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::EffectBlurUVStep); JsonValue.IsValid())
 		{
-			OutEffect.EffectBlurUVStep = FUMGValueParser::ParseVector2D(Str);
+			OutEffect.EffectBlurUVStep = ParseVector2DValue(JsonValue, UMGPropertyKeys::EffectBlurUVStep);
 		}
 		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectColor, Str))
 		{
 			OutEffect.EffectColor = FUMGValueParser::ParseColor(Str);
 		}
-		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::EffectOffset, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::EffectOffset); JsonValue.IsValid())
 		{
-			OutEffect.EffectOffset = FUMGValueParser::ParseVector2D(Str);
+			OutEffect.EffectOffset = ParseVector2DValue(JsonValue, UMGPropertyKeys::EffectOffset);
 		}
 		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskShape, Str))
 		{
@@ -576,16 +601,20 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				OutEffect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
 			}
 		}
-		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskSize, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::GeometryMaskSize); JsonValue.IsValid())
 		{
-			OutEffect.GeometryMaskSize = FUMGValueParser::ParseVector2D(Str);
+			OutEffect.GeometryMaskSize = ParseVector2DValue(JsonValue, UMGPropertyKeys::GeometryMaskSize);
 		}
-		if (DesignJsonUtils::TryGetString(*EffectObject, UMGPropertyKeys::GeometryMaskCornerRadii, Str))
+		if (const TSharedPtr<FJsonValue> RadiiValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::GeometryMaskCornerRadii); RadiiValue.IsValid())
 		{
 			FVector4 Radii;
-			if (TryParseVector4(Str, Radii))
+			if (RadiiValue->Type == EJson::String && TryParseVector4(RadiiValue->AsString(), Radii))
 			{
 				OutEffect.GeometryMaskCornerRadii = Radii;
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Effect.GeometryMaskCornerRadii; ignoring value."));
 			}
 		}
 		FUMGEffectData::FRenderingPhaseData RenderingPhase = OutEffect.RenderingPhase.Get(FUMGEffectData::FRenderingPhaseData());
@@ -656,9 +685,9 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		float Val = 0.0f;
 		FString Str;
 
-		if (DesignJsonUtils::TryGetString(*ShadowDataObject, UMGPropertyKeys::ShadowOffset, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*ShadowDataObject, UMGPropertyKeys::ShadowOffset); JsonValue.IsValid())
 		{
-			OutShadow.ShadowOffset = FUMGValueParser::ParseVector2D(Str);
+			OutShadow.ShadowOffset = ParseVector2DValue(JsonValue, UMGPropertyKeys::ShadowOffset);
 		}
 		if (DesignJsonUtils::TryGetString(*ShadowDataObject, UMGPropertyKeys::ShadowColorAndOpacity, Str))
 		{
@@ -679,9 +708,9 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				}
 
 				FUMGBoxShadowLayerData Layer;
-				if (DesignJsonUtils::TryGetString(*LayerObject, UMGJsonKeys::Offset, Str))
+				if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*LayerObject, UMGJsonKeys::Offset); JsonValue.IsValid())
 				{
-					Layer.Offset = FUMGValueParser::ParseVector2D(Str);
+					Layer.Offset = ParseVector2DValue(JsonValue, UMGJsonKeys::Offset).Get(Layer.Offset);
 				}
 				if (DesignJsonUtils::TryGetFloat(*LayerObject, UMGJsonKeys::Blur, Val))
 				{
@@ -717,21 +746,22 @@ void FUMGJsonParser::ParseRenderPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		{
 			OutRender.RenderOpacity = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*RenderObject, UMGPropertyKeys::RenderAngle, Val))
+		double Angle;
+		if (TryGetFiniteFloatField(*RenderObject, UMGPropertyKeys::RenderAngle, Angle))
 		{
-			OutRender.RenderAngle = Val;
+			OutRender.RenderAngle = static_cast<float>(Angle);
 		}
-		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTransformPivot, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*RenderObject, UMGPropertyKeys::RenderTransformPivot); JsonValue.IsValid())
 		{
-			OutRender.RenderTransformPivot = FUMGValueParser::ParseVector2D(Str, FVector2D(0.5f, 0.5f));
+			OutRender.RenderTransformPivot = ParseVector2DValue(JsonValue, UMGPropertyKeys::RenderTransformPivot);
 		}
-		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTransformScale, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*RenderObject, UMGPropertyKeys::RenderTransformScale); JsonValue.IsValid())
 		{
-			OutRender.RenderTransformScale = FUMGValueParser::ParseVector2D(Str);
+			OutRender.RenderTransformScale = ParseVector2DValue(JsonValue, UMGPropertyKeys::RenderTransformScale);
 		}
-		if (DesignJsonUtils::TryGetString(*RenderObject, UMGPropertyKeys::RenderTranslation, Str))
+		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*RenderObject, UMGPropertyKeys::RenderTranslation); JsonValue.IsValid())
 		{
-			OutRender.RenderTranslation = FUMGValueParser::ParseVector2D(Str);
+			OutRender.RenderTranslation = ParseVector2DValue(JsonValue, UMGPropertyKeys::RenderTranslation);
 		}
 	}
 }
@@ -801,7 +831,11 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 	// Parse Padding.
 	if (const TSharedPtr<FJsonValue> PaddingValue = DesignJsonUtils::TryGetField(JsonObject, UMGPropertyKeys::Padding); PaddingValue.IsValid())
 	{
-		OutSlot.Padding = ParsePaddingValue(PaddingValue);
+		const TOptional<FMargin> Padding = ParsePaddingValue(PaddingValue, TEXT("Slot.Padding"));
+		if (Padding.IsSet())
+		{
+			OutSlot.Padding = Padding.GetValue();
+		}
 	}
 
 	// Parse HorizontalAlignment (VerticalBox/HorizontalBox/Overlay).

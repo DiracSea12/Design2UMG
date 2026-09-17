@@ -389,24 +389,6 @@ namespace Design2UMGConverterInternal
 		return WorkingCopy;
 	}
 
-	void FFlowChildPreResolutionResolver::MarkFitContentPrecomputed(const TSharedPtr<FDesignNode>& RefNode) const
-	{
-		if (!RefNode.IsValid() || RefNode->Type != EDesignNodeType::Ref)
-		{
-			return;
-		}
-
-		const FDesignNode* CacheNode = ResolveSnapshotNode(*ExpansionCache, RefNode.Get());
-		const FRefExpansionCacheKey CacheKey{ CacheNode, BuildThemeSignature(ThemeContext) };
-		if (FRefExpansionCacheEntry* CacheEntry = ExpansionCache->Entries.Find(CacheKey))
-		{
-			if (CacheEntry->Expanded.IsValid() && !CacheEntry->bFitContentPrecomputed)
-			{
-				CacheEntry->bFitContentPrecomputed = true;
-			}
-		}
-	}
-
 	TSharedPtr<FDesignNode> FFlowChildPreResolutionResolver::ResolveExpandedChild(
 		const TSharedPtr<FDesignNode>& Child,
 		const bool bPreComputeFitContent) const
@@ -422,16 +404,13 @@ namespace Design2UMGConverterInternal
 			auto RefResolver =
 				[this](const TSharedPtr<FDesignNode>& RefNode)
 				{
-					TSharedPtr<FDesignNode> ExpandedRef = MakeWorkingCopy(RefNode);
-					MarkFitContentPrecomputed(RefNode);
-					return ExpandedRef;
+					return MakeWorkingCopy(RefNode);
 				};
 			// Fit estimates depend on the current layout context (including
 			// available parent width), so reuse the Expanded snapshot but let
 			// each caller measure it for its own context.
 			TSharedPtr<FDesignNode> WorkingExpanded = MakeWorkingCopy(Child);
 			SizeEstimator::PromoteFitContentSizes(WorkingExpanded, Document, RefResolver, FontMappings);
-			MarkFitContentPrecomputed(Child);
 			return WorkingExpanded;
 		}
 

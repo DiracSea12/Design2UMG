@@ -235,12 +235,9 @@ namespace Design2UMGConverterPrivate
 			const auto RefResolver =
 				[&PreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
 				{
-					TSharedPtr<FDesignNode> ExpandedRef = PreResolutionResolver.MakeWorkingCopy(RefNode);
-					PreResolutionResolver.MarkFitContentPrecomputed(RefNode);
-					return ExpandedRef;
+					return PreResolutionResolver.MakeWorkingCopy(RefNode);
 				};
 			SizeEstimator::PromoteFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver, &ActiveContext.State.SettingsSnapshot.FontMappings);
-			PreResolutionResolver.MarkFitContentPrecomputed(Node);
 			return ConvertNode(Expanded, ActiveContext, ParentLayout);
 		}
 
@@ -645,9 +642,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	const auto RefResolver =
 		[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
 		{
-			TSharedPtr<FDesignNode> ExpandedRef = RootPreResolutionResolver.MakeWorkingCopy(RefNode);
-			RootPreResolutionResolver.MarkFitContentPrecomputed(RefNode);
-			return ExpandedRef;
+			return RootPreResolutionResolver.MakeWorkingCopy(RefNode);
 		};
 	for (const auto& Child : VisibleChildren)
 	{

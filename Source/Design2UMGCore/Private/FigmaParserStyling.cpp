@@ -4,6 +4,7 @@
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
 #include "ParserSharedSemantics.h"
+#include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
 
 namespace FigmaParserInternal
@@ -175,13 +176,16 @@ namespace
 				Result.Image.ScalingFactor = static_cast<float>(ScalingFactor);
 			}
 
-			const TArray<TSharedPtr<FJsonValue>>* TransformArr = GetArray(FillObj, TEXT("imageTransform"));
-			if (TransformArr)
+			if (const TSharedPtr<FJsonValue> TransformField = FillObj->TryGetField(TEXT("imageTransform")); TransformField.IsValid())
 			{
-				ParserSharedSemantics::TryParseImageTransformMatrix(
-					*TransformArr,
-					[](const TSharedPtr<FJsonValue>& Value, float& OutNumber) { OutNumber = static_cast<float>(Value->AsNumber()); },
-					Result.Image.Transform);
+				const TArray<TSharedPtr<FJsonValue>>* Matrix = nullptr;
+				if (!TransformField->TryGetArray(Matrix) || !ParserSharedSemantics::TryParseImageTransformMatrix(
+					*Matrix,
+					[](const TSharedPtr<FJsonValue>& Value, float& OutNumber) { return Value->Type == EJson::Number && Value->TryGetNumber(OutNumber); },
+					Result.Image.Transform))
+				{
+					UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: Invalid imageTransform; expected a 2x3 matrix of finite numbers. Ignoring transform."));
+				}
 			}
 
 			return Result;

@@ -3,6 +3,9 @@
 #include "UMGValueParser.h"
 #include "Design2UMGLog.h"
 #include "DesignColorUtils.h"
+#include "Containers/StringConv.h"
+
+#include <charconv>
 
 namespace
 {
@@ -182,16 +185,52 @@ namespace FUMGValueParser
 		return Found ? *Found : ESlateVisibility::Visible;
 	}
 
-	FVector2D ParseVector2D(const FString& Str, FVector2D Default)
+	bool TryParseFloat(const FString& Value, float& OutValue)
+	{
+		const FString Trimmed = Value.TrimStartAndEnd();
+		const FTCHARToUTF8 Utf8(*Trimmed, Trimmed.Len());
+		const char* Begin = Utf8.Get();
+		const char* End = Begin + Utf8.Length();
+		// from_chars accepts a leading minus, but not a leading plus.
+		if (Begin != End && *Begin == '+')
+		{
+			++Begin;
+			if (Begin != End && *Begin == '-')
+			{
+				return false;
+			}
+		}
+		float Parsed = 0.0f;
+		const auto Result = std::from_chars(Begin, End, Parsed);
+		if (Result.ec != std::errc{} || Result.ptr != End || !FMath::IsFinite(Parsed))
+		{
+			return false;
+		}
+		OutValue = Parsed;
+		return true;
+	}
+
+	bool TryParseVector2D(const FString& Str, FVector2D& OutValue)
 	{
 		TArray<FString> Parts;
-		Str.ParseIntoArray(Parts, TEXT(","));
-		if (Parts.Num() == 2)
+		Str.ParseIntoArray(Parts, TEXT(","), false);
+		float X, Y;
+		if (Parts.Num() != 2 || !TryParseFloat(Parts[0], X) || !TryParseFloat(Parts[1], Y))
 		{
-			return FVector2D(
-				FCString::Atof(*Parts[0].TrimStartAndEnd()),
-				FCString::Atof(*Parts[1].TrimStartAndEnd()));
+			return false;
 		}
+		OutValue = FVector2D(X, Y);
+		return true;
+	}
+
+	FVector2D ParseVector2D(const FString& Str, FVector2D Default)
+	{
+		FVector2D Parsed;
+		if (TryParseVector2D(Str, Parsed))
+		{
+			return Parsed;
+		}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid vector '%s'; using the supplied default."), *Str);
 		return Default;
 	}
 
