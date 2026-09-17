@@ -9,164 +9,247 @@ namespace
 {
 	const TCHAR* ExpandedRefInstanceMetadataKey = TEXT("design2umg.expanded_ref_instance");
 
-	bool ShouldApplySizeOverride(const FDesignSize& Size, bool bHasExplicitFlag)
+	template <typename T, typename Destination>
+	void AssignIfSet(const TOptional<T>& Value, Destination& Target)
 	{
-		// Explicit width/height always wins.
-		if (bHasExplicitFlag)
-			return true;
-
-		// Pre-computed fit_content size (value > 0) should also propagate for ref instances.
-		if (Size.Mode == EDesignSizeMode::FitContent)
-			return Size.Value > 0.0f;
-
-		// Non-fit modes (fixed/fill) are meaningful overrides even when explicit flags are absent.
-		return true;
+		if (Value.IsSet()) Target = Value.GetValue();
 	}
 
-	void ApplyCommonOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
+	TArray<TSharedPtr<FDesignNode>> CopyChildren(const TArray<TSharedPtr<FDesignNode>>& Children)
 	{
-		const bool bFillExplicitClear = Override.Visual.bFillExplicitClear;
-		const bool bKeepExplicitStrokeFill = Override.Visual.Stroke.Fill.IsSet();
+		TArray<TSharedPtr<FDesignNode>> Copy;
+		Copy.Reserve(Children.Num());
+		for (const TSharedPtr<FDesignNode>& Child : Children)
+			Copy.Add(RefExpander::DeepCopyNode(Child));
+		return Copy;
+	}
 
-		if (Override.Visual.Fills.Num() > 0 || bFillExplicitClear)
-		{
-			Target.Visual.Fills = Override.Visual.Fills;
-			Target.Visual.bFillExplicitClear = bFillExplicitClear;
-		}
-		if (Override.Visual.Stroke.HasStroke())
-		{
-			Target.Visual.Stroke = Override.Visual.Stroke;
-		}
-		if (bFillExplicitClear && !bKeepExplicitStrokeFill)
-		{
-			Target.Visual.Stroke.Fill.Reset();
-		}
-		if (Override.Visual.bEffectsExplicitClear || Override.Visual.Effects.Num() > 0)
-		{
-			Target.Visual.Effects = Override.Visual.Effects;
-			Target.Visual.bEffectsExplicitClear = Override.Visual.bEffectsExplicitClear;
-		}
+	FDesignNodePatch CopyPatch(const FDesignNodePatch& Patch)
+	{
+		FDesignNodePatch Copy = Patch;
+		if (Patch.Children.IsSet()) Copy.Children = CopyChildren(Patch.Children.GetValue());
+		return Copy;
+	}
 
-		if (Override.LayoutData.HasExplicitPadding())
+	void MergePatch(FDesignNodePatch& Target, const FDesignNodePatch& Outer)
+	{
+		AssignIfSet(Outer.Name, Target.Name);
+		AssignIfSet(Outer.X, Target.X);
+		AssignIfSet(Outer.Y, Target.Y);
+		AssignIfSet(Outer.Width, Target.Width);
+		AssignIfSet(Outer.Height, Target.Height);
+		AssignIfSet(Outer.Rotation, Target.Rotation);
+		AssignIfSet(Outer.Enabled, Target.Enabled);
+		AssignIfSet(Outer.Opacity, Target.Opacity);
+		AssignIfSet(Outer.FlipX, Target.FlipX);
+		AssignIfSet(Outer.FlipY, Target.FlipY);
+		AssignIfSet(Outer.Layout, Target.Layout);
+		AssignIfSet(Outer.Gap, Target.Gap);
+		AssignIfSet(Outer.Padding, Target.Padding);
+		AssignIfSet(Outer.PaddingRequiresRuntimeWrap, Target.PaddingRequiresRuntimeWrap);
+		AssignIfSet(Outer.JustifyContent, Target.JustifyContent);
+		AssignIfSet(Outer.AlignItems, Target.AlignItems);
+		AssignIfSet(Outer.Clip, Target.Clip);
+		AssignIfSet(Outer.LayoutGrow, Target.LayoutGrow);
+		AssignIfSet(Outer.SemanticPlaceholderSurface, Target.SemanticPlaceholderSurface);
+		AssignIfSet(Outer.Fills, Target.Fills);
+		AssignIfSet(Outer.StrokeFill, Target.StrokeFill);
+		AssignIfSet(Outer.StrokeThickness, Target.StrokeThickness);
+		AssignIfSet(Outer.StrokeAlign, Target.StrokeAlign);
+		AssignIfSet(Outer.StrokeCap, Target.StrokeCap);
+		AssignIfSet(Outer.StrokeJoin, Target.StrokeJoin);
+		AssignIfSet(Outer.CornerRadius, Target.CornerRadius);
+		AssignIfSet(Outer.Effects, Target.Effects);
+		if (Outer.Content.IsSet())
 		{
-			Target.LayoutData.ExplicitPadding = Override.LayoutData.ExplicitPadding;
-			Target.LayoutData.PaddingRequiresRuntimeWrap = Override.LayoutData.PaddingRequiresRuntimeWrap;
+			Target.Content = Outer.Content;
+			Target.TextRuns = Outer.TextRuns;
+			Target.Metadata.Remove(TEXT("text.content.raw"));
 		}
-		if (Override.LayoutData.HasExplicitGap())
-		{
-			Target.LayoutData.ExplicitGap = Override.LayoutData.ExplicitGap;
-		}
-		if (Override.LayoutData.HasExplicitClip())
-		{
-			Target.LayoutData.ExplicitClip = Override.LayoutData.ExplicitClip;
-		}
+		AssignIfSet(Outer.FontFamily, Target.FontFamily);
+		AssignIfSet(Outer.FontPostScriptName, Target.FontPostScriptName);
+		AssignIfSet(Outer.FontSize, Target.FontSize);
+		AssignIfSet(Outer.FontWeight, Target.FontWeight);
+		AssignIfSet(Outer.FontStyle, Target.FontStyle);
+		AssignIfSet(Outer.LineHeight, Target.LineHeight);
+		AssignIfSet(Outer.LetterSpacing, Target.LetterSpacing);
+		AssignIfSet(Outer.TextAlign, Target.TextAlign);
+		AssignIfSet(Outer.TextAlignVertical, Target.TextAlignVertical);
+		AssignIfSet(Outer.TextGrowth, Target.TextGrowth);
+		AssignIfSet(Outer.Underline, Target.Underline);
+		AssignIfSet(Outer.Strikethrough, Target.Strikethrough);
+		AssignIfSet(Outer.Href, Target.Href);
+		AssignIfSet(Outer.IconFontName, Target.IconFontName);
+		AssignIfSet(Outer.IconFontFamily, Target.IconFontFamily);
+		AssignIfSet(Outer.IconWeight, Target.IconWeight);
+		AssignIfSet(Outer.InnerRadius, Target.InnerRadius);
+		AssignIfSet(Outer.StartAngle, Target.StartAngle);
+		AssignIfSet(Outer.SweepAngle, Target.SweepAngle);
+		AssignIfSet(Outer.PolygonCount, Target.PolygonCount);
+		AssignIfSet(Outer.Geometry, Target.Geometry);
+		AssignIfSet(Outer.FillRule, Target.FillRule);
+		AssignIfSet(Outer.Children, Target.Children);
+		Target.Metadata.Append(Outer.Metadata);
+	}
 
-		if (!Override.Transform.bEnabled)
+	void ApplyPatch(FDesignNode& Target, const FDesignNodePatch& Patch)
+	{
+		AssignIfSet(Patch.Name, Target.Name);
+		AssignIfSet(Patch.Rotation, Target.Transform.Rotation);
+		AssignIfSet(Patch.Enabled, Target.Transform.bEnabled);
+		AssignIfSet(Patch.FlipX, Target.Transform.bFlipX);
+		AssignIfSet(Patch.FlipY, Target.Transform.bFlipY);
+		AssignIfSet(Patch.Layout, Target.LayoutData.Layout);
+		AssignIfSet(Patch.Gap, Target.LayoutData.ExplicitGap);
+		AssignIfSet(Patch.Padding, Target.LayoutData.ExplicitPadding);
+		AssignIfSet(Patch.PaddingRequiresRuntimeWrap, Target.LayoutData.PaddingRequiresRuntimeWrap);
+		AssignIfSet(Patch.JustifyContent, Target.LayoutData.JustifyContent);
+		AssignIfSet(Patch.AlignItems, Target.LayoutData.AlignItems);
+		AssignIfSet(Patch.Clip, Target.LayoutData.ExplicitClip);
+		AssignIfSet(Patch.LayoutGrow, Target.LayoutData.LayoutGrow);
+		AssignIfSet(Patch.SemanticPlaceholderSurface, Target.LayoutData.bSemanticPlaceholderSurface);
+		AssignIfSet(Patch.StrokeFill, Target.Visual.Stroke.Fill);
+		AssignIfSet(Patch.StrokeThickness, Target.Visual.Stroke.Thickness);
+		AssignIfSet(Patch.StrokeAlign, Target.Visual.Stroke.Align);
+		AssignIfSet(Patch.StrokeCap, Target.Visual.Stroke.Cap);
+		AssignIfSet(Patch.StrokeJoin, Target.Visual.Stroke.Join);
+		AssignIfSet(Patch.CornerRadius, Target.Visual.CornerRadius);
+		AssignIfSet(Patch.FontFamily, Target.Text.FontFamily);
+		AssignIfSet(Patch.FontPostScriptName, Target.Text.FontPostScriptName);
+		AssignIfSet(Patch.FontSize, Target.Text.FontSize);
+		AssignIfSet(Patch.FontWeight, Target.Text.FontWeight);
+		AssignIfSet(Patch.FontStyle, Target.Text.FontStyle);
+		AssignIfSet(Patch.LineHeight, Target.Text.LineHeight);
+		AssignIfSet(Patch.LetterSpacing, Target.Text.LetterSpacing);
+		AssignIfSet(Patch.TextAlign, Target.Text.TextAlign);
+		AssignIfSet(Patch.TextAlignVertical, Target.Text.TextAlignVertical);
+		AssignIfSet(Patch.TextGrowth, Target.Text.TextGrowth);
+		AssignIfSet(Patch.Underline, Target.Text.bUnderline);
+		AssignIfSet(Patch.Strikethrough, Target.Text.bStrikethrough);
+		AssignIfSet(Patch.Href, Target.Text.Href);
+		AssignIfSet(Patch.IconFontName, Target.Text.IconFontName);
+		AssignIfSet(Patch.IconFontFamily, Target.Text.IconFontFamily);
+		AssignIfSet(Patch.IconWeight, Target.Text.IconWeight);
+		AssignIfSet(Patch.InnerRadius, Target.Shape.InnerRadius);
+		AssignIfSet(Patch.StartAngle, Target.Shape.StartAngle);
+		AssignIfSet(Patch.SweepAngle, Target.Shape.SweepAngle);
+		AssignIfSet(Patch.PolygonCount, Target.Shape.PolygonCount);
+		AssignIfSet(Patch.Geometry, Target.Shape.Geometry);
+		AssignIfSet(Patch.FillRule, Target.Shape.FillRule);
+		if (Patch.X.IsSet())
 		{
-			Target.Transform.bEnabled = false;
+			Target.Transform.X = Patch.X.GetValue();
+			Target.Transform.ExplicitX = Patch.X;
 		}
-		if (Override.Transform.HasExplicitOpacity())
+		if (Patch.Y.IsSet())
 		{
-			Target.Transform.Opacity = Override.Transform.Opacity;
-			Target.Transform.ExplicitOpacity = Override.Transform.Opacity;
+			Target.Transform.Y = Patch.Y.GetValue();
+			Target.Transform.ExplicitY = Patch.Y;
 		}
-		if (Override.Text.LineHeight > 0.0f)
+		if (Patch.Width.IsSet()) Target.Transform.SetWidthValue(Patch.Width.GetValue());
+		if (Patch.Height.IsSet()) Target.Transform.SetHeightValue(Patch.Height.GetValue());
+		if (Patch.Opacity.IsSet()) Target.Transform.SetOpacityValue(Patch.Opacity.GetValue());
+		if (Patch.Fills.IsSet())
 		{
-			Target.Text.LineHeight = Override.Text.LineHeight;
+			Target.Visual.Fills = Patch.Fills.GetValue();
+			Target.Visual.bFillExplicitClear = Target.Visual.Fills.IsEmpty();
 		}
-		if (Override.Text.LetterSpacing.IsSet())
+		if (Patch.Effects.IsSet())
 		{
-			Target.Text.LetterSpacing = Override.Text.LetterSpacing;
+			Target.Visual.Effects = Patch.Effects.GetValue();
+			Target.Visual.bEffectsExplicitClear = Target.Visual.Effects.IsEmpty();
+		}
+		if (Patch.Content.IsSet())
+		{
+			Target.Text.Content = Patch.Content.GetValue();
+			Target.Text.TextRuns = Patch.TextRuns.Get(TArray<FDesignTextRun>());
+			Target.Metadata.Remove(TEXT("text.content.raw"));
+		}
+		if (Patch.Children.IsSet())
+		{
+			Target.Children = CopyChildren(Patch.Children.GetValue());
+			Target.Descendants.Reset();
+		}
+		Target.Metadata.Append(Patch.Metadata);
+
+		// A patched descendant can itself be a ref. Preserve its authored patch for its later expansion.
+		if (Target.Type == EDesignNodeType::Ref)
+		{
+			FDesignNodePatch Combined = Target.RefOverrides.IsValid() ? *Target.RefOverrides : FDesignNodePatch();
+			MergePatch(Combined, Patch);
+			Target.RefOverrides = MakeShared<FDesignNodePatch>(MoveTemp(Combined));
 		}
 	}
 
-	// Known limitation: "unset" is detected by comparing against each field's default
-	// value (e.g. JustifyContent != Start), so a default-valued override is
-	// indistinguishable from an unset one and an instance cannot override a component
-	// property back to its enum default. Migrating these fields to TOptional is the
-	// known follow-up.
-	void ApplyOverrideProperties(FDesignNode& Target, const FDesignNode& Override)
+	FDesignNodeOverride CopyOverride(const FDesignNodeOverride& Override)
 	{
-		ApplyCommonOverrideProperties(Target, Override);
-
-		if (!Override.Text.Content.IsEmpty())
-			Target.Text.Content = Override.Text.Content;
-		if (Override.Text.FontSize > 0)
-			Target.Text.FontSize = Override.Text.FontSize;
-		if (!Override.Text.FontWeight.IsEmpty())
-			Target.Text.FontWeight = Override.Text.FontWeight;
-		if (!Override.Text.FontStyle.IsEmpty())
-			Target.Text.FontStyle = Override.Text.FontStyle;
-		if (!Override.Text.FontFamily.IsEmpty())
-			Target.Text.FontFamily = Override.Text.FontFamily;
-		if (Override.Transform.bHasWidth)
-			Target.Transform.Width = Override.Transform.Width;
-		if (Override.Transform.bHasHeight)
-			Target.Transform.Height = Override.Transform.Height;
-		if (Override.Transform.HasExplicitX())
-		{
-			Target.Transform.X = Override.Transform.X;
-			Target.Transform.ExplicitX = Override.Transform.X;
-		}
-		if (Override.Transform.HasExplicitY())
-		{
-			Target.Transform.Y = Override.Transform.Y;
-			Target.Transform.ExplicitY = Override.Transform.Y;
-		}
-		if (Override.LayoutData.JustifyContent != EDesignJustifyContent::Start)
-			Target.LayoutData.JustifyContent = Override.LayoutData.JustifyContent;
-		if (Override.LayoutData.AlignItems != EDesignAlignItems::Start)
-			Target.LayoutData.AlignItems = Override.LayoutData.AlignItems;
-		if (Override.Text.TextAlign != EDesignTextAlign::Left)
-			Target.Text.TextAlign = Override.Text.TextAlign;
-		if (Override.Text.TextGrowth != EDesignTextGrowth::Auto)
-			Target.Text.TextGrowth = Override.Text.TextGrowth;
-		if (Override.Text.bUnderline)
-			Target.Text.bUnderline = true;
-		if (Override.Text.bStrikethrough)
-			Target.Text.bStrikethrough = true;
-		if (!Override.Text.Href.IsEmpty())
-			Target.Text.Href = Override.Text.Href;
-		if (Override.Children.Num() > 0)
-			Target.Children = Override.Children;
+		FDesignNodeOverride Copy;
+		Copy.Replacement = RefExpander::DeepCopyNode(Override.Replacement);
+		Copy.Patch = CopyPatch(Override.Patch);
+		return Copy;
 	}
 
-	TSharedPtr<FDesignNode> MergeDescendantOverrideNodes(
-		const TSharedPtr<FDesignNode>& BaseOverride,
-		const TSharedPtr<FDesignNode>& OuterOverride)
+	void MergeOverride(FDesignNodeOverride& Target, const FDesignNodeOverride& Outer)
 	{
-		if (!OuterOverride.IsValid())
-			return BaseOverride;
-		if (!BaseOverride.IsValid())
-			return RefExpander::DeepCopyNode(OuterOverride);
-		if (OuterOverride->Type != EDesignNodeType::Unknown)
-			return RefExpander::DeepCopyNode(OuterOverride);
+		if (Outer.Replacement.IsValid()) Target = CopyOverride(Outer);
+		else MergePatch(Target.Patch, Outer.Patch);
+	}
 
-		auto Merged = RefExpander::DeepCopyNode(BaseOverride);
-		if (!Merged.IsValid())
-			return RefExpander::DeepCopyNode(OuterOverride);
+	bool ReplacesSubtree(const FDesignNodeOverride& Override)
+	{
+		return Override.Replacement.IsValid() || Override.Patch.Children.IsSet();
+	}
 
-		ApplyOverrideProperties(*Merged, *OuterOverride);
-		return Merged;
+	void DiscardReplacedDescendantPatches(
+		TMap<FString, FDesignNodeOverride>& Descendants,
+		const FString& Path,
+		const FDesignNodeOverride& Override)
+	{
+		if (!ReplacesSubtree(Override)) return;
+		const FString Prefix = Path + TEXT("/");
+		for (auto It = Descendants.CreateIterator(); It; ++It)
+		{
+			if (It.Key().StartsWith(Prefix, ESearchCase::CaseSensitive)) It.RemoveCurrent();
+		}
 	}
 
 	void MergeDescendants(
-		TMap<FString, TSharedPtr<FDesignNode>>& InOut,
-		const TMap<FString, TSharedPtr<FDesignNode>>& Outer)
+		TMap<FString, FDesignNodeOverride>& Target,
+		const TMap<FString, FDesignNodeOverride>& Outer)
 	{
+		// Discard the old subtree's patches before adding any patches from the outer layer.
 		for (const auto& Pair : Outer)
+			DiscardReplacedDescendantPatches(Target, Pair.Key, Pair.Value);
+		for (const auto& Pair : Outer)
+			MergeOverride(Target.FindOrAdd(Pair.Key), Pair.Value);
+	}
+
+	void ApplyDescendants(TSharedPtr<FDesignNode>& Node, const TMap<FString, FDesignNodeOverride>& Descendants)
+	{
+		TArray<FString> Paths;
+		Descendants.GetKeys(Paths);
+		// Within one layer, establish parent structures before more specific child patches.
+		Paths.Sort([&Descendants](const FString& A, const FString& B)
 		{
-			TSharedPtr<FDesignNode> Existing = InOut.FindRef(Pair.Key);
-			InOut.Add(Pair.Key, MergeDescendantOverrideNodes(Existing, Pair.Value));
-		}
+			int32 ADepth = 0;
+			int32 BDepth = 0;
+			for (const TCHAR Ch : A) ADepth += Ch == TCHAR('/');
+			for (const TCHAR Ch : B) BDepth += Ch == TCHAR('/');
+			if (ADepth != BDepth) return ADepth < BDepth;
+			const bool bAStructural = ReplacesSubtree(Descendants.FindChecked(A));
+			const bool bBStructural = ReplacesSubtree(Descendants.FindChecked(B));
+			return bAStructural != bBStructural ? bAStructural : A.Compare(B, ESearchCase::CaseSensitive) < 0;
+		});
+		for (const FString& Path : Paths)
+			RefExpander::ApplyDescendantOverride(Node, Path, Descendants.FindChecked(Path));
 	}
 
 	bool ApplyOverrideToDirectChild(
 		TSharedPtr<FDesignNode>& Parent,
 		const FString& TargetId,
-		const TSharedPtr<FDesignNode>& Override)
+		const FDesignNodeOverride& Override)
 	{
-		if (!Parent.IsValid() || !Override.IsValid())
+		if (!Parent.IsValid())
 			return false;
 
 		for (int32 i = 0; i < Parent->Children.Num(); ++i)
@@ -175,13 +258,9 @@ namespace
 			if (!Child.IsValid() || Child->Id != TargetId)
 				continue;
 
-			if (Override->Type != EDesignNodeType::Unknown)
-			{
-				Parent->Children[i] = RefExpander::DeepCopyNode(Override);
-				return true;
-			}
-
-			ApplyOverrideProperties(*Child, *Override);
+			if (Override.Replacement.IsValid())
+				Child = RefExpander::DeepCopyNode(Override.Replacement);
+			ApplyPatch(*Child, Override.Patch);
 			return true;
 		}
 
@@ -191,7 +270,7 @@ namespace
 	bool ApplyOverrideByIdRecursive(
 		TSharedPtr<FDesignNode>& Node,
 		const FString& TargetId,
-		const TSharedPtr<FDesignNode>& Override,
+		const FDesignNodeOverride& Override,
 		int32 Depth = 0)
 	{
 		// Ref-override recursion cap: bounds override application inside one expansion, deliberately
@@ -203,7 +282,7 @@ namespace
 			return false;
 		}
 
-		if (!Node.IsValid() || !Override.IsValid())
+		if (!Node.IsValid())
 			return false;
 
 		if (ApplyOverrideToDirectChild(Node, TargetId, Override))
@@ -236,58 +315,28 @@ namespace
 
 	void ApplyInstanceOverrides(TSharedPtr<FDesignNode>& Expanded, const TSharedPtr<FDesignNode>& RefNode)
 	{
-		if (!Expanded.IsValid() || !RefNode.IsValid())
-			return;
-
-		ApplyCommonOverrideProperties(*Expanded, *RefNode);
-
+		if (RefNode->RefOverrides.IsValid()) ApplyPatch(*Expanded, *RefNode->RefOverrides);
 		Expanded->Id = RefNode->Id;
-		if (!RefNode->Name.IsEmpty())
-			Expanded->Name = RefNode->Name;
 
-		if (RefNode->Transform.HasExplicitX())
-		{
-			Expanded->Transform.X = RefNode->Transform.X;
-			Expanded->Transform.ExplicitX = RefNode->Transform.X;
-		}
-		else
-		{
-			// Instance with no explicit x should use local origin, not component definition canvas coordinate.
-			Expanded->Transform.X = 0.0f;
-			Expanded->Transform.ExplicitX.Reset();
-		}
-		if (RefNode->Transform.HasExplicitY())
-		{
-			Expanded->Transform.Y = RefNode->Transform.Y;
-			Expanded->Transform.ExplicitY = RefNode->Transform.Y;
-		}
-		else
-		{
-			// Instance with no explicit y should use local origin, not component definition canvas coordinate.
-			Expanded->Transform.Y = 0.0f;
-			Expanded->Transform.ExplicitY.Reset();
-		}
-		if (ShouldApplySizeOverride(RefNode->Transform.Width, RefNode->Transform.bHasWidth))
+		// An instance without authored coordinates starts at its local origin, not the component canvas position.
+		Expanded->Transform.X = RefNode->Transform.ExplicitX.Get(0.0f);
+		Expanded->Transform.Y = RefNode->Transform.ExplicitY.Get(0.0f);
+		Expanded->Transform.ExplicitX = RefNode->Transform.ExplicitX;
+		Expanded->Transform.ExplicitY = RefNode->Transform.ExplicitY;
+
+		// These flags also cover dimensions synthesized by SizeEstimator, not just authored Patch values.
+		if (RefNode->Transform.bHasWidth)
 		{
 			Expanded->Transform.Width = RefNode->Transform.Width;
 			Expanded->Transform.bHasWidth = true;
+			Expanded->Transform.bSourceHasWidth = RefNode->Transform.bSourceHasWidth;
 		}
-		if (ShouldApplySizeOverride(RefNode->Transform.Height, RefNode->Transform.bHasHeight))
+		if (RefNode->Transform.bHasHeight)
 		{
 			Expanded->Transform.Height = RefNode->Transform.Height;
 			Expanded->Transform.bHasHeight = true;
+			Expanded->Transform.bSourceHasHeight = RefNode->Transform.bSourceHasHeight;
 		}
-
-		if (!FMath::IsNearlyZero(RefNode->Transform.Rotation))
-			Expanded->Transform.Rotation = RefNode->Transform.Rotation;
-		if (RefNode->Transform.bFlipX)
-			Expanded->Transform.bFlipX = RefNode->Transform.bFlipX;
-		if (RefNode->Transform.bFlipY)
-			Expanded->Transform.bFlipY = RefNode->Transform.bFlipY;
-
-		// Slot override has the highest priority.
-		if (RefNode->Children.Num() > 0)
-			Expanded->Children = RefNode->Children;
 	}
 
 	TSharedPtr<FDesignNode> ExpandRefInternal(
@@ -322,8 +371,8 @@ namespace
 			RefChain.Remove(RefTargetId);
 			return nullptr;
 		}
-		MergeDescendants(Expanded->Descendants, RefNode->Descendants);
 		ApplyInstanceOverrides(Expanded, RefNode);
+		MergeDescendants(Expanded->Descendants, RefNode->Descendants);
 
 		TSharedPtr<FDesignNode> Result = Expanded;
 		if (Expanded->Type == EDesignNodeType::Ref && !Expanded->Ref.IsEmpty())
@@ -332,8 +381,7 @@ namespace
 		}
 		else
 		{
-			for (const auto& Pair : Expanded->Descendants)
-				RefExpander::ApplyDescendantOverride(Result, Pair.Key, Pair.Value);
+			ApplyDescendants(Result, Expanded->Descendants);
 		}
 
 		if (Result.IsValid() && !RefNode->bReusable)
@@ -354,14 +402,11 @@ TSharedPtr<FDesignNode> RefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>&
 	auto Copy = MakeShared<FDesignNode>();
 	*Copy = *Source;
 
-	// Deep copy children
-	Copy->Children.Empty();
-	for (const auto& Child : Source->Children)
-		Copy->Children.Add(DeepCopyNode(Child));
-
-	// Deep copy descendants to avoid cross-instance mutation.
+	Copy->Children = CopyChildren(Source->Children);
+	if (Source->RefOverrides.IsValid())
+		Copy->RefOverrides = MakeShared<FDesignNodePatch>(CopyPatch(*Source->RefOverrides));
 	for (auto& Pair : Copy->Descendants)
-		Pair.Value = DeepCopyNode(Pair.Value);
+		Pair.Value = CopyOverride(Pair.Value);
 
 	return Copy;
 }
@@ -372,10 +417,18 @@ TSharedPtr<FDesignNode> RefExpander::ExpandRef(const TSharedPtr<FDesignNode>& Re
 	return ExpandRefInternal(RefNode, Doc, RefChain);
 }
 
-void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override)
+void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override)
 {
-	if (!Node.IsValid() || !Override.IsValid())
+	if (!Node.IsValid())
 		return;
+
+	// Defer a path through an unexpanded ref; its reusable children are not in this tree yet.
+	if (Node->Type == EDesignNodeType::Ref)
+	{
+		DiscardReplacedDescendantPatches(Node->Descendants, Path, Override);
+		MergeOverride(Node->Descendants.FindOrAdd(Path), Override);
+		return;
+	}
 
 	FString FirstPart, Remaining;
 	if (Path.Split(TEXT("/"), &FirstPart, &Remaining))

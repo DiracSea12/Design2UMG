@@ -415,58 +415,7 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		}
 	}
 
-	const TSharedPtr<FJsonValue>& SizeField = JsonObj->TryGetField(TEXT("size"));
-	if (SizeField.IsValid() && SizeField->Type == EJson::Object)
-	{
-		const TSharedPtr<FJsonObject>& SizeObject = SizeField->AsObject();
-		float SizeWidth = 0.0f;
-		if (TryGetResolvedNumberField(SizeObject, TEXT("width"), *ActiveResolver, SizeWidth))
-		{
-			Node->Transform.SetWidthValue(FDesignSize::Fixed(SizeWidth));
-		}
-
-		float SizeHeight = 0.0f;
-		if (TryGetResolvedNumberField(SizeObject, TEXT("height"), *ActiveResolver, SizeHeight))
-		{
-			Node->Transform.SetHeightValue(FDesignSize::Fixed(SizeHeight));
-		}
-	}
-
-	PenParser::ApplyNodeBoxProperties(JsonObj, *Node, Node->Type, *ActiveResolver);
-	TryGetResolvedNumberField(JsonObj, TEXT("rotation"), *ActiveResolver, Node->Transform.Rotation);
-
-	// Visibility.
-	TryGetResolvedBoolField(JsonObj, TEXT("enabled"), *ActiveResolver, Node->Transform.bEnabled);
-	TryGetResolvedBoolField(JsonObj, TEXT("flipX"), *ActiveResolver, Node->Transform.bFlipX);
-	TryGetResolvedBoolField(JsonObj, TEXT("flipY"), *ActiveResolver, Node->Transform.bFlipY);
-
-	// Default layout: frame falls back to Horizontal, group to None.
-	{
-		FString LayoutStr;
-		if (JsonObj->TryGetStringField(TEXT("layout"), LayoutStr))
-			Node->LayoutData.Layout = PenParser::ParseLayout(LayoutStr);
-		else if (Node->Type == EDesignNodeType::Group)
-			Node->LayoutData.Layout = EDesignLayout::None;
-	}
-	PenParser::ApplyNodeLayoutProperties(JsonObj, *Node, *ActiveResolver, false);
-	if (JsonObj->HasField(TEXT("layoutIncludeStroke")))
-	{
-		bool bLayoutIncludeStroke = false;
-		if (TryGetResolvedBoolField(JsonObj, TEXT("layoutIncludeStroke"), *ActiveResolver, bLayoutIncludeStroke))
-		{
-			Node->Metadata.Add(TEXT("layoutIncludeStroke"), bLayoutIncludeStroke ? TEXT("true") : TEXT("false"));
-		}
-	}
-	TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), *ActiveResolver, Node->LayoutData.LayoutGrow);
-
-	// Visual properties.
-	if (JsonObj->HasField(TEXT("fill")))
-		PenParser::ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, *ActiveResolver);
-	PenParser::ParseNodeStrokeProperties(JsonObj, *Node, *ActiveResolver);
-	if (JsonObj->HasField(TEXT("cornerRadius")))
-		Node->Visual.CornerRadius = ActiveResolver->ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
-
-	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, *ActiveResolver);
+	PenParser::ParseNodeProperties(JsonObj, Node, *ActiveResolver);
 	if (Node->Type == EDesignNodeType::Note || Node->Type == EDesignNodeType::Context || Node->Type == EDesignNodeType::Prompt)
 	{
 		PenParserNodeExtensions::SynthesizeStickyCard(Node);
@@ -476,6 +425,10 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 	PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
 
 	PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, *ActiveResolver);
+	if (Node->Type == EDesignNodeType::Ref)
+	{
+		Node->RefOverrides = MakeShared<FDesignNodePatch>(PenParser::CaptureNodePatch(JsonObj, *Node, *ActiveResolver));
+	}
 
 	return Node;
 }
@@ -507,6 +460,62 @@ void AppendParsedChildrenAtDepth(
 
 namespace PenParser
 {
+void ParseNodeProperties(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver)
+{
+	const TSharedPtr<FJsonValue>& SizeField = JsonObj->TryGetField(TEXT("size"));
+	if (SizeField.IsValid() && SizeField->Type == EJson::Object)
+	{
+		const TSharedPtr<FJsonObject>& SizeObject = SizeField->AsObject();
+		float SizeWidth = 0.0f;
+		if (TryGetResolvedNumberField(SizeObject, TEXT("width"), Resolver, SizeWidth))
+		{
+			Node->Transform.SetWidthValue(FDesignSize::Fixed(SizeWidth));
+		}
+
+		float SizeHeight = 0.0f;
+		if (TryGetResolvedNumberField(SizeObject, TEXT("height"), Resolver, SizeHeight))
+		{
+			Node->Transform.SetHeightValue(FDesignSize::Fixed(SizeHeight));
+		}
+	}
+
+	PenParser::ApplyNodeBoxProperties(JsonObj, *Node, Node->Type, Resolver);
+	TryGetResolvedNumberField(JsonObj, TEXT("rotation"), Resolver, Node->Transform.Rotation);
+
+	// Visibility.
+	TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Node->Transform.bEnabled);
+	TryGetResolvedBoolField(JsonObj, TEXT("flipX"), Resolver, Node->Transform.bFlipX);
+	TryGetResolvedBoolField(JsonObj, TEXT("flipY"), Resolver, Node->Transform.bFlipY);
+
+	// Default layout: frame falls back to Horizontal, group to None.
+	{
+		FString LayoutStr;
+		if (JsonObj->TryGetStringField(TEXT("layout"), LayoutStr))
+			Node->LayoutData.Layout = PenParser::ParseLayout(LayoutStr);
+		else if (Node->Type == EDesignNodeType::Group)
+			Node->LayoutData.Layout = EDesignLayout::None;
+	}
+	PenParser::ApplyNodeLayoutProperties(JsonObj, *Node, Resolver);
+	if (JsonObj->HasField(TEXT("layoutIncludeStroke")))
+	{
+		bool bLayoutIncludeStroke = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("layoutIncludeStroke"), Resolver, bLayoutIncludeStroke))
+		{
+			Node->Metadata.Add(TEXT("layoutIncludeStroke"), bLayoutIncludeStroke ? TEXT("true") : TEXT("false"));
+		}
+	}
+	TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), Resolver, Node->LayoutData.LayoutGrow);
+
+	// Visual properties.
+	if (JsonObj->HasField(TEXT("fill")))
+		PenParser::ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
+	PenParser::ParseNodeStrokeProperties(JsonObj, *Node, Resolver);
+	if (JsonObj->HasField(TEXT("cornerRadius")))
+		Node->Visual.CornerRadius = Resolver.ResolveCornerRadius(JsonObj->TryGetField(TEXT("cornerRadius")));
+
+	PenParserNodeExtensions::ParseNodeExtended(JsonObj, Node, Resolver);
+}
+
 TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver)
 {
 	FPenParserParseContext ParseContext;
@@ -637,6 +646,7 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		if (ParserSharedSemantics::TryParseStrokeCapToken(StrokeLinecap, ParsedCap))
 		{
 			Stroke.Cap = ParsedCap;
+			bHasCurrentStroke = true;
 		}
 	}
 
@@ -648,6 +658,7 @@ void ParseNodeStrokeProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		if (ParserSharedSemantics::TryParseStrokeJoinToken(StrokeLinejoin, ParsedJoin))
 		{
 			Stroke.Join = ParsedJoin;
+			bHasCurrentStroke = true;
 		}
 	}
 

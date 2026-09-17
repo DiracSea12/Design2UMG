@@ -6,8 +6,10 @@
 #include "DesignReferenceExpansion.h"
 #include "DesignVariableResolver.h"
 
+struct FDesignNodeOverride;
+
 namespace RefExpander
 {
 	void ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
-	void ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const TSharedPtr<FDesignNode>& Override);
+	void ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override);
 }

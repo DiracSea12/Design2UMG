@@ -35,7 +35,7 @@ void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode&
 	}
 }
 
-void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver, bool bIncludeTextProperties)
+void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
 	if (JsonObj->HasField(TEXT("opacity")))
 	{
@@ -72,19 +72,7 @@ void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNo
 		else
 			OutNode.LayoutData.ExplicitClip.Reset();
 	}
-	if (!bIncludeTextProperties)
-		return;
-	FString TextAlign;
-	if (JsonObj->TryGetStringField(TEXT("textAlign"), TextAlign))
-		OutNode.Text.TextAlign = ParserSharedSemantics::ParseTextAlignToken(TextAlign);
-	float LineHeight = 0.0f;
-	if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, LineHeight) && LineHeight > 0.0f)
-	{
-		OutNode.Text.LineHeight = LineHeight;
-	}
-	FString TextGrowth;
-	if (JsonObj->TryGetStringField(TEXT("textGrowth"), TextGrowth))
-		OutNode.Text.TextGrowth = ParseTextGrowth(TextGrowth);
+
 }
 
 void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
@@ -107,5 +95,128 @@ void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesig
 	TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, OutNode.Text.bUnderline);
 	TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, OutNode.Text.bStrikethrough);
 	JsonObj->TryGetStringField(TEXT("href"), OutNode.Text.Href);
+}
+}
+
+namespace PenParser
+{
+FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const FDesignNode& Node, const FDesignVariableResolver& Resolver)
+{
+	FDesignNodePatch Patch;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("name"))) Patch.Name = Node.Name;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontFamily"))) Patch.FontFamily = Node.Text.FontFamily;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontPostScriptName"))) Patch.FontPostScriptName = Node.Text.FontPostScriptName;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontWeight"))) Patch.FontWeight = Node.Text.FontWeight;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontStyle"))) Patch.FontStyle = Node.Text.FontStyle;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("href"))) Patch.Href = Node.Text.Href;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("icon"))) Patch.IconFontName = Node.Text.IconFontName;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("library"))) Patch.IconFontFamily = Node.Text.IconFontFamily;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("geometry"))) Patch.Geometry = Node.Shape.Geometry;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("fillRule"))) Patch.FillRule = Node.Shape.FillRule;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("layout"))) Patch.Layout = Node.LayoutData.Layout;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("justifyContent"))) Patch.JustifyContent = Node.LayoutData.JustifyContent;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("alignItems"))) Patch.AlignItems = Node.LayoutData.AlignItems;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("textAlign"))) Patch.TextAlign = Node.Text.TextAlign;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("textAlignVertical"))) Patch.TextAlignVertical = Node.Text.TextAlignVertical;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("textGrowth"))) Patch.TextGrowth = Node.Text.TextGrowth;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("strokeAlignment"))) Patch.StrokeAlign = Node.Visual.Stroke.Align;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("strokeLinecap"))) Patch.StrokeCap = Node.Visual.Stroke.Cap;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("strokeLinejoin"))) Patch.StrokeJoin = Node.Visual.Stroke.Join;
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("rotation"), Resolver, Value)) Patch.Rotation = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("layoutGrow"), Resolver, Value)) Patch.LayoutGrow = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, Value)) Patch.FontSize = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("lineHeight"), Resolver, Value)) Patch.LineHeight = Value;
+	}
+	{
+		int32 Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("weight"), Resolver, Value)) Patch.IconWeight = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("innerRadius"), Resolver, Value)) Patch.InnerRadius = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("startAngle"), Resolver, Value)) Patch.StartAngle = Value;
+	}
+	{
+		float Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("sweepAngle"), Resolver, Value)) Patch.SweepAngle = Value;
+	}
+	{
+		int32 Value = 0;
+		if (TryGetResolvedNumberField(JsonObj, TEXT("polygonCount"), Resolver, Value)) Patch.PolygonCount = Value;
+	}
+	{
+		bool Value = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Value)) Patch.Enabled = Value;
+	}
+	{
+		bool Value = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("flipX"), Resolver, Value)) Patch.FlipX = Value;
+	}
+	{
+		bool Value = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("flipY"), Resolver, Value)) Patch.FlipY = Value;
+	}
+	{
+		bool Value = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("underline"), Resolver, Value)) Patch.Underline = Value;
+	}
+	{
+		bool Value = false;
+		if (TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, Value)) Patch.Strikethrough = Value;
+	}
+	Patch.X = Node.Transform.ExplicitX;
+	Patch.Y = Node.Transform.ExplicitY;
+	Patch.Opacity = Node.Transform.ExplicitOpacity;
+	if (Node.Transform.bHasWidth) Patch.Width = Node.Transform.Width;
+	if (Node.Transform.bHasHeight) Patch.Height = Node.Transform.Height;
+	Patch.Gap = Node.LayoutData.ExplicitGap;
+	Patch.Padding = Node.LayoutData.ExplicitPadding;
+	// New children without baked coordinates need the inherited inset at runtime.
+	// Child coordinates alone cannot revoke ownership of padding authored by another layer.
+	if (Patch.Padding.IsSet() || (JsonObj->HasTypedField<EJson::Array>(TEXT("children"))
+		&& Node.LayoutData.PaddingRequiresRuntimeWrap.Get(false)))
+	{
+		Patch.PaddingRequiresRuntimeWrap = Node.LayoutData.PaddingRequiresRuntimeWrap;
+	}
+	Patch.Clip = Node.LayoutData.ExplicitClip;
+	Patch.LetterSpacing = Node.Text.LetterSpacing;
+	if (Node.Visual.Stroke.Fill.IsSet()) Patch.StrokeFill.Emplace(Node.Visual.Stroke.Fill);
+	// Pencil no-fill removes implicit stroke paint unless the fragment authors stroke paint too.
+	else if (Node.Visual.bFillExplicitClear) Patch.StrokeFill.Emplace();
+	if (JsonObj->HasField(TEXT("strokeWidth"))) Patch.StrokeThickness = Node.Visual.Stroke.Thickness;
+	if (JsonObj->HasField(TEXT("cornerRadius"))) Patch.CornerRadius = Node.Visual.CornerRadius;
+	if (JsonObj->HasField(TEXT("fill"))) Patch.Fills = Node.Visual.Fills;
+	if (JsonObj->HasTypedField<EJson::Array>(TEXT("effect")) || JsonObj->HasTypedField<EJson::Object>(TEXT("effect"))
+		|| JsonObj->HasTypedField<EJson::Array>(TEXT("effects")) || JsonObj->HasTypedField<EJson::Object>(TEXT("effects")))
+	{
+		Patch.Effects = Node.Visual.Effects;
+	}
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("content")) || JsonObj->HasTypedField<EJson::Array>(TEXT("content")))
+	{
+		Patch.Content = Node.Text.Content;
+		Patch.TextRuns = Node.Text.TextRuns;
+	}
+	if (JsonObj->HasTypedField<EJson::Array>(TEXT("children"))) Patch.Children = Node.Children;
+	if (JsonObj->HasField(TEXT("placeholder")) || JsonObj->HasTypedField<EJson::Array>(TEXT("slot")))
+	{
+		Patch.SemanticPlaceholderSurface = Node.LayoutData.bSemanticPlaceholderSurface;
+	}
+	Patch.Metadata = Node.Metadata;
+	Patch.Metadata.Remove(TEXT("source.provider"));
+	return Patch;
 }
 }

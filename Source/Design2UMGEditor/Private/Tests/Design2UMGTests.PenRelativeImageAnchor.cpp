@@ -55,7 +55,11 @@ bool FPenRelativeImageFillAnchorTest::RunTest(const FString& Parameters)
 	Root->Children.Add(MakeNode(TEXT("absolute"), { MakeImageFill(ExistingAbsolutePng) }));
 	Root->Children.Add(MakeNode(TEXT("empty_url"), { MakeImageFill(TEXT("")) }));
 	const TSharedPtr<FDesignNode> OverrideFragment = MakeNode(TEXT("ovr_child"), { MakeImageFill(TEXT("assets/badge.png")) });
-	Root->Descendants.Add(TEXT("ovr"), OverrideFragment);
+	Root->Descendants.FindOrAdd(TEXT("replacement")).Replacement = OverrideFragment;
+	FDesignNodePatch& Patch = Root->Descendants.FindOrAdd(TEXT("ovr")).Patch;
+	Patch.Fills = TArray<FDesignFill>{MakeImageFill(TEXT("assets/badge.png"))};
+	Patch.Children = TArray<TSharedPtr<FDesignNode>>{MakeNode(TEXT("patch_child"), {MakeImageFill(TEXT("assets/badge.png"))})};
+	Root->RefOverrides = MakeShared<FDesignNodePatch>(Patch);
 	Document.Children.Add(Root);
 
 	const FString PenPath = FPaths::Combine(TempRoot, TEXT("design.pen"));
@@ -69,8 +73,11 @@ bool FPenRelativeImageFillAnchorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Remote url untouched"), Root->Children[2]->Visual.Fills[0].Image.Url == TEXT("https://example.com/a.png"));
 	TestTrue(TEXT("Absolute url untouched"), Root->Children[3]->Visual.Fills[0].Image.Url == ExistingAbsolutePng);
 	TestTrue(TEXT("Empty url untouched"), Root->Children[4]->Visual.Fills[0].Image.Url.IsEmpty());
-	TestTrue(TEXT("Descendant override fragment anchored"), OverrideFragment->Visual.Fills[0].Image.Url == ExpectedAnchored);
+	TestTrue(TEXT("Descendant replacement anchored"), OverrideFragment->Visual.Fills[0].Image.Url == ExpectedAnchored);
 
+	TestEqual(TEXT("Descendant patch fill anchored"), Patch.Fills.GetValue()[0].Image.Url, ExpectedAnchored);
+	TestEqual(TEXT("Descendant patch child anchored"), Patch.Children.GetValue()[0]->Visual.Fills[0].Image.Url, ExpectedAnchored);
+	TestEqual(TEXT("Ref root patch fill anchored"), Root->RefOverrides->Fills.GetValue()[0].Image.Url, ExpectedAnchored);
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 	return true;
 }

@@ -8,6 +8,7 @@
 // The 7-argument MakeNode sets an explicit position plus fixed source sizes; the
 // 5-argument overload keeps the same fixed-size contract but leaves ExplicitX/ExplicitY
 // unset for fixtures that must not declare an authored position.
+// Ref names are authored through RefOverrides rather than inferred from the full node state.
 
 namespace Design2UMGEditorTests
 {
@@ -24,6 +25,12 @@ namespace Design2UMGEditorTests
 		Node->Id = Id;
 		Node->Name = Name;
 		Node->Type = Type;
+		if (Type == EDesignNodeType::Ref)
+		{
+			TSharedPtr<FDesignNodePatch> Patch = MakeShared<FDesignNodePatch>();
+			Patch->Name = Name;
+			Node->RefOverrides = MoveTemp(Patch);
+		}
 		Node->Transform.SetPosition(X, Y);
 		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
 		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
@@ -42,6 +49,12 @@ namespace Design2UMGEditorTests
 		Node->Id = Id;
 		Node->Name = Name;
 		Node->Type = Type;
+		if (Type == EDesignNodeType::Ref)
+		{
+			TSharedPtr<FDesignNodePatch> Patch = MakeShared<FDesignNodePatch>();
+			Patch->Name = Name;
+			Node->RefOverrides = MoveTemp(Patch);
+		}
 		Node->Transform.SetWidthValue(FDesignSize::Fixed(Width));
 		Node->Transform.SetHeightValue(FDesignSize::Fixed(Height));
 		return Node;

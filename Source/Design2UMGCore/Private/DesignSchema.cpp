@@ -29,6 +29,7 @@ FDesignNode::FDesignNode(const FDesignNode& Other)
 	, Ref(Other.Ref)
 	, bReusable(Other.bReusable)
 	, bExpandedRefInstance(Other.bExpandedRefInstance)
+	, RefOverrides(Other.RefOverrides)
 	, Descendants(Other.Descendants)
 	, Children(Other.Children)
 {
@@ -58,6 +59,7 @@ FDesignNode& FDesignNode::operator=(const FDesignNode& Other)
 	Ref = Other.Ref;
 	bReusable = Other.bReusable;
 	bExpandedRefInstance = Other.bExpandedRefInstance;
+	RefOverrides = Other.RefOverrides;
 	Descendants = Other.Descendants;
 	Children = Other.Children;
 	SourceData = Other.SourceData ? MakeUnique<FDesignSourceNodeData>(*Other.SourceData) : nullptr;

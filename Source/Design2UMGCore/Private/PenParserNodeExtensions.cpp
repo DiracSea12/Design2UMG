@@ -219,38 +219,17 @@ namespace
 		Node->Text.Content = CombinedContent;
 	}
 
-	TSharedPtr<FDesignNode> ParseDescendantOverrideNode(
+	FDesignNodePatch ParseDescendantOverrideNode(
 		const TSharedPtr<FJsonObject>& JsonObj,
 		const FDesignVariableResolver& Resolver)
 	{
-		if (!JsonObj.IsValid())
-		{
-			return nullptr;
-		}
-
 		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-		Node->Text.FontSize = 0.0f;
-
-		FString RawContent;
-		if (JsonObj->TryGetStringField(TEXT("content"), RawContent))
-		{
-			Node->Text.Content = Resolver.ResolveString(RawContent);
-		}
-
-		PenParser::ApplyNodeTextStyleProperties(JsonObj, *Node, Resolver);
-		if (JsonObj->HasField(TEXT("fill")))
-		{
-			PenParser::ParseNodeFillProperties(JsonObj->TryGetField(TEXT("fill")), *Node, Resolver);
-		}
-		PenParser::ParseNodeStrokeProperties(JsonObj, *Node, Resolver);
-		PenParser::ApplyNodeBoxProperties(JsonObj, *Node, EDesignNodeType::Frame, Resolver);
-		TryGetResolvedBoolField(JsonObj, TEXT("enabled"), Resolver, Node->Transform.bEnabled);
-		PenParser::ApplyNodeLayoutProperties(JsonObj, *Node, Resolver, true);
 		JsonObj->TryGetStringField(TEXT("name"), Node->Name);
+		PenParser::ParseNodeProperties(JsonObj, Node, Resolver);
 		PenParser::AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
 		PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
 		PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, Resolver);
-		return Node;
+		return PenParser::CaptureNodePatch(JsonObj, *Node, Resolver);
 	}
 
 	void ParseDescendants(
@@ -277,15 +256,16 @@ namespace
 			{
 				if (TSharedPtr<FDesignNode> FullNode = PenParser::ParseNode(OverrideObj, Resolver))
 				{
-					Node->Descendants.Add(FString(*Pair.Key), FullNode);
+					FDesignNodeOverride Override;
+					Override.Replacement = MoveTemp(FullNode);
+					Node->Descendants.Add(FString(*Pair.Key), MoveTemp(Override));
 				}
 				continue;
 			}
 
-			if (TSharedPtr<FDesignNode> DescNode = ParseDescendantOverrideNode(OverrideObj, Resolver))
-			{
-				Node->Descendants.Add(FString(*Pair.Key), DescNode);
-			}
+			FDesignNodeOverride Override;
+			Override.Patch = ParseDescendantOverrideNode(OverrideObj, Resolver);
+			Node->Descendants.Add(FString(*Pair.Key), MoveTemp(Override));
 		}
 	}
 }

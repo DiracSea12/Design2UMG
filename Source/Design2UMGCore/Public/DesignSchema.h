@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "DesignSchemaFoundation.h"
+#include "DesignNodePatch.h"
 
 struct FDesignSourceNodeData;
 struct FDesignSourceDocumentData;
@@ -249,7 +249,9 @@ struct DESIGN2UMGCORE_API FDesignNode
 	FString Ref;
 	bool bReusable = false;
 	bool bExpandedRefInstance = false;
-	TMap<FString, TSharedPtr<FDesignNode>> Descendants;
+	// Authored overrides are separate from the resolved/synthesized node state.
+	TSharedPtr<const FDesignNodePatch> RefOverrides;
+	TMap<FString, FDesignNodeOverride> Descendants;
 	TArray<TSharedPtr<FDesignNode>> Children;
 
 	bool IsContainer() const

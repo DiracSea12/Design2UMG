@@ -444,42 +444,44 @@ namespace DesignImportPipeline
 
 	namespace
 	{
+		void AnchorRelativeImageFillUrl(FDesignFill& Fill, const FString& PenDirectory)
+		{
+			FString& Url = Fill.Image.Url;
+			if (!Fill.IsImage() || Url.IsEmpty() || DesignImportUtils::IsHttpUrl(Url) || !FPaths::IsRelative(Url)) return;
+			const FString Anchored = FPaths::ConvertRelativePathToFull(FPaths::Combine(PenDirectory, Url));
+			if (FPaths::FileExists(Anchored)) Url = Anchored;
+		}
+
+		void AnchorRelativeImageFillUrlsInNode(FDesignNode& Node, const FString& PenDirectory);
+
+		void AnchorRelativeImageFillUrlsInPatch(FDesignNodePatch& Patch, const FString& PenDirectory)
+		{
+			if (Patch.Fills.IsSet())
+				for (FDesignFill& Fill : Patch.Fills.GetValue()) AnchorRelativeImageFillUrl(Fill, PenDirectory);
+			if (Patch.StrokeFill.IsSet() && Patch.StrokeFill->IsSet())
+				AnchorRelativeImageFillUrl(Patch.StrokeFill->GetValue(), PenDirectory);
+			if (Patch.Children.IsSet())
+				for (const TSharedPtr<FDesignNode>& Child : Patch.Children.GetValue())
+					if (Child.IsValid()) AnchorRelativeImageFillUrlsInNode(*Child, PenDirectory);
+		}
+
 		void AnchorRelativeImageFillUrlsInNode(FDesignNode& Node, const FString& PenDirectory)
 		{
-			for (FDesignFill& Fill : Node.Visual.Fills)
+			for (FDesignFill& Fill : Node.Visual.Fills) AnchorRelativeImageFillUrl(Fill, PenDirectory);
+			if (Node.Visual.Stroke.Fill.IsSet()) AnchorRelativeImageFillUrl(Node.Visual.Stroke.Fill.GetValue(), PenDirectory);
+			if (Node.RefOverrides.IsValid())
 			{
-				if (!Fill.IsImage())
-				{
-					continue;
-				}
-				FString& Url = Fill.Image.Url;
-				if (Url.IsEmpty() || DesignImportUtils::IsHttpUrl(Url) || !FPaths::IsRelative(Url))
-				{
-					continue;
-				}
-				const FString Anchored = FPaths::ConvertRelativePathToFull(FPaths::Combine(PenDirectory, Url));
-				if (FPaths::FileExists(Anchored))
-				{
-					Url = Anchored;
-				}
+				FDesignNodePatch Patch = *Node.RefOverrides;
+				AnchorRelativeImageFillUrlsInPatch(Patch, PenDirectory);
+				Node.RefOverrides = MakeShared<FDesignNodePatch>(MoveTemp(Patch));
 			}
-			// Ref-instance descendant override fragments carry fills that later merge into the
-			// expanded tree, so they need anchoring too; reusable component definitions already
-			// live in Children and are covered by the recursion below.
-			for (TPair<FString, TSharedPtr<FDesignNode>>& Pair : Node.Descendants)
+			for (auto& Pair : Node.Descendants)
 			{
-				if (Pair.Value.IsValid())
-				{
-					AnchorRelativeImageFillUrlsInNode(*Pair.Value, PenDirectory);
-				}
+				if (Pair.Value.Replacement.IsValid()) AnchorRelativeImageFillUrlsInNode(*Pair.Value.Replacement, PenDirectory);
+				AnchorRelativeImageFillUrlsInPatch(Pair.Value.Patch, PenDirectory);
 			}
 			for (const TSharedPtr<FDesignNode>& Child : Node.Children)
-			{
-				if (Child.IsValid())
-				{
-					AnchorRelativeImageFillUrlsInNode(*Child, PenDirectory);
-				}
-			}
+				if (Child.IsValid()) AnchorRelativeImageFillUrlsInNode(*Child, PenDirectory);
 		}
 	}
 

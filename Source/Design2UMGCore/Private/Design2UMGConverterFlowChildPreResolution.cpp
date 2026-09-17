@@ -60,11 +60,21 @@ namespace
 		{
 			RegisterSnapshotAliases(Snapshot->Children[Index], WorkingCopy->Children[Index], Aliases);
 		}
+		const auto RegisterPatchAliases = [&Aliases](const FDesignNodePatch& Source, const FDesignNodePatch& Copy)
+		{
+			if (!Source.Children.IsSet() || !Copy.Children.IsSet()) return;
+			const int32 Count = FMath::Min(Source.Children->Num(), Copy.Children->Num());
+			for (int32 Index = 0; Index < Count; ++Index)
+				RegisterSnapshotAliases((*Source.Children)[Index], (*Copy.Children)[Index], Aliases);
+		};
+		if (Snapshot->RefOverrides.IsValid() && WorkingCopy->RefOverrides.IsValid())
+			RegisterPatchAliases(*Snapshot->RefOverrides, *WorkingCopy->RefOverrides);
 		for (const auto& Pair : Snapshot->Descendants)
 		{
-			if (const TSharedPtr<FDesignNode>* WorkingDescendant = WorkingCopy->Descendants.Find(Pair.Key))
+			if (const FDesignNodeOverride* WorkingDescendant = WorkingCopy->Descendants.Find(Pair.Key))
 			{
-				RegisterSnapshotAliases(Pair.Value, *WorkingDescendant, Aliases);
+				RegisterSnapshotAliases(Pair.Value.Replacement, WorkingDescendant->Replacement, Aliases);
+				RegisterPatchAliases(Pair.Value.Patch, WorkingDescendant->Patch);
 			}
 		}
 	}
