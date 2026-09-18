@@ -39,9 +39,9 @@
 | PR-04 | `VERIFIED` | Degradation / Warning / Partial Sync 诊断闭环 |
 | PR-05 | `VERIFIED` | 删除确定无效复杂度并修严输入解析 |
 | PR-06 | `VERIFIED` | Typed Payload 与内部 JSON/String 胶水收敛 |
-| PR-07 | `NOT_STARTED` | 单次树索引与身份歧义检测 |
+| PR-07 | `VERIFIED` | 单次树索引与身份歧义检测 |
 | PR-08 | `VERIFIED` | Core / Editor 小切口解耦 |
-| PR-09 | `NOT_STARTED` | 测试体系分层与低价值测试整理 |
+| PR-09 | `VERIFIED` | 测试体系分层与低价值测试整理 |
 | PR-10 | `NOT_STARTED` | 大文件按已有真实职责边界局部拆分 |
 | PR-11 | `NOT_STARTED` | Release hardening、全量回归与最终质量门禁 |
 
@@ -828,7 +828,7 @@ Prototype前两次红测存在夹具问题（第二页缺失或为空，被既�
 
 # PR-07：单次树索引与身份歧义检测
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P1 / 建议完成
 
@@ -844,21 +844,89 @@ Prototype前两次红测存在夹具问题（第二页缺失或为空，被既�
 
 ## 行动项
 
-- [ ] 对单次 conversion/reimport 构建必要的 `DesignNodeId / StableDesignNodeId / WidgetName` 索引。
-- [ ] 用索引替代 manifest records × root DFS 等明显重复扫描。
-- [ ] 重复 stable identity 不得静默覆盖，必须诊断或拒绝歧义。
-- [ ] 明确组件实例、wrapper、document scope 下的 identity 规则，禁止简单裸 ID 一刀切。
-- [ ] 不引入 arena、intrusive tree、自定义容器等无证据优化。
+- [x] 对单次 conversion/reimport 构建必要的 `DesignNodeId / StableDesignNodeId / WidgetName` 索引。
+- [x] 用索引替代 manifest records × root DFS 等明显重复扫描。
+- [x] 重复 stable identity 不得静默覆盖，必须诊断或拒绝歧义。
+- [x] 明确组件实例、wrapper、document scope 下的 identity 规则，禁止简单裸 ID 一刀切。
+- [x] 不引入 arena、intrusive tree、自定义容器等无证据优化。
 
 ## 完成条件
 
-- [ ] 关键 plan 构建不再按每条记录重复 DFS 根树。
-- [ ] 重复身份有明确处理与测试。
-- [ ] 行为、结构快照和 81-case 回归无退步。
+- [x] 关键 plan 构建不再按每条记录重复 DFS 根树。
+- [x] 重复身份有明确处理与测试。
+- [x] 行为、结构快照和 81-case 回归无退步。
 
-## 会话记录
+## 会话记录与最终验收
 
-尚无。
+2026-09-18 完成。进入/结束 HEAD `8ff0a06198c5c3d12c73ab5a5246bce0f648fa96`，未暂存、未提交；进入时未跟踪 `.workbuddy/` 保持不动。PR-01～PR-06及PR-08～PR-11正文不改动。
+
+### 实现与身份边界
+
+转换在既有 `FRefExpansionCache` 构造时建立文档内 reusable-definition 索引，引用展开及引用链复用该索引；原实例指针与主题缓存键不变，没有新全局状态或布尔初始化协议。重复定义保留既有文档DFS首项顺序并发出汇总诊断，诊断进入conversion Warnings：Pencil筛选入口会同时保留组件定义及包含它们的选中子树，不能把这些定义副本当成冲突实例一律拒绝。
+
+重导入在原有 `provider + documentScope` 匹配后建立source-root索引，映射后的prepared IR另建stable-id/parent索引；每条manifest记录与祖先查找不再重复DFS根树。沿用 `GetStableDesignNodeId()`，不改变manifest格式。组件局部重复后代身份从全局查找排除并诊断，仍按原父容器匹配；已有manifest实例、新顶层实例、新mapped实例的歧义在修改资产前拒绝。
+
+wrapper别名只保留单子节点载体关系。普通synthetic载体没有源身份；组件 `ExposeContent` 生成的NamedSlot转存内容SourceNodeId但没有SourceNodeType，按该真实生成规则保留别名。两真实源节点或多子节点不能凭同ID获得豁免。component-batch外层虽有单独编排，其内部依赖仍调用相同的prepared reimport，本轮已覆盖，不把它排除在验证之外。
+
+WidgetName索引用于结构检查与read/move阶段；删除、替换、创建完成后重新建立一次快照，再用于reparent和移动候选预扫描。后续会替换控件的更新路径仍查询实时WidgetTree，避免引入持续维护的第二套控件所有权系统。没有新增生产文件、模块、manager、自定义容器、配置或样例/字体/文件定向分支；不宣称未经测量的性能提升比例。
+
+### 最终真实验证
+
+| 检查 | 结果 | 证据（本插件 `Saved/PR07/20260918/`） |
+|---|---|---|
+| 真实项目构建 | `FPSRoguelikeEditor Win64 Development`成功，exit0 | `build-final-03-*` |
+| 针对性行为回归 | 42/42，组件批处理、提交恢复、PrepareCommit及定义索引测试；完成标记/editor均0 | `focused-final-02-*` |
+| 完整插件自动化 | 626/626，原623个ID全部保留，新增3项；包含结构快照测试，完成标记/editor均0 | `all-tests-final-02-*`、`automation-final-assessment.json` |
+| 前次退步5例独占串行复核 | 5张PNG与PR06逐图SHA-256相同，四项指标差值0；原始4通过+1项既有例外、batch1，5个editor均0 | `isolated5-final-01-*` |
+| 完整81-case | 无include/exclude，81张PNG与PR06最终运行逐图SHA-256相同，四项指标逐例差值0；输入/有效参考身份、结构、尺寸和产物检查通过，editor0/0 | `full81-final-01-*`、`full81-final-assessment.json` |
+| 原始门禁 | available81、passed79、failed2，batch2；仅两项原批准例外，历史blocked保留且例外未新增或扩大 | final run的summary/history |
+| 完整性 | 418源码、2DLL与最终冻结指纹一致；248保护文件未变，UTF8无BOM、diff检查通过，无staged改动 | `final-integrity.json` |
+
+实际项目始终为 `G:/UE5/FPSRoguelike/FPSRoguelike.uproject`。独占5例：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr07-identity-isolated5-20260918`。最终全量：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr07-final-full81-20260918`。相邻实现对照为 `pr06-closure-final-full81-20260918`，登记reference仍为 `review-batch-transaction-full-20260915`；没有提升工作运行为新基线。
+
+原两项批准例外仍为 `pen_pencil-shadcn_shadcn-design-system-components`、`pen_pencil-welcome_step-1-frame`；不是原始门禁零例外通过。视觉子进程沿用PR06的 `-UDPMESSAGING_TRANSPORT_ENABLE=false` 单次环境参数，全插件自动化使用正常UDP环境；不改引擎、持久配置或阈值。
+
+### 失败记录与自审
+
+首轮 `pr07-full81-20260918` 为75/81，5张候选图退步来自重复定义被错误拒绝；该实现已撤回，原记录不覆盖。`focused-final-01` 为97/98，唯一失败是预期日志字符串中的方括号被正则解释，实际3条诊断存在；修正匹配字符串，严格次数仍为3。`all-tests-final-01` 的生成NamedSlot误判已收口，停止的编辑器进程、实际退出码及失败日志保留，不冒充最终成功运行。早期625项成功记录也不是最终版本的验收依据。
+
+最终三个新增行为测试覆盖定义次序/跨文档隔离/诊断、组件局部身份/wrapper/新根歧义、冲突时原对象与uasset/sidecar完整字节不变。自审确认成品复杂度与本阶段相称，旧重复DFS已退出，转换/准备IR/控件快照生命周期明确；没有顺带改造后续模块解耦或nested refresh协议。保留本机Win64验证范围及原两项例外，未确认本阶段遗留阻断问题。详细四项自审见 `self-review.md`。
+
+**最终证据入口：`Saved/PR07/20260918/verification.json`。** 按既有批准例外口径标记PR-07为 `VERIFIED`。
+
+### 2026-09-18 自审更正：VERIFIED → IN_PROGRESS
+
+用户要求重新核对覆盖与代码质量后，逐一审阅10个生产文件、2个测试文件及调用链。原构建、626项自动化和完整81-case证据重新核验仍然有效：418源码、2DLL、248保护文件不变，81PNG及四指标同PR06最终版，原79+2例外未扩大。但现有测试不覆盖下列边界，撤回此前“本阶段未确认遗留阻断问题/全部覆盖”的结论。
+
+- **R1/P1**：`DesignImportReimportPersist.cpp:36-49`只豁免相邻父子。真实源A → 无源同ID载体W → 另一真实源B可以逐边获豁免，遗漏两个真实源身份冲突；需要按整条别名链真实归属判断并补多层链测试。
+- **R2/P2**：同文件的全树索引无条件进入mapped实例的未生成实现后代，而后续验证/生成在mapped边界停止，存在局部实现身份误触发全局拒绝的路径；需要对齐索引与消费范围并补对照。
+- **R3/P2**：同文件503-511行在mutation结束后仍对每条owned记录调用全树FindWidget；属于原目标内的明确重复扫描遗漏，可以一次live-name遍历过滤，不需新增缓存系统。
+
+R1/R2为源码控制流审查发现，不冒充本轮运行复现。新增独立诊断DLL编译/链接成功，但设备执行请求被工具安全检查拦截，没有改道执行，未取得新探针运行结果。此轮仅记录问题、复核既有证据并更新计划，未改生产源码/原测试/DLL/引擎/参考/阈值，未暂存或提交。完整审阅及证据为 `Saved/PR07/self-review-20260918/review.md`、`evidence-audit.json`；旧验收与失败记录保留。
+
+### 2026-09-18 审阅问题收口：IN_PROGRESS → VERIFIED
+
+本轮完成R1/R2/R3并验证直接相邻调用链。R1沿整条同ID单子节点链跟踪真实源归属，不能靠无源载体绕过重复检查；生成NamedSlot仍按既有身份转存约定处理。R2在源根定位前确定映射边界，索引不进入被映射实现替换的后代；映射遍历命中即停止，不再用跨分支裸ID标记抑制真实兄弟实例。选择文档内子树时，映射状态与诊断重新限定到该子树。R3在manifest尾部一次收集live-name集合，再原位过滤owned名称，不复用过期快照。
+
+仅相对进入版本修改4个生产文件和1个现有测试文件；没有新增生产文件、全局缓存、manager、配置、源字段或样例定向分支。BuildReimportUpdatePlan改为消费已准备的const树，减少3个参数；所有裁切先于索引建立，原事务/保存/manifest协议不变。Core和后续阶段未顺带改造。
+
+**真实红绿验证：** 旧生产实现只加入反例，10项中IdentityIndexRules、IdentityFailurePreservesAsset、MappedIdentityDomain共3项失败，editor exit255。修正后的最终构建exit0、最终PrepareCommit10/10、完整插件628/628（原626个ID全部保留，新增2项），完成标记和实际editor退出码均0。56组多层别名组合、真实背景模糊重复身份输入、修改前对象/uasset/sidecar字节保护、隐藏实现与外部节点/源根/实例本体重名、映射兄弟遍历顺序、无映射反向对照、选中子树隔离及最终存活名称均已覆盖。前一候选92/92另存，不替代最终版本结果。
+
+**完整81-case：** 无include/exclude，最终81张候选PNG与上次PR07有效运行逐张SHA-256相同，四项指标逐例差值0；输入、参考内容、比较尺寸规则、结构与产物完整性检查通过。原始no_regression为79通过/2失败，两项既有批准例外与历史blocked范围不变，batch exit2、editor0/0，不宣称81/81全绿。登记基线、阈值及248项受保护文件未变，418源码及2DLL与最终构建指纹一致。
+
+所有运行仍用真实 `G:/UE5/FPSRoguelike/FPSRoguelike.uproject`，视觉子进程继续沿用单次UDP关闭参数，未改引擎或持久配置。全量产物：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr07-review-closure-full81-20260918`。未暂存、未提交，HEAD保持 `8ff0a06198c5c3d12c73ab5a5246bce0f648fa96`。之前的实施、自审及失败记录保留。
+
+四项自审：成品采用局部直接规则，无新增框架；R1/R2/R3及相邻边界均完成真实验证；准备树/控件快照/持久化职责保持独立，没有为了复用而新增长期owner；本机Win64与既定输入范围内未确认遗留阻断问题，不承诺未测试平台或未经测量的整体加速。详细审阅：`Saved/PR07/review-closure-20260918/review.md`。
+
+**最新验收入口：`Saved/PR07/review-closure-20260918/verification.json`。**
+
+### 2026-09-18 身份语义收口
+
+后续复核确认R1实现里仍有一处类型特定协议知识内联在索引算法：生成 `NamedSlot` 会转存内容 `SourceNodeId` 且不写 `SourceNodeType`。本轮仅将该判断收口为 `OwnsSourceIdentity()`，由重导入身份语义工具统一回答“节点是否真正拥有源身份”；`IndexDesignTree` 不再知道 `NamedSlot` 或 `SourceNodeType` 细节。没有新增IR字段、配置、兼容分支、manager或样例定向逻辑，行为不变。
+
+真实项目构建exit0，PrepareCommit 10/10、完整插件自动化628/628；完整81-case候选图逐张与上一收口版SHA-256一致，四项指标逐例差值0，原始门禁仍为79通过+2项既有批准例外、batch exit2、editor exits0/0。418源码、2DLL与本轮最终构建指纹一致，248保护文件未变，UTF-8无BOM、diff检查通过。证据：`Saved/PR07/identity-semantics-20260918/verification.json`。
+
+**最新验收入口更新为：`Saved/PR07/identity-semantics-20260918/verification.json`。**
 
 ---
 
@@ -976,7 +1044,7 @@ python Saved/PR08/20260918/verify.py final G:/UE5/FPSRoguelike/Saved/Design2UMG/
 
 # PR-09：测试体系分层与低价值测试整理
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P1 / 建议完成
 
@@ -1025,22 +1093,45 @@ python Saved/PR08/20260918/verify.py final G:/UE5/FPSRoguelike/Saved/Design2UMG/
 
 ## 行动项
 
-- [ ] 标记仅测试 `TOptional` 等基础容器行为的低价值 case。
-- [ ] 文件 Public/Private 位置类测试统一归为 architecture guard。
-- [ ] 大量重复 fixture/helper 做最小合并，不为了“测试框架化”过度设计。
-- [ ] 模拟 HTTP 只替换 transport，尽量复用真实响应处理路径，避免模拟分支复制一套业务逻辑。
-- [ ] 删除任何测试前先确认不会削弱正式 81-case / no_regression 保障。
+- [x] 标记仅测试 `TOptional` 等基础容器行为的低价值 case。
+- [x] 文件 Public/Private 位置类测试统一归为 architecture guard。
+- [x] 大量重复 fixture/helper 做最小合并，不为了“测试框架化”过度设计。
+- [x] 模拟 HTTP 只替换 transport，尽量复用真实响应处理路径，避免模拟分支复制一套业务逻辑。
+- [x] 删除任何测试前先确认不会削弱正式 81-case / no_regression 保障。
 
 ## 完成条件
 
-- [ ] 关键 failure path 有真实故障注入。
-- [ ] 测试层级和职责清楚。
-- [ ] 删除/合并测试不减少关键行为覆盖。
-- [ ] 正式 full gate 无退步。
+- [x] 关键 failure path 有真实故障注入。
+- [x] 测试层级和职责清楚。
+- [x] 删除/合并测试不减少关键行为覆盖。
+- [x] 正式 full gate 无退步。
 
 ## 会话记录
 
-尚无。
+### 2026-09-18：实施与验证完成
+
+开始与结束 HEAD 均为 `ba73bcbee8b485b6e4c2102a1482b337729a1056`。进入时所有已有未提交源码均保留；未暂存或提交，未修改其它 PR 的计划内容。进入快照、执行命令、原始日志、逐项核验与自审保存在 `Saved/PR09/20260918/`。
+
+**实施内容**：
+
+- L1 语义、L2 UE 对象/服务集成、L3 持久化失败、L4 golden/visual 以及独立 architecture guard 的责任和真实入口，已同步到中英文 `Docs/ValidationGovernance/TestCoverageBoundary*`。层级按用例执行边界分类，不机械重命名整个测试库。
+- `PublicSurface.PostReviewFixesGuard` 已标记为低价值 optional 存储 smoke，保留历史标识但不再作为业务或架构覆盖证据。parser/override/JSON/property 的真实 presence 行为以及插件自身 opt-in 扩展契约继续保留。
+- 五个 HTTP 生命周期用例迁到 `Design2UMGHttpTests.cpp`，名称不变；与两个 REST dependency 用例共享最小作用域 transport fixture。唯一选择器迁移为 `Design2UMG.TextMeasurement.PublicHeaderRemoved` → `Design2UMG.Architecture.TextMeasurementPrivateBoundary`。
+- HTTP 模拟仅替换发送/取消传输，直接执行真实请求完成委托。删除 Figma/MCP 两套重复模拟响应逻辑；逐段对比确认真实 response handler 未变。无新协议抽象或测试框架。
+- 增加三项 HTTP 状态/空响应/解析/握手故障契约和一项真实 Blueprint 编译失败测试。后者通过缺失函数的实际执行链触发 Kismet 编译错误，验证失败提交、新资产不落盘及原资产字节不变。
+
+**自审修正**：对照迁移前的完整生命周期用例，补回“旧初始化通知在新会话 initialize 期间迟到”的时序，保留迟到旧 tool 对新请求无影响的断言。修正前全量运行主动中止并归档至 `attempt-before-late-notify/`，没有当作全量通过；以下结果全部来自修正后的同一份冻结源码。
+
+**真实验证**：
+
+- 原 `FPSRoguelikeEditor Win64 Development` 构建退出码 0；针对性自动化 27/27 通过；完整 `Design2UMG` 自动化 632/632 通过，退出码均为 0，测试标识集合相对 PR-08 仅一项 architecture 迁名与四项新行为用例。
+- 完整不筛选的 81-case（39 Pen + 42 Figma）运行目录：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr09-test-quality-full81-20260918`。集合与 PR-08 完全一致；结构全部通过，81/81 candidate PNG 与 PR-08 字节一致，reference/source identity、尺寸与比较模式一致，四项视觉指标差值全部为 0。
+- 原始 no_regression 仍为 79 passed / 2 failed，batch 退出码仍为 2、两个 editor 均为 0；既有批准例外仅 `pen_pencil-shadcn_shadcn-design-system-components`、`pen_pencil-welcome_step-1-frame`。historical gate 的原始 blocked 状态与原因原样保留，无新增退步或 missing/incompatible identity；没有更新冻结 baseline/history、修改输入/参考或放宽阈值。
+- 最终构建、针对性/完整自动化、81-case 的 422 项源码哈希完全一致；2 个验证 DLL 未变；248 项受保护文件、进入时已有源码修改均未变。UTF-8 无 BOM，`git diff --check` 通过，index 为空。
+
+**改动边界与风险**：本轮改动 11 个源码文件，新增 570 行、删除 636 行；不触及 parser、布局、映射、提交或 reimport 的生产语义。传输替身不证明线上服务、网络超时调度或并发正确性；文件位置 guard 依赖源码检出；旧的单项 TextMeasurement 位置选择器需要使用上述新名称。未将本次 Win64 Development 验证扩张为所有平台/配置均已验证。
+
+**证据索引**：`verification.json`、`automation-assessment.json`、`visual-assessment.json`、`integrity.json`、`test-inventory.json`、`change-summary.json`、`self-review.md` 及各阶段原始命令/日志。最终结论为遵循既有两项批准例外的无新增退步验收，不是将原始 gate 伪装为全绿。
 
 ---
 
@@ -1287,12 +1378,20 @@ Visual Mapper：
 | 2026-09-18 | PR-06 self review | PR-06 | `VERIFIED → IN_PROGRESS` | 未提交；HEAD `96344eec` | 13组原DLL探针确认Shape溢出进入inf并破坏JSON往返；发现prototype按键内部JSON盘点遗漏。原620项/81图证据重新审计有效，不改源码/DLL/保护文件；见 `Saved/PR06/self-review-20260918/review.md` |
 | 2026-09-18 | PR-06 review closure | PR-06 | `IN_PROGRESS → IMPLEMENTED → VERIFIED` | 未提交；HEAD `96344eec` | Shape107坏输入精确诊断/往返，Prototype源键typed直传及局部整理；build0、typed8/8、numeric12/12、全623/623；完整81图及4指标同前版，原79+2/batch2例外不变；418源码/2DLL/248保护文件一致；见 `Saved/PR06/closure-20260918/verification.json` |
 
+| 2026-09-18 | PR-07 implementation and closure | PR-07 | `NOT_STARTED → IN_PROGRESS → VERIFIED` | 未提交；HEAD `8ff0a061` | 单次definition/stable-id/parent/widget-name索引及歧义诊断；build0、focused42/42、全626/626；独占5例及完整81图/四指标同PR06最终版，原79+2/batch2例外不变；418源码/2DLL/248保护文件一致；见 `Saved/PR07/20260918/verification.json` |
+
+| 2026-09-18 | PR-07 self review | PR-07 | `VERIFIED → IN_PROGRESS` | 未提交；HEAD `8ff0a061` | 静态发现多层wrapper链身份漏检、mapped后代索引域过宽及尾部重复扫描；原626项/81图证据有效且源码/DLL/保护文件未变；新增运行探针被工具安全检查拦截，未冒充运行复现；见 `Saved/PR07/self-review-20260918/review.md` |
+
+
+| 2026-09-18 | PR-07 review closure | PR-07 | `IN_PROGRESS → VERIFIED` | 未提交；HEAD `8ff0a061` | R1/R2/R3与相邻调用链收口；旧3项红断言exit255→最终10/10，完整628/628；81图/四指标同前版，原79+2/batch2不变；418源码/2DLL/248保护文件一致；见 `Saved/PR07/review-closure-20260918/verification.json` |
+| 2026-09-18 | PR-07 identity semantics cleanup | PR-07 | `VERIFIED` | 未提交；HEAD `8ff0a061` | 将生成NamedSlot身份转发细节从树索引抽到 `OwnsSourceIdentity()`；build0、focused10/10、全628/628，完整81图/四指标同前版，原79+2/batch2不变；见 `Saved/PR07/identity-semantics-20260918/verification.json` |
+
 ---
 
 # 6. 当前下一步
 
-**下一阶段：PR-07 — 单次树索引与身份歧义检测。**
+**下一阶段：PR-08 — Core / Editor 小切口解耦；本轮未实施。**
 
-PR-06自审列出的Shape输入边界、Prototype按键内部JSON往返及局部冗余已收口，并重新执行真实编译、623项全插件自动化及完整81-case验证。最新证据入口为`Saved/PR06/closure-20260918/verification.json`；原实施和自审证据均保留。PR-01～PR-05状态不变，PR-07及后续阶段未实施。
+PR-07自审R1/R2/R3及直接相邻调用链已收口；身份所有权规则又进一步从索引算法中抽离了生成NamedSlot的具体协议知识。真实构建、10项定向测试、628项全插件自动化和完整81-case验收完成。最新入口为 `Saved/PR07/identity-semantics-20260918/verification.json`。之前的实施、626/628项验收、自审更正和失败记录均保留。PR-01～PR-06及后续阶段状态不变。
 
-本次及进入时工作区修改均未暂存、未提交；HEAD仍为`96344eec46d6ecd07b21ddb7cf6ba556435a350f`。完整81-case原始门禁仍为79通过与两项既有批准例外；全部候选图和四项指标相对收口前PR06完全不变。后续不得新增或扩大例外、移动注册基线或以简化代码为由接受退步。
+本轮未暂存、未提交，HEAD仍为 `8ff0a06198c5c3d12c73ab5a5246bce0f648fa96`。完整81-case原始门禁仍为79通过与2项既有批准例外；81张候选图和四项指标逐例相对收口前完全不变。后续不得新增或扩大例外、移动登记基线或以简化代码为由接受退步。

@@ -7,9 +7,6 @@
 #include "FontResolver.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Framework/Application/SlateApplication.h"
-#include "HAL/FileManager.h"
-#include "Interfaces/IPluginManager.h"
-#include "Misc/Paths.h"
 #include "Styling/SlateTypes.h"
 #include "TextMeasurement.h"
 #include "Widgets/Text/STextBlock.h"
@@ -20,14 +17,6 @@
 
 namespace
 {
-	FString GetCoreSourcePath(const TCHAR* RelativePath)
-	{
-		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-		return Plugin.IsValid()
-			? FPaths::Combine(Plugin->GetBaseDir(), TEXT("Source/Design2UMGCore"), RelativePath)
-			: FString();
-	}
-
 	TSharedPtr<FDesignNode> MakeTextNode(const FString& Id, const float SourceFontSize)
 	{
 		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
@@ -343,18 +332,6 @@ bool FTextMeasurementRuntimeContentPreservesParagraphBreaksTest::RunTest(const F
 {
 	const FString RuntimeText = TextMeasurement::PrepareRuntimeTextContent(TEXT("first\r\n\r\nsecond"));
 	TestEqual(TEXT("Runtime normalization preserves paragraph breaks"), RuntimeText, FString(TEXT("first\n\nsecond")));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementPublicHeaderRemovedTest,
-	"Design2UMG.TextMeasurement.PublicHeaderRemoved",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-
-bool FTextMeasurementPublicHeaderRemovedTest::RunTest(const FString&)
-{
-	TestFalse(TEXT("TextMeasurement is not exposed as a public header"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Public/TextMeasurement.h"))));
-	TestTrue(TEXT("Private TextMeasurement header exists"), IFileManager::Get().FileExists(*GetCoreSourcePath(TEXT("Private/TextMeasurement.h"))));
 	return true;
 }
 

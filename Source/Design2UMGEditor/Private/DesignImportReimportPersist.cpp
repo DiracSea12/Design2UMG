@@ -24,33 +24,72 @@ namespace DesignImportPipeline
 {
 	namespace
 	{
-		const FUMGWidgetNode* FindNodeByDesignId(const FUMGWidgetNode& Node, const FString& DesignNodeId)
+		void IndexDesignTree(
+			const FUMGWidgetNode& Node,
+			const FUMGWidgetNode* Parent,
+			FReimportTreeIndex& Index,
+			bool bParentAliasHasSource)
 		{
-			if (GetDesignNodeId(Node) == DesignNodeId)
+			const FString DesignNodeId = GetDesignNodeId(Node);
+			const bool bContinuesAlias = Parent && Parent->Children.Num() == 1
+				&& GetDesignNodeId(*Parent) == DesignNodeId;
+			const bool bOwnsSource = OwnsSourceIdentity(Node);
+			if (!DesignNodeId.IsEmpty())
 			{
-				return &Node;
-			}
-			for (const FUMGWidgetNode& Child : Node.Children)
-			{
-				if (const FUMGWidgetNode* Found = FindNodeByDesignId(Child, DesignNodeId))
+				if (const FUMGWidgetNode** Existing = Index.DesignNodesById.Find(DesignNodeId))
 				{
-					return Found;
+					// Keep the outer carrier, but an entire alias chain may represent only one source node.
+					if (!bContinuesAlias || (bParentAliasHasSource && bOwnsSource))
+					{
+						*Existing = nullptr;
+						Index.AmbiguousDesignNodeIds.Add(DesignNodeId);
+					}
+				}
+				else
+				{
+					Index.DesignNodesById.Add(DesignNodeId, &Node);
 				}
 			}
-			return nullptr;
+			if (Parent)
+			{
+				Index.ParentsByNode.Add(&Node, Parent);
+			}
+			// The project widget supplies a mapped instance's implementation; those design descendants are not built.
+			if (!Node.Source().MappedComponentKey.IsEmpty()) return;
+			const bool bAliasHasSource = bOwnsSource || (bContinuesAlias && bParentAliasHasSource);
+			for (const FUMGWidgetNode& Child : Node.Children)
+			{
+				IndexDesignTree(Child, &Node, Index, bAliasHasSource);
+			}
 		}
 
-		bool ValidateReimportMappedClasses(const FUMGWidgetNode& Node,
-			FDesign2UMGComponentMappingBuildState& BuildState, TSet<FString>& CheckedKeys)
+		void BuildDesignTreeIndex(
+			const FUMGWidgetNode& Root,
+			FReimportTreeIndex& Index)
+		{
+			Index.DesignNodesById.Reset();
+			Index.AmbiguousDesignNodeIds.Reset();
+			Index.ParentsByNode.Reset();
+			IndexDesignTree(Root, nullptr, Index, false);
+		}
+
+		bool ValidateReimportMappedNodes(const FUMGWidgetNode& Node, const FReimportTreeIndex& Index,
+			FDesign2UMGComponentMappingBuildState& BuildState, TSet<FString>& CheckedKeys, FString& OutFailureReason)
 		{
 			if (Node.HasSourceData() && !Node.Source().MappedComponentKey.IsEmpty())
 			{
+				if (Index.AmbiguousDesignNodeIds.Contains(GetDesignNodeId(Node)))
+				{
+					OutFailureReason = TEXT("Ambiguous stable design identity for mapped instance: ") + GetDesignNodeId(Node);
+					return false;
+				}
 				const FString& Key = Node.Source().MappedComponentKey;
 				if (CheckedKeys.Contains(Key)) return true;
 				CheckedKeys.Add(Key);
 				const auto* Entry = BuildState.FindEntryForKey(Key);
 				if (!Entry || !FSoftClassPath(Entry->WidgetClass).TryLoadClass<UUserWidget>())
 				{
+					OutFailureReason = TEXT("Mapped class validation failed; existing asset and manifest preserved");
 					BuildState.AddDiagnostic(TEXT("mapping_class_unavailable"), FString::Printf(
 						TEXT("Mapping '%s' for node '%s' cannot load class '%s'; reimport left the existing asset unchanged"),
 						*Key, *Node.Name, Entry ? *Entry->WidgetClass : TEXT("(missing entry)")));
@@ -60,7 +99,7 @@ namespace DesignImportPipeline
 			}
 			for (const FUMGWidgetNode& Child : Node.Children)
 			{
-				if (!ValidateReimportMappedClasses(Child, BuildState, CheckedKeys)) return false;
+				if (!ValidateReimportMappedNodes(Child, Index, BuildState, CheckedKeys, OutFailureReason)) return false;
 			}
 			return true;
 		}
@@ -123,11 +162,13 @@ namespace DesignImportPipeline
 		return {};
 	}
 
-	/** Steps 4)-5): DocumentScope matching, source-root location and host continuation; failure exits early as a full conflict. */
-	TOptional<FDesignReimportResult> MatchReimportScopeAndRoot(
+	/** Validate the document domain, apply mapping on an IR copy, then locate the active reimport scope. */
+	TOptional<FDesignReimportResult> PrepareReimportScope(
 		const FReimportSession& Session,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		FDesignReimportResult& Result,
+		FUMGWidgetNode& PreparedRoot,
+		FDesign2UMGComponentMappingBuildState& MappingBuildState,
 		const FUMGWidgetNode*& ScopeRoot,
 		bool& bPrototypeHostContinued)
 	{
@@ -145,13 +186,29 @@ namespace DesignImportPipeline
 				Session, MoveTemp(Result.Diagnostics));
 		}
 
-		// 5) Locate the manifest-recorded sourceRoot in the new IR (the page/root-node relation).
+		// Establish mapping boundaries before either root lookup or instance reconciliation. The source stays untouched.
+		PreparedRoot = Data.RootWidget;
+		Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
+			PreparedRoot, Session.GenerationSettings.ComponentMapping, Data, MappingBuildState);
+
+		// 5) Locate the manifest-recorded sourceRoot in the active IR (the page/root-node relation).
 		// An empty sourceRoot identity = the synthesized switcher host root of a single-page interactive document (only
 		// multi-page documents get a fingerprint token id; see the PrototypePages.Num() > 1 branch of BuildAnalysis) -
 		// this is the current identity rule, not legacy-sidecar compatibility: on empty, the new IR root simply is the scope.
+		FReimportTreeIndex SourceIndex;
+		BuildDesignTreeIndex(PreparedRoot, SourceIndex);
+		if (!Manifest.SourceRootNodeId.IsEmpty()
+			&& SourceIndex.AmbiguousDesignNodeIds.Contains(Manifest.SourceRootNodeId))
+		{
+			return HandleFullConflict(
+				FString::Printf(
+					TEXT("ambiguous stable design identity '%s' for the recorded source root inside document scope '%s'"),
+					*Manifest.SourceRootNodeId, *NewScope),
+				Session, MoveTemp(Result.Diagnostics));
+		}
 		ScopeRoot = Manifest.SourceRootNodeId.IsEmpty()
-			? &Data.RootWidget
-			: FindNodeByDesignId(Data.RootWidget, Manifest.SourceRootNodeId);
+			? &PreparedRoot
+			: SourceIndex.DesignNodesById.FindRef(Manifest.SourceRootNodeId);
 		// Host continuation: the synthesized host root id of a multi-page prototype is a content fingerprint of the page set (BuildPrototypeInternalTokenHash =
 		// CRC32 of each page's "id|name;" concatenation); adding/removing pages necessarily rewrites it, but a content fingerprint is not the document identity -
 		// provider + documentScope already matched in step 4, and when the new source is itself still a multi-page prototype, this is the same
@@ -170,7 +227,7 @@ namespace DesignImportPipeline
 			&& Data.PrototypeNavigation().SwitcherWidgetId == GetDesignNodeId(Data.RootWidget);
 		if (bPrototypeHostContinued)
 		{
-			ScopeRoot = &Data.RootWidget;
+			ScopeRoot = &PreparedRoot;
 			AddReimportDiagnostic(
 				Result.Diagnostics, ReimportDiagnosticKinds::PrototypeHostContinued,
 				FString::Printf(
@@ -186,6 +243,17 @@ namespace DesignImportPipeline
 				Session, MoveTemp(Result.Diagnostics));
 		}
 
+		if (ScopeRoot != &PreparedRoot)
+		{
+			// Only the selected subtree is materialized. Discard mapping state and diagnostics from other roots.
+			FUMGWidgetNode SelectedRoot = *ScopeRoot;
+			PreparedRoot = MoveTemp(SelectedRoot);
+			ScopeRoot = &PreparedRoot;
+			MappingBuildState = FDesign2UMGComponentMappingBuildState(Session.GenerationSettings.ComponentMapping);
+			Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
+				PreparedRoot, Session.GenerationSettings.ComponentMapping, Data, MappingBuildState);
+		}
+
 		AddReimportDiagnostic(
 			Result.Diagnostics, ReimportDiagnosticKinds::ScopeMatched,
 			FString::Printf(
@@ -194,33 +262,44 @@ namespace DesignImportPipeline
 		return {};
 	}
 
-	/** Steps 6)-7): Component Mapping two-tier match (on an IR copy) + update-plan construction. */
+	/** Build the update plan over the already mapped, immutable reimport scope. */
 	bool BuildReimportUpdatePlan(
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		const FUMGWidgetData& Data,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
-		const FUMGWidgetNode* ScopeRoot,
-		FUMGWidgetNode& PreparedScopeRoot,
+		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
 		FDesign2UMGComponentMappingBuildState& MappingBuildState,
 		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>& InstancesById,
 		TArray<FReimportPlanEntry>& Plan,
-		TSet<FString>& AliveInstanceWidgetNames)
+		TSet<FString>& AliveInstanceWidgetNames,
+		FString& OutFailureReason)
 	{
-		// 6) Component Mapping: two-tier match on the IR copy before generation (hit Keys go into the copy; the source data stays untouched).
-		PreparedScopeRoot = *ScopeRoot;
-		Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
-			PreparedScopeRoot, GenerationSettings.ComponentMapping, Data, MappingBuildState);
+		// 7) Update plan: one scoped identity index replaces the old manifest-record x root-DFS pairing.
+		BuildDesignTreeIndex(PreparedScopeRoot, TreeIndex);
 
-		// 7) Update plan: manifest instances <-> new IR nodes paired by designNodeId.
 		TSet<FString> CheckedMappingKeys;
-		if (!ValidateReimportMappedClasses(PreparedScopeRoot, MappingBuildState, CheckedMappingKeys)) return false;
+		if (!ValidateReimportMappedNodes(PreparedScopeRoot, TreeIndex, MappingBuildState, CheckedMappingKeys, OutFailureReason))
+			return false;
 		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
 		{
+			if (TreeIndex.AmbiguousDesignNodeIds.Contains(Record.DesignNodeId))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("Ambiguous stable design identity '%s' participates in reimport reconciliation; existing asset and manifest preserved"),
+					*Record.DesignNodeId);
+				return false;
+			}
+			if (InstancesById.Contains(Record.DesignNodeId))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("Manifest contains duplicate design identity '%s'; existing asset and manifest preserved"),
+					*Record.DesignNodeId);
+				return false;
+			}
 			InstancesById.Add(Record.DesignNodeId, &Record);
 
 			FReimportPlanEntry Entry;
 			Entry.ManifestRecord = &Record;
-			Entry.NewNode = FindNodeByDesignId(PreparedScopeRoot, Record.DesignNodeId);
+			Entry.NewNode = TreeIndex.DesignNodesById.FindRef(Record.DesignNodeId);
 			Entry.bNewKindMapped = Entry.NewNode && Entry.NewNode->HasSourceData()
 				&& !Entry.NewNode->Source().MappedComponentKey.IsEmpty();
 
@@ -237,6 +316,33 @@ namespace DesignImportPipeline
 				Entry.Action = EReimportPlanAction::Matched;
 			}
 			Plan.Add(Entry);
+		}
+
+		// Expanded component descendants may legitimately repeat definition ids across distinct instances. New
+		// top-level roots, however, become reconciliation identities this round and must be unique before mutation.
+		if (!InstancesById.Contains(GetDesignNodeId(PreparedScopeRoot)))
+		{
+			for (const FUMGWidgetNode& Child : PreparedScopeRoot.Children)
+			{
+				const FString ChildId = GetDesignNodeId(Child);
+				if (!InstancesById.Contains(ChildId) && TreeIndex.AmbiguousDesignNodeIds.Contains(ChildId))
+				{
+					OutFailureReason = FString::Printf(
+						TEXT("Ambiguous stable design identity '%s' would become a new top-level reimport instance; existing asset and manifest preserved"),
+						*ChildId);
+					return false;
+				}
+			}
+		}
+
+		// Definition descendants can repeat across component instances. They are not global reconciliation keys;
+		// nested refresh still resolves within its parent. Make that exclusion observable instead of picking a branch.
+		TArray<FString> LocalIds = TreeIndex.AmbiguousDesignNodeIds.Array();
+		LocalIds.Sort();
+		for (const FString& Id : LocalIds)
+		{
+			MappingBuildState.AddDiagnostic(TEXT("reimport_ambiguous_local_identity"), FString::Printf(
+				TEXT("Repeated nested stable identity '%s' excluded from document-wide lookup; descendants remain parent-local"), *Id));
 		}
 
 		// Instance widget names still alive in this round's update plan (Matched/KindChanged = still present in the design-side new source).
@@ -257,6 +363,7 @@ namespace DesignImportPipeline
 		UWidgetBlueprint* WBP,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
 		FDesignReimportResult& Result,
 		FIntPoint& DesignSize)
 	{
@@ -267,10 +374,11 @@ namespace DesignImportPipeline
 				TEXT("target widget tree is missing a root widget"),
 				Session, MoveTemp(Result.Diagnostics));
 		}
+		RebuildReimportWidgetNameIndex(WBP->WidgetTree, TreeIndex);
 		int32 LocatedInstances = 0;
 		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
 		{
-			LocatedInstances += WBP->WidgetTree->FindWidget(FName(*Record.WidgetName)) ? 1 : 0;
+			LocatedInstances += TreeIndex.WidgetsByName.Contains(FName(*Record.WidgetName)) ? 1 : 0;
 		}
 		if (LocatedInstances == 0)
 		{
@@ -289,6 +397,19 @@ namespace DesignImportPipeline
 				Session, MoveTemp(Result.Diagnostics));
 		}
 		return {};
+	}
+
+	void RebuildReimportWidgetNameIndex(UWidgetTree* WidgetTree, FReimportTreeIndex& TreeIndex)
+	{
+		TreeIndex.WidgetsByName.Reset();
+		if (!WidgetTree)
+		{
+			return;
+		}
+		WidgetTree->ForEachWidget([&TreeIndex](UWidget* Widget)
+		{
+			TreeIndex.WidgetsByName.Add(Widget->GetFName(), Widget);
+		});
 	}
 
 	/** Step 9) transaction prelude: open the editor transaction + add RF_Transactional to the existing tree; returns the transaction index (INDEX_NONE = no transaction). */
@@ -390,11 +511,16 @@ namespace DesignImportPipeline
 		}
 		if (Shared.WBP->WidgetTree)
 		{
-			for (const FString& OwnedName : UpdatedD2UOwned.Array())
+			TSet<FName> LiveNames;
+			Shared.WBP->WidgetTree->ForEachWidget([&LiveNames](UWidget* Widget)
 			{
-				if (!Shared.WBP->WidgetTree->FindWidget(FName(*OwnedName)))
+				LiveNames.Add(Widget->GetFName());
+			});
+			for (auto It = UpdatedD2UOwned.CreateIterator(); It; ++It)
+			{
+				if (!LiveNames.Contains(FName(**It)))
 				{
-					UpdatedD2UOwned.Remove(OwnedName);
+					It.RemoveCurrent();
 				}
 			}
 		}

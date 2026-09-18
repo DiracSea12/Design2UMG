@@ -223,73 +223,7 @@ void FMCPHttpClient::SendRequestAsync(
 		}
 	};
 
-#if WITH_DEV_AUTOMATION_TESTS
-	if (DesignHttpClientSlot::HasAutomationTransport())
-	{
-		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
-			RequestId,
-			[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState, WeakSession](
-				bool bConnectedSuccessfully,
-				const FString& ResponseBody,
-				int32 ResponseCode,
-				const FString& NewSessionId)
-		{
-			if (!State->ConsumeCompletion(RequestId))
-			{
-				UE_LOG(LogDesign2UMG, Verbose, TEXT("MCPHttpClient: Request cancelled for %s"), *LogLabel);
-				return;
-			}
-
-			FinishInFlightRequest(WeakSession, CancelState);
-
-			if (!bConnectedSuccessfully)
-			{
-				if (bLogTransportErrors)
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: Connection failed for %s"), *LogLabel);
-				}
-				if (OnComplete)
-				{
-					OnComplete(false, TEXT(""), TEXT(""));
-				}
-				return;
-			}
-
-			if (ResponseCode < 200 || ResponseCode >= 300)
-			{
-				if (bLogTransportErrors)
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: HTTP %d for %s"), ResponseCode, *LogLabel);
-				}
-				if (OnComplete)
-				{
-					OnComplete(false, TEXT(""), TEXT(""));
-				}
-				return;
-			}
-
-			if (OnComplete)
-			{
-				OnComplete(true, bExpectResponse ? ResponseBody : FString(), NewSessionId);
-			}
-		});
-
-		if (!bStarted)
-		{
-			State->ClearActiveRequest(RequestId);
-			FinishInFlightRequest(Session, CancelState);
-			UE_LOG(LogDesign2UMG, Error, TEXT("MCPHttpClient: ProcessRequest failed for %s"), *LogLabel);
-			if (OnComplete)
-			{
-				OnComplete(false, TEXT(""), TEXT(""));
-			}
-		}
-		return;
-	}
-#endif
-
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(Session->ServerEndpoint, Session->SessionId, RequestBody);
-	State->BindActiveRequest(HttpRequest);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState, WeakSession](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{
@@ -330,7 +264,7 @@ void FMCPHttpClient::SendRequestAsync(
 			OnComplete(true, ResponseBody, NewSessionId);
 	});
 
-	if (!HttpRequest->ProcessRequest())
+	if (!State->ProcessRequest(HttpRequest))
 	{
 		State->ClearActiveRequest(RequestId);
 		FinishInFlightRequest(Session, CancelState);

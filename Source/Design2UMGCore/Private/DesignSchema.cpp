@@ -2,12 +2,39 @@
 
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "Design2UMGLog.h"
 
 namespace
 {
 	const FDesignSourceNodeData EmptySourceNodeData;
 	const FDesignSourceDocumentData EmptySourceDocumentData;
 	const FDesignParseDiagnostics EmptyParseDiagnostics;
+
+	void IndexReusableNodes(
+		const TArray<TSharedPtr<FDesignNode>>& Nodes,
+		TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
+		TSet<FString>& RepeatedIds)
+	{
+		for (const TSharedPtr<FDesignNode>& Node : Nodes)
+		{
+			if (!Node.IsValid())
+			{
+				continue;
+			}
+			if (Node->bReusable)
+			{
+				if (const TSharedPtr<FDesignNode>* Existing = OutNodesById.Find(Node->Id))
+				{
+					if (*Existing != Node) RepeatedIds.Add(Node->Id);
+				}
+				else
+				{
+					OutNodesById.Add(Node->Id, Node);
+				}
+			}
+			IndexReusableNodes(Node->Children, OutNodesById, RepeatedIds);
+		}
+	}
 }
 
 FDesignNode::FDesignNode() = default;
@@ -172,22 +199,27 @@ FDesignParseDiagnostics& FDesignDocument::MutableParseDiagnostics()
 
 TSharedPtr<FDesignNode> FDesignDocument::FindReusableNode(const FString& Id) const
 {
-	return FindNodeRecursive(Children, Id, true);
+	TMap<FString, TSharedPtr<FDesignNode>> NodesById;
+	BuildReusableNodeIndex(NodesById);
+	return NodesById.FindRef(Id);
 }
 
-TSharedPtr<FDesignNode> FDesignDocument::FindNodeRecursive(
-	const TArray<TSharedPtr<FDesignNode>>& Nodes,
-	const FString& Id,
-	bool bReusableOnly)
+void FDesignDocument::BuildReusableNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
+	TArray<FString>* OutWarnings) const
 {
-	for (const TSharedPtr<FDesignNode>& Node : Nodes)
+	OutNodesById.Reset();
+	TSet<FString> RepeatedIds;
+	IndexReusableNodes(Children, OutNodesById, RepeatedIds);
+	if (!RepeatedIds.IsEmpty())
 	{
-		if (!Node.IsValid())
-			continue;
-		if (Node->Id == Id && (!bReusableOnly || Node->bReusable))
-			return Node;
-		if (const TSharedPtr<FDesignNode> Found = FindNodeRecursive(Node->Children, Id, bReusableOnly))
-			return Found;
+		// A selected subtree can also contain definitions supplied separately by the import source.
+		// Keep the established document-order lookup; do not confuse repeated definitions with instance identity.
+		TArray<FString> Ids = RepeatedIds.Array();
+		Ids.Sort();
+		const FString Warning = FString::Printf(
+			TEXT("Repeated reusable definition ids [%s]; first occurrence in document order retained"),
+			*FString::Join(Ids, TEXT(", ")));
+		if (OutWarnings) OutWarnings->Add(Warning);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
 	}
-	return nullptr;
 }

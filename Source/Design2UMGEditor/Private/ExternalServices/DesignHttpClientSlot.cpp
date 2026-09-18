@@ -15,9 +15,16 @@ int32 FDesignHttpClientSlot::BeginRequest()
 	return ActiveRequestId;
 }
 
-void FDesignHttpClientSlot::BindActiveRequest(const FHttpRequestPtr& Request)
+bool FDesignHttpClientSlot::ProcessRequest(const FHttpRequestPtr& Request)
 {
 	ActiveRequest = Request;
+#if WITH_DEV_AUTOMATION_TESTS
+	if (GDesignHttpClientSlotAutomationHooks.IsValid())
+	{
+		return GDesignHttpClientSlotAutomationHooks->StartRequest(ActiveRequestId, Request);
+	}
+#endif
+	return Request->ProcessRequest();
 }
 
 void FDesignHttpClientSlot::CancelActiveRequest()
@@ -28,16 +35,20 @@ void FDesignHttpClientSlot::CancelActiveRequest()
 	}
 
 	CancelledRequestIdWatermark = FMath::Max(CancelledRequestIdWatermark, ActiveRequestId);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (GDesignHttpClientSlotAutomationHooks.IsValid())
+	{
+		if (GDesignHttpClientSlotAutomationHooks->CancelRequest)
+		{
+			GDesignHttpClientSlotAutomationHooks->CancelRequest(ActiveRequestId);
+		}
+	}
+	else
+#endif
 	if (ActiveRequest.IsValid())
 	{
 		ActiveRequest->CancelRequest();
 	}
-#if WITH_DEV_AUTOMATION_TESTS
-	else if (GDesignHttpClientSlotAutomationHooks.IsValid() && GDesignHttpClientSlotAutomationHooks->CancelRequest)
-	{
-		GDesignHttpClientSlotAutomationHooks->CancelRequest(ActiveRequestId);
-	}
-#endif
 	ActiveRequest.Reset();
 	ActiveRequestId = 0;
 }
@@ -62,24 +73,6 @@ void FDesignHttpClientSlot::ClearActiveRequest(int32 RequestId)
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
-namespace DesignHttpClientSlot
-{
-	bool HasAutomationTransport()
-	{
-		return GDesignHttpClientSlotAutomationHooks.IsValid()
-			&& GDesignHttpClientSlotAutomationHooks->StartRequest;
-	}
-
-	bool StartAutomationTransport(int32 RequestId, FDesignHttpClientSlotSimulatedCompletion&& OnComplete)
-	{
-		if (!GDesignHttpClientSlotAutomationHooks.IsValid() || !GDesignHttpClientSlotAutomationHooks->StartRequest)
-		{
-			return false;
-		}
-		return GDesignHttpClientSlotAutomationHooks->StartRequest(RequestId, MoveTemp(OnComplete));
-	}
-}
-
 void SetDesignHttpClientSlotAutomationHooks(const TSharedPtr<FDesignHttpClientSlotAutomationHooks>& InHooks)
 {
 	GDesignHttpClientSlotAutomationHooks = InHooks;

@@ -4,6 +4,7 @@
 
 #include "Design2UMGLog.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "UMGWidgetTypes.h"
 
 namespace DesignImportPipeline
 {
@@ -37,6 +38,17 @@ namespace DesignImportPipeline
 	bool HasRealSourceIdentity(const FUMGWidgetNode& Node)
 	{
 		return Node.HasSourceData() && !Node.Source().SourceNodeId.IsEmpty();
+	}
+
+	/** A source identity is owned by a design node, not merely forwarded by a generated carrier. */
+	bool OwnsSourceIdentity(const FUMGWidgetNode& Node)
+	{
+		if (!HasRealSourceIdentity(Node))
+		{
+			return false;
+		}
+		// ExposeContent forwards its child's identity through a generated NamedSlot and leaves source type empty.
+		return Node.Type != UMGWidgetTypes::NamedSlot || !Node.Source().SourceNodeType.IsEmpty();
 	}
 
 	/** The same design identity key as the import side (single source of truth: FUMGWidgetNode::GetStableDesignNodeId). */

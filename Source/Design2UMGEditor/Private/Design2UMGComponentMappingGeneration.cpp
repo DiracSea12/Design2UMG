@@ -30,9 +30,8 @@ namespace
 		const DesignComponentMapping::FComponentMappingTable& Table,
 		FDesign2UMGComponentMappingBuildState& BuildState)
 	{
-		// Subtrees already swallowed by an outer mapped hit no longer participate in matching: a hit would create no
-		// instance (the generation chain does not expand it), and emitting mapping_hit would only make users believe the inner component was wired to the project WBP (false reporting).
-		if (!BuildState.IsInsideMappedSubtree(Node.Id) && Node.HasSourceData())
+		// Stop at a mapped boundary below; a descendant's bare id must not suppress a real sibling instance.
+		if (Node.HasSourceData())
 		{
 			DesignComponentMapping::FDesignComponentIdentity Identity;
 			if (Node.Source().bMappedComponentCandidate
@@ -57,6 +56,7 @@ namespace
 							*MatchedIdentity,
 							*Entry->WidgetClass,
 							bMatchedAtSetLevel ? TEXT(" (component-set level match)") : TEXT("")));
+					return;
 				}
 			}
 		}

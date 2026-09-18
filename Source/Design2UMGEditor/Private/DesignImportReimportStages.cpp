@@ -12,26 +12,6 @@
 
 namespace DesignImportPipeline
 {
-	namespace
-	{
-		/** Find Target's parent within the Root subtree (compared by node pointer). */
-		const FUMGWidgetNode* FindParentNode(const FUMGWidgetNode& Root, const FUMGWidgetNode& Target)
-		{
-			for (const FUMGWidgetNode& Child : Root.Children)
-			{
-				if (&Child == &Target)
-				{
-					return &Root;
-				}
-				if (const FUMGWidgetNode* Found = FindParentNode(Child, Target))
-				{
-					return Found;
-				}
-			}
-			return nullptr;
-		}
-	}
-
 	FDesign2UMGMappedInstanceRecord ManifestRecordToMappedRecord(
 		const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record)
 	{
@@ -297,7 +277,7 @@ namespace DesignImportPipeline
 			const TMap<FString, UWidget*>& NewlyCreatedWidgets)
 		{
 			FReparentTargetResolution Resolution;
-			const FUMGWidgetNode* ImmediateParentNode = FindParentNode(ScopeRoot, NewNode);
+			const FUMGWidgetNode* ImmediateParentNode = Shared.TreeIndex->ParentsByNode.FindRef(&NewNode);
 			const FUMGWidgetNode* AncestorNode = ImmediateParentNode;
 
 			// A synthetic direct parent layer (inner etc., no source node id) pairs with the current parent by name: without
@@ -324,7 +304,7 @@ namespace DesignImportPipeline
 				if (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* const* ParentRecord =
 					Shared.InstancesById->Find(GetDesignNodeId(*AncestorNode)))
 				{
-					AncestorWidget = Shared.WidgetTree->FindWidget(FName(*(*ParentRecord)->WidgetName));
+					AncestorWidget = Shared.TreeIndex->WidgetsByName.FindRef(FName(*(*ParentRecord)->WidgetName));
 				}
 				else if (UWidget* const* NewlyCreated = NewlyCreatedWidgets.Find(GetDesignNodeId(*AncestorNode)))
 				{
@@ -345,7 +325,7 @@ namespace DesignImportPipeline
 					// A real design node with unclear ownership: boundary unclear -> conflict-kept.
 					Resolution.bUnresolvable = true;
 				}
-				AncestorNode = FindParentNode(ScopeRoot, *AncestorNode);
+				AncestorNode = Shared.TreeIndex->ParentsByNode.FindRef(AncestorNode);
 			}
 
 			// No-conflict exception: resolution failed, but the widget's current parent is exactly the deterministic counterpart
@@ -382,7 +362,7 @@ namespace DesignImportPipeline
 				continue;
 			}
 
-			UWidget* Widget = Shared.WidgetTree->FindWidget(FName(*Entry.ManifestRecord->WidgetName));
+			UWidget* Widget = Shared.TreeIndex->WidgetsByName.FindRef(FName(*Entry.ManifestRecord->WidgetName));
 			if (!Widget)
 			{
 				KeepAsIsWidgetNames.Add(Entry.ManifestRecord->WidgetName);
@@ -466,7 +446,7 @@ namespace DesignImportPipeline
 			{
 				// The scope root itself is an instance: the expected set starts from that instance widget's children.
 				if (UPanelWidget* ScopeRootPanel = Cast<UPanelWidget>(
-					Shared.WidgetTree->FindWidget(FName(*(*ScopeRootRecord)->WidgetName))))
+					Shared.TreeIndex->WidgetsByName.FindRef(FName(*(*ScopeRootRecord)->WidgetName))))
 				{
 					CollectExpectedNestedNames(PreparedScopeRoot, ScopeRootPanel, Shared, ExpectedNames);
 				}
@@ -480,7 +460,7 @@ namespace DesignImportPipeline
 						Shared.InstancesById->Find(GetDesignNodeId(Child)))
 					{
 						if (UPanelWidget* ChildPanel = Cast<UPanelWidget>(
-							Shared.WidgetTree->FindWidget(FName(*(*ChildRecord)->WidgetName))))
+							Shared.TreeIndex->WidgetsByName.FindRef(FName(*(*ChildRecord)->WidgetName))))
 						{
 							CollectExpectedNestedNames(Child, ChildPanel, Shared, ExpectedNames);
 						}

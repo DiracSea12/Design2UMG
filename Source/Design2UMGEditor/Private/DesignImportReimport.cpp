@@ -108,18 +108,20 @@ namespace DesignImportPipeline
 		Result.Commit.AssetPath = WBP->GetPathName();
 		const auto& Data = Session.Data;
 		const auto& GenerationSettings = Session.GenerationSettings;
-		// 4)-5) Scope matching, source-root location and host continuation.
+		// 4)-6) Match the document domain and prepare the active scope with its local mapping state.
+		FUMGWidgetNode PreparedRoot;
+		FDesign2UMGComponentMappingBuildState MappingBuildState(GenerationSettings.ComponentMapping);
 		const FUMGWidgetNode* ScopeRoot = nullptr;
 		bool bPrototypeHostContinued = false;
-		if (TOptional<FDesignReimportResult> Early = MatchReimportScopeAndRoot(
-			Session, Manifest, Result, ScopeRoot, bPrototypeHostContinued))
+		if (TOptional<FDesignReimportResult> Early = PrepareReimportScope(
+			Session, Manifest, Result, PreparedRoot, MappingBuildState, ScopeRoot, bPrototypeHostContinued))
 		{
 			return MoveTemp(*Early);
 		}
 
-		// 6)-8) Component Mapping two-tier match, update-plan construction, structural sanity check.
-		FUMGWidgetNode PreparedScopeRoot;
-		FDesign2UMGComponentMappingBuildState MappingBuildState(GenerationSettings.ComponentMapping);
+		// 7)-8) Update-plan construction and structural sanity over the immutable prepared tree.
+		const FUMGWidgetNode& PreparedScopeRoot = *ScopeRoot;
+		FReimportTreeIndex TreeIndex;
 		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*> InstancesById;
 		TArray<FReimportPlanEntry> Plan;
 		TSet<FString> AliveInstanceWidgetNames;
@@ -162,17 +164,17 @@ namespace DesignImportPipeline
 				WBP->GetOutermost()->GetName(), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
 			return Result;
 		};
+		FString PrepareFailureReason;
 		if (!BuildReimportUpdatePlan(
-			GenerationSettings, Data, Manifest, ScopeRoot,
-			PreparedScopeRoot, MappingBuildState, InstancesById, Plan, AliveInstanceWidgetNames))
+			Manifest, PreparedScopeRoot, TreeIndex, MappingBuildState, InstancesById, Plan, AliveInstanceWidgetNames,
+			PrepareFailureReason))
 		{
-			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed,
-				TEXT("Mapped class validation failed; existing asset and manifest preserved"));
+			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
 			return FailApply();
 		}
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
 		if (TOptional<FDesignReimportResult> Early = CheckReimportStructureViability(
-			Session, WBP, Manifest, PreparedScopeRoot, Result, DesignSize))
+			Session, WBP, Manifest, PreparedScopeRoot, TreeIndex, Result, DesignSize))
 		{
 			return MoveTemp(*Early);
 		}
@@ -207,6 +209,7 @@ namespace DesignImportPipeline
 		Shared.GenerationSettings = &GenerationSettings;
 		Shared.OwnedNames = &ManifestOwnedNames;
 		Shared.InstancesById = &InstancesById;
+		Shared.TreeIndex = &TreeIndex;
 		Shared.MappingBuildState = &MappingBuildState;
 		Shared.Diagnostics = &Result.Diagnostics;
 		Shared.bHasDegradation = &Result.bHasDegradation;
@@ -229,8 +232,16 @@ namespace DesignImportPipeline
 		// register newly created widgets; 9d reparent resolves its targets from that registry.
 		if (!ApplyRemovedPlanEntries(Plan, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames)
 			|| !ApplyKindChangedPlanEntries(Plan, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames, NewlyCreatedWidgets)
-			|| !ApplyAddedTopLevelNodes(PreparedScopeRoot, Shared, NewlyCreatedWidgets)
-			|| !ApplyReparentPlanEntries(Plan, PreparedScopeRoot, Shared, KeepAsIsWidgetNames, NewlyCreatedWidgets))
+			|| !ApplyAddedTopLevelNodes(PreparedScopeRoot, Shared, NewlyCreatedWidgets))
+		{
+			return FailApply();
+		}
+
+		// 9d is read/move-only: refresh the WidgetName index once after the destructive/create stages, then reuse it
+		// for reparent target resolution and the nested-move pre-scan. Later 9e refreshes may replace widgets, so
+		// mutation-sensitive refresh code continues to query the live WidgetTree directly.
+		RebuildReimportWidgetNameIndex(WBP->WidgetTree, TreeIndex);
+		if (!ApplyReparentPlanEntries(Plan, PreparedScopeRoot, Shared, KeepAsIsWidgetNames, NewlyCreatedWidgets))
 		{
 			return FailApply();
 		}

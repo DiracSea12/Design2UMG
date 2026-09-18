@@ -335,7 +335,7 @@ namespace Design2UMGConverterInternal
 		const FDesign2UMGFontMappings* InFontMappings)
 		: Document(InDocument)
 		, ThemeContext(InThemeContext)
-		, ExpansionCache(InExpansionCache.IsValid() ? MoveTemp(InExpansionCache) : MakeShared<FRefExpansionCache>())
+		, ExpansionCache(InExpansionCache.IsValid() ? MoveTemp(InExpansionCache) : MakeShared<FRefExpansionCache>(InDocument))
 		, FontMappings(InFontMappings)
 	{
 	}
@@ -355,7 +355,7 @@ namespace Design2UMGConverterInternal
 		}
 
 		FRefExpansionCacheEntry& CacheEntry = ExpansionCache->Entries.Add(CacheKey);
-		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Document);
+		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, ExpansionCache->ReusableNodesById);
 		if (!Expanded.IsValid())
 		{
 			CacheEntry.bResolved = true;

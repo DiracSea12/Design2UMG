@@ -39,6 +39,17 @@ namespace DesignImportPipeline
 		bool bNewKindMapped = false;
 	};
 
+	/** Non-owning lookups over the prepared IR; the IR stays unchanged until apply finishes.
+	 * Widget names are a stage snapshot, rebuilt after 9a-9c and used only through read/move stage 9d.
+	 */
+	struct FReimportTreeIndex
+	{
+		TMap<FString, const FUMGWidgetNode*> DesignNodesById;
+		TSet<FString> AmbiguousDesignNodeIds;
+		TMap<const FUMGWidgetNode*, const FUMGWidgetNode*> ParentsByNode;
+		TMap<FName, UWidget*> WidgetsByName;
+	};
+
 	/**
 	 * Reimport session state shared across stages: the common parameter carrier of the early-exit functions and
 	 * HandleFullConflict (so the Document/Request/Data/GenerationSettings quartet is not repeated verbatim in every
@@ -107,6 +118,7 @@ namespace DesignImportPipeline
 		/** Set view of the manifest.d2uOwned list (data source of the delete/move ownership decisions). */
 		const TSet<FString>* OwnedNames = nullptr;
 		const TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>* InstancesById = nullptr;
+		const FReimportTreeIndex* TreeIndex = nullptr;
 		FDesign2UMGComponentMappingBuildState* MappingBuildState = nullptr;
 		TArray<FDesign2UMGMappingDiagnostic>* Diagnostics = nullptr;
 		/** Monotonic non-fatal partial-sync signal; diagnostics explain the concrete cause. */
@@ -131,6 +143,7 @@ namespace DesignImportPipeline
 		const TCHAR* Kind,
 		const FString& Message);
 	bool HasRealSourceIdentity(const FUMGWidgetNode& Node);
+	bool OwnsSourceIdentity(const FUMGWidgetNode& Node);
 	FString GetDesignNodeId(const FUMGWidgetNode& Node);
 	void PruneManifestInstanceChildren(
 		FUMGWidgetNode& Node,
@@ -232,29 +245,32 @@ namespace DesignImportPipeline
 		FString& TargetPackage,
 		UWidgetBlueprint*& WBP,
 		FDesign2UMGGenerationManifestSidecar& Manifest);
-	TOptional<FDesignReimportResult> MatchReimportScopeAndRoot(
+	TOptional<FDesignReimportResult> PrepareReimportScope(
 		const FReimportSession& Session,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		FDesignReimportResult& Result,
+		FUMGWidgetNode& PreparedRoot,
+		FDesign2UMGComponentMappingBuildState& MappingBuildState,
 		const FUMGWidgetNode*& ScopeRoot,
 		bool& bPrototypeHostContinued);
 	bool BuildReimportUpdatePlan(
-		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings,
-		const FUMGWidgetData& Data,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
-		const FUMGWidgetNode* ScopeRoot,
-		FUMGWidgetNode& PreparedScopeRoot,
+		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
 		FDesign2UMGComponentMappingBuildState& MappingBuildState,
 		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>& InstancesById,
 		TArray<FReimportPlanEntry>& Plan,
-		TSet<FString>& AliveInstanceWidgetNames);
+		TSet<FString>& AliveInstanceWidgetNames,
+		FString& OutFailureReason);
 	TOptional<FDesignReimportResult> CheckReimportStructureViability(
 		const FReimportSession& Session,
 		UWidgetBlueprint* WBP,
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
 		FDesignReimportResult& Result,
 		FIntPoint& DesignSize);
+	void RebuildReimportWidgetNameIndex(UWidgetTree* WidgetTree, FReimportTreeIndex& TreeIndex);
 	int32 BeginReimportApplyTransaction(UWidgetBlueprint* WBP);
 	FDesign2UMGGenerationOutput BuildReimportManifestPayload(
 		const FDesign2UMGGenerationManifestSidecar& Manifest,

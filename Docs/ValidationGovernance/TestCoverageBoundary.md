@@ -27,12 +27,46 @@ The full discovered admissible case set formal visual regression gate is not in 
 
 ## Coverage Layers
 
-| Layer | What it covers | Typical entry point | Who can realistically run it | What it does not prove |
-| --- | --- | --- | --- | --- |
-| `private unit tests` | parser/converter contracts, typed JSON behavior, generator invariants, workflow helpers, structure guards, import-report behavior, regression-focused editor automation tests under `Source/Design2UMGEditor/Private/Tests/` | `Tools/Run-Design2UMGAutomationTests.ps1 -Tests Design2UMG` or direct `Automation RunTests Design2UMG...` | Contributors and maintainers with a local UE setup and a real project | It does not prove packaged-plugin health or formal admissible case set no-regression |
-| `editor workflow smoke` | basic import path, example content flow, generated Widget Blueprint exists, preview PNG exists, obvious editor-facing breakage | enable plugin, import an example `.pen`, inspect the generated widget and preview PNG | Contributors and maintainers | It does not prove automation parity, release packaging, or formal visual quality |
-| `automation render` | focused asset render, designer snapshot, structure snapshot, import diagnostics, local repro for a specific case or bug | `Design2UMG.AutomationRender`, `Tools/design2umg_auto_verify.py`, `Run-DesignerSnapshotValidation.ps1`, `Run-StructureSnapshotValidation.ps1` | Contributors can run focused local repro with explicit `--project` / `--editor`; maintainers use the same tools for deeper evidence | It does not automatically become the maintainer release gate just because one case passed locally |
-| `formal visual regression gate` | full discovered admissible case set release gate, archived `summary.no_regression`, historical-best comparison, curated reference-root evidence chain | maintainer-run batch validation described in [ValidationProtocol.md](../ValidationProtocol.md) | Maintainers only | It is not a public PR check, not a coverage badge, and not something contributors should describe as already covered by GitHub Actions |
+Classify a test by the boundary it executes, not its historical name. These L1–L4 tiers describe test dependencies and cost; they do not replace the visual metric layers or change the formal gate. Core and Editor both contain private automation tests. A `Unit` or `BatchD` prefix alone does not guarantee a pure test.
+
+| Tier | Contract and representative owners | Execution boundary |
+| --- | --- | --- |
+| L1 — semantic | Parser presence, Pen overrides, variable resolution, reference expansion, layout decisions and typed payload conversion. Examples: Core `PenOverrideTests.cpp`, `DesignTextLetterSpacingPresenceTests.cpp`, `Design2UMGCoreHelperContractTests.cpp`; Editor `Design2UMGNumericParsingTests.cpp` and JSON contract cases. | Exercise input-to-output semantics without creating assets or rendering. Run focused cases through UE automation; an engine-independent test executable is not claimed. |
+| L2 — UE object / service integration | WidgetTree generation, slots and properties, mapped instances, prototype graph wiring and resource binding. Examples: `Design2UMGPrototypeGraphWiringTests.cpp`, object-generation cases in `Design2UMGComponentBlueprintTests.cpp`, and `Design2UMGHttpTests.cpp`. | Use actual UE objects or request delegates. HTTP tests replace network transport only; they exercise real request construction, response validation, parsing, cancellation and session lifecycle, not live service availability. |
+| L3 — persistence and failure | Compile/save/manifest failures, read-only files, Undo ownership, replacement construction, unavailable mappings and nested partial synchronization. Owners: `Design2UMGSaveSemanticsTests.cpp`, `Design2UMGCommitResultTests.cpp`, `Design2UMGReimportQA.*.cpp`, batch rollback cases in `Design2UMGComponentBlueprintTests.cpp`. | Inject a failure at the relevant boundary and assert the returned outcome **and** preserved disk/object state. Some L2 owners also contain L3 cases; select the case, not the whole file as a purported single tier. |
+| L4 — end-to-end golden / visual | Pen/Figma import, candidate/reference images, tree correspondence, deterministic output and fresh-process asset reload. Entry points: `Design2UMG.AutomationRender`, `design2umg_auto_verify.py`, designer/structure snapshot tools and the maintainer batch in [ValidationProtocol.md](../ValidationProtocol.md). | Preserve input/reference identities and archive the complete admissible case set and historical comparison. A focused render or same-process reload does not establish the full gate or fresh-process persistence. |
+| Architecture guards — separate from L1–L4 | Source visibility and dependency ownership. `Design2UMGArchitectureGuardTests.cpp` owns `Design2UMG.Architecture.TextMeasurementPrivateBoundary`. | Check the declared architecture, not runtime text measurement or visual correctness. File-location guards require a source checkout. |
+
+An interactive editor workflow smoke test remains useful for example import, generated asset and preview inspection, but is not a substitute for any complete automated tier. Public CI and maintainer execution boundaries above still apply.
+
+### Test value and fixture policy
+
+A test that only assigns a standalone `TOptional`, reads `IsSet` / `GetValue`, then resets it is a low-value container test: prefer an actual parser, override, serialization or property-application contract. Do not remove a presence assertion merely because the implementation uses `TOptional`. Explicit zero, false and empty values must survive their real consumer boundaries.
+
+**Marked low-value case:** `Design2UMG.PublicSurface.PostReviewFixesGuard` in `DesignNodeSemanticsTests.cpp` only assigns layout optionals, reads them and resets the row field. Its historical selector is retained as a storage smoke check, but it is not evidence for grid positioning, parser presence or architecture boundaries. Do not extend it with more container-only assertions; actual semantic coverage comes from parser/converter cases. This classification does not inflate the business coverage claimed below.
+
+The PR-09 review retained `TextLetterSpacingPresenceExplicitZeroVsUnset`, `RefOverrideExplicitZeroLetterSpacingPresence`, typed empty-text/property tests and JSON round trips. `SourceExtensionsRemainOptIn` and `UMGSourceExtensionsRemainOptIn` also stay: they verify plugin-owned read-without-allocation and explicit-mutation behavior, not an engine container. No behavior case was deleted merely to reduce the count.
+
+Shared helpers should remove demonstrated duplication, not model the application a second time. `Design2UMGHttpTestTransport.h` provides a scoped transport and raw `IHttpResponse`; it removes a pending request before invoking its real completion delegate, so callbacks can enqueue another request safely. Construct the transport before the client, and keep response status/session/body logic in production. It does not provide network, timeout scheduling or concurrency coverage.
+
+### Fault-injection evidence map
+
+| Boundary | Concrete test / injection | Required observation |
+| --- | --- | --- |
+| Blueprint compilation | `Design2UMG.Generation.CompileFailurePreservesDisk`: a live graph call references a missing function; the real Kismet compiler runs. | Compiler error, unsuccessful commit, unchanged existing bytes and no newly saved failed asset. |
+| Save / manifest / read-only | `SaveFailureRollsBackAndKeepsManifest`, `ManifestWriteFailurePropagates`, `SaveWritabilityPrecheckBlocksHalfUpdate` under `Design2UMG.SafeReimportQA`; one-shot save/sidecar injection and actual file read-only flags. | Original asset/manifest preservation or an explicit partial-commit outcome; flags restored at cleanup. |
+| Undo / finalization | `Design2UMG.CommitResult.ReimportUndoFailure` and `.ManifestFinalizeFailure`; one-shot Undo/finalization failures. | Recovery failure is distinct from success; prior user transactions are not silently consumed. |
+| Replacement / missing mapping | `Design2UMG.SafeReimportQA.PrepareCommit.KindFailurePreservesSubtree`, `.AutomaticOverrideFailurePreservesAllSlots`, and `Design2UMG.SafeReimportQA.MappingDiagnosticsSurfaced`; invalid widget types or unloadable classes. | Original subtree/slots/manifest retained; diagnostics identify the actual failed boundary. |
+| Nested partial synchronization | `Design2UMG.SafeReimportQA.NestedAddAndRemovalBoundary`, `.NestedRemoveConflictNamesNode` and `.NestedMoveConflictCreatesNoCopy`; real nested owned/project content conflicts. | No duplicate instance, unsafe removal or success-shaped partial update; unsupported work remains explicit. |
+| HTTP | `Design2UMG.Http.Figma.ResponseContract`, `.MCP.ResponseContract`, `.MCP.HandshakeFailures` plus the retained five `Design2UMG.BatchD` HTTP lifecycle cases. | Exact callback delivery, real status/body/session processing, stale-response suppression, launch-failure cleanup and session release. |
+
+This is a navigation map to executable evidence, not a coverage percentage or a claim that each run exercised all tiers. Record the actual test identifiers, logs and result counts for a change.
+
+### PR-09 ownership and selector migration
+
+The five `Design2UMG.BatchD` HTTP tests moved from `Design2UMGTests.BatchDStructure.cpp` to `Design2UMGHttpTests.cpp` without renaming. The two component REST dependency tests use the same transport fixture and remain in their integration owner. The only relocated selector is `Design2UMG.TextMeasurement.PublicHeaderRemoved` → `Design2UMG.Architecture.TextMeasurementPrivateBoundary`; actual text-measurement behavior selectors are unchanged.
+
+Use `Automation RunTests Design2UMG` for the full plugin suite, `Automation RunTests Design2UMG.Architecture` for the new architecture group, and `Automation RunTests Design2UMG.Http+Design2UMG.BatchD` for the response and retained lifecycle cases. The latter intentionally also includes the existing non-HTTP BatchD tests; use individual identifiers when strict isolation matters.
 
 ## What Contributors Can Run
 

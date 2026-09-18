@@ -8,7 +8,7 @@
 #include "Design2UMGEditorImportServices.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "Interfaces/IPluginManager.h"
-#include "ExternalServices/DesignHttpClientSlot.h"
+#include "Design2UMGHttpTestTransport.h"
 #include "FigmaComponentDependencies.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Misc/ScopeExit.h"
@@ -806,16 +806,14 @@ bool FComponentBlueprintRestTest::RunTest(const FString&)
 	FJsonSerializer::Serialize(Library, TJsonWriterFactory<>::Create(&LibraryResponse));
 	const TArray<FString> Responses = {RootResponse, TEXT("{\"meta\":{\"file_key\":\"library\",\"node_id\":\"main\"}}"), LibraryResponse, TEXT("{\"meta\":{\"images\":{}}}")};
 	int32 Requests = 0;
-	const auto Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
-	Hooks->StartRequest = [&](int32, FDesignHttpClientSlotSimulatedCompletion Complete)
+	Design2UMGEditorTests::FScopedHttpTestTransport Transport;
+	Transport.Hooks->StartRequest = [&](int32, const FHttpRequestPtr& Request)
 	{
 		if (Requests >= Responses.Num()) return false;
 		const FString Response = Responses[Requests++];
-		Complete(true, Response, 200, FString());
+		Design2UMGEditorTests::FScopedHttpTestTransport::Reply(Request, Response);
 		return true;
 	};
-	SetDesignHttpClientSlotAutomationHooks(Hooks);
-	ON_SCOPE_EXIT { ResetDesignHttpClientSlotAutomationHooks(); };
 	Design2UMGEditorImportServices::FFigmaImportService Owner;
 	FDesign2UMGImportSettingsSnapshot Settings;
 	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
@@ -867,16 +865,14 @@ bool FRemoteSetMappingDependencyTest::RunTest(const FString&)
 	FString Response;
 	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Response));
 	int32 Requests = 0;
-	const auto Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
-	Hooks->StartRequest = [&](int32, FDesignHttpClientSlotSimulatedCompletion Complete)
+	Design2UMGEditorTests::FScopedHttpTestTransport Transport;
+	Transport.Hooks->StartRequest = [&](int32, const FHttpRequestPtr& Request)
 	{
 		++Requests;
 		if (Requests != 1) return false;
-		Complete(true, Response, 200, FString());
+		Design2UMGEditorTests::FScopedHttpTestTransport::Reply(Request, Response);
 		return true;
 	};
-	SetDesignHttpClientSlotAutomationHooks(Hooks);
-	ON_SCOPE_EXIT { ResetDesignHttpClientSlotAutomationHooks(); };
 	FDesign2UMGImportSettingsSnapshot Settings;
 	auto& Mapping = Settings.GenerationSettings.ComponentMapping.Table.Entries.AddDefaulted_GetRef();
 	Mapping.Provider = TEXT("figma");

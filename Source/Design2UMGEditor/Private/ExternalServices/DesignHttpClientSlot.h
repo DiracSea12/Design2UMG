@@ -6,10 +6,6 @@
 #include "Interfaces/IHttpRequest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
-/** Neutral simulated-transport completion shape shared by the HTTP clients. */
-using FDesignHttpClientSlotSimulatedCompletion =
-	TFunction<void(bool bConnected, const FString& ResponseBody, int32 ResponseCode, const FString& NewSessionId)>;
-
 /**
  * Shared automation injection point for the single-flight HTTP clients.
  * While installed it replaces real HTTP with a simulated transport.
@@ -18,10 +14,10 @@ struct FDesignHttpClientSlotAutomationHooks
 {
 	/**
 	 * Simulated transport start for a request. Return false to force the
-	 * synchronous launch-failure path. Protocol adapters shape their payload
-	 * handling around the neutral completion.
+	 * synchronous launch-failure path. Complete the supplied request through
+	 * its real OnProcessRequestComplete delegate; do not reimplement response handling.
 	 */
-	TFunction<bool(int32 RequestId, FDesignHttpClientSlotSimulatedCompletion OnComplete)> StartRequest;
+	TFunction<bool(int32 RequestId, const FHttpRequestPtr& Request)> StartRequest;
 	/** Notifies the simulated transport that a request was cancelled. */
 	TFunction<void(int32 RequestId)> CancelRequest;
 };
@@ -43,8 +39,8 @@ public:
 	/** Reserves the next request id and makes it the active request. */
 	int32 BeginRequest();
 
-	/** Binds the real HTTP request backing the active request id. */
-	void BindActiveRequest(const FHttpRequestPtr& Request);
+	/** Starts the configured request through HTTP or the installed test transport. */
+	bool ProcessRequest(const FHttpRequestPtr& Request);
 
 	/** Cancels the active request (real or simulated) and forgets it. */
 	void CancelActiveRequest();
@@ -67,14 +63,3 @@ private:
 	/** Ids are monotonic and single-flight, so any id <= watermark was cancelled. */
 	int32 CancelledRequestIdWatermark = 0;
 };
-
-#if WITH_DEV_AUTOMATION_TESTS
-namespace DesignHttpClientSlot
-{
-	/** True while a simulated transport is installed and can start requests. */
-	bool HasAutomationTransport();
-
-	/** Routes a request through the installed simulated transport. */
-	bool StartAutomationTransport(int32 RequestId, FDesignHttpClientSlotSimulatedCompletion&& OnComplete);
-}
-#endif

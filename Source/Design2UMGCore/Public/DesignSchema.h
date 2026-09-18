@@ -307,13 +307,11 @@ struct DESIGN2UMGCORE_API FDesignDocument
 	FDesignParseDiagnostics& MutableParseDiagnostics();
 
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const;
+	/** Document-local definition lookup. Repeated definitions keep document order and emit a diagnostic. */
+	void BuildReusableNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
+		TArray<FString>* OutWarnings = nullptr) const;
 
 private:
-	static TSharedPtr<FDesignNode> FindNodeRecursive(
-		const TArray<TSharedPtr<FDesignNode>>& Nodes,
-		const FString& Id,
-		bool bReusableOnly);
-
 	TUniquePtr<FDesignSourceDocumentData> SourceDocumentData;
 	TUniquePtr<FDesignParseDiagnostics> ParseDiagnosticsData;
 };

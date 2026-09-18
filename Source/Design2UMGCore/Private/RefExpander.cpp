@@ -341,7 +341,7 @@ namespace
 
 	TSharedPtr<FDesignNode> ExpandRefInternal(
 		const TSharedPtr<FDesignNode>& RefNode,
-		const FDesignDocument& Doc,
+		const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById,
 		TSet<FString>& RefChain)
 	{
 		if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
@@ -357,15 +357,15 @@ namespace
 
 		RefChain.Add(RefTargetId);
 
-		auto SourceNode = Doc.FindReusableNode(RefTargetId);
-		if (!SourceNode.IsValid())
+		const TSharedPtr<FDesignNode>* SourceNode = ReusableNodesById.Find(RefTargetId);
+		if (!SourceNode)
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("ExpandRef: ref '%s' -> '%s' NOT FOUND"), *RefNode->Id, *RefTargetId);
 			RefChain.Remove(RefTargetId);
 			return nullptr;
 		}
 
-		auto Expanded = RefExpander::DeepCopyNode(SourceNode);
+		auto Expanded = RefExpander::DeepCopyNode(*SourceNode);
 		if (!Expanded.IsValid())
 		{
 			RefChain.Remove(RefTargetId);
@@ -377,7 +377,7 @@ namespace
 		TSharedPtr<FDesignNode> Result = Expanded;
 		if (Expanded->Type == EDesignNodeType::Ref && !Expanded->Ref.IsEmpty())
 		{
-			Result = ExpandRefInternal(Expanded, Doc, RefChain);
+			Result = ExpandRefInternal(Expanded, ReusableNodesById, RefChain);
 		}
 		else
 		{
@@ -413,8 +413,17 @@ TSharedPtr<FDesignNode> RefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>&
 
 TSharedPtr<FDesignNode> RefExpander::ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc)
 {
+	TMap<FString, TSharedPtr<FDesignNode>> ReusableNodesById;
+	Doc.BuildReusableNodeIndex(ReusableNodesById);
+	return ExpandRef(RefNode, ReusableNodesById);
+}
+
+TSharedPtr<FDesignNode> RefExpander::ExpandRef(
+	const TSharedPtr<FDesignNode>& RefNode,
+	const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById)
+{
 	TSet<FString> RefChain;
-	return ExpandRefInternal(RefNode, Doc, RefChain);
+	return ExpandRefInternal(RefNode, ReusableNodesById, RefChain);
 }
 
 void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override)

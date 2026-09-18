@@ -81,6 +81,263 @@ namespace
 	};
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportIdentityIndexRulesTest,
+	"Design2UMG.SafeReimportQA.PrepareCommit.IdentityIndexRules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReimportIdentityIndexRulesTest::RunTest(const FString&)
+{
+	auto MakeOwnedNode = [](const TCHAR* Id)
+	{
+		FUMGWidgetNode Node = MakeNode(Id, TEXT("CanvasPanel"));
+		Node.MutableSource().SourceNodeId = Id;
+		return Node;
+	};
+	auto AddRecord = [](FDesign2UMGGenerationManifestSidecar& Manifest, const TCHAR* Id)
+	{
+		auto& Record = Manifest.Instances.AddDefaulted_GetRef();
+		Record.DesignNodeId = Id;
+		Record.WidgetName = Id;
+		Record.Kind = Design2UMGManifestKinds::Generated;
+	};
+	FUMGWidgetNode PreparedScope;
+	auto BuildPlan = [&PreparedScope](const FUMGWidgetNode& Scope, const FDesign2UMGGenerationManifestSidecar& Manifest,
+		FReimportTreeIndex& Index, FString& FailureReason)
+	{
+		PreparedScope = Scope;
+		FDesign2UMGGenerationSettingsSnapshot Settings;
+		FDesign2UMGComponentMappingBuildState Mapping(Settings.ComponentMapping);
+		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*> Instances;
+		TArray<FReimportPlanEntry> Plan;
+		TSet<FString> Alive;
+		return BuildReimportUpdatePlan(
+			Manifest, PreparedScope, Index,
+			Mapping, Instances, Plan, Alive, FailureReason);
+	};
+
+	FUMGWidgetNode Scope = MakeNode(TEXT("scope"), TEXT("CanvasPanel"));
+	FUMGWidgetNode InstanceA = MakeOwnedNode(TEXT("instance_a"));
+	FUMGWidgetNode InstanceB = MakeOwnedNode(TEXT("instance_b"));
+	InstanceA.Children.Add(MakeOwnedNode(TEXT("definition_child")));
+	InstanceB.Children.Add(MakeOwnedNode(TEXT("definition_child")));
+
+	// Converter pass-through wrapper: deterministic wrapper id equals its only source-owned child's stable id.
+	FUMGWidgetNode Wrapper = MakeNode(TEXT("wrapped"), TEXT("SizeBox"));
+	Wrapper.Children.Add(MakeOwnedNode(TEXT("wrapped")));
+	Scope.Children = { InstanceA, InstanceB, Wrapper };
+
+	FDesign2UMGGenerationManifestSidecar Manifest;
+	AddRecord(Manifest, TEXT("instance_a"));
+	AddRecord(Manifest, TEXT("instance_b"));
+	AddRecord(Manifest, TEXT("wrapped"));
+	FReimportTreeIndex Index;
+	FString FailureReason;
+	TestTrue(TEXT("component-local repeated definition ids do not block reconciliation"),
+		BuildPlan(Scope, Manifest, Index, FailureReason));
+	TestTrue(TEXT("component-local duplicate is recorded as ambiguous"),
+		Index.AmbiguousDesignNodeIds.Contains(TEXT("definition_child")));
+	TestFalse(TEXT("direct pass-through wrapper alias is not ambiguous"),
+		Index.AmbiguousDesignNodeIds.Contains(TEXT("wrapped")));
+	TestTrue(TEXT("the wrapper remains the manifest lookup target"),
+		Index.DesignNodesById.FindRef(TEXT("wrapped")) == &PreparedScope.Children[2]);
+	TestTrue(TEXT("parent index references the prepared tree"),
+		Index.ParentsByNode.FindRef(&PreparedScope.Children[2].Children[0]) == &PreparedScope.Children[2]);
+	TestNull(TEXT("a repeated component-local id cannot silently select one instance"),
+		Index.DesignNodesById.FindRef(TEXT("definition_child")));
+
+	Scope.Children[2].MutableSource().SourceNodeId = TEXT("wrapped");
+	TestFalse(TEXT("two real source nodes are not a wrapper alias merely because one is the only child"),
+		BuildPlan(Scope, Manifest, Index, FailureReason));
+	Scope.Children[2].Type = TEXT("NamedSlot");
+	Scope.Children[2].Id = TEXT("exposed_slot");
+	TestTrue(TEXT("generated component content slot aliases its child's source identity"),
+		BuildPlan(Scope, Manifest, Index, FailureReason));
+	Scope.Children[2].MutableSource().SourceNodeType = TEXT("FRAME");
+	TestFalse(TEXT("a source-owned NamedSlot is not treated as generated exposure"),
+		BuildPlan(Scope, Manifest, Index, FailureReason));
+	Scope.Children[2] = Wrapper;
+	Scope.Children[2].Children.Add(MakeOwnedNode(TEXT("wrapped")));
+	TestFalse(TEXT("a synthetic parent with multiple matching children is ambiguous"),
+		BuildPlan(Scope, Manifest, Index, FailureReason));
+
+	FUMGWidgetNode AmbiguousScope = MakeNode(TEXT("scope"), TEXT("CanvasPanel"));
+	AmbiguousScope.Children = { MakeOwnedNode(TEXT("duplicate")), MakeOwnedNode(TEXT("duplicate")) };
+	FDesign2UMGGenerationManifestSidecar AmbiguousManifest;
+	AddRecord(AmbiguousManifest, TEXT("duplicate"));
+	FReimportTreeIndex AmbiguousIndex;
+	FailureReason.Reset();
+	TestFalse(TEXT("ambiguous reconciliation identity is rejected before apply"),
+		BuildPlan(AmbiguousScope, AmbiguousManifest, AmbiguousIndex, FailureReason));
+	TestTrue(TEXT("rejection explains the ambiguous stable identity"),
+		FailureReason.Contains(TEXT("Ambiguous stable design identity 'duplicate'")));
+	AmbiguousManifest.Instances.Reset();
+	TestFalse(TEXT("two new top-level roots are rejected before they enter a manifest"),
+		BuildPlan(AmbiguousScope, AmbiguousManifest, AmbiguousIndex, FailureReason));
+
+	// Check ownership across a whole alias chain, not just its adjacent pairs. The source may be at any depth;
+	// generated NamedSlots forward identity without introducing another source node.
+	for (const int32 ChainLength : {2, 3, 4})
+	{
+		for (int32 SourceMask = 0; SourceMask < (1 << ChainLength); ++SourceMask)
+		{
+			for (const bool bUseNamedSlots : {false, true})
+			{
+				FUMGWidgetNode Chain;
+				int32 SourceCount = 0;
+				for (int32 Depth = ChainLength - 1; Depth >= 0; --Depth)
+				{
+					FUMGWidgetNode Layer = MakeNode(TEXT("chain"), bUseNamedSlots ? TEXT("NamedSlot") : TEXT("SizeBox"));
+					if ((SourceMask & (1 << Depth)) != 0)
+					{
+						Layer.MutableSource().SourceNodeId = TEXT("chain");
+						Layer.MutableSource().SourceNodeType = TEXT("FRAME");
+						++SourceCount;
+					}
+					else if (bUseNamedSlots)
+					{
+						Layer.MutableSource().SourceNodeId = TEXT("chain");
+					}
+					if (Depth < ChainLength - 1) Layer.Children.Add(MoveTemp(Chain));
+					Chain = MoveTemp(Layer);
+				}
+				Scope.Children = {MoveTemp(Chain)};
+				FDesign2UMGGenerationManifestSidecar ChainManifest;
+				AddRecord(ChainManifest, TEXT("chain"));
+				const bool bAccepted = BuildPlan(Scope, ChainManifest, Index, FailureReason);
+				TestEqual(FString::Printf(TEXT("alias chain length=%d source-mask=%d named-slots=%d"),
+					ChainLength, SourceMask, bUseNamedSlots), bAccepted, SourceCount <= 1);
+				if (bAccepted)
+				{
+					TestTrue(TEXT("accepted chain retains its outermost reconciliation target"),
+						Index.DesignNodesById.FindRef(TEXT("chain")) == &PreparedScope.Children[0]);
+				}
+			}
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportMappedIdentityDomainTest,
+	"Design2UMG.SafeReimportQA.PrepareCommit.MappedIdentityDomain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReimportMappedIdentityDomainTest::RunTest(const FString&)
+{
+	const FString Output = TEXT("/Game/Design2UMG/_TestOutput/QAMappedIdentityDomain");
+	ON_SCOPE_EXIT { QAWipeOutput(Output); };
+	const FString Button = MakeQAButton(TEXT("mapped"), TEXT("MappedButton"), 180, 24, TEXT("Label"));
+	UWidgetBlueprint* WBP = QAImport(MakeQADoc(
+		MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Original")) + TEXT(",") + Button), QAMappedClassPath, Output);
+	if (!TestNotNull(TEXT("initial asset"), WBP)) return false;
+	const FString Package = WBP->GetOutermost()->GetName();
+	UTextBlock* Alpha = CastChecked<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Alpha")));
+	UWidget* Mapped = WBP->WidgetTree->FindWidget(TEXT("MappedButton"));
+	if (!TestNotNull(TEXT("mapped instance"), Mapped)) return false;
+
+	// These implementation children are replaced by the project class. Their ids must not compete with an
+	// active sibling, the recorded source root, or the mapped instance itself.
+	for (const TCHAR* HiddenId : {TEXT("first"), TEXT("qa_root"), TEXT("mapped")})
+	{
+		const FString Hidden = Button.Replace(TEXT("\"id\":\"mapped_label\""),
+			*FString::Printf(TEXT("\"id\":\"%s\""), HiddenId));
+		const FString Updated = MakeQADoc(
+			MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, HiddenId) + TEXT(",") + Hidden);
+		const FDesignReimportResult Result = QAReimport(Updated, QAMappedClassPath, Package);
+		TestTrue(FString::Printf(TEXT("unconsumed implementation id '%s' does not block reimport"), HiddenId), Result.bSucceeded);
+		TestTrue(TEXT("existing active widget identity preserved"), WBP->WidgetTree->FindWidget(TEXT("Alpha")) == Alpha);
+		TestTrue(TEXT("existing mapped instance preserved"), WBP->WidgetTree->FindWidget(TEXT("MappedButton")) == Mapped);
+		TestEqual(TEXT("active design value updated"), Alpha->GetText().ToString(), FString(HiddenId));
+		FDesign2UMGGenerationManifestSidecar Manifest;
+		TestTrue(TEXT("resulting manifest remains valid"), QALoadSidecar(Package, Manifest));
+	}
+
+	// Without a successful mapping, the same descendants are live again and must participate in ambiguity checks.
+	const FString Unmapped = Button.Replace(TEXT("\"id\":\"mapped_label\""), TEXT("\"id\":\"first\""));
+	const FDesignReimportResult UnmappedResult = QAReimport(MakeQADoc(
+		MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Rejected")) + TEXT(",") + Unmapped), nullptr, Package);
+	TestFalse(TEXT("unmapped implementation is not excluded from identity validation"), UnmappedResult.bSucceeded);
+	TestEqual(TEXT("rejected source did not update active text"), Alpha->GetText().ToString(), FString(TEXT("mapped")));
+
+	const FString SecondButton = MakeQAButton(TEXT("second_mapped"), TEXT("SiblingButton"), 180, 100, TEXT("Sibling"));
+	UWidgetBlueprint* Siblings = QAImport(MakeQADoc(Button + TEXT(",") + SecondButton), QAMappedClassPath, Output / TEXT("Siblings"));
+	if (!TestNotNull(TEXT("two mapped siblings"), Siblings)) return false;
+	UWidget* Sibling = Siblings->WidgetTree->FindWidget(TEXT("SiblingButton"));
+	if (!TestNotNull(TEXT("second mapped sibling"), Sibling)) return false;
+	const FString HiddenSibling = Button.Replace(TEXT("\"id\":\"mapped_label\""), TEXT("\"id\":\"second_mapped\""));
+	for (const bool bReverseOrder : {false, true})
+	{
+		const FString Children = bReverseOrder ? SecondButton + TEXT(",") + HiddenSibling : HiddenSibling + TEXT(",") + SecondButton;
+		const FDesignReimportResult Result = QAReimport(MakeQADoc(Children), QAMappedClassPath, Siblings->GetOutermost()->GetName());
+		TestTrue(TEXT("hidden descendant cannot suppress another mapped sibling regardless of order"), Result.bSucceeded);
+		TestTrue(TEXT("sibling keeps its mapped widget rather than becoming generated content"),
+			Siblings->WidgetTree->FindWidget(TEXT("SiblingButton")) == Sibling);
+	}
+
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("parse a selected scope and an unrelated mapped root"), FFigmaParser::ParseDocument(MakeQADoc(
+		MakeQAPanel(TEXT("selected"), TEXT("SelectedScope"), 0, 0,
+			MakeQAText(TEXT("leaf"), TEXT("Leaf"), 0, 0, TEXT("Local"))) + TEXT(",") + Button), Document))) return false;
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const auto Settings = MakeQASnapshot(QAMappedClassPath);
+	FDesignReimportRequest Request;
+	const FReimportSession Session{nullptr, Request, Data, Settings.GenerationSettings};
+	FDesign2UMGGenerationManifestSidecar ScopeManifest;
+	ScopeManifest.Provider = TEXT("figma");
+	ScopeManifest.DocumentScope = QAReimportScope;
+	ScopeManifest.SourceRootNodeId = TEXT("selected");
+	FUMGWidgetNode PreparedRoot;
+	FDesign2UMGComponentMappingBuildState Mapping(Settings.GenerationSettings.ComponentMapping);
+	FDesignReimportResult ScopeResult;
+	const FUMGWidgetNode* ScopeRoot = nullptr;
+	bool bHostContinued = false;
+	TestFalse(TEXT("selected subtree prepares successfully"), PrepareReimportScope(
+		Session, ScopeManifest, ScopeResult, PreparedRoot, Mapping, ScopeRoot, bHostContinued).IsSet());
+	TestTrue(TEXT("prepared tree owns only the selected scope"), ScopeRoot == &PreparedRoot
+		&& GetDesignNodeId(PreparedRoot) == TEXT("selected"));
+	TestFalse(TEXT("unrelated mapped root is not published as a local mapping hit"),
+		Mapping.GetDiagnostics().ContainsByPredicate([](const auto& Diagnostic) { return Diagnostic.Kind == TEXT("mapping_hit"); }));
+	TestFalse(TEXT("unrelated mapped identity does not leak into this scope"), Mapping.IsMappedNodeId(TEXT("mapped")));
+	TestFalse(TEXT("unrelated implementation identity does not leak into this scope"), Mapping.IsInsideMappedSubtree(TEXT("mapped_label")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportManifestLiveNamesTest,
+	"Design2UMG.SafeReimportQA.PrepareCommit.ManifestUsesFinalLiveNames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReimportManifestLiveNamesTest::RunTest(const FString&)
+{
+	const FString Output = TEXT("/Game/Design2UMG/_TestOutput/QAManifestLiveNames");
+	ON_SCOPE_EXIT { QAWipeOutput(Output); };
+	UWidgetBlueprint* WBP = QAImport(MakeQADoc(
+		MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Remove")) + TEXT(",")
+		+ MakeQAText(TEXT("second"), TEXT("Beta"), 160, 24, TEXT("Keep"))), nullptr, Output);
+	if (!TestNotNull(TEXT("initial asset"), WBP)) return false;
+	FApplyFixture F(WBP);
+	FReimportTreeIndex StaleIndex;
+	RebuildReimportWidgetNameIndex(WBP->WidgetTree, StaleIndex);
+	F.Shared.TreeIndex = &StaleIndex;
+	UWidget* Removed = WBP->WidgetTree->FindWidget(TEXT("Alpha"));
+	if (!TestNotNull(TEXT("widget to detach"), Removed)) return false;
+	Removed->RemoveFromParent();
+	F.Owned.Add(TEXT("MissingWidget"));
+	UCanvasPanel* Added = WBP->WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("LatePanel"));
+	F.Shared.HostPanel->AddChild(Added);
+	UTextBlock* Leaf = WBP->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LateLeaf"));
+	Added->AddChild(Leaf);
+	UTextBlock* Detached = WBP->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Detached"));
+	F.Mapping.RecordCreatedWidget(MakeNode(TEXT("late_panel")), Added, F.Shared.HostPanel);
+	F.Mapping.RecordCreatedWidget(MakeNode(TEXT("late_leaf")), Leaf, Added);
+	F.Mapping.RecordCreatedWidget(MakeNode(TEXT("detached")), Detached, nullptr);
+	const FUMGWidgetData Data;
+	const FDesign2UMGGenerationOutput Payload = BuildReimportManifestPayload(F.Manifest, false, Data, F.Shared, F.Owned, {});
+	const auto& Names = Payload.Manifest.D2UOwnedNames;
+	TestTrue(TEXT("surviving owned widget retained"), Names.Contains(TEXT("Beta")));
+	TestTrue(TEXT("post-snapshot parent and descendant included"), Names.Contains(TEXT("LatePanel")) && Names.Contains(TEXT("LateLeaf")));
+	TestFalse(TEXT("detached original is not live"), Names.Contains(TEXT("Alpha")));
+	TestFalse(TEXT("absent name is dropped"), Names.Contains(TEXT("MissingWidget")));
+	TestFalse(TEXT("new detached object is not live"), Names.Contains(TEXT("Detached")));
+	TestFalse(TEXT("host root does not become an owned instance"), Names.Contains(WBP->WidgetTree->RootWidget->GetName()));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportKindPreparationFailureTest,
 	"Design2UMG.SafeReimportQA.PrepareCommit.KindFailurePreservesSubtree",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -368,6 +625,60 @@ bool FReimportLateApplyFailureTest::RunTest(const FString&)
 	TestEqual(TEXT("rolled-back addition not reported as success"), QACountKind(Result, ReimportDiagnosticKinds::Added), 0);
 	TestEqual(TEXT("rolled-back removal not reported as success"), QACountKind(Result, ReimportDiagnosticKinds::Removed), 0);
 	TestTrue(TEXT("no ghost manifest payload"), GenerationOutput.Manifest.D2UOwnedNames.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReimportIdentityFailurePreservesAssetTest,
+	"Design2UMG.SafeReimportQA.PrepareCommit.IdentityFailurePreservesAsset",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReimportIdentityFailurePreservesAssetTest::RunTest(const FString&)
+{
+	const FString Output = TEXT("/Game/Design2UMG/_TestOutput/QAIdentityFailure");
+	ON_SCOPE_EXIT { QAWipeOutput(Output); };
+	const FString Initial = MakeQADoc(MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Original"))
+		+ TEXT(",") + MakeQAText(TEXT("second"), TEXT("Beta"), 160, 24, TEXT("Keep")));
+	UWidgetBlueprint* WBP = QAImport(Initial, nullptr, Output);
+	if (!TestNotNull(TEXT("initial asset"), WBP)) return false;
+	const FString Package = WBP->GetOutermost()->GetName();
+	const FString Sidecar = Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package);
+	TArray<uint8> AssetBefore, ManifestBefore;
+	if (!TestTrue(TEXT("asset bytes readable"), FFileHelper::LoadFileToArray(AssetBefore, *QAAssetFilePath(Package)))
+		|| !TestTrue(TEXT("manifest bytes readable"), FFileHelper::LoadFileToArray(ManifestBefore, *Sidecar))) return false;
+	UWidget* Root = WBP->WidgetTree->RootWidget;
+	UTextBlock* Alpha = CastChecked<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Alpha")));
+	const int32 WidgetCount = WBP->GetAllSourceWidgets().Num();
+
+	const FString BlurredParent = MakeQAPanel(TEXT("first"), TEXT("BlurredParent"), 0, 0,
+		MakeQAText(TEXT("first"), TEXT("DuplicateChild"), 24, 24, TEXT("Duplicate")))
+		.Replace(TEXT("\"children\":"), TEXT("\"effects\":[{\"type\":\"BACKGROUND_BLUR\",\"visible\":true,\"radius\":4}],\"children\":"));
+	const TArray<FString> AmbiguousDocuments = {
+		// Existing global reconciliation identity claimed by a second source branch.
+		MakeQADoc(MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Changed"))
+			+ TEXT(",") + MakeQAText(TEXT("first"), TEXT("Other"), 160, 24, TEXT("Duplicate"))),
+		// New mapped children acquire manifest entries even when nested inside an existing generated panel.
+		MakeQADoc(MakeQAText(TEXT("first"), TEXT("Alpha"), 24, 24, TEXT("Changed"))
+			+ TEXT(",") + MakeQAPanel(TEXT("new_panel"), TEXT("NewPanel"), 0, 0,
+				MakeQAButton(TEXT("new_mapped"), TEXT("OneButton"), 0, 0, TEXT("One")) + TEXT(",")
+				+ MakeQAButton(TEXT("new_mapped"), TEXT("OtherButton"), 120, 0, TEXT("Two")))),
+		// Real converter output: background blur separates the two same-id source nodes with a generated carrier.
+		MakeQADoc(BlurredParent + TEXT(",") + MakeQAText(TEXT("second"), TEXT("Beta"), 160, 24, TEXT("Keep")))
+	};
+	for (const FString& Json : AmbiguousDocuments)
+	{
+		const FDesignReimportResult Result = QAReimport(Json, QAMappedClassPath, Package);
+		TestFalse(TEXT("ambiguous reimport does not succeed"), Result.bSucceeded);
+		TestTrue(TEXT("failure explains identity ambiguity"),
+			QAHasMessage(Result, ReimportDiagnosticKinds::PrepareFailed, TEXT("Ambiguous stable design identity")));
+		TestEqual(TEXT("no transaction opened for ambiguous input"), Result.Commit.Memory, EDesign2UMGMemoryState::Unchanged);
+		TestTrue(TEXT("original root and widget survive"), WBP->WidgetTree->RootWidget == Root
+			&& WBP->WidgetTree->FindWidget(TEXT("Alpha")) == Alpha);
+		TestEqual(TEXT("original value untouched"), Alpha->GetText().ToString(), FString(TEXT("Original")));
+		TestEqual(TEXT("no detached or newly attached widgets"), WBP->GetAllSourceWidgets().Num(), WidgetCount);
+		TArray<uint8> AssetAfter, ManifestAfter;
+		TestTrue(TEXT("asset remains readable"), FFileHelper::LoadFileToArray(AssetAfter, *QAAssetFilePath(Package)));
+		TestTrue(TEXT("manifest remains readable"), FFileHelper::LoadFileToArray(ManifestAfter, *Sidecar));
+		TestTrue(TEXT("asset and manifest bytes unchanged"), AssetBefore == AssetAfter && ManifestBefore == ManifestAfter);
+	}
 	return true;
 }
 

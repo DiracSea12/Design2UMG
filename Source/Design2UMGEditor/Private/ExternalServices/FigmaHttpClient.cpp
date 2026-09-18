@@ -66,63 +66,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 	const int32 RequestId = State->BeginRequest();
 	TSharedRef<FOnComplete> SharedOnComplete = MakeShared<FOnComplete>(MoveTemp(OnComplete));
 
-#if WITH_DEV_AUTOMATION_TESTS
-	if (DesignHttpClientSlot::HasAutomationTransport())
-	{
-		const bool bStarted = DesignHttpClientSlot::StartAutomationTransport(
-			RequestId,
-			[State = State, RequestId, SharedOnComplete](
-				bool bConnected,
-				const FString& ResponseBody,
-				int32 ResponseCode,
-				const FString&)
-			{
-				if (!State->ConsumeCompletion(RequestId))
-				{
-					UE_LOG(LogDesign2UMG, Verbose, TEXT("FigmaHttpClient: Request cancelled"));
-					return;
-				}
-
-				if (!bConnected)
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("FigmaHttpClient: Connection failed"));
-					if (*SharedOnComplete)
-					{
-						(*SharedOnComplete)(false, TEXT(""));
-					}
-					return;
-				}
-
-				if (ResponseCode < 200 || ResponseCode >= 300)
-				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("FigmaHttpClient: HTTP %d"), ResponseCode);
-					if (*SharedOnComplete)
-					{
-						(*SharedOnComplete)(false, ResponseBody);
-					}
-					return;
-				}
-
-				if (*SharedOnComplete)
-				{
-					(*SharedOnComplete)(true, ResponseBody);
-				}
-			});
-
-		if (!bStarted)
-		{
-			State->ClearActiveRequest(RequestId);
-			if (*SharedOnComplete)
-			{
-				(*SharedOnComplete)(false, TEXT(""));
-			}
-		}
-		return;
-	}
-#endif
-
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
-	State->BindActiveRequest(Request);
 	Request->SetURL(Url);
 	Request->SetVerb(TEXT("GET"));
 	Request->SetHeader(TEXT("X-Figma-Token"), Token);
@@ -155,7 +99,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 			if (*SharedOnComplete) (*SharedOnComplete)(true, Response->GetContentAsString());
 		});
 
-	if (!Request->ProcessRequest())
+	if (!State->ProcessRequest(Request))
 	{
 		State->ClearActiveRequest(RequestId);
 		UE_LOG(LogDesign2UMG, Error, TEXT("FigmaHttpClient: ProcessRequest failed"));

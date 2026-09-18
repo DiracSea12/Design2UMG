@@ -12,6 +12,16 @@
 #include "Misc/AutomationTest.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraphSchema_K2.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_CustomEvent.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Misc/FileHelper.h"
+#include "Misc/PackageName.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -294,6 +304,72 @@ bool FDesign2UMGGenerationLeavesNoUndoTransactionTest::RunTest(const FString& Pa
 		UndoCountBefore);
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+// A missing function in a live execution chain forces the real Kismet compiler to fail.
+// Merely arming the save-failure hook would not exercise this boundary.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBlueprintCompileFailurePreservesDiskTest,
+	"Design2UMG.Generation.CompileFailurePreservesDisk",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FBlueprintCompileFailurePreservesDiskTest::RunTest(const FString&)
+{
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CompileFailure");
+	DeleteGeneratedAssetsAtPath(Folder);
+	ON_SCOPE_EXIT { DeleteGeneratedAssetsAtPath(Folder); };
+	AddExpectedError(TEXT("D2UMissingFunction"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("SaveWidgetBlueprint: compilation failed"), EAutomationExpectedErrorFlags::Contains, 2);
+	for (const bool bExisting : {false, true})
+	{
+		UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(
+			MakeSaveSemanticsWidgetData(bExisting ? TEXT("WBP_ExistingCompileFailure") : TEXT("WBP_NewCompileFailure")), Folder);
+		if (!TestNotNull(TEXT("Valid blueprint is built before graph corruption"), Blueprint)) return false;
+		UPackage* Package = Blueprint->GetOutermost();
+		const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		TArray<uint8> Before;
+		if (bExisting)
+		{
+			if (!TestTrue(TEXT("Existing asset baseline saves"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())
+				|| !TestTrue(TEXT("Existing bytes can be read"), FFileHelper::LoadFileToArray(Before, *File))) return false;
+		}
+
+		UEdGraph* Graph = FBlueprintEditorUtils::FindEventGraph(Blueprint);
+		if (!TestNotNull(TEXT("Event graph exists"), Graph)) return false;
+		UK2Node_CustomEvent* Event = NewObject<UK2Node_CustomEvent>(Graph);
+		Event->CustomFunctionName = TEXT("InvokeBrokenCall");
+		Graph->AddNode(Event);
+		Event->CreateNewGuid();
+		Event->AllocateDefaultPins();
+		UK2Node_CallFunction* Call = NewObject<UK2Node_CallFunction>(Graph);
+		Call->SetFromFunction(UKismetSystemLibrary::StaticClass()->FindFunctionByName(
+			GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, PrintString)));
+		Graph->AddNode(Call);
+		Call->CreateNewGuid();
+		Call->AllocateDefaultPins();
+		if (!TestTrue(TEXT("Invalid call is on an executable path"), GetDefault<UEdGraphSchema_K2>()->TryCreateConnection(
+			Event->FindPinChecked(UEdGraphSchema_K2::PN_Then), Call->FindPinChecked(UEdGraphSchema_K2::PN_Execute)))) return false;
+		Call->FunctionReference.SetExternalMember(TEXT("D2UMissingFunction"), UKismetSystemLibrary::StaticClass());
+
+		const FDesign2UMGCommitResult Result = FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+		TestEqual(TEXT("The real compiler rejects the graph"), Blueprint->Status, BS_Error);
+		TestFalse(TEXT("Compilation failure cannot be reported as success"), Result.IsSuccess());
+		TestEqual(TEXT("Compilation failure never commits asset bytes"), Result.Asset, EDesign2UMGFileState::Unchanged);
+		if (bExisting)
+		{
+			TArray<uint8> After;
+			TestTrue(TEXT("Original file remains readable"), FFileHelper::LoadFileToArray(After, *File));
+			TestTrue(TEXT("Original asset bytes are unchanged"), Before == After);
+			TestEqual(TEXT("Existing asset is retained in its package"), Blueprint->GetOutermost(), Package);
+		}
+		else
+		{
+			TestFalse(TEXT("Failed new asset never reaches disk"), FPaths::FileExists(File));
+			TestEqual(TEXT("Unsaved failed asset is discarded"), Blueprint->GetOutermost(), GetTransientPackage());
+		}
+		// Remove the deliberately invalid source before editor cleanup can compile it again.
+		Graph->RemoveNode(Call);
+		Graph->RemoveNode(Event);
+	}
 	return true;
 }
 

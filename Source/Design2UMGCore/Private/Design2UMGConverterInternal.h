@@ -51,7 +51,13 @@ namespace Design2UMGConverterInternal
 
 	struct FRefExpansionCache
 	{
+		explicit FRefExpansionCache(const FDesignDocument& Document, TArray<FString>* Warnings = nullptr)
+		{
+			Document.BuildReusableNodeIndex(ReusableNodesById, Warnings);
+		}
+
 		TMap<FRefExpansionCacheKey, FRefExpansionCacheEntry> Entries;
+		TMap<FString, TSharedPtr<FDesignNode>> ReusableNodesById;
 		// Working copies retain aliases to their immutable snapshot nodes so nested
 		// refs can reuse the pointer-keyed cache without merging distinct instances.
 		TMap<const FDesignNode*, const FDesignNode*> SnapshotAliases;
@@ -74,13 +80,14 @@ namespace Design2UMGConverterInternal
 			: Document(InDocument)
 			, Warnings(InWarnings)
 			, SettingsSnapshot(InSettingsSnapshot)
+			, RefExpansionCache(MakeShared<FRefExpansionCache>(InDocument, &InWarnings))
 		{
 		}
 
 		const FDesignDocument& Document;
 		TArray<FString>& Warnings;
 		const FConversionSettingsSnapshot& SettingsSnapshot;
-		TSharedPtr<FRefExpansionCache> RefExpansionCache = MakeShared<FRefExpansionCache>();
+		TSharedPtr<FRefExpansionCache> RefExpansionCache;
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;
 		TSet<FString> PrototypeTriggerNodeIds;

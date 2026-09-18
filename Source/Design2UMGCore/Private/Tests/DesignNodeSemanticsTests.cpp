@@ -634,6 +634,56 @@ bool FFlowRefExpansionSnapshotReuseTest::RunTest(const FString& Parameters)
 	return RunFlowRefExpansionSnapshotChecks(*this);
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReusableNodeIndexScopeTest,
+	"Design2UMG.Converter.ReusableIndexOrderAndScope",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FReusableNodeIndexScopeTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	auto Definition = Design2UMGCoreTests::MakeNode(TEXT("definition"), EDesignNodeType::Rectangle);
+	Definition->bReusable = true;
+	Definition->Name = TEXT("First");
+	auto Duplicate = RefExpander::DeepCopyNode(Definition);
+	Duplicate->Name = TEXT("Second");
+	auto Container = Design2UMGCoreTests::MakeNode(TEXT("container"), EDesignNodeType::Frame);
+	Container->Children = {Definition};
+	Document.Children = {Container, Duplicate};
+	TMap<FString, TSharedPtr<FDesignNode>> Index;
+	TArray<FString> Warnings;
+	AddExpectedError(TEXT("Repeated reusable definition ids"), EAutomationExpectedErrorFlags::Contains, 3);
+	Document.BuildReusableNodeIndex(Index, &Warnings);
+	TestTrue(TEXT("lookup retains the nested first definition in DFS order"), Index.FindRef(TEXT("definition")) == Definition);
+	TestEqual(TEXT("repeated definition diagnosed once per index build"), Warnings.Num(), 1);
+
+	auto Ref = MakeShared<FDesignNode>();
+	Ref->Id = TEXT("instance");
+	Ref->Type = EDesignNodeType::Ref;
+	Ref->Ref = TEXT("definition");
+	const TMap<FString, FString> Theme;
+	Design2UMGConverterInternal::FFlowChildPreResolutionResolver First(Document, Theme);
+	const auto Expanded = First.ExpandRef(Ref);
+	if (!TestTrue(TEXT("repeated definitions still expand"), Expanded.IsValid())) return false;
+	TestEqual(TEXT("instance keeps its own identity"), Expanded->Id, Ref->Id);
+	TestEqual(TEXT("expansion uses the first definition"), Expanded->Name, Definition->Name);
+	TestTrue(TEXT("one conversion reuses its snapshot"), First.ExpandRef(Ref) == Expanded);
+
+	FDesignDocument Other;
+	Other.Children = {Duplicate};
+	Design2UMGConverterInternal::FFlowChildPreResolutionResolver Second(Other, Theme);
+	const auto OtherExpanded = Second.ExpandRef(Ref);
+	if (!TestTrue(TEXT("same bare id resolves in a different document"), OtherExpanded.IsValid())) return false;
+	TestEqual(TEXT("document lookup never leaks across conversions"), OtherExpanded->Name, Duplicate->Name);
+
+	Warnings.Reset();
+	Other.Children.Add(Duplicate);
+	Other.BuildReusableNodeIndex(Index, &Warnings);
+	TestTrue(TEXT("the same definition object at two positions is not a conflicting definition"), Warnings.IsEmpty());
+	const FUMGWidgetData Converted = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("definition warning reaches conversion diagnostics"), Converted.Warnings.ContainsByPredicate(
+		[](const FString& Warning) { return Warning.Contains(TEXT("Repeated reusable definition ids [definition]")); }));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignNodeSemanticsVisibleFillOwnerBoundaryTest,
 	"Design2UMG.DesignNodeSemantics.VisibleFillOwnerBoundary",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
