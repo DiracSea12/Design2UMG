@@ -226,7 +226,7 @@ bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, 
 			Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(Content, Settings.ComponentMapping, Component->Data, Mapping);
 			UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(OwnerTree, Content, nullptr, Textures, DesignSize, &Mapping, nullptr, &Settings);
 			if (!Widget) return false;
-			if (Ownership) Ownership->IncludeOwnedWidgets(Mapping);
+			if (Ownership) Ownership->IncludeInstanceContent(Mapping);
 			Instance->SetContentForSlot(SlotName(Path), Widget);
 			if (Instance->GetContentForSlot(SlotName(Path)) != Widget)
 			{
@@ -543,6 +543,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 				? EDesign2UMGCommitStatus::Conflict : EDesign2UMGCommitStatus::NotCommitted);
 		}
 		Result.Manifest = MoveTemp(UpdatedOutput.Manifest);
+		Result.bHasDegradation = UpdatedOutput.bHasDegradation;
 		if (Navigation) *Navigation = MoveTemp(UpdatedNavigation);
 		Root = ExistingRoot;
 	}
@@ -556,6 +557,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 	for (int32 Index = 0; Index < Order.Num(); ++Index)
 	{
 		const FString& Key = Order[Index];
+		Result.bHasDegradation |= Result.Components[Index].Output->bHasDegradation;
 		for (const FString& Warning : Context.Components[Key].Data.Warnings)
 		{
 			Result.MappingDiagnostics.Add({TEXT("component_warning"), FString::Printf(TEXT("Component '%s': %s"), *Key, *Warning)});

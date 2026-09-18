@@ -164,10 +164,12 @@ public:
 
 	/** All widget names created by this generation run (including nested leaves; data source of manifest.d2uOwned for reimport). */
 	const TSet<FString>& GetCreatedWidgetNames() const { return CreatedWidgetNames; }
-	/** Collect ownership of instance-slot widgets built in a separate mapping scope. */
-	void IncludeOwnedWidgets(const FDesign2UMGComponentMappingBuildState& Other)
+	/** Merge instance-slot content without publishing its separate scope's instance records. */
+	void IncludeInstanceContent(const FDesign2UMGComponentMappingBuildState& Other)
 	{
 		CreatedWidgetNames.Append(Other.GetCreatedWidgetNames());
+		Diagnostics.Append(Other.GetDiagnostics());
+		bHasDegradation |= Other.HasDegradation();
 	}
 
 
@@ -225,9 +227,10 @@ namespace Design2UMGComponentMappingGeneration
 	/**
 	 * The BuildState-less variant above, reused by reimport: overwrite the latest design value directly into the existing
 	 * instance per the mapping declaration (inputs are D2U-owned; the project-side current value is not read, no baseline recorded).
+	 * Returns true only when every declared input was applied; failure skips that input, not the remaining inputs.
 	 * Per-input overwrite/skip diagnostics; OutInputRecords (optional) backfills an inputs declaration record with the same structure as the import manifest.
 	 */
-	void ApplyMappedComponentInputsToInstance(
+	bool ApplyMappedComponentInputsToInstance(
 		UUserWidget* Instance,
 		const FUMGWidgetNode& Node,
 		const DesignComponentMapping::FComponentMappingEntry& Entry,

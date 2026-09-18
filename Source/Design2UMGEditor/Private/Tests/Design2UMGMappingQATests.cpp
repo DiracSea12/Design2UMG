@@ -362,6 +362,8 @@ bool FDesign2UMGMappingQAComponentTextInputValueTest::RunTest(const FString&)
 	TestEqual(TEXT("no skip diagnostic on success"),
 		CountDiagnosticsByKind(StateWithText, TEXT("mapping_input_skipped")), 0);
 
+	TestFalse(TEXT("Applied input is not degraded"), StateWithText.HasDegradation());
+
 	// No direct text: input skipped + diagnostic; the default value is not written.
 	FUMGWidgetNode NodeWithoutText = MakeQAMappedCandidateNode(TEXT("text_inst_2"));
 	FDesign2UMGComponentMappingConfig ConfigWithoutText =
@@ -475,6 +477,8 @@ bool FDesign2UMGMappingQAInputTypeMismatchAndInvalidValuesTest::RunTest(const FS
 		MakeQAMappingConfig(TEXT("figma|qa-gen-scope|qa-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	UDesign2UMGMappingQAWidget* Instance = ApplyQAInputs(Node, Config, BuildState);
+
+	TestTrue(TEXT("Skipped inputs mark generation as degraded"), BuildState.HasDegradation());
 
 	// All three failed inputs keep their default property values.
 	TestTrue(TEXT("text target untouched on type mismatch"), Instance->TextValue.IsEmpty());

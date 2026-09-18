@@ -349,13 +349,14 @@ namespace
 {
 	// Write inputs one by one per declaration: resolve design value -> reflection write; a single failure only skips with a diagnostic.
 	// The import path and the reimport path share this; only the diagnostic/record destinations differ.
-	void ApplyMappedComponentInputsInternal(
+	bool ApplyMappedComponentInputsInternal(
 		UUserWidget* Instance,
 		const FUMGWidgetNode& Node,
 		const DesignComponentMapping::FComponentMappingEntry& Entry,
 		FDesign2UMGMappedInstanceRecord* Record,
 		TArray<FDesign2UMGMappingDiagnostic>& Diagnostics)
 	{
+		bool bAllInputsApplied = true;
 		for (const DesignComponentMapping::FComponentInputDeclaration& Input : Entry.Inputs)
 		{
 			FDesign2UMGMappedInputRecord InputRecord;
@@ -387,6 +388,7 @@ namespace
 			}
 			else
 			{
+				bAllInputsApplied = false;
 				Diagnostic.Kind = TEXT("mapping_input_skipped");
 				Diagnostic.Message = FString::Printf(
 					TEXT("Input '%s' -> %s.%s skipped: %s; other inputs and the mapping remain active"),
@@ -397,6 +399,7 @@ namespace
 			}
 			Diagnostics.Add(MoveTemp(Diagnostic));
 		}
+		return bAllInputsApplied;
 	}
 }
 
@@ -465,6 +468,7 @@ namespace Design2UMGComponentMappingGeneration
 			BuildState.FindEntryForKey(Node.Source().MappedComponentKey);
 		if (!Entry)
 		{
+			BuildState.MarkDegraded();
 			BuildState.AddDiagnostic(
 				TEXT("mapping_class_unavailable"),
 				FString::Printf(
@@ -478,6 +482,7 @@ namespace Design2UMGComponentMappingGeneration
 		UClass* WidgetClass = WidgetClassPath.TryLoadClass<UUserWidget>();
 		if (!WidgetClass || !WidgetClass->IsChildOf(UUserWidget::StaticClass()))
 		{
+			BuildState.MarkDegraded();
 			BuildState.AddDiagnostic(
 				TEXT("mapping_class_unavailable"),
 				FString::Printf(
@@ -492,6 +497,7 @@ namespace Design2UMGComponentMappingGeneration
 		UUserWidget* MappedInstance = WidgetTree->ConstructWidget<UUserWidget>(WidgetClass, WidgetName);
 		if (!MappedInstance)
 		{
+			BuildState.MarkDegraded();
 			BuildState.AddDiagnostic(
 				TEXT("mapping_class_unavailable"),
 				FString::Printf(
@@ -527,14 +533,17 @@ namespace Design2UMGComponentMappingGeneration
 			BuildState.FindMappedInstanceByWidgetName(Instance->GetFName().ToString());
 
 		TArray<FDesign2UMGMappingDiagnostic> Diagnostics;
-		ApplyMappedComponentInputsInternal(Instance, Node, *Entry, Record, Diagnostics);
+		if (!ApplyMappedComponentInputsInternal(Instance, Node, *Entry, Record, Diagnostics))
+		{
+			BuildState.MarkDegraded();
+		}
 		for (FDesign2UMGMappingDiagnostic& Diagnostic : Diagnostics)
 		{
 			BuildState.AddDiagnostic(MoveTemp(Diagnostic.Kind), MoveTemp(Diagnostic.Message));
 		}
 	}
 
-	void ApplyMappedComponentInputsToInstance(
+	bool ApplyMappedComponentInputsToInstance(
 		UUserWidget* Instance,
 		const FUMGWidgetNode& Node,
 		const DesignComponentMapping::FComponentMappingEntry& Entry,
@@ -543,11 +552,12 @@ namespace Design2UMGComponentMappingGeneration
 	{
 		FDesign2UMGMappedInstanceRecord ScratchRecord;
 		FDesign2UMGMappedInstanceRecord* Record = OutInputRecords ? &ScratchRecord : nullptr;
-		ApplyMappedComponentInputsInternal(Instance, Node, Entry, Record, OutDiagnostics);
+		const bool bAllInputsApplied = ApplyMappedComponentInputsInternal(Instance, Node, Entry, Record, OutDiagnostics);
 		if (OutInputRecords)
 		{
 			*OutInputRecords = MoveTemp(ScratchRecord.Inputs);
 		}
+		return bAllInputsApplied;
 	}
 
 	void ReportInertPrototypeBindings(

@@ -14,7 +14,10 @@ The current machine-facing contract is built around these grouped sections:
 - grouped objects:
   - `source`
   - `output`
+  - `outcome` (when a commit result is supplied)
   - `diagnostics`
+  - `componentMapping`
+  - `reimport` (on reimport reports)
   - `resources`
   - `fontResolution`
   - `effects`
@@ -39,6 +42,24 @@ These grouped objects are the fields new tooling should read first.
 - `warnings`
 - `skippedDesignerNodes`
 - `degradations`
+
+`outcome`
+- `status`: `succeeded`, `succeeded_with_degradation`, `not_committed`, `committed_with_metadata_failure`, `rollback_incomplete`, or `conflict`.
+- `succeeded`: true only for the two successful statuses. It describes the asset commit, not whether an optional PNG or preview operation succeeded.
+- `assetState`, `manifestState`: `unchanged`, `saved`, `restored`, or `indeterminate`.
+- `memoryState`: `unchanged`, `modified`, `restored`, or `recovery_failed`.
+- `assetPath`: the commit target, present when known; its presence alone does not prove a successful save.
+
+The writer serializes the supplied typed result; it does not infer success from diagnostic kinds or message text. An absent `outcome` means no commit result was supplied, not success. `manifestState=unchanged` also covers an asset-only save that did not request a manifest. File and memory states describe the state at return; `indeterminate` means the final file contents are not guaranteed.
+
+`succeeded` means the requested asset/manifest commit completed without reported degradation. `succeeded_with_degradation` is still a successful commit, but some design behavior or content was skipped or preserved. Examples include unsupported Prototype wiring, skipped declared mapping inputs, and nested subtrees preserved outside the safe-delete scope. Component batches propagate both page and dependency degradation. Informational mapping hits and successful input writes do not imply degradation.
+
+`committed_with_metadata_failure` means the asset was saved but its manifest failed. `not_committed` means there is no successful commit; inspect file and memory states to distinguish untouched state from a completed rollback or remaining memory edits. `rollback_incomplete` reports uncertain files or incomplete recovery. `conflict` reports an operation blocked by an ownership or identity conflict. These failure states take precedence over degradation; a warning cannot turn a failed operation into success.
+
+`componentMapping` and `reimport`
+- `entries`: structured `kind` / `message` pairs. `kind` identifies the event; `message` explains it for people and is not a parsing contract.
+- `prototype_wiring_skipped` identifies skipped Prototype graph wiring; `mapping_input_skipped` identifies an unapplied declared input; `reimport_partial_sync` identifies deliberately preserved nested design content.
+- For successful commits these events must agree with `outcome.status=succeeded_with_degradation`. Their presence during an unsuccessful operation does not replace the failure outcome.
 
 `resources`
 - `missingFonts`

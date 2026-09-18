@@ -1680,8 +1680,9 @@ bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Para
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
 	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
-		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
-			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
+		|| !TestEqual(TEXT("Supported keyboard save is not degraded"),
+			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).Status,
+			EDesign2UMGCommitStatus::Succeeded))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
@@ -1735,6 +1736,15 @@ bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Para
 		{
 			return Warning.Contains(TEXT("OnKeyDown")) && Warning.Contains(TEXT("already exists"));
 		}));
+
+	const FDesign2UMGCommitResult SaveWithoutDiagnostics =
+		FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData);
+	TestEqual(TEXT("Wiring degradation does not require a diagnostic output"), SaveWithoutDiagnostics.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestEqual(TEXT("Degraded asset-only save still commits the asset"), SaveWithoutDiagnostics.Asset,
+		EDesign2UMGFileState::Saved);
+	TestEqual(TEXT("Asset-only save does not request a manifest"), SaveWithoutDiagnostics.Manifest,
+		EDesign2UMGFileState::Unchanged);
 
 	FDesign2UMGGenerationOutput SaveOutput;
 	const FDesign2UMGCommitResult SaveResult = FUMGGenerator::SaveWidgetBlueprint(WBP, &SaveOutput, &NavigationData);

@@ -169,8 +169,11 @@ namespace DesignImportPipeline
 			}
 
 			TArray<FDesign2UMGMappedInputRecord> InputRecords;
-			Design2UMGComponentMappingGeneration::ApplyMappedComponentInputsToInstance(
-				Instance, Node, *Entry, &InputRecords, *Shared.Diagnostics);
+			if (!Design2UMGComponentMappingGeneration::ApplyMappedComponentInputsToInstance(
+				Instance, Node, *Entry, &InputRecords, *Shared.Diagnostics))
+			{
+				*Shared.bHasDegradation = true;
+			}
 
 			ReportMappedOwnAttrDivergence(Instance, Node, InputRecords, Shared);
 

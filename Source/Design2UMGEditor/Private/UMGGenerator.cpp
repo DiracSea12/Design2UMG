@@ -519,7 +519,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		// Sorting keeps the manifest text stable across two imports of the same input (the sidecar stays diffable).
 		OutGenerationOutput->Manifest.D2UOwnedNames = MappingBuildState.GetCreatedWidgetNames().Array();
 		OutGenerationOutput->Manifest.D2UOwnedNames.Sort();
-		OutGenerationOutput->bHasDegradation = MappingBuildState.HasDegradation();
+		OutGenerationOutput->bHasDegradation = MappingBuildState.HasDegradation() || !WidgetData.Warnings.IsEmpty();
 
 		OutGenerationOutput->MappingDiagnostics = EffectiveGenerationSettings.ComponentMapping.ValidationDiagnostics;
 		OutGenerationOutput->MappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
@@ -604,11 +604,13 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	// widgets' properties now exist: the wiring resolves real properties for its nodes.
 	// Runs strictly before the final full compile below, which registers the delegate
 	// bindings from the authored source nodes and emits the bound functions.
+	bool bHasWiringWarnings = false;
 	if (PrototypeNavigation)
 	{
 		TArray<FString> WiringWarnings;
 		Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, *PrototypeNavigation, WiringWarnings);
-		if (GenerationOutput && WiringWarnings.Num() > 0)
+		bHasWiringWarnings = !WiringWarnings.IsEmpty();
+		if (GenerationOutput && bHasWiringWarnings)
 		{
 			GenerationOutput->bHasDegradation = true;
 			for (FString& Warning : WiringWarnings)
@@ -658,7 +660,8 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 		return Result;
 	}
 	Result.Asset = EDesign2UMGFileState::Saved;
-	Result.Status = WBP->Status == BS_UpToDateWithWarnings || (GenerationOutput && GenerationOutput->bHasDegradation)
+	Result.Status = WBP->Status == BS_UpToDateWithWarnings || bHasWiringWarnings
+		|| (GenerationOutput && GenerationOutput->bHasDegradation)
 		? EDesign2UMGCommitStatus::SucceededWithDegradation : EDesign2UMGCommitStatus::Succeeded;
 	if (bWasNewlyCreated)
 	{

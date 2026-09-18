@@ -91,11 +91,111 @@ bool FComponentDefinitionWarningsTest::RunTest(const FString&)
 	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data,
 		TEXT("/Game/Design2UMG/Automation/DefinitionWarnings_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), nullptr, &Output);
 	if (!TestNotNull(TEXT("Missing local face is reported without losing successful component generation"), Blueprint)) return false;
+	TestTrue(TEXT("Dependency-only warning degrades the batch output"), Output.bHasDegradation);
 	TestTrue(TEXT("Root generation output reports definition warning with stable component identity"),
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
 			return Diagnostic.Message.Contains(TEXT("D2UMissingDefinitionFace")) && Diagnostic.Message.Contains(TEXT("button-key"));
 		}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentDependencyPartialSyncTest,
+	"Design2UMG.ComponentBlueprints.DependencyPartialSync",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
+{
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/DependencyPartialSync_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FDesignDocument Document;
+	const FString Source = MakeComponentImportJson(TEXT("Cancel"));
+	if (!TestTrue(TEXT("Parse first page"), FFigmaParser::ParseDocument(Source, Document))) return false;
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	FDesign2UMGGenerationOutput Initial;
+	UWidgetBlueprint* First = FUMGGenerator::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Initial);
+	if (!TestNotNull(TEXT("First component batch saved"), First)) return false;
+	TestEqual(TEXT("Fresh complete batch is ordinary success"), Initial.Commit.Status, EDesign2UMGCommitStatus::Succeeded);
+
+	// A new page shares the existing dependency: only its component merge can produce partial sync.
+	FDesignDocument SecondDocument;
+	if (!TestTrue(TEXT("Parse second page"), FFigmaParser::ParseDocument(
+		Source.Replace(TEXT("\"id\":\"root\""), TEXT("\"id\":\"second-root\"")), SecondDocument))) return false;
+	FDesign2UMGGenerationOutput Output;
+	FUMGPrototypeNavigationData Navigation;
+	UWidgetBlueprint* Second = FUMGGenerator::BuildWidgetBlueprint(
+		FDesign2UMGConverter::Convert(SecondDocument, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output, &Navigation);
+	if (!TestNotNull(TEXT("New page built"), Second)
+		|| !TestEqual(TEXT("One shared dependency"), Output.Components.Num(), 1)) return false;
+	TestTrue(TEXT("Page itself is new"), Second != First);
+	TestTrue(TEXT("Existing dependency carries its apply degradation"), Output.Components[0].Output->bHasDegradation);
+	TestTrue(TEXT("Dependency degradation survives new root assembly"), Output.bHasDegradation);
+	TestTrue(TEXT("Component partial synchronization is explained"), Output.MappingDiagnostics.ContainsByPredicate(
+		[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("reimport_partial_sync"); }));
+	const FDesign2UMGCommitResult Saved = FUMGGenerator::SaveWidgetBlueprint(Second, &Output, &Navigation);
+	TestEqual(TEXT("Dependency-only degradation reaches the batch commit"), Saved.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestEqual(TEXT("Dependency save also reports degradation"), Output.Components[0].Output->Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentOverrideInputDegradationTest,
+	"Design2UMG.ComponentBlueprints.OverrideInputDegradation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
+{
+	TSharedPtr<FJsonObject> Json;
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MakeComponentImportJson(TEXT("Cancel"))), Json)) return false;
+	const auto Outer = Json->GetObjectField(TEXT("document"))->GetArrayField(TEXT("children"))[0]->AsObject();
+	const auto Label = Outer->GetArrayField(TEXT("children"))[0];
+	TSharedRef<FJsonObject> Override = MakeShared<FJsonObject>();
+	Override->SetStringField(TEXT("id"), TEXT("override-instance"));
+	Override->SetStringField(TEXT("name"), TEXT("MappedOverride"));
+	Override->SetStringField(TEXT("type"), TEXT("INSTANCE"));
+	Override->SetStringField(TEXT("componentId"), TEXT("override-main"));
+	Override->SetStringField(TEXT("mainComponentKey"), TEXT("override-key"));
+	Override->SetObjectField(TEXT("absoluteBoundingBox"), Label->AsObject()->GetObjectField(TEXT("absoluteBoundingBox")));
+	Override->SetArrayField(TEXT("children"), {Label});
+	Outer->SetArrayField(TEXT("children"), {MakeShared<FJsonValueObject>(Override)});
+	TSharedRef<FJsonObject> Value = MakeShared<FJsonObject>();
+	Value->SetStringField(TEXT("type"), TEXT("TEXT"));
+	Value->SetStringField(TEXT("value"), TEXT("invalid-bool"));
+	TSharedRef<FJsonObject> Properties = MakeShared<FJsonObject>();
+	Properties->SetObjectField(TEXT("label"), Value);
+	Override->SetObjectField(TEXT("componentProperties"), Properties);
+	FString Source;
+	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Parse mapped instance override"), FFigmaParser::ParseDocument(Source, Document))) return false;
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	auto& Entry = Settings.ComponentMapping.Table.Entries.AddDefaulted_GetRef();
+	Entry.Provider = TEXT("figma");
+	Entry.DocumentScope = TEXT("component-blueprint-test");
+	Entry.ComponentKey = TEXT("override-key");
+	Entry.Key = Entry.Provider + TEXT("|") + Entry.DocumentScope + TEXT("|") + Entry.ComponentKey;
+	Entry.WidgetClass = UDesign2UMGMappingQAWidget::StaticClass()->GetPathName();
+	auto& Input = Entry.Inputs.AddDefaulted_GetRef();
+	Input.Source = TEXT("label");
+	Input.Target = TEXT("BoolValue");
+	Input.Type = DesignComponentMapping::EComponentInputType::Bool;
+	Input.ValueKind = DesignComponentMapping::EComponentInputValueKind::ComponentProperty;
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/OverrideInput_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FDesign2UMGGenerationOutput Output;
+	UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
+	if (!TestNotNull(TEXT("Skipped override input does not fail generation"), Blueprint)) return false;
+	UDesign2UMGMappingQAWidget* Mapped = nullptr;
+	Blueprint->WidgetTree->ForEachWidget([&](UWidget* Widget)
+	{
+		if (auto* Candidate = Cast<UDesign2UMGMappingQAWidget>(Widget)) Mapped = Candidate;
+	});
+	if (!TestNotNull(TEXT("Override actually materializes the mapped class"), Mapped)) return false;
+	TestTrue(TEXT("Invalid override input preserves default bool"), Mapped->BoolValue);
+	TestTrue(TEXT("Override input diagnostic reaches root output"), Output.MappingDiagnostics.ContainsByPredicate(
+		[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("mapping_input_skipped"); }));
+	TestTrue(TEXT("Override input degradation reaches root output"), Output.bHasDegradation);
+	TestEqual(TEXT("Override input loss reaches final commit"), Output.Commit.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
 	return true;
 }
 
@@ -363,6 +463,11 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(UpdatedDocument, Request);
 	if (!TestTrue(TEXT("Existing Reimport API updates component batch"), Result.bSucceeded)) return false;
 	TestTrue(TEXT("Reimport preserves original blueprint object"), Result.UpdatedBlueprint == Blueprint);
+	TestTrue(TEXT("Nested preservation is diagnosed in the component batch"), Result.Diagnostics.ContainsByPredicate(
+		[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("reimport_partial_sync"); }));
+	TestTrue(TEXT("Component batch preserves the apply degradation signal"), Result.bHasDegradation);
+	TestEqual(TEXT("Partial component synchronization is not ordinary success"), Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 	UUserWidget* Runtime = NewObject<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass);
 	Runtime->Initialize();
 	Runtime->TakeWidget();
@@ -1337,6 +1442,8 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Unavailable explicit mapping uses ordinary conversion"), Blueprint)) return false;
+	TestTrue(TEXT("Unavailable active mapping explicitly degrades generation"), Output.bHasDegradation);
+	TestEqual(TEXT("Mapping fallback is not ordinary success"), Output.Commit.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
 	TestEqual(TEXT("No generated substitute for explicit mapping"), Output.Components.Num(), 0);
 	TestTrue(TEXT("Mapping failure diagnosed"), Output.MappingDiagnostics.ContainsByPredicate(
 		[](const FDesign2UMGMappingDiagnostic& D) { return D.Kind == TEXT("mapping_class_unavailable"); }));

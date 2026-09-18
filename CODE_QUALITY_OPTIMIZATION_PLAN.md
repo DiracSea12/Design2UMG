@@ -518,7 +518,7 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 - [x] 底层 Prototype wiring warning 不再在正常 Import/Reimport 保存链中收集后丢弃；`prototype_wiring_skipped` 进入现有 diagnostics，成功提交提升为 `SucceededWithDegradation`。
 - [x] Nested pure-D2U removal 仍按 v1 安全边界保留，但产生 `reimport_partial_sync`，并显式传播 degradation，不再静默完全成功。
 - [x] Diagnostic report 增加 typed `outcome`（commit status + asset/manifest/memory state），能够区分完整成功、降级成功、metadata partial commit、rollback/failure/conflict。
-- [x] 相关 import/reimport/prototype 测试通过；全插件自动化 599/599。
+- [x] 相关 import/reimport/prototype 测试通过；最新全插件自动化603/603，含本次新增四项状态闭环测试。
 - [x] 正式 81-case 结果与 PR-03 一致：79 项原始门禁通过 + 2 项既有批准例外，81 张 candidate PNG SHA-256 全部一致，无新增或扩大退步。
 
 ## 会话记录
@@ -528,6 +528,61 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 验证使用真实 `G:/UE5/FPSRoguelike/FPSRoguelike.uproject`：最终 Build `Succeeded`；全插件自动化 599/599、exit 0，包含 `KeyboardMixedGraphPreserved`、`KeyboardMixedGraphReimportPreserved`、`ImportDiagnosticReportGenerationFailure`、`NestedAddAndRemovalBoundary`、`MoveConflictOnUnclearBoundary`、`MappedClassChangeIsConflict`、`ManifestFinalizeFailure` 等针对性断言。正式 81-case discovered set 为 81/81，两个 editor exit 0/0，产物/compare report 完整；原始 no_regression 仍是 79/81，仅保留 PR-01 已批准的 `pen_pencil-shadcn_shadcn-design-system-components` 与 `pen_pencil-welcome_step-1-frame` 两项，指标与 PR-03 完全相同。81 张 `candidate.png` 与 `pr03-final-full81-20260917` 逐张 SHA-256 一致。
 
 证据：`Saved/PR04/20260917/verification.json`、`build-final.log`、`all-tests.log`、`final-full81-command.json`、`final-full81.log`；完整运行目录为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr04-final-full81-20260917`。原始 full batch exit 仍为 `2`，原因仅是上述两项既有批准例外；未修改阈值、冻结 reference root、输入或历史基线。
+
+---
+
+### 2026-09-17 本次续作（已验证）
+
+进入基线为 `50f18d777c30ee03deb5b3782286588179a4d7c1`，该提交已包含 PR-01～PR-04；进入时已跟踪工作区干净，仅有原未跟踪 `.workbuddy/`，本次未操作该目录。既有 PR-04 主实现和历史验收记录保留，不重复重构、不扩展到 PR-05。
+
+**确认并修复的缺口**：`SaveWidgetBlueprint(WBP, nullptr, &NavigationData)` 不接收可选诊断输出时，Prototype wiring skip 未参与返回状态计算，错误返回普通成功。新增断言已在未改生产代码时真实复现：编译 exit 0，`KeyboardMixedGraphPreserved` 因降级状态断言失败而 exit 255；修复后同一用例 exit 0。
+
+**实际代码改动**：`UMGGenerator.cpp` 用单个局部 `bHasWiringWarnings` 保留连线阶段结果，使最终提交状态不依赖是否提供诊断输出。生产代码 +5/-2（净增 3 行），没有新接口、配置、诊断框架或按样例分支。`Design2UMGPrototypeGraphWiringTests.cpp` 在原用例中补强正常保存的精确成功状态，以及无诊断输出时的降级、资产已保存、清单未请求断言；原有诊断输出断言保留。保存失败、清单失败及恢复失败的优先级不变。
+
+**最终验证**：
+- 真实 `FPSRoguelikeEditor Win64 Development` 编译成功，exit 0；全插件 **599/599** 通过，editor exit 0，测试名称集合与原 PR-04 完全一致，含提交状态 8/8、安全重导入 50/50。
+- 完整 **81-case**，无过滤；生成、结构、尺寸规则及产物完整性均有效，两个 editor exits 为 0/0。原始 `no_regression` 为 **79 通过 + 2 项既有例外**，batch exit **2**，历史门禁仍为 `blocked / historical_best_regression`；保留原始结果，不宣称原始门禁全绿。
+- 全部 **81 张候选 PNG 的 SHA-256 与原 PR-04 完全一致**；每项 `changed_ratio`、`stable_changed_ratio`、`mean_abs_error`、`stable_mean_abs_error` 差值均为 0；源与参考身份一致。两项原 PR-01 已登记例外的指标与历史退步明细不变，没有新增或扩大例外。
+- 397 个源码文件、2 个 DLL 与本次编译冻结指纹一致；248 个受保护文件未变。未改参考图、设计输入、门禁阈值或全局历史基线。修改文件 UTF-8 无 BOM，`git diff --check` 为 0，其他阶段正文不变。
+
+**四维自审**：简洁性上只保留必要的局部事实，没有引入新的状态 owner；行为上用先失败后通过的同一用例及全量回归锁定边界；架构上保存结果不再耦合可选诊断接收者，原 Import/Reimport/Save 分层不变；剩余边界是原有两项视觉例外，本次不处理其视觉效果，也未实施 PR-05 及后续阶段。
+
+**证据与交接**：入口 `Saved/PR04/continuation-20260917/verification.json`；同目录保存红/绿用例、最终编译、599 自动化、81-case 的原始命令/进程/日志，及 `full81-assessment.json`、`final-integrity.json`、可复跑的只读核验脚本 `verify_results.py`。完整运行目录为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr04-continuation-full81-20260917`。本次仅修改 2 个源码文件及本计划，未暂存、未提交；HEAD 仍为 `50f18d7`。
+
+---
+
+### 2026-09-17 自审缺口修复（已验证）
+
+进入基线 `50f18d777c30ee03deb5b3782286588179a4d7c1`，保留上一轮可选诊断输出修复及全部已有工作区内容。本次自审推翻的是“所有路径已闭环”的结论，不推翻此前599项测试和81-case视觉结果的真实性。原记录保留，以下记录为本阶段最新验收依据。
+
+**实施内容**：
+- 映射输入函数由 `void` 改为返回“所有声明输入是否均已应用”；单项失败仍继续其他输入，Import与Reimport直接消费该布尔结果，不扫描诊断文本猜状态。有效输入不误报降级，失败输入保留原值。
+- `ApplyPreparedReimport` 在输出出口同步降级事实，组件页面和依赖汇总传递同一信号；只发生在依赖组件上的warning/partial-sync也能到达最终提交状态。
+- 实例插槽原来的 ownership-only 合并收口为 `IncludeInstanceContent`：合并已有归属、诊断和降级信息，不跨作用域发布实例清单记录。旧 helper 已替换，没有新增平行分支。实际使用的映射类不可用时，在原失败出口标记降级，原有首次导入降级行为及重导入拒绝行为不变。
+- 补齐 `Docs/ImportDiagnosticContract.md` 的 `outcome` 字段、六种提交状态、文件/内存状态和优先级说明；报告 writer 及提交结果类型未扩展。
+
+**变更规模与边界**：本次相对进入状态修改6个既有生产文件（+31/-11，净增20行）、3个测试文件及报告契约/本计划；没有新增生产文件、结果类型、配置或框架。上一轮的Prototype可选输出修复与测试保留，本次未改该测试文件。Core、布局、渲染、引擎源码、输入、参考、阈值与PR-05及后续阶段未动。
+
+**测试与实际结果**：
+
+| 检查 | 本次结果 | 证据（均位于 `Saved/PR04/review-closure-20260917/`） |
+|---|---|---|
+| 原缺口红绿验证 | 未改生产代码时，DefinitionWarnings、ReimportAndConflicts、QAInputTypeMismatchAndInvalidValues三项新断言全部失败，editor255；最终同三项均通过 | `red-source.json`、`red-tests.log`、`red-tests-process.json`、`focused-04.log` |
+| 真实项目编译 | `FPSRoguelikeEditor Win64 Development` 成功，exit0；最终源码对应build-03 | `build-03-command.json`、`build-03-stdout.log`、`build-03-process.json` |
+| 针对性行为与报告测试 | 9/9通过，editor0 | `focused-04-command.json`、`focused-04.log`、`focused-04-process.json` |
+| 全插件自动化 | **603/603通过**，保留原599项并增加4项；提交状态8/8、安全重导入50/50；完成标记和editor exit均为0 | `all-tests-command.json`、`all-tests.log`、`all-tests-process.json`、`automation-assessment.json` |
+| 真实报告内容审计 | 本轮日志引用95份报告，其中86份保留文件逐份核对，未发现partial-sync/input-skip与普通成功矛盾；其余9份由旧测试在断言后主动清理，单列且不冒充已读取 | `report-assessment.json`、`report-cleanup.json` |
+| 完整81-case | 无过滤；81张候选PNG与修复前PR04逐张SHA-256相同，四项像素指标逐例差值为0；源/参考身份相同，结构/尺寸/产物有效，editor exits0/0 | `full81-command.json`、`full81-process.json`、`full81-assessment.json` |
+| 原始视觉门禁 | **79通过 + 2项原PR-01已批准例外**，batch exit2，历史门禁仍blocked；无新增或扩大退步，未修改原始结果或放宽条件 | full run的`summary.json`与`validation_against_historical_best.json` |
+| 完整性与自审 | 397源码、2DLL与最终冻结指纹一致；248个保护文件未变；UTF-8无BOM、diff检查通过，其他阶段正文保持原样 | `final-source.json`、`final-binaries.json`、`final-integrity.json`、`self-review.md` |
+
+新增四项测试为 `DependencyPartialSync`、`OverrideInputDegradation`、`ImportDiagnosticReportOutcomeContract`、`ImportDiagnosticReportMappingOutcome`。覆盖新页面仅依赖降级、真实实例插槽内输入跳过、全部提交/文件/内存状态序列化，以及真实Import→有效Reimport→无效Reimport→清单失败的结果与JSON一致性。原断言不放宽，清单失败仍高于降级成功。
+
+**中间测试修正**：初次新增夹具重复使用Parser输出，累积了文档节点；已改为每次独立文档。原插槽夹具只改TEXT节点类型，未触发预期输入路径；改为独立嵌套INSTANCE，并增加“映射类实际物化”和“拒绝的bool保持原值”断言。修正仅在测试，未调整Parser或布局以迎合用例。保留所有中间失败日志，不把它们作为最终成功证据。
+
+**四项自审结论**：当前改动与状态传递范围相称，不引入第二套warning/结果系统；本次列明缺口均已实现并由真实运行验证；输入执行、状态汇总、报告序列化仍分工清晰，旧void接口和ownership-only helper已退出；本次未发现待处理阻塞项，剩余边界仍为既有两项视觉例外及未实施的后续阶段，不承诺整个插件不存在任何未知缺陷。
+
+**证据入口**：`Saved/PR04/review-closure-20260917/verification.json`。完整运行：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr04-review-closure-full81-20260917`。所有验证均使用既有 `G:/UE5/FPSRoguelike/FPSRoguelike.uproject`；HEAD未变，未暂存、未提交，原未跟踪 `.workbuddy/` 未操作。
 
 ---
 
@@ -1069,6 +1124,8 @@ Visual Mapper：
 | 2026-09-17 | PR-02 continuation check | PR-02 | 保持 `VERIFIED` | 未提交；HEAD `a7be4ae` | 本次重跑 QA 50/50、故障组 6/6、editor exit 0；源码395、DLL2、受保护文件248与验收指纹一致；独立复核原全量证据，未重改源码、未进入PR03；见 `Saved/PR02/continuation-20260917/verification.json` |
 | 2026-09-17 | PR-03 implementation and continuation | PR-03 | `NOT_STARTED → IN_PROGRESS → VERIFIED` | 未提交；HEAD `a7be4ae` | 最终真实编译exit0，提交状态8/8、全插件599/599（含重导入QA50/50）；完整81图与PR02一致、四项指标差值0，原始79+2批准例外未扩大，editor exits0/0、batch exit2；见PR03节及 `Saved/PR03/20260917/verification.json` |
 | 2026-09-17 | PR-04 diagnostic closure | PR-04 | `NOT_STARTED → IN_PROGRESS → VERIFIED` | 未提交；HEAD `a7be4ae` | Wiring warning、nested partial-sync、reimport degradation 与 report outcome 闭环；最终 Build 成功、全插件599/599；完整81产物齐全且与PR03逐图SHA一致，原始79+2批准例外未扩大，editor exits0/0、batch exit2；见PR04节及 `Saved/PR04/20260917/verification.json` |
+| 2026-09-17 | PR-04 optional-output continuation | PR-04 | `VERIFIED → IN_PROGRESS → IMPLEMENTED → VERIFIED` | 本次未提交；HEAD `50f18d7` 已含此前PR01～04 | 修复无可选诊断输出时 wiring skip 被误报为普通成功；真实红/绿同测255→0，最终编译0、全插件599/599；81图及四指标与原PR04完全一致，原始79+2/batch2及历史blocked保留且例外未扩大；397源码/2DLL/248保护文件一致；见 `Saved/PR04/continuation-20260917/verification.json` |
+| 2026-09-17 | PR-04 review closure | PR-04 | `VERIFIED → IN_PROGRESS → IMPLEMENTED → VERIFIED` | 未提交；HEAD `50f18d7` | 补齐组件/输入/实例插槽降级，完善报告契约；原3项红断言255→0，最终9/9、全603/603、完整81图及四指标同前版；86份保留报告无矛盾，9份旧夹具清理单列；原79+2/batch2不改写；见 `Saved/PR04/review-closure-20260917/verification.json` |
 
 ---
 
@@ -1076,6 +1133,6 @@ Visual Mapper：
 
 **下一阶段：PR-05 — 删除确定无效复杂度并修严输入解析。**
 
-PR-01、PR-02、PR-03、PR-04 已验证；PR-05 及后续阶段未实施。工作区未暂存、未提交，继续保留此前各阶段修改。PR-04 最终验证入口为 `Saved/PR04/20260917/verification.json`，完整 81-case 运行目录为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr04-final-full81-20260917`。
+PR-04自审列出的缺口及同链路实例插槽遗漏已修复并重新验证。PR-01～PR-03状态不变，PR-05及后续阶段未实施。最新证据入口为 `Saved/PR04/review-closure-20260917/verification.json`；先前验收及中间失败证据全部保留。本次与上一轮工作区修改均未暂存、未提交，HEAD仍为 `50f18d7`。
 
-后续回归继续使用完整81-case、相同输入与冻结参考，保留原始门禁结果；PR-01两项批准例外不得扩大。PR-05 只做有明确证据的减法和输入边界修正，不借诊断闭环继续扩展状态/诊断抽象。
+完整81-case原始门禁仍为79通过和2项既有批准例外；候选图与四项指标未变化。后续继续使用冻结参考和相同身份检查，不得新增或扩大例外，不得以代码更简洁为由接受退步。

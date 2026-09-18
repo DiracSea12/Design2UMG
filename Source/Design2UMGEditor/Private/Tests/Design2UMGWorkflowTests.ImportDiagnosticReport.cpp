@@ -3,6 +3,9 @@
 #include "Design2UMGSettings.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignImportPipeline.h"
+#include "DesignImportDiagnosticReport.h"
+#include "Tests/Design2UMGReimportQATestFixtures.h"
+#include "Misc/ScopeExit.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FontResolver.h"
@@ -171,6 +174,141 @@ namespace
 		}
 		return nullptr;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportOutcomeContractTest,
+	"Design2UMG.Import.ImportDiagnosticReportOutcomeContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportOutcomeContractTest::RunTest(const FString&)
+{
+	using Status = EDesign2UMGCommitStatus;
+	using File = EDesign2UMGFileState;
+	using Memory = EDesign2UMGMemoryState;
+	struct FCase
+	{
+		FDesign2UMGCommitResult Commit;
+		const TCHAR* StatusName;
+		const TCHAR* Asset;
+		const TCHAR* Manifest;
+		const TCHAR* MemoryName;
+		bool bSucceeded;
+	};
+	const FCase Cases[] = {
+		{{Status::Succeeded, File::Saved, File::Saved, Memory::Modified}, TEXT("succeeded"), TEXT("saved"), TEXT("saved"), TEXT("modified"), true},
+		{{Status::SucceededWithDegradation, File::Saved, File::Saved, Memory::Modified}, TEXT("succeeded_with_degradation"), TEXT("saved"), TEXT("saved"), TEXT("modified"), true},
+		{{Status::NotCommitted, File::Restored, File::Restored, Memory::Restored}, TEXT("not_committed"), TEXT("restored"), TEXT("restored"), TEXT("restored"), false},
+		{{Status::CommittedWithMetadataFailure, File::Saved, File::Indeterminate, Memory::Modified}, TEXT("committed_with_metadata_failure"), TEXT("saved"), TEXT("indeterminate"), TEXT("modified"), false},
+		{{Status::RollbackIncomplete, File::Indeterminate, File::Restored, Memory::RecoveryFailed}, TEXT("rollback_incomplete"), TEXT("indeterminate"), TEXT("restored"), TEXT("recovery_failed"), false},
+		{{Status::Conflict, File::Unchanged, File::Unchanged, Memory::Unchanged}, TEXT("conflict"), TEXT("unchanged"), TEXT("unchanged"), TEXT("unchanged"), false},
+		{{Status::Succeeded, File::Saved, File::Unchanged, Memory::Modified}, TEXT("succeeded"), TEXT("saved"), TEXT("unchanged"), TEXT("modified"), true},
+	};
+	const FString ReportDir = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ImportReports");
+	TArray<FString> Reports;
+	IFileManager::Get().FindFilesRecursive(Reports, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports(Reports);
+	FDesignDocument Document;
+	FUMGWidgetData Data;
+	DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
+	for (const FCase& Case : Cases)
+	{
+		Artifacts.Commit = Case.Commit;
+		Artifacts.Commit->AssetPath = TEXT("/Game/OutcomeContract.Target");
+		DesignImportDiagnosticReport::Write(Document, Data, Artifacts);
+		const FString Path = FindNewImportReport(ReportDir, ExistingReports);
+		ExistingReports.Add(Path);
+		TSharedPtr<FJsonObject> Report;
+		if (!LoadImportReportJson(*this, Path, Report)) return false;
+		const TSharedPtr<FJsonObject>* Outcome = nullptr;
+		if (!TestTrue(TEXT("Commit outcome emitted"), Report->TryGetObjectField(TEXT("outcome"), Outcome))) return false;
+		TestEqual(TEXT("Commit status serialized"), (*Outcome)->GetStringField(TEXT("status")), FString(Case.StatusName));
+		TestEqual(TEXT("Success agrees with commit status"), (*Outcome)->GetBoolField(TEXT("succeeded")), Case.bSucceeded);
+		TestEqual(TEXT("Asset state serialized"), (*Outcome)->GetStringField(TEXT("assetState")), FString(Case.Asset));
+		TestEqual(TEXT("Manifest state serialized"), (*Outcome)->GetStringField(TEXT("manifestState")), FString(Case.Manifest));
+		TestEqual(TEXT("Memory state serialized"), (*Outcome)->GetStringField(TEXT("memoryState")), FString(Case.MemoryName));
+		TestEqual(TEXT("Target path does not imply success"), (*Outcome)->GetStringField(TEXT("assetPath")), Artifacts.Commit->AssetPath);
+	}
+	Artifacts.Commit.Reset();
+	DesignImportDiagnosticReport::Write(Document, Data, Artifacts);
+	TSharedPtr<FJsonObject> Report;
+	if (!LoadImportReportJson(*this, FindNewImportReport(ReportDir, ExistingReports), Report)) return false;
+	TestFalse(TEXT("No supplied commit does not invent success"), Report->HasField(TEXT("outcome")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportMappingOutcomeTest,
+	"Design2UMG.Import.ImportDiagnosticReportMappingOutcome",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
+{
+	using namespace Design2UMGReimportQA;
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/MappingOutcome");
+	QAWipeOutput(Folder);
+	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
+	FDesign2UMGImportSettingsSnapshot Settings = MakeQASnapshot(QAMappedClassPath);
+	auto& Inputs = Settings.GenerationSettings.ComponentMapping.Table.Entries[0].Inputs;
+	auto BoolInput = Inputs[0];
+	BoolInput.Target = TEXT("BoolValue");
+	BoolInput.Type = DesignComponentMapping::EComponentInputType::Bool;
+	Inputs.Insert(BoolInput, 0); // The valid text input must still run after the invalid bool input.
+	const auto MakeDocument = [](const TCHAR* Label)
+	{
+		return MakeQADoc(MakeQAButton(TEXT("mapped"), TEXT("Mapped"), 24, 24, Label));
+	};
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Parse source"), FFigmaParser::ParseDocument(MakeDocument(TEXT("not-a-bool")), Document))) return false;
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings);
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = Folder;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	Request.DiagnosticDocument = Document;
+	const FString ReportDir = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ImportReports");
+	TArray<FString> Reports;
+	IFileManager::Get().FindFilesRecursive(Reports, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports(Reports);
+	const auto CheckReport = [&](const FDesign2UMGCommitResult& Commit, const TCHAR* Status, const TCHAR* ManifestState)
+	{
+		const FString Path = FindNewImportReport(ReportDir, ExistingReports);
+		ExistingReports.Add(Path);
+		TSharedPtr<FJsonObject> Report;
+		if (!LoadImportReportJson(*this, Path, Report)) return false;
+		const TSharedPtr<FJsonObject>* Outcome = nullptr;
+		if (!TestTrue(TEXT("Final pipeline outcome emitted"), Report->TryGetObjectField(TEXT("outcome"), Outcome))) return false;
+		TestEqual(TEXT("Pipeline status reaches JSON"), (*Outcome)->GetStringField(TEXT("status")), FString(Status));
+		TestEqual(TEXT("Pipeline success reaches JSON"), (*Outcome)->GetBoolField(TEXT("succeeded")), Commit.IsSuccess());
+		TestEqual(TEXT("Asset saved despite skipped input"), (*Outcome)->GetStringField(TEXT("assetState")), FString(TEXT("saved")));
+		TestEqual(TEXT("Manifest result reaches JSON"), (*Outcome)->GetStringField(TEXT("manifestState")), FString(ManifestState));
+		TestEqual(TEXT("Saved memory remains modified"), (*Outcome)->GetStringField(TEXT("memoryState")), FString(TEXT("modified")));
+		return true;
+	};
+	const FArtifactGenerationResult Imported = DesignImportPipeline::GenerateArtifacts(Data, Request, Settings.GenerationSettings);
+	TestEqual(TEXT("Skipped import input degrades the commit"), Imported.Commit.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
+	if (!CheckReport(Imported.Commit, TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
+	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, *Imported.GeneratedAssetPath);
+	if (!TestNotNull(TEXT("Degraded import remains usable"), Blueprint)) return false;
+	UDesign2UMGMappingQAWidget* Instance = QAFindMappedInstance(Blueprint);
+	if (!TestNotNull(TEXT("Mapped instance built"), Instance)) return false;
+	TestTrue(TEXT("Invalid bool preserves its default"), Instance->BoolValue);
+	TestEqual(TEXT("Later valid input still applied"), Instance->TextValue.ToString(), FString(TEXT("not-a-bool")));
+	FDesignReimportRequest ReimportRequest;
+	ReimportRequest.TargetAssetPath = Blueprint->GetPathName();
+	ReimportRequest.SettingsSnapshot = Settings;
+	for (const bool bValid : {true, false})
+	{
+		FDesignDocument UpdatedDocument;
+		if (!TestTrue(TEXT("Parse updated inputs"), FFigmaParser::ParseDocument(
+			MakeDocument(bValid ? TEXT("false") : TEXT("invalid-again")), UpdatedDocument))) return false;
+		const FDesignReimportResult Result = DesignImportPipeline::Reimport(UpdatedDocument, ReimportRequest);
+		TestEqual(TEXT("Reimport exposes only current input degradation"), Result.bHasDegradation, !bValid);
+		TestEqual(TEXT("Reimport preserves instance identity"), QAFindMappedInstance(Blueprint), Instance);
+		TestFalse(TEXT("Invalid input retains the previously applied bool"), Instance->BoolValue);
+		if (!CheckReport(Result.Commit, bValid ? TEXT("succeeded") : TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
+	}
+	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
+	AddExpectedError(TEXT("automation-injected sidecar write failure"), EAutomationExpectedErrorFlags::Contains, 1);
+	const FDesignReimportResult Failed = DesignImportPipeline::Reimport(Document, ReimportRequest);
+	TestEqual(TEXT("Metadata failure outranks input degradation"), Failed.Commit.Status, EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
+	TestTrue(TEXT("Metadata failure retains input loss information"), Failed.bHasDegradation);
+	return CheckReport(Failed.Commit, TEXT("committed_with_metadata_failure"), TEXT("unchanged"));
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportGenerationFailureTest,

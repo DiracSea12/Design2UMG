@@ -260,8 +260,10 @@ namespace DesignImportPipeline
 		Result.ComponentMappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
 
 		// 10) Assemble the post-reimport manifest payload + asset finalization (CDO preview size, variable GUIDs).
+		Result.bHasDegradation |= MappingBuildState.HasDegradation() || !Data.Warnings.IsEmpty();
 		GenerationOutput = BuildReimportManifestPayload(
 			Manifest, bPrototypeHostContinued, Data, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames);
+		GenerationOutput.bHasDegradation = Result.bHasDegradation;
 		FinalizeReimportedAssetState(WBP, DesignSize);
 
 		Result.bSucceeded = true;
