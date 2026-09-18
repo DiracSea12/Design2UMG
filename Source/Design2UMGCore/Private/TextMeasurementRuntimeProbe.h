@@ -33,14 +33,6 @@ namespace TextMeasurementRuntimeProbe
 	bool TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize);
 	bool TryMeasureTextBlockDesiredSize(const FTextBlockMeasureRequest& Request, FVector2D& OutSize);
 
-	/** Reads hhea lineGap from the same selected face as the measured Slate font. */
-	bool TryReadLineGapEm(const FSlateFontInfo& FontInfo, float& OutLineGapEm);
-
-	/**
-	 * Module-lifecycle hooks owned by FDesign2UMGCoreModule: release the rooted probe
-	 * text block and drain the lineGap cache so no probe UObject or stale font metric
-	 * outlives module shutdown / hot-reload.
-	 */
+	/** Release the module-owned probe text block before shutdown / hot-reload. */
 	void ResetProbeForModuleShutdown();
-	void ClearLineGapEmCache();
 }

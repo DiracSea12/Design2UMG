@@ -23,7 +23,6 @@ public class Design2UMGCore : ModuleRules
 		{
 			"AssetRegistry",
 			"Slate",
-			"UnrealEd",
 		});
 
 		if (Target.bBuildDeveloperTools)

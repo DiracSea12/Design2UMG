@@ -5,6 +5,7 @@
 #include "Design2UMGEditorCommandOwner.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGEditorMenuOwner.h"
+#include "Design2UMGFontMetrics.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
@@ -12,7 +13,11 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserModule.h"
+#include "Editor.h"
 #include "Engine/Font.h"
+#include "Engine/FontFace.h"
+#include "Misc/CoreDelegates.h"
+#include "Subsystems/ImportSubsystem.h"
 #include "IContentBrowserSingleton.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -106,11 +111,22 @@ void FDesign2UMGEditorModule::StartupModule()
 	FontAssetRemovedHandle = AssetRegistry.OnAssetRemoved().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
 	FontAssetRenamedHandle = AssetRegistry.OnAssetRenamed().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetRenamed);
 	FontAssetUpdatedHandle = AssetRegistry.OnAssetUpdated().AddRaw(this, &FDesign2UMGEditorModule::HandleFontAssetChanged);
+	// The import subsystem appears after module startup on a cold editor launch;
+	// an editor module reload can subscribe immediately.
+	if (!TrySubscribeFontReimportHook())
+	{
+		FCoreDelegates::OnPostEngineInit.AddRaw(this, &FDesign2UMGEditorModule::HandlePostEngineInit);
+	}
 	Design2UMGEditorMenuOwner::MaybeShowWelcomeDialog();
 }
 
 void FDesign2UMGEditorModule::ShutdownModule()
 {
+	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
+	if (UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
+	{
+		ImportSubsystem->OnAssetReimport.RemoveAll(this);
+	}
 	if (FAssetRegistryModule* AssetRegistryModule = FModuleManager::GetModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry")))
 	{
 		IAssetRegistry& AssetRegistry = AssetRegistryModule->Get();
@@ -140,6 +156,31 @@ void FDesign2UMGEditorModule::HandleFontAssetChanged(const FAssetData& AssetData
 void FDesign2UMGEditorModule::HandleFontAssetRenamed(const FAssetData& AssetData, const FString&)
 {
 	HandleFontAssetChanged(AssetData);
+}
+
+bool FDesign2UMGEditorModule::TrySubscribeFontReimportHook()
+{
+	UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr;
+	if (!ImportSubsystem)
+	{
+		return false;
+	}
+	ImportSubsystem->OnAssetReimport.AddRaw(this, &FDesign2UMGEditorModule::HandleAssetReimported);
+	return true;
+}
+
+void FDesign2UMGEditorModule::HandlePostEngineInit()
+{
+	TrySubscribeFontReimportHook();
+}
+
+void FDesign2UMGEditorModule::HandleAssetReimported(UObject* ReimportedObject)
+{
+	// Both composite font and individual face imports can change measured metrics.
+	if (ReimportedObject && (ReimportedObject->IsA<UFont>() || ReimportedObject->IsA<UFontFace>()))
+	{
+		Design2UMGFontMetrics::ClearCache();
+	}
 }
 
 IMPLEMENT_MODULE(FDesign2UMGEditorModule, Design2UMGEditor)

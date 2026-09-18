@@ -6,6 +6,7 @@
 #include "TextFontResolution.h"
 #include "TextMeasurement.h"
 #include "TextMeasurementRuntimeProbe.h"
+#include "Design2UMGFontMetrics.h"
 
 namespace RuntimeProbeSizing
 {
@@ -59,7 +60,7 @@ namespace
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
 		Request.TypefaceName = ResolvedFont.TypefaceName;
 		float LineGapEm = 0.0f;
-		if (!TextMeasurementRuntimeProbe::TryReadLineGapEm(
+		if (!Design2UMGFontMetrics::TryReadLineGapEm(
 			TextMeasurementRuntimeProbe::BuildFontInfo(Request), LineGapEm))
 		{
 			return false;

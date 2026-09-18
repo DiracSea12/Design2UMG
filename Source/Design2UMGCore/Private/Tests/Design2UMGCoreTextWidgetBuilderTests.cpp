@@ -12,6 +12,7 @@
 #include "Fonts/SlateFontInfo.h"
 #include "FontResolver.h"
 #include "TextMeasurementRuntimeProbe.h"
+#include "Design2UMGFontMetrics.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
 #include "Serialization/JsonReader.h"
@@ -193,7 +194,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 		if (TestTrue(TEXT("Natural font metrics are available"),
 			TextMeasurementRuntimeProbe::TryMeasureText(FontMetrics, NaturalFontSize))
 			&& TestTrue(TEXT("Font line gap is available"),
-				TextMeasurementRuntimeProbe::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(FontMetrics), LineGapEm)))
+				Design2UMGFontMetrics::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(FontMetrics), LineGapEm)))
 		{
 			const float ExpectedShift = -((NaturalFontSize.Y - Node->Text.FontSize * Node->Text.LineHeight)
 				+ LineGapEm * Node->Text.FontSize) / 2.0f;
@@ -233,7 +234,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	FVector2D EngineNaturalSize;
 	float EngineLineGapEm = 0.0f;
 	if (TestTrue(TEXT("Resolved engine font metrics readable"), TextMeasurementRuntimeProbe::TryMeasureText(EngineMetrics, EngineNaturalSize))
-		&& TestTrue(TEXT("Engine font line gap readable"), TextMeasurementRuntimeProbe::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(EngineMetrics), EngineLineGapEm)))
+		&& TestTrue(TEXT("Engine font line gap readable"), Design2UMGFontMetrics::TryReadLineGapEm(TextMeasurementRuntimeProbe::BuildFontInfo(EngineMetrics), EngineLineGapEm)))
 	{
 		const float ExpectedShift = -((EngineNaturalSize.Y - Node->Text.FontSize * Node->Text.LineHeight)
 			+ EngineLineGapEm * Node->Text.FontSize) / 2.0f;

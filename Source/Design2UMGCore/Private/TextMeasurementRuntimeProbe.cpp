@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "TextMeasurementRuntimeProbe.h"
+#include "Design2UMGFontMetrics.h"
 
 #include "Components/TextBlock.h"
 #include "Engine/Font.h"
@@ -225,7 +226,7 @@ namespace
 
 	/**
 	 * Cache contract: entries stay valid until the backing font asset is reimported
-	 * (FDesign2UMGCoreModule clears the whole map on any UFont reimport) or the module
+	 * (Editor invalidates it on UFont / UFontFace reimport) or the Core module
 	 * shuts down; both paths repopulate lazily on the next read.
 	 */
 	TMap<FString, TOptional<float>> GLineGapEmCache;
@@ -359,7 +360,7 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 	return true;
 }
 
-bool TextMeasurementRuntimeProbe::TryReadLineGapEm(const FSlateFontInfo& FontInfo, float& OutLineGapEm)
+bool Design2UMGFontMetrics::TryReadLineGapEm(const FSlateFontInfo& FontInfo, float& OutLineGapEm)
 {
 	OutLineGapEm = 0.0f;
 	const FCompositeFont* CompositeFont = FontInfo.GetCompositeFont();
@@ -406,7 +407,7 @@ void TextMeasurementRuntimeProbe::ResetProbeForModuleShutdown()
 	GTextBlockProbe.ResetForModuleShutdown();
 }
 
-void TextMeasurementRuntimeProbe::ClearLineGapEmCache()
+void Design2UMGFontMetrics::ClearCache()
 {
 	GLineGapEmCache.Empty();
 }

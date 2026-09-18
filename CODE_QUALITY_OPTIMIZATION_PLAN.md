@@ -40,7 +40,7 @@
 | PR-05 | `VERIFIED` | 删除确定无效复杂度并修严输入解析 |
 | PR-06 | `VERIFIED` | Typed Payload 与内部 JSON/String 胶水收敛 |
 | PR-07 | `NOT_STARTED` | 单次树索引与身份歧义检测 |
-| PR-08 | `NOT_STARTED` | Core / Editor 小切口解耦 |
+| PR-08 | `VERIFIED` | Core / Editor 小切口解耦 |
 | PR-09 | `NOT_STARTED` | 测试体系分层与低价值测试整理 |
 | PR-10 | `NOT_STARTED` | 大文件按已有真实职责边界局部拆分 |
 | PR-11 | `NOT_STARTED` | Release hardening、全量回归与最终质量门禁 |
@@ -864,7 +864,7 @@ Prototype前两次红测存在夹具问题（第二页缺失或为空，被既�
 
 # PR-08：Core / Editor 小切口解耦
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P1 / 建议完成
 
@@ -882,21 +882,95 @@ Prototype前两次红测存在夹具问题（第二页缺失或为空，被既�
 
 ## 行动项
 
-- [ ] 审计 `AssetRegistry / LoadObject<UFont> / Notification / UDesign2UMGSettings::Get() / renderer probe` 的调用边界。
-- [ ] 已有 settings snapshot 能承载的数据，不在深层重新读全局 settings。
-- [ ] 检查 Core 的 `UnrealEd` 依赖是否有可以零/低复杂度迁往 Editor 的真实使用点。
-- [ ] 如果迁移需要大量 facade/adapter 或复制代码，则保留现状并在本阶段记录理由。
-- [ ] 不为了 Build.cs 漂亮制造新抽象。
+- [x] 审计 `AssetRegistry / LoadObject<UFont> / Notification / UDesign2UMGSettings::Get() / renderer probe` 的调用边界。
+- [x] 已有 settings snapshot 能承载的数据，不在深层重新读全局 settings。
+- [x] 检查 Core 的 `UnrealEd` 依赖是否有可以零/低复杂度迁往 Editor 的真实使用点。
+- [x] 如果迁移需要大量 facade/adapter 或复制代码，则保留现状并在本阶段记录理由。
+- [x] 不为了 Build.cs 漂亮制造新抽象。
 
 ## 完成条件
 
-- [ ] 转换核心的外部副作用入口数量减少或至少集中清晰。
-- [ ] Core/Editor 边界由真实依赖决定，不是纯目录美化。
-- [ ] Build、automation、visual fidelity 无退步。
+- [x] 转换核心的外部副作用入口数量减少或至少集中清晰。
+- [x] Core/Editor 边界由真实依赖决定，不是纯目录美化。
+- [x] Build、automation、visual fidelity 无退步。
 
 ## 会话记录
 
-尚无。
+### 2026-09-18：实现与验收完成
+
+**状态**：`VERIFIED`（沿用用户已批准的两项视觉例外，不代表原始零例外门禁全绿）。
+**开始 / 完成 HEAD**：`8ff0a06198c5c3d12c73ab5a5246bce0f648fa96`。
+**完成提交**：未暂存、未提交。进入时14份未提交源码、其他阶段正文及状态均原样保留；当前起点源码和DLL与PR-07最终验收指纹一致。
+**证据目录**：`Saved/PR08/20260918/`。
+
+#### 实际改动与保留边界
+
+8个生产文件净增4行。将字体重导入订阅、延后初始化及卸载解绑从Core迁到既有EditorModule，删除Core的`UnrealEd`直接依赖。缓存及探测对象仍由Core拥有并在Core退出时释放，不增加新状态或第二套所有者。
+
+新增公共头`Design2UMGFontMetrics.h`只声明两个既有操作：`TryReadLineGapEm`与`ClearCache`。函数定义直接更名，原私有声明退出，解析、字体面选择、缓存键、测量函数体和错误返回均不变；没有兼容转发、通用服务或全目录Private暴露。
+
+已重新检查设置快照、AssetRegistry、UFont加载、通知和renderer调用边界。主转换路径沿用显式快照，不增加第二层设置。独立字体查询/诊断入口仍可读取当前编辑器设置，真实资源查询和Slate测量仍保留在Core；为搬迁这些职责而新增宽适配面或复制解析没有收益。本阶段没有改变字体、字号、布局算法或加入case/字体族/路径特判。详见`boundary-audit.md`、`boundary-scan.json`与`self-review.md`。
+
+修改文件（仅PR-08差异见`phase08-source.diff`）：
+
+```text
+Source/Design2UMGCore/Design2UMGCore.Build.cs
+Source/Design2UMGCore/Private/Design2UMGCoreModule.cpp
+Source/Design2UMGCore/Public/Design2UMGFontMetrics.h（新增，17行）
+Source/Design2UMGCore/Private/TextMeasurementRuntimeProbe.h
+Source/Design2UMGCore/Private/TextMeasurementRuntimeProbe.cpp
+Source/Design2UMGCore/Private/TextMeasurementRuntimeProbeSizing.cpp
+Source/Design2UMGEditor/Public/Design2UMGEditorModule.h
+Source/Design2UMGEditor/Private/Design2UMGEditorModule.cpp
+Source/Design2UMGCore/Private/Tests/Design2UMGCoreTextWidgetBuilderTests.cpp
+Source/Design2UMGCore/Private/Tests/TextMeasurementFontMetricsTests.cpp
+  → Source/Design2UMGEditor/Private/Tests/TextMeasurementFontMetricsTests.cpp（迁移并增强原测试）
+```
+
+#### 实际验证
+
+| 验证 | 最终记录 | 结果 |
+|---|---|---|
+| 真实FPSRoguelikeEditor Win64 Development构建 | `build-final-03-*` | exit0，源文件未变；此前完整依赖重编译亦成功 |
+| 字体重导入、文本测量/构造、快照隔离 | `focused-final-02-*` | 20/20，editor exit0 |
+| 全插件自动化 | `all-final-*` | 628/628，editor exit0；与PR-07测试ID集合完全相同 |
+| 完整视觉回归 | `visual-final-*` | 81-case完整；81张候选图及参考图与PR-07逐张SHA-256一致；四项指标逐例差值全0 |
+| 结构、尺寸、来源与历史身份 | `visual-assessment.json` | 全部结构通过，比较尺寸兼容且与PR-07相同，输入签名一致，无缺失/不兼容项 |
+| 版本与保护文件 | `integrity.json` | 构建及各运行的419份Source清单/哈希一致，2个DLL未变；248项保护文件未变；无BOM/替换字符问题，diff --check为0 |
+
+最终视觉run：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr08-core-editor-full81-20260918`。相邻实现对照为`pr07-identity-semantics-full81-20260918`；登记参考仍为`review-batch-transaction-full-20260915`，未修改CURRENT、历史基线或输入/参考，也未筛选或跳过样例。
+
+原始no_regression仍为**79 passed / 2 failed**，历史门禁仍blocked。两项为`pen_pencil-shadcn_shadcn-design-system-components`和`pen_pencil-welcome_step-1-frame`；案例、blocked原因及四项指标与PR-07一致，无新增或扩大退步。两个编辑器exit为`0 / 0`，batch exit为`2`，与前阶段相同；不能改写为原始门禁81/81零例外全绿。
+
+第一轮`focused-final`为19/20：新增非字体夹具误用抽象`UObject`触发ensure。已替换为具体`UTexture2D`，未删除断言、放宽期望或修改生产分支。首次失败和中间构建日志保留，最终仅采用上表修正后版本的证据。完整回归没有分片异常或需要串行复核的新差异。
+
+实际运行命令如下；对应完整参数、工作目录和环境还保存在各`*-command.json`。仅视觉进程沿用PR-06/07的`DESIGN2UMG_EDITOR_EXTRA_ARGS=-UDPMESSAGING_TRANSPORT_ENABLE=false`临时设置，未改项目配置、引擎源码或插件运行策略。既有run_batch包装器不发布全局历史清单。
+
+```text
+cmd.exe /d /c G:/UE5/UnrealEngine/Engine/Build/BatchFiles/Build.bat FPSRoguelikeEditor Win64 Development G:/UE5/FPSRoguelike/FPSRoguelike.uproject -WaitMutex -NoHotReloadFromIDE
+G:/UE5/UnrealEngine/Engine/Binaries/Win64/UnrealEditor.exe G:/UE5/FPSRoguelike/FPSRoguelike.uproject -NoSplash -NoSound -nop4 -nocefaccelpaint -ini:Engine:[/Script/Engine.AutomationTestSettings]:DefaultInteractiveFramerateWaitTime=5 "-ExecCmds=Automation RunTests Design2UMG.TextMeasurement+Design2UMG.TextWidgetBuilder+Design2UMG.ReviewSafety.FontSettingsSnapshotIsolation; Quit" "-TestExit=Automation Test Queue Empty" -AbsLog=G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\PR08\20260918\focused-final-02.log
+G:/UE5/UnrealEngine/Engine/Binaries/Win64/UnrealEditor.exe G:/UE5/FPSRoguelike/FPSRoguelike.uproject -NoSplash -NoSound -nop4 -nocefaccelpaint -ini:Engine:[/Script/Engine.AutomationTestSettings]:DefaultInteractiveFramerateWaitTime=5 "-ExecCmds=Automation RunTests Design2UMG; Quit" "-TestExit=Automation Test Queue Empty" -AbsLog=G:\UE5\UnrealEngine\Engine\Plugins\Marketplace\Design2UMG\Saved\PR08\20260918\all-final.log
+python -u Saved/PR01/regression-fix/run_batch.py --design-root G:/UE5/FPSRoguelike/Designs --figma-export-root G:/UE5/ReviewArtifacts/component-complete-figma-exports-20260915 --output-root G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr08-core-editor-full81-20260918 --reference-root G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/review-batch-transaction-full-20260915 --project G:/UE5/FPSRoguelike/FPSRoguelike.uproject --editor G:/UE5/UnrealEngine/Engine/Binaries/Win64/UnrealEditor.exe --parallel-editors 2 --editor-isolation shard --reference-cache read-write --native-self-check off --no-regression-epsilon 1e-6
+python Saved/PR08/20260918/verify.py final G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr08-core-editor-full81-20260918
+```
+
+最终`verification.json`为`verified=true`，验证器exit0。边界审计和四维源码自审已完成；具体内容及失败修复记录见`self-review.md`。
+
+**剩余边界 / 风险**：上述两项已批准视觉例外仍在。本轮验证限于本机Win64真实项目；冷启动事件链已通过实际广播测试，模块卸载/热重载路径已审阅，但没有专门进行热重载压力测试或跨平台/游戏打包验证。Core仍需要真实字体资产与Slate renderer；其他宿主单独使用Core时须经公开失效操作通知字体数据变化。不把本轮结果夸大成Core零UE依赖、纯函数转换或未经测量的整体性能提升。
+
+**下一步**：PR-09；本轮未实施PR-09～PR-11。
+
+### 2026-09-18：提交前自审与复核
+
+用户要求重新自审并在无问题后提交。本次重新核对PR-08五项行动项、11个源码路径的完整增量、设置快照传递、通知/资源/renderer边界及模块订阅/解绑生命周期，未确认阻塞项或未覆盖的本阶段要求。没有新增生产或测试源码改动；原独立查询全局设置、资源加载与Slate测量的保留理由仍成立，不扩大为Core零UE依赖改造。
+
+**再次实际执行**：真实FPSRoguelikeEditor Win64 Development构建exit0；字体/文本/设置快照针对性测试20/20，完成标记及editor exit均0。**重新审计既有证据**：原628项自动化ID集合完整，完整81-case候选/参考PNG逐张SHA-256、四项指标、来源/有效参考身份、结构与尺寸均与PR-07相同；历史退步完整指标明细不变。原始79通过+2项既有批准例外、batch2、editor0/0如实保留。本次没有重跑628项或81-case渲染。
+
+419份源码和2个DLL仍与原已验收指纹一致，248保护文件未变。本次四项自审结论为：成品复杂度与范围相称、行动项已覆盖、Editor事件与Core缓存职责清楚、未发现本阶段已知阻塞问题。未专门验证热重载压力、跨平台和游戏打包的边界不变。
+
+**提交范围**：仅PR-08源码、总表PR-08状态和本章节；PR-07原有14份未提交源码及其计划记录留在工作区，不带入本阶段提交。验证对应当前组合工作区，不冒称已对去掉PR-07改动的干净checkout执行完整回归。提交标题为`refactor(core): move font reimport lifecycle to editor (PR-08)`；准确提交编号由Git记录及本次证据目录的`commit-result.json`记录。
+
+本次证据：`Saved/PR08/precommit-review-20260918/review.md`、`evidence-audit.json`及实际构建/测试的命令、日志、进程与源码指纹。原`Saved/PR08/20260918/`证据未覆盖，PR-08维持VERIFIED，其他阶段不变。
 
 ---
 

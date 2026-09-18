@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
+class UObject;
 struct FAssetData;
 
 /**
@@ -17,6 +18,9 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
+	bool TrySubscribeFontReimportHook();
+	void HandlePostEngineInit();
+	void HandleAssetReimported(UObject* ReimportedObject);
 	void HandleFontAssetChanged(const FAssetData& AssetData);
 	void HandleFontAssetRenamed(const FAssetData& AssetData, const FString& OldObjectPath);
 
