@@ -42,7 +42,7 @@
 | PR-07 | `VERIFIED` | 单次树索引与身份歧义检测 |
 | PR-08 | `VERIFIED` | Core / Editor 小切口解耦 |
 | PR-09 | `VERIFIED` | 测试体系分层与低价值测试整理 |
-| PR-10 | `NOT_STARTED` | 大文件按已有真实职责边界局部拆分 |
+| PR-10 | `VERIFIED` | 大文件按已有真实职责边界局部拆分 |
 | PR-11 | `NOT_STARTED` | Release hardening、全量回归与最终质量门禁 |
 
 ---
@@ -1153,7 +1153,7 @@ python Saved/PR08/20260918/verify.py final G:/UE5/FPSRoguelike/Saved/Design2UMG/
 
 # PR-10：大文件按真实职责边界局部拆分
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P2 / 最后做
 
@@ -1196,20 +1196,67 @@ Visual Mapper：
 
 ## 行动项
 
-- [ ] 对候选大文件先画函数职责图，不直接按行数拆。
-- [ ] 只迁移已经存在的职责簇，不新建无意义 manager/service。
-- [ ] 公共入口尽量保持稳定。
-- [ ] 拆分后删除旧重复 helper，不形成转发层叠罗汉。
+- [x] 对候选大文件先画函数职责图，不直接按行数拆。
+- [x] 只迁移已经存在的职责簇，不新建无意义 manager/service。
+- [x] 公共入口尽量保持稳定。
+- [x] 拆分后删除旧重复 helper，不形成转发层叠罗汉。
 
 ## 完成条件
 
-- [ ] 每次拆分都能明确说出认知负担下降在哪里。
-- [ ] 净抽象层不增加或有充分理由。
-- [ ] 编译、测试、结构与视觉回归无退步。
+- [x] 每次拆分都能明确说出认知负担下降在哪里。
+- [x] 净抽象层不增加或有充分理由。
+- [x] 编译、测试、结构与视觉回归无退步。
 
 ## 会话记录
 
-尚无。
+### 2026-09-18：开始实施
+
+进入 HEAD `836687aba511bf8b22658bcb63c32be93f4af399`，跟踪工作区干净，仅既有 `.workbuddy/` 未跟踪。422 项源码、2 个插件 DLL 和 248 项保护文件与 PR-09 验收快照一致。四个候选职责图及拆分取舍先记录于 `Saved/PR10/20260918/responsibility-map.md`；范围限本阶段，不改运行语义或公共入口，不进入 PR-11，不暂存或提交。
+
+### 2026-09-18：职责迁移完成，回归进行中
+
+- 原型：`Design2UMGPrototypeGraphWiring.cpp` 保留生成内容清理与生命周期入口；分类/解析/骨架准备移至 `Design2UMGPrototypeBindingPlan.cpp`，鼠标和键盘生成分别移至 `Design2UMGPrototypeMouseWiring.cpp`、`Design2UMGPrototypeKeyboardWiring.cpp`；已有节点原语及计划类型由 private `Design2UMGPrototypeGraphSupport.cpp` / `Design2UMGPrototypeGraphWiringInternal.h` 共享。先解析、再刷新骨架、最后读取属性并连线的顺序不变。
+- 视觉：基础属性继续由 `VisualMapper.cpp` 承担，边框拓扑与内容提升移至 `VisualMapperBorder.cpp`，阴影/模糊/遮罩拓扑移至 `VisualMapperEffects.cpp`。已有填充和描边模块不重建，render transfer 仍只有一份实现；单纯 `Base + Suffix` 的助手内联到原调用处，不新增字符串服务。
+- 字体：诊断分类、匹配/回退决策与结果组装移至 `FontResolverDiagnostics.cpp`。仅共享既有 mapping-result enum 和五个 private 查询函数；缓存、索引、图标注册、字重选择及清理仍保持原来的单一状态归属和锁，不为进一步拆文件增加 reset 桥接或公开缓存。
+- 远程图片：核实现有下载/校验/解码与资产解析边界后保留原结构；预览尾部与持久化共享 URL 收集及 UI 纹理配置，不为行数新增跨文件契约。ui4/ui5 命名、复用和修复链不属于本次行为变更。
+- 共变更 13 项源码（3 项原文件、10 项新增 private 文件），Public 头、模块依赖、测试、配置和资源未改。职责图见 `Saved/PR10/20260918/responsibility-map.md`。
+- `build-02` 已逐个编译全部 10 个受影响 cpp；最终 `build-final` 使用真实 `FPSRoguelikeEditor Win64 Development` target，exit 0。迁移核对覆盖 118 个原顶层函数定义及 11 项类型/构造状态，除删除拼接别名并内联四处函数体外 token 等价；字符串字面量集合完全一致。证据为 `migration-audit.json`、`build-02-stdout.log`、`build-final-process.json`。
+- 最终源已冻结。93 项 focused、632 项全量与完整 81-case 按顺序验证；正式对照仍是 `review-batch-transaction-full-20260915`，相邻阶段逐案对照为 `pr09-test-quality-full81-20260918`。81 项 manifest 已锁定，外部 reference.png / compare_report.json 齐全；原始历史口径为 79/81 加既有两项获准例外，不允许新增或扩大退步。
+
+### 2026-09-18：完成验证与自审
+
+验收证据目录：`Saved/PR10/20260918/`。最终结论见 `verification.json`；职责取舍见 `responsibility-map.md`；逐项自审见 `self-review.md`；源码变更见 `pr10-source.diff`。
+
+- 构建：真实 `FPSRoguelikeEditor Win64 Development` target，最终 exit 0；全部 10 个受影响 cpp 已逐个编译，未依赖 Unity 合并隐藏跨文件问题。Public 头和 Build.cs 均未改。
+- 自动化：focused 93/93，全量 632/632；全部成功且 editor exit 0。Focused 精确清单和 PR-09 的完整 632 项 ID 均无缺失、替换或额外项目，测试源码未改。
+- 完整视觉 run：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr10-responsibility-split-full81-20260918`，仍为 39 Pencil + 42 Figma，包含两个必选 source/frame case。结构 81/81 通过；相对 PR-09，81/81 candidate PNG 字节一致，reference/source identity、原始及比较尺寸相同，changed_ratio、stable_changed_ratio、mae、stable_mae 逐案差值全部为 0。
+- 原始历史门禁仍为 79/81：`pen_pencil-shadcn_shadcn-design-system-components`、`pen_pencil-welcome_step-1-frame` 两项已获准例外保持原边界，无新增或扩大。原始 history blocked、batch exit 2 如实保留；editor exits 为 [0, 0]，未重设 baseline、historical best 或指标阈值。不得将该结果描述为原始 81/81 全绿。
+- 完整性：同一最终 432 项源码贯穿构建、focused、全量与视觉运行；2 个插件 DLL 和 248 项保护文件哈希不变。额外确认运行中编辑器加载的正是本插件 Binaries 下两 DLL。UTF-8 无 BOM、git diff --check 通过，HEAD 不变，无暂存或提交，其余阶段章节未修改，既有 `.workbuddy/` 未动。
+- 迁移审计：118 项原顶层定义、包括成员在内 134 项定义、11 项类型/构造状态完成核对；仅删除一个纯拼接别名并内联原调用，不新增函数职责、状态或分支。字符串及 constexpr 声明集合相同。初次提取脚本的 namespace 试编译问题已修正，失败尝试保留但不计入成功验收。
+
+自审结论：认知负担下降来自职责与可见性边界，而非行数指标；没有新增 manager/service、泛化框架、缓存、配置、兼容路径或样例特判。未发现本次新增行为回归；两项既有历史例外仍是已知限制。远程图片候选已完成取舍，不作为未完成拆分转交。PR-10 无待完成门禁，PR-11 尚未开始。
+
+---
+
+### 2026-09-18：提交前自审收口
+
+用户要求自审后提交。重新阅读全部13项源码与原实现，确认遗漏两处无独立职责的私有转发：`IsLayoutPanelType` 和 `BuildIndexedShadowSuffix`；删除后原调用直接使用现有函数，净减12行，不改参数、返回值或分支。已完成的上一轮构建、632项及81-case证据保留，但本次修改后的最终版本须重新验证，暂回到IN_PROGRESS。另确认第6节当前下一步指向PR-08已过期，待闭环后更新为PR-11。证据位于`Saved/PR10/precommit-review-20260918/`。
+
+### 2026-09-18：提交前自审最终结论
+
+本次自审读取全部13项源码路径、阶段前源码和完整增量，逐项核对四项行动及三项完成条件。未确认本阶段功能遗漏或新引入的正确性缺陷；确认并修正两处局部冗余：删除仅转发到现有函数的 `IsLayoutPanelType`、`BuildIndexedShadowSuffix`，原调用直接复用 `UMGWidgetTypes::IsLayoutPanel`、`Design2UMGGeneratedNameSuffixes::Shadow`，净减12行。没有改变输入、返回值、判断分支或测试。另修正第6节过期的PR-08下一步指针；既有阶段历史正文不改。
+
+**最终版本重新实际验证**：真实 `FPSRoguelikeEditor Win64 Development` 构建exit0，两个本次修改的cpp已重新编译；针对视觉映射/阴影的27/27项、完整插件632/632项通过，完成标记与editor exit均0，完整测试ID与上轮相同。此处结果来自净减12行后的最终源码，不是拿进入时93项复跑或旧632项日志充数。
+
+完整无过滤81-case输出：`G:\UE5\FPSRoguelike\Saved\Design2UMG\Automation\pr10-precommit-full81-20260918`。结构81/81通过，81张candidate PNG与上轮PR-10逐字节相同，四项像素指标逐案差值0，源/provided参考签名、effective参考内容身份和比较尺寸相同。原始门禁保持79通过、2项原批准例外，history仍blocked，batch exit2、editor exits0/0；历史退步完整明细未扩大，没有改基线、阈值或参考。上轮PR-10已经证明同PR-09图像/指标一致，因此本次也未增加阶段间退步。
+
+本次新增的只读复核脚本首遍把effective参考副本的绝对路径和复制时间也按跨运行相等比较，因新运行目录不同而报告失败。逐81例核实仅`path`和`mtime_ns`不同；源/provided签名完全相同，effective其余签名字段、运行目录内相对位置及实际文件SHA-256全部相同。复核现按这些内容身份检查，保留`verification-first-pass.json`、`visual-assessment-first-pass.json`和`identity-metadata-audit.json`。这是Saved内审计脚本的判断修正，不是改生产逻辑、正式验收器、评分阈值或历史例外。
+
+最终432项Source在构建、针对性、全插件和81-case之间完全一致，2个最终DLL匹配构建指纹，248项保护文件不变。Public头、Build.cs、测试、其它生产源码和原`.workbuddy/`未动。UTF-8无BOM、diff检查通过。原验收目录 `Saved/PR10/20260918/` 保留；本次最新证据为 `Saved/PR10/precommit-review-20260918/verification.json`、`review.md`、`review-closure.diff` 及实际命令/日志。
+
+**四项质量判断**：成品仅保留具有真实职责的分文件及共享入口，两处无职责私有转发已经删掉；本阶段行动和验收覆盖完整，远程图片保持已有边界是有源码依据的候选取舍；缓存归属、生命周期、模块依赖和公共入口不扩张，没有新增manager/service、配置、兼容分支或按case/font/node/file的窄逻辑；当前未确认阻止本阶段提交的问题，但既有两项视觉例外仍须保留，验证范围仅当前Win64 Development真实项目，不声称所有平台或未知输入均无缺陷。
+
+用户授权本次审查通过后提交。提交范围仅13项源码和本计划；准确提交号以Git记录及本次证据目录的 `commit-result.json` 为准，不推送远端。PR-10恢复VERIFIED，PR-11尚未开始。
 
 ---
 
@@ -1401,13 +1448,14 @@ Visual Mapper：
 
 | 2026-09-18 | PR-07 review closure | PR-07 | `IN_PROGRESS → VERIFIED` | 未提交；HEAD `8ff0a061` | R1/R2/R3与相邻调用链收口；旧3项红断言exit255→最终10/10，完整628/628；81图/四指标同前版，原79+2/batch2不变；418源码/2DLL/248保护文件一致；见 `Saved/PR07/review-closure-20260918/verification.json` |
 | 2026-09-18 | PR-07 identity semantics cleanup | PR-07 | `VERIFIED` | 未提交；HEAD `8ff0a061` | 将生成NamedSlot身份转发细节从树索引抽到 `OwnsSourceIdentity()`；build0、focused10/10、全628/628，完整81图/四指标同前版，原79+2/batch2不变；见 `Saved/PR07/identity-semantics-20260918/verification.json` |
+| 2026-09-18 | PR-10 precommit self-review | PR-10 | `VERIFIED → IN_PROGRESS → VERIFIED` | 本次提交；起始 `836687a`，结果见Git及commit-result.json | 三热点职责拆分完成；自审再删2个私有转发净减12行；最终build0、27/27、632/632、81图/四指标同上轮，原79+2/batch2不变；见 `Saved/PR10/precommit-review-20260918/verification.json` |
 
 ---
 
 # 6. 当前下一步
 
-**下一阶段：PR-08 — Core / Editor 小切口解耦；本轮未实施。**
+**下一阶段：PR-11 — Release Hardening 与最终质量门禁；尚未开始。**
 
-PR-07自审R1/R2/R3及直接相邻调用链已收口；身份所有权规则又进一步从索引算法中抽离了生成NamedSlot的具体协议知识。真实构建、10项定向测试、628项全插件自动化和完整81-case验收完成。最新入口为 `Saved/PR07/identity-semantics-20260918/verification.json`。之前的实施、626/628项验收、自审更正和失败记录均保留。PR-01～PR-06及后续阶段状态不变。
+PR-01～PR-10当前均为VERIFIED，各阶段验收边界以对应章节为准。PR-10职责拆分及本次自审收口已完成；最新源码/测试/81-case证据入口为 `Saved/PR10/precommit-review-20260918/verification.json`。本次按用户授权审查通过后提交，不推送远端；提交号见Git及同目录 `commit-result.json`。此前实施、审查、更正和失败记录仍保留，不把当前下一步与历史交接混淆。
 
-本轮未暂存、未提交，HEAD仍为 `8ff0a06198c5c3d12c73ab5a5246bce0f648fa96`。完整81-case原始门禁仍为79通过与2项既有批准例外；81张候选图和四项指标逐例相对收口前完全不变。后续不得新增或扩大例外、移动登记基线或以简化代码为由接受退步。
+正式81-case原始门禁仍是79通过及2项既有批准例外，本次81张候选图及四项指标逐案与上轮PR-10完全一致。后续不得新增或扩大例外、移动登记基线或以简化代码为由接受退步。PR-11的发布门禁未在本次实施，不把PR-10验收等同于发布验收。
