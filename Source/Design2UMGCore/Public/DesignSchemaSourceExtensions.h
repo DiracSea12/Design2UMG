@@ -115,6 +115,7 @@ struct FDesignPrototypeInteraction
 
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
+	UPROPERTY() TArray<FString> TriggerKeyCodes;
 	UPROPERTY() TArray<FDesignPrototypeAction> Actions;
 };
 

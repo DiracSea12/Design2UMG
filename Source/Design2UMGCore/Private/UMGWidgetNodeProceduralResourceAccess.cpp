@@ -20,7 +20,8 @@ namespace Design2UMGWidgetNodeProceduralResourceAccess
 		else if (Node.Brush.MaterialRef.IsSet())
 		{
 			Result.MaterialRef = Node.Brush.MaterialRef.GetValue();
-			if (Node.Brush.MaterialParams.IsSet())
+			Result.Shape = Node.Brush.Shape;
+			if (!Result.Shape.IsSet() && Node.Brush.MaterialParams.IsSet())
 			{
 				Result.MaterialParams = Node.Brush.MaterialParams.GetValue();
 			}

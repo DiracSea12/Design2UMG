@@ -3,7 +3,6 @@
 #include "VisualMapperFillTransfer.h"
 
 #include "Design2UMGGeneratedNameSuffixes.h"
-#include "GradientMaterialParams.h"
 #include "ImageFillUtils.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
@@ -13,9 +12,6 @@ namespace
 {
 	namespace GradientHelpers
 	{
-		const TCHAR* MatRef_GradientLinear = TEXT("gradientlinear");
-		const TCHAR* MatRef_Radial = TEXT("radialgradient");
-		const TCHAR* MatRef_Angular = TEXT("angulargradient");
 
 		const TCHAR* ToTypedGradientTypeString(const EDesignGradientType Type)
 		{
@@ -29,30 +25,6 @@ namespace
 			default:
 				return TEXT("Linear");
 			}
-		}
-
-		FString BuildGradientMaterialParams(const FDesignGradient& Gradient)
-		{
-			if (Gradient.Colors.Num() == 0)
-			{
-				return FString();
-			}
-
-			Design2UMGGradientMaterialParams::FGradientParams Params;
-			Params.bRadial = Gradient.GradientType == EDesignGradientType::Radial;
-			Params.bHasLinearEndpoints = Gradient.GradientType == EDesignGradientType::Linear
-				&& Gradient.StartPoint.IsSet()
-				&& Gradient.EndPoint.IsSet();
-			Params.StartPoint = Gradient.StartPoint.Get(FVector2D::ZeroVector);
-			Params.EndPoint = Gradient.EndPoint.Get(FVector2D(1.0f, 0.0f));
-			Params.Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
-			Params.Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
-			Params.Rotation = Gradient.Rotation;
-			for (const FDesignGradientStop& Stop : Gradient.Colors)
-			{
-				Params.Stops.Add({Stop.Position, Stop.Color});
-			}
-			return Design2UMGGradientMaterialParams::BuildGradientMaterialParamsJson(Params);
 		}
 
 		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
@@ -84,19 +56,6 @@ namespace
 			}
 		}
 
-		FString ResolveGradientMaterialRef(const FDesignGradient& Gradient)
-		{
-			switch (Gradient.GradientType)
-			{
-			case EDesignGradientType::Radial:
-				return MatRef_Radial;
-			case EDesignGradientType::Angular:
-				return MatRef_Angular;
-			case EDesignGradientType::Linear:
-			default:
-				return MatRef_GradientLinear;
-			}
-		}
 	}
 
 	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -153,7 +112,7 @@ namespace
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()
 			|| Brush.MaterialParams.IsSet()
-			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Shape.IsSet()
 			|| Brush.Image.HasAny()
 			|| Brush.Gradient.HasAny();
 	}
@@ -268,13 +227,7 @@ namespace
 		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
 			Layer.Type = UMGWidgetTypes::Image;
-			Layer.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(Fill.Gradient);
 			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
-			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(Fill.Gradient);
-			if (!MaterialParams.IsEmpty())
-			{
-				Layer.Brush.MaterialParams = MaterialParams;
-			}
 			AddTextureSizeHints(Layer, Node);
 			return true;
 		}
@@ -368,13 +321,7 @@ namespace VisualMapperFillTransfer
 
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.Colors.Num() > 0)
 		{
-			Widget.Brush.MaterialRef = GradientHelpers::ResolveGradientMaterialRef(PrimaryFill.Gradient);
 			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, PrimaryFill.Gradient);
-			const FString MaterialParams = GradientHelpers::BuildGradientMaterialParams(PrimaryFill.Gradient);
-			if (!MaterialParams.IsEmpty())
-			{
-				Widget.Brush.MaterialParams = MaterialParams;
-			}
 			AddTextureSizeHints(Widget, Node);
 			return;
 		}

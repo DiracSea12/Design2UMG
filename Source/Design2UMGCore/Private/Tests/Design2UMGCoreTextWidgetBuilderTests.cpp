@@ -46,7 +46,7 @@ bool FTextWidgetBuilderRichTextMarkupContractTest::RunTest(const FString& Parame
 		Widget.Text.Text.Get(FString()),
 		FString(TEXT("<d2u_run_0 href=\"https://example.test/?q=&quot;x&quot;&amp;v=&apos;y&apos;\">A&amp;B &lt;C&gt;</><d2u_run_1> tail</>")));
 	TestEqual(TEXT("Single href remains tooltip text"), Widget.WidgetStyle.ToolTipText.Get(FString()), LinkRun.Href);
-	TestTrue(TEXT("Style rows still serialize"), Widget.Text.RichTextStyleRowsJson.IsSet());
+	TestTrue(TEXT("Style rows remain typed"), Widget.Text.RichTextStyleRows.IsSet());
 	return true;
 }
 
@@ -269,32 +269,18 @@ bool FTextWidgetBuilderRichTextRunFontSizeConversionContractTest::RunTest(const 
 
 	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
 	TestEqual(TEXT("Explicit run size produces rich text"), Widget.Type, FString(TEXT("RichTextBlock")));
-	if (!TestTrue(TEXT("Rich text style rows serialize"), Widget.Text.RichTextStyleRowsJson.IsSet()))
+	if (!TestTrue(TEXT("Rich text style rows are present"), Widget.Text.RichTextStyleRows.IsSet()))
 	{
 		return false;
 	}
 
-	TSharedPtr<FJsonObject> RootObject;
-	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Widget.Text.RichTextStyleRowsJson.GetValue());
-	if (!TestTrue(TEXT("Rich text style rows parse"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid()))
-	{
-		return false;
-	}
-
-	const TSharedPtr<FJsonObject>* ValidRow = nullptr;
-	const TSharedPtr<FJsonObject>* InvalidRow = nullptr;
-	if (!TestTrue(TEXT("Valid run row exists"), RootObject->TryGetObjectField(TEXT("d2u_run_0"), ValidRow) && ValidRow)
-		|| !TestTrue(TEXT("Invalid run row exists"), RootObject->TryGetObjectField(TEXT("d2u_run_1"), InvalidRow) && InvalidRow))
-	{
-		return false;
-	}
-
-	double ValidFontSize = 0.0;
-	TestTrue(TEXT("Valid run has an applied point size"), (*ValidRow)->TryGetNumberField(UMGPropertyKeys::FontSize, ValidFontSize));
-	TestTrue(TEXT("16 source pixels convert to 12 points independently of the invalid parent size"),
-		FMath::IsNearlyEqual(static_cast<float>(ValidFontSize), 12.0f, 0.001f));
-	TestFalse(TEXT("Invalid explicit run size does not inherit or bypass conversion"),
-		(*InvalidRow)->HasField(UMGPropertyKeys::FontSize));
+	const auto& Rows = Widget.Text.RichTextStyleRows.GetValue();
+	const auto* ValidRow = Rows.Find(TEXT("d2u_run_0"));
+	const auto* InvalidRow = Rows.Find(TEXT("d2u_run_1"));
+	if (!TestNotNull(TEXT("Valid run row exists"), ValidRow) || !TestNotNull(TEXT("Invalid run row exists"), InvalidRow)) return false;
+	TestTrue(TEXT("Valid run has an applied point size"), ValidRow->FontSize.IsSet());
+	TestEqual(TEXT("16 source pixels convert to 12 points independently of the invalid parent size"), ValidRow->FontSize.Get(0.0f), 12.0f);
+	TestFalse(TEXT("Invalid explicit run size does not inherit or bypass conversion"), InvalidRow->FontSize.IsSet());
 	return true;
 }
 

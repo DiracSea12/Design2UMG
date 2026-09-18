@@ -1,10 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGPrototypeStepGraphAssembly.h"
-#include "DesignJsonUtils.h"
 #include "DesignSchemaSourceExtensions.h"
-
-#include "Dom/JsonObject.h"
 
 namespace Design2UMGPrototypeStepGraphAssembly
 {
@@ -399,43 +396,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return TriggerType;
 	}
 
-	TArray<FString> ParsePrototypeTriggerKeyCodes(const FString& TriggerJson)
-	{
-		TArray<FString> KeyCodes;
-
-		TSharedPtr<FJsonObject> TriggerObject;
-		if (!DesignJsonUtils::TryParseObject(TriggerJson, TriggerObject))
-		{
-			return KeyCodes;
-		}
-
-		if (const TArray<TSharedPtr<FJsonValue>>* KeyCodeArray =
-			DesignJsonUtils::GetArray(TriggerObject, TEXT("keyCodes")))
-		{
-			for (const TSharedPtr<FJsonValue>& KeyCodeValue : *KeyCodeArray)
-			{
-				if (!KeyCodeValue.IsValid())
-				{
-					continue;
-				}
-
-				FString KeyCodeString;
-				if (KeyCodeValue->TryGetString(KeyCodeString) && !KeyCodeString.IsEmpty())
-				{
-					KeyCodes.AddUnique(KeyCodeString.ToUpper());
-				}
-			}
-		}
-
-		const FString SingleKeyCode = DesignJsonUtils::GetString(TriggerObject, TEXT("keyCode"));
-		if (!SingleKeyCode.IsEmpty())
-		{
-			KeyCodes.AddUnique(SingleKeyCode.ToUpper());
-		}
-
-		return KeyCodes;
-	}
-
 	bool BuildPrototypeBindingSummary(
 		const TArray<FUMGPrototypeNavigationStep>& Steps,
 		FResolvedPrototypeAction& OutSummary)
@@ -547,7 +507,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			}
 			Binding.TriggerType = NormalizedTriggerType;
 			Binding.TriggerJson = Interaction.TriggerJson;
-			Binding.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(Interaction.TriggerJson);
+			Binding.TriggerKeyCodes = Interaction.TriggerKeyCodes;
 			if (Binding.UsesKeyboardTrigger() && Binding.TriggerKeyCodes.Num() == 0)
 			{
 				Warnings.AddUnique(FString::Printf(

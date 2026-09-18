@@ -173,7 +173,7 @@ namespace
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()
 			|| Brush.MaterialParams.IsSet()
-			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Shape.IsSet()
 			|| Brush.Image.HasAny()
 			|| Brush.Gradient.HasAny();
 	}
@@ -195,14 +195,12 @@ namespace
 		}
 
 		FUMGWidgetStyleData AppliedBorderStyle = BorderSurface.WidgetStyle;
-		// These four fields were transferred from the content when the synthetic
+		// These size constraints were transferred from the content when the synthetic
 		// Border was created; they do not give a paint-free surface a separate duty.
 		if (BorderSurface.Children[0].Type != UMGWidgetTypes::SizeBox)
 		{
 			AppliedBorderStyle.WidthOverride.Reset();
 			AppliedBorderStyle.HeightOverride.Reset();
-			AppliedBorderStyle.ImageMode.Reset();
-			AppliedBorderStyle.ImageTransform.Reset();
 		}
 
 		return !AppliedBorderStyle.HasAny()
@@ -226,8 +224,6 @@ namespace
 		if (Content.Type == UMGWidgetTypes::SizeBox) return Content;
 		Content.WidgetStyle.WidthOverride = BorderSurface.WidgetStyle.WidthOverride;
 		Content.WidgetStyle.HeightOverride = BorderSurface.WidgetStyle.HeightOverride;
-		Content.WidgetStyle.ImageMode = BorderSurface.WidgetStyle.ImageMode;
-		Content.WidgetStyle.ImageTransform = BorderSurface.WidgetStyle.ImageTransform;
 		return Content;
 	}
 

@@ -312,11 +312,9 @@ bool FFigmaDropShadowConvertsToBoxShadowWrapperTest::RunTest(const FString& Para
 	TestTrue(TEXT("Precoloured shadow texture has neutral tint, so alpha is not multiplied twice"),
 		Shadow.Brush.BrushColor.IsSet()
 		&& Shadow.Brush.BrushColor.GetValue().Equals(FLinearColor::White));
-	TSharedPtr<FJsonObject> ShadowParams;
-	if (!TestTrue(TEXT("Shadow texture parameters parse"), FJsonSerializer::Deserialize(
-		TJsonReaderFactory<>::Create(Shadow.Brush.MaterialParams.Get(FString())), ShadowParams))) return false;
+	if (!TestTrue(TEXT("Shadow texture parameters are typed"), Shadow.Brush.Shape.IsSet())) return false;
 	TestTrue(TEXT("Texture generation retains the source shadow colour and alpha"),
-		FUMGValueParser::ParseColor(ShadowParams->GetStringField(TEXT("Color"))).Equals(FLinearColor(0, 0, 0, 0.2f)));
+		Shadow.Brush.Shape->Color.IsSet() && Shadow.Brush.Shape->Color->Equals(FLinearColor(0, 0, 0, 0.2f)));
 	TestTrue(TEXT("Figma outer shadow remains a fill child with its source offset"),
 		Shadow.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
 		&& Shadow.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill

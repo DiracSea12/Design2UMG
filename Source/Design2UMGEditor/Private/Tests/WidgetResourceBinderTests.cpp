@@ -281,8 +281,8 @@ bool FPropertyApplierUsesSharedAxisAlignedCropSemantics::RunTest(const FString& 
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("AxisCropPropertyApply");
 	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
-	Node.WidgetStyle.ImageMode = TEXT("Crop");
-	Node.WidgetStyle.ImageTransform = TEXT("0.5,0,0.25,0,0.75,0.1");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 0.5f, 0.0f, 0.25f, 0.0f, 0.75f, 0.1f };
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
 
@@ -335,8 +335,8 @@ bool FPropertyApplierUsesSharedAffineCropSemantics::RunTest(const FString& Param
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("AffineCropPropertyApply");
 	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
-	Node.WidgetStyle.ImageMode = TEXT("Crop");
-	Node.WidgetStyle.ImageTransform = TEXT("1,0.25,0,0.10,1,0");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 1.0f, 0.25f, 0.0f, 0.1f, 1.0f, 0.0f };
 	Node.WidgetStyle.WidthOverride = 8.0f;
 	Node.WidgetStyle.HeightOverride = 6.0f;
 
@@ -372,8 +372,8 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("AffineCropImage");
 	Node.Brush.Image.TexturePath = TextureKey;
-	Node.WidgetStyle.ImageMode = TEXT("Crop");
-	Node.WidgetStyle.ImageTransform = TEXT("1,0.25,0,0.10,1,0");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 1.0f, 0.25f, 0.0f, 0.1f, 1.0f, 0.0f };
 	Node.WidgetStyle.WidthOverride = 8.0f;
 	Node.WidgetStyle.HeightOverride = 6.0f;
 
@@ -415,8 +415,8 @@ bool FWidgetResourceBinderPreservesAxisAlignedCropAfterBinding::RunTest(const FS
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("AxisCropImage");
 	Node.Brush.Image.TexturePath = TextureKey;
-	Node.WidgetStyle.ImageMode = TEXT("Crop");
-	Node.WidgetStyle.ImageTransform = TEXT("0.5,0,0.25,0,0.75,0.1");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 0.5f, 0.0f, 0.25f, 0.0f, 0.75f, 0.1f };
 	UImage* ImageWidget = NewObject<UImage>();
 	TMap<FString, UTexture2D*> TextureMap;
 	TextureMap.Add(TextureKey, SourceTexture);

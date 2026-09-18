@@ -10,6 +10,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 
 TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeAnchor(const FUMGAnchorData& Anchor)
 {
@@ -181,10 +182,6 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeWidgetStylePayload(const FU
 		StyleObject->SetStringField(UMGPropertyKeys::StrokePadding, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokePadding.GetValue()));
 	if (Style.StrokeMargin.IsSet())
 		StyleObject->SetStringField(UMGPropertyKeys::StrokeMargin, Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Style.StrokeMargin.GetValue()));
-	if (Style.ImageMode.IsSet())
-		StyleObject->SetStringField(UMGPropertyKeys::ImageMode, Style.ImageMode.GetValue());
-	if (Style.ImageTransform.IsSet())
-		StyleObject->SetStringField(UMGPropertyKeys::ImageTransform, Style.ImageTransform.GetValue());
 	if (Style.Stretch.IsSet())
 		StyleObject->SetStringField(UMGPropertyKeys::Stretch, Style.Stretch.GetValue());
 	if (Style.StretchDirection.IsSet())
@@ -218,8 +215,27 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextPayload(const FUMGTextD
 	TSharedRef<FJsonObject> TextObject = MakeShared<FJsonObject>();
 	if (Text.Text.IsSet())
 		TextObject->SetStringField(UMGPropertyKeys::Text, Text.Text.GetValue());
-	if (Text.RichTextStyleRowsJson.IsSet())
-		TextObject->SetStringField(UMGPropertyKeys::RichTextStyleRows, Text.RichTextStyleRowsJson.GetValue());
+	if (Text.RichTextStyleRows.IsSet())
+	{
+		TSharedRef<FJsonObject> RowsObject = MakeShared<FJsonObject>();
+		for (const auto& Pair : Text.RichTextStyleRows.GetValue())
+		{
+			const FUMGRichTextStyleRowData& Row = Pair.Value;
+			TSharedRef<FJsonObject> RowObject = MakeShared<FJsonObject>();
+			if (!Row.FontFamily.IsEmpty()) RowObject->SetStringField(UMGPropertyKeys::FontFamily, Row.FontFamily);
+			if (!Row.TypefaceFontName.IsEmpty()) RowObject->SetStringField(UMGPropertyKeys::TypefaceFontName, Row.TypefaceFontName);
+			if (Row.FontSize.IsSet()) RowObject->SetNumberField(UMGPropertyKeys::FontSize, Row.FontSize.GetValue());
+			if (Row.LetterSpacing.IsSet()) RowObject->SetNumberField(UMGPropertyKeys::LetterSpacing, Row.LetterSpacing.GetValue());
+			if (Row.Color.IsSet()) RowObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Row.Color.GetValue()));
+			if (Row.bUnderline) RowObject->SetBoolField(UMGPropertyKeys::Underline, true);
+			if (Row.bStrikethrough) RowObject->SetBoolField(UMGPropertyKeys::Strikethrough, true);
+			if (!Row.Href.IsEmpty()) RowObject->SetStringField(UMGPropertyKeys::Href, Row.Href);
+			RowsObject->SetObjectField(Pair.Key, RowObject);
+		}
+		FString RowsJson;
+		const auto Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&RowsJson);
+		if (FJsonSerializer::Serialize(RowsObject, Writer)) TextObject->SetStringField(UMGPropertyKeys::RichTextStyleRows, RowsJson);
+	}
 	if (Text.HintText.IsSet())
 		TextObject->SetStringField(UMGPropertyKeys::HintText, Text.HintText.GetValue());
 	if (Text.FontFamily.IsSet())
@@ -256,9 +272,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextPayload(const FUMGTextD
 TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisualBrushData& Brush)
 {
 	// Brush (v2.4)
-	FUMGVisualBrushData BrushData = Brush;
-	Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(BrushData);
-	const FUMGVisualBrushData& B = BrushData;
+	const FUMGVisualBrushData& B = Brush;
 	TSharedRef<FJsonObject> BJ = MakeShared<FJsonObject>();
 	bool bHasAny = false;
 	if (B.OutlineCornerRadius.IsSet())   { BJ->SetNumberField(UMGPropertyKeys::OutlineCornerRadius, B.OutlineCornerRadius.GetValue()); bHasAny = true; }
@@ -270,6 +284,27 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 	if (B.OutlineColor.IsSet())        { BJ->SetStringField(UMGPropertyKeys::OutlineColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(B.OutlineColor.GetValue())); bHasAny = true; }
 	if (B.MaterialRef.IsSet())         { BJ->SetStringField(UMGPropertyKeys::MaterialRef, B.MaterialRef.GetValue()); bHasAny = true; }
 	if (B.MaterialParams.IsSet())      { BJ->SetStringField(UMGPropertyKeys::MaterialParams, B.MaterialParams.GetValue()); bHasAny = true; }
+	if (B.Shape.IsSet())
+	{
+		const auto& Shape = B.Shape.GetValue();
+		TSharedRef<FJsonObject> ShapeObject = MakeShared<FJsonObject>();
+		if (Shape.Color.IsSet()) ShapeObject->SetStringField(TEXT("Color"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Shape.Color.GetValue()));
+		if (Shape.Thickness.IsSet()) ShapeObject->SetNumberField(TEXT("Thickness"), Shape.Thickness.GetValue());
+		if (Shape.CornerRadius.IsSet()) ShapeObject->SetNumberField(TEXT("CornerRadius"), Shape.CornerRadius.GetValue());
+		if (Shape.BlurPadding.IsSet()) ShapeObject->SetNumberField(TEXT("BlurPadding"), Shape.BlurPadding.GetValue());
+		if (Shape.StripeColor.IsSet()) ShapeObject->SetStringField(TEXT("StripeColor"), Design2UMGWidgetNodeAccess::SerializeWidgetColor(Shape.StripeColor.GetValue()));
+		if (Shape.StripeWidth.IsSet()) ShapeObject->SetNumberField(TEXT("StripeWidth"), Shape.StripeWidth.GetValue());
+		if (Shape.StripeGap.IsSet()) ShapeObject->SetNumberField(TEXT("StripeGap"), Shape.StripeGap.GetValue());
+		if (Shape.Inset.IsSet()) ShapeObject->SetNumberField(TEXT("Inset"), Shape.Inset.GetValue());
+		if (Shape.CornerRadii.IsSet())
+		{
+			TArray<TSharedPtr<FJsonValue>> Radii;
+			for (int32 Index = 0; Index < 4; ++Index) Radii.Add(MakeShared<FJsonValueNumber>(Shape.CornerRadii.GetValue()[Index]));
+			ShapeObject->SetArrayField(TEXT("CornerRadii"), Radii);
+		}
+		BJ->SetObjectField(TEXT("Shape"), ShapeObject);
+		bHasAny = true;
+	}
 	if (B.Image.HasAny())
 	{
 		TSharedRef<FJsonObject> ImageObject = MakeShared<FJsonObject>();

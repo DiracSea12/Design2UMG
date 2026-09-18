@@ -36,7 +36,7 @@ namespace
 
 	FString ResolveImageMode(const FUMGWidgetNode& Node)
 	{
-		return Node.WidgetStyle.ImageMode.Get(Node.Brush.Image.Mode.Get(FString()));
+		return Node.Brush.Image.Mode.Get(FString());
 	}
 
 	bool ApplyImageModeToSlateBrush(
@@ -150,7 +150,7 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(FString());
 		if (!TexturePath.IsEmpty())
 		{
 			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
@@ -212,7 +212,7 @@ namespace UMGBrushPropertyApplier
 		}
 		else
 		{
-			const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+			const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(FString());
 			if (!TexturePath.IsEmpty())
 			{
 				if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))

@@ -628,21 +628,15 @@ bool FTextRunPostScriptNameTriggersRichTextBlockTest::RunTest(const FString& Par
 	{
 		TestEqual(TEXT("Run-level PostScript-only styling converts to RichTextBlock"), TextWidget->Type, TEXT("RichTextBlock"));
 		TestTrue(TEXT("Rich text markup includes mapped run tag"), GetWidgetProperty(*TextWidget, TEXT("Text")).Contains(TEXT("<d2u_run_1>Mapped</>")));
-		TestTrue(TEXT("Run-level PostScript style rows exported"), TextWidget->Text.RichTextStyleRowsJson.IsSet());
-		if (TextWidget->Text.RichTextStyleRowsJson.IsSet())
+		TestTrue(TEXT("Run-level PostScript style rows exported"), TextWidget->Text.RichTextStyleRows.IsSet());
+		if (TextWidget->Text.RichTextStyleRows.IsSet())
 		{
-			TSharedPtr<FJsonObject> StyleRows;
-			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(TextWidget->Text.RichTextStyleRowsJson.GetValue());
-			TestTrue(TEXT("Run-level PostScript style rows JSON is valid"), FJsonSerializer::Deserialize(Reader, StyleRows) && StyleRows.IsValid());
-			if (StyleRows.IsValid())
+			const auto* MappedRunRow = TextWidget->Text.RichTextStyleRows->Find(TEXT("d2u_run_1"));
+			TestNotNull(TEXT("Mapped run style row exists"), MappedRunRow);
+			if (MappedRunRow)
 			{
-				const TSharedPtr<FJsonObject>* MappedRunRow = nullptr;
-				TestTrue(TEXT("Mapped run style row exists"), StyleRows->TryGetObjectField(TEXT("d2u_run_1"), MappedRunRow));
-				if (MappedRunRow && MappedRunRow->IsValid())
-				{
-					TestEqual(TEXT("Mapped run resolves explicit PostScript font asset"), (*MappedRunRow)->GetStringField(TEXT("FontFamily")), RunFontPath);
-					TestEqual(TEXT("Mapped run keeps exact regular typeface"), (*MappedRunRow)->GetStringField(TEXT("TypefaceFontName")), RunRegularTypeface);
-				}
+				TestEqual(TEXT("Mapped run resolves explicit PostScript font asset"), MappedRunRow->FontFamily, RunFontPath);
+				TestEqual(TEXT("Mapped run keeps exact regular typeface"), MappedRunRow->TypefaceFontName, RunRegularTypeface);
 			}
 		}
 	}

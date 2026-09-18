@@ -645,8 +645,8 @@ namespace
 		S.bHasMaterialRef = Node.Brush.MaterialRef.IsSet();
 		S.TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		S.bHasTexturePath = Node.Brush.Image.TexturePath.IsSet();
-		S.bHasImageMode = Node.Brush.Image.Mode.IsSet() || Node.WidgetStyle.ImageMode.IsSet();
-		S.bHasImageTransform = Node.Brush.Image.Transform.IsSet() || Node.WidgetStyle.ImageTransform.IsSet();
+		S.bHasImageMode = Node.Brush.Image.Mode.IsSet();
+		S.bHasImageTransform = Node.Brush.Image.Transform.IsSet();
 		return S;
 	}
 
@@ -689,8 +689,8 @@ namespace
 		Node.Id = Id;
 		Node.Name = Id;
 		Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
-		Node.WidgetStyle.ImageMode = TEXT("Crop");
-		Node.WidgetStyle.ImageTransform = TEXT("0.75,0.1,0.05,-0.1,0.65,0.2");
+		Node.Brush.Image.Mode = TEXT("Crop");
+		Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 0.75f, 0.1f, 0.05f, -0.1f, 0.65f, 0.2f };
 		Node.WidgetStyle.WidthOverride = 8.0f;
 		Node.WidgetStyle.HeightOverride = 6.0f;
 		return Node;

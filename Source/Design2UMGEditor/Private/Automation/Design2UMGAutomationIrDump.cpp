@@ -384,8 +384,6 @@ namespace
 		AddOptionalMargin(Fields, TEXT("SlotPadding"), WidgetStyle.SlotPadding);
 		AddOptionalMargin(Fields, TEXT("StrokePadding"), WidgetStyle.StrokePadding);
 		AddOptionalMargin(Fields, TEXT("StrokeMargin"), WidgetStyle.StrokeMargin);
-		AddOptionalString(Fields, TEXT("ImageMode"), WidgetStyle.ImageMode);
-		AddOptionalString(Fields, TEXT("ImageTransform"), WidgetStyle.ImageTransform);
 		AddOptionalString(Fields, TEXT("Stretch"), WidgetStyle.Stretch);
 		AddOptionalString(Fields, TEXT("StretchDirection"), WidgetStyle.StretchDirection);
 		AddOptionalColor(Fields, TEXT("BackgroundColor"), WidgetStyle.BackgroundColor);
@@ -403,7 +401,25 @@ namespace
 	{
 		FJsonFields Fields;
 		AddOptionalString(Fields, TEXT("Text"), Text.Text);
-		AddOptionalString(Fields, TEXT("RichTextStyleRowsJson"), Text.RichTextStyleRowsJson);
+		if (Text.RichTextStyleRows.IsSet())
+		{
+			FJsonFields Rows;
+			for (const auto& Pair : Text.RichTextStyleRows.GetValue())
+			{
+				const auto& Row = Pair.Value;
+				FJsonFields RowFields;
+				AddString(RowFields, TEXT("FontFamily"), Row.FontFamily);
+				AddString(RowFields, TEXT("TypefaceFontName"), Row.TypefaceFontName);
+				AddOptionalFloat(RowFields, TEXT("FontSize"), Row.FontSize);
+				AddOptionalFloat(RowFields, TEXT("LetterSpacing"), Row.LetterSpacing);
+				AddOptionalColor(RowFields, TEXT("Color"), Row.Color);
+				AddBool(RowFields, TEXT("Underline"), Row.bUnderline);
+				AddBool(RowFields, TEXT("Strikethrough"), Row.bStrikethrough);
+				AddString(RowFields, TEXT("Href"), Row.Href);
+				Rows.Add(FJsonField(Pair.Key, RenderObject(RowFields)));
+			}
+			Fields.Add(FJsonField(TEXT("RichTextStyleRows"), RenderObject(Rows)));
+		}
 		AddOptionalString(Fields, TEXT("HintText"), Text.HintText);
 		AddOptionalString(Fields, TEXT("FontFamily"), Text.FontFamily);
 		AddOptionalString(Fields, TEXT("TypefaceFontName"), Text.TypefaceFontName);
@@ -448,7 +464,22 @@ namespace
 		AddOptionalColor(Fields, TEXT("OutlineColor"), Brush.OutlineColor);
 		AddOptionalString(Fields, TEXT("MaterialRef"), Brush.MaterialRef);
 		AddOptionalString(Fields, TEXT("MaterialParams"), Brush.MaterialParams);
-		AddString(Fields, TEXT("TexturePath"), Brush.TexturePath);
+
+		if (Brush.Shape.IsSet())
+		{
+			const auto& Shape = Brush.Shape.GetValue();
+			FJsonFields ShapeFields;
+			AddOptionalColor(ShapeFields, TEXT("Color"), Shape.Color);
+			AddOptionalFloat(ShapeFields, TEXT("Thickness"), Shape.Thickness);
+			AddOptionalFloat(ShapeFields, TEXT("CornerRadius"), Shape.CornerRadius);
+			AddOptionalVector4(ShapeFields, TEXT("CornerRadii"), Shape.CornerRadii);
+			AddOptionalFloat(ShapeFields, TEXT("BlurPadding"), Shape.BlurPadding);
+			AddOptionalColor(ShapeFields, TEXT("StripeColor"), Shape.StripeColor);
+			AddOptionalInt(ShapeFields, TEXT("StripeWidth"), Shape.StripeWidth);
+			AddOptionalInt(ShapeFields, TEXT("StripeGap"), Shape.StripeGap);
+			AddOptionalInt(ShapeFields, TEXT("Inset"), Shape.Inset);
+			Fields.Add(FJsonField(TEXT("Shape"), RenderObject(ShapeFields)));
+		}
 
 		if (Brush.Image.HasAny())
 		{

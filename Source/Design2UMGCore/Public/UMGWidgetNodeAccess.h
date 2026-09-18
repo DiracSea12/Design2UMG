@@ -31,7 +31,6 @@ namespace Design2UMGWidgetNodeAccess
 	DESIGN2UMGCORE_API bool TryParseDrawAs(const FString& Value, ESlateBrushDrawType::Type& OutDrawAs);
 	DESIGN2UMGCORE_API FString GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient);
 	DESIGN2UMGCORE_API FString SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient);
-	DESIGN2UMGCORE_API bool NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic = nullptr);
 
 	// Verbose-log presentation helper: renders the set typed payload fields of a
 	// widget node as " Key=Value" fragments grouped by payload, in the shared

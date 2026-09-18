@@ -38,7 +38,7 @@
 | PR-03 | `VERIFIED` | Import / Reimport / Save 结果状态统一 |
 | PR-04 | `VERIFIED` | Degradation / Warning / Partial Sync 诊断闭环 |
 | PR-05 | `VERIFIED` | 删除确定无效复杂度并修严输入解析 |
-| PR-06 | `NOT_STARTED` | Typed Payload 与内部 JSON/String 胶水收敛 |
+| PR-06 | `VERIFIED` | Typed Payload 与内部 JSON/String 胶水收敛 |
 | PR-07 | `NOT_STARTED` | 单次树索引与身份歧义检测 |
 | PR-08 | `NOT_STARTED` | Core / Editor 小切口解耦 |
 | PR-09 | `NOT_STARTED` | 测试体系分层与低价值测试整理 |
@@ -697,7 +697,7 @@ KindChanged 等路径存在“先删除旧 D2U-owned subtree，再创建新 subt
 
 # PR-06：Typed Payload 与内部 JSON/String 胶水收敛
 
-**状态**：`NOT_STARTED`
+**状态**：`VERIFIED`
 
 **优先级**：P1 / 建议完成
 
@@ -725,22 +725,104 @@ JSON/String 允许存在于明确的：
 
 ## 行动项
 
-- [ ] 盘点内部仍在“拼 JSON → 后续再解析”的固定协议。
-- [ ] 优先迁移 placeholder / 固定 shape 参数等内部闭合协议为 typed payload。
-- [ ] 不消灭所有 `MaterialParams`；开放式用户 material 参数可保留字符串/JSON。
-- [ ] 明确 legacy/canonical 字段唯一归一化位置。
-- [ ] 下游不再同时判断 legacy owner 与 canonical owner。
-- [ ] 未经用户批准，不新增旧字段兼容；发现现存兼容时先记录，不擅自扩展。
+- [x] 盘点内部仍在“拼 JSON → 后续再解析”的固定协议。
+- [x] 优先迁移 placeholder / 固定 shape 参数等内部闭合协议为 typed payload。
+- [x] 不消灭所有 `MaterialParams`；开放式用户 material 参数可保留字符串/JSON。
+- [x] 明确 legacy/canonical 字段唯一归一化位置。
+- [x] 下游不再同时判断 legacy owner 与 canonical owner。
+- [x] 未经用户批准，不新增旧字段兼容；发现现存兼容时先记录，不擅自扩展。
 
 ## 完成条件
 
-- [ ] 核心内部固定语义不依赖不必要的 JSON round-trip。
-- [ ] Canonical representation 进入内部主路径后保持唯一。
-- [ ] Serializer/Parser 的 round-trip 测试与视觉回归无退步。
+- [x] 核心内部固定语义不依赖不必要的 JSON round-trip。
+- [x] Canonical representation 进入内部主路径后保持唯一。
+- [x] Serializer/Parser 的 round-trip 测试与视觉回归无退步。
 
 ## 会话记录
 
-尚无。
+2026-09-18：用户批准收掉本阶段全部自审问题。开始基线 `96344eec46d6ecd07b21ddb7cf6ba556435a350f`，保留全部已有工作区修改；本次处理 Shape 新增输入边界、Prototype 按键 typed 传递及本阶段局部冗余。进入快照和验证证据位于 `Saved/PR06/closure-20260918/`。当前状态仍为 `IN_PROGRESS`，完成真实验证后再更新。
+
+2026-09-18：开始基线 `96344eec46d6ecd07b21ddb7cf6ba556435a350f`。已核对当前源码、根目录协作规则与相关 canonical specs；保留全部既有工作区修改，仅实施 PR-06。进入快照位于 `Saved/PR06/20260918/`。内部固定 shape/placeholder/gradient 传递和图片字段 owner 为本阶段收敛范围；现存旧图片输入别名先在输入边界登记，不新增兼容格式或扩大兼容行为。
+
+### 实现与保留边界
+
+| 范围 | 当前实现与唯一边界 |
+|---|---|
+| Placeholder / 固定 shape / shadow | `Brush.Shape` 的显式 typed 字段直接进入现有 `FUMGProceduralResourceRequest`；删除生成 JSON 再解析的内部路径。Shape 存在时（包括显式空值）不与外部参数合并，全部字段及 presence 纳入现有资源缓存键。 |
+| Gradient | 仅写入 `Brush.Gradient`；request 从该字段推导 material ref，删除 mapper 的 ref/JSON 双写。`SerializeGradientMaterialParams` 仅保留测试适配与现有外部输入等价验证使用，不在生产资源主路径调用。 |
+| Rich-text rows | `Text.RichTextStyleRows` 使用 optional typed map，builder 到 style-table consumer 直接传递；删除 `RichTextStyleRowSerializer.h/.cpp`。既有 encoded JSON string 仅由输入/输出 serializer 处理，保留缺省、显式空表及继承语义。 |
+| Image | 仅保留 `Brush.Image`；root texture path 与 WidgetStyle 的旧 image 字段只在 `FUMGJsonParser::ParseBrushPayload` 归一化，原优先级及非法值诊断不变。Importer / crop / binder / applier 不再判断双 owner。 |
+| Path 与输出 | 路径颜色直接使用 typed 值，保留原8位颜色精度；SVG geometry、文本 markup、诊断/交换序列化保持既有格式。 |
+| 开放参数 | 保留用户 `MaterialParams` 原始字符串/JSON 与既有外部参数解析入口，不扩大兼容格式；不新建字段注册表、通用 schema 框架或额外 fallback。 |
+
+本阶段相对进入快照共涉及42个源码/测试文件，生产代码新增376行、删除551行，净减少175行；另同步 `Docs/PropertyTyping.md` 与本进度文档。既有工作区修改原样保留，未修改引擎、参考输入、注册基线或阈值，未实施PR-07～PR-11。
+
+### 实际验证
+
+| 检查 | 结果与证据 |
+|---|---|
+| 真实项目构建 | `FPSRoguelikeEditor Win64 Development` 成功，exit 0；最终 `build-04-stdout.log` 与 `build-04-process.json`。 |
+| 新增行为测试 | `Design2UMG.TypedPayload.*` 5/5；覆盖shape所有字段与presence、8种图形像素等价、缓存隔离、图片别名归一化与rich-text空表/继承。最终 `typed-tests-02.log`。 |
+| 数值边界回归 | `Design2UMG.NumericParsing.*` 12/12；`numeric-tests.log`。原严格字符串/矩阵输入语义未放宽。 |
+| 全插件自动化 | 620/620，完整保留PR-05的615项并新增5项，无重复或缺失ID；`all-tests.log`，editor exit 0及完成标记0。实际使用D3D12，缓存测试已生成并检查资源，非NullRHI跳过。 |
+| 完整81-case | 未筛选、产物齐全；81张候选PNG逐张SHA-256与 `pr05-closure-full81-20260918` 完全相同，四项像素指标差值均为0，source/reference身份相同。生成、结构与尺寸检查通过，editor exits 0/0。 |
+| 原始门禁 | `available=81, passed=79, failed=2`，batch exit 2；历史best仍保留原blocked结果。仅 `pen_pencil-shadcn_shadcn-design-system-components` 与 `pen_pencil-welcome_step-1-frame` 两项既有批准例外，数值及阻断原因未新增或扩大；不改写为原始81/81。 |
+| 完整性 | 418个Source文件与2个DLL匹配最终冻结指纹，248项受保护文件未变；无无关tracked修改，无staged改动，HEAD保持 `96344eec46d6ecd07b21ddb7cf6ba556435a350f`。 |
+
+实际运行命令均保存为 `Saved/PR06/20260918/*-command.json`。视觉产物根目录为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr06-full81-20260918`；注册参考仍为 `review-batch-transaction-full-20260915`，没有把PR-05工作结果提升为新注册基线。初次失败构建、早期测试及被中断的测试记录原样保留，不作为最终成功证据。
+
+### 自审与续作收口
+
+2026-09-18续作重新读取本阶段全部生产/测试diff、原始日志与逐例产物，执行 `assess.py` 核对当前源码和原已运行版本完全一致；本次续作没有重改源码或把重读日志称为重新执行全套测试。类型说明和本阶段记录已同步，其他阶段章节不变。
+
+**四项自审结论**：实现复用现有payload、request、consumer及缓存，删除双写/重复解析而非增加通用抽象；本阶段行动项已覆盖；Core负责typed语义、Editor负责输入归一化与UE资源消费，继续拆分仅为减少文件行数没有当前收益；在已审范围与实际验证中未确认新的阻断缺陷。外部开放参数、既有输入别名及测试用序列化helper是明确保留边界，不宣称清除了全部JSON/String。少量测试说明仍沿用旧“material params”措辞，数值测试有一处重复canonical缺省断言，不影响本次覆盖，不混入PR-09的全局测试整理。
+
+验收范围为本机Windows/Win64、真实项目与本阶段行为契约，不是独立外部正式评审、所有手工IR输入的全面安全加固或游戏打包发布认证。证据入口：`Saved/PR06/20260918/verification.json`；完整自审：`self-review.md`；机器核验：`build-assessment.json`、`automation-assessment.json`、`full81-assessment.json`、`final-integrity.json`。按原有两项批准例外口径将PR-06标为 `VERIFIED`。
+
+### 2026-09-18 自我审查更正：新增输入边界缺陷与盘点遗漏
+
+本次按用户要求重新审查全部PR-06增量、相关调用链和行为测试。上轮构建、620项自动化及81-case证据均真实有效，但不能推出本阶段所有要求已经闭合。**撤回“固定协议收敛完整”的结论，状态改回`IN_PROGRESS`**；原验收记录与失败/成功日志保留，其他阶段不变。
+
+- **R1，已实际复现**：`UMGJsonParser.cpp:480-482`新增Shape的`CornerRadius / Thickness / BlurPadding`未校验float范围。三者分别输入`1e39`时，ParseJson均成功、无warning、typed字段成为`inf`且资源请求仍构造成功；serializer写出裸`inf`，插件自身重新解析报`Invalid JSON`。同一Shape入口还会把bool读为0/1，并静默丢弃坏radii或溢出整数字段。已有5项TypedPayload测试没有覆盖这些异常输入。收口应限制在新增Shape边界，复用本文件已有有限数值读取/诊断能力，不扩成全JSON/schema改造。
+- **R2，盘点/范围遗漏而非新增运行故障**：`FigmaParserPrototype.cpp:237-243`将trigger转成JSON字符串，`Design2UMGPrototypeStepGraphAssembly.cpp:402-436,550`又在Core解析固定`keyCodes/keyCode`字段。上轮范围表未登记或解释这条主路径，却勾选了完整盘点。应将已消费的按键列表在源入口提取后typed传递，或明确完成范围调整；不要求删除承担原始源信息保留职责的TriggerJson，更不要求重写整个Prototype。
+
+**代码质量判断**：24个生产文件（含删除2个文件）、18个测试文件的迁移没有新增通用框架、额外状态owner或case/node/font/file定向分支。资源请求、缓存、图片归一化和富文本应用端的解耦收益成立；生产净减少175行不是完整性证明。Shadow中的1000/100有旧三位精度与百分比约定依据，不判作样例硬编码。测试长presence断言、两处重复/旧注释是非阻断整理项，不借此扩大到PR-09。
+
+**本次真实验证**：独立诊断DLL调用未修改的插件，13组输入（含两个正常对照），编译/链接0，真实`FPSRoguelike.uproject`编辑器exit0且完成标记有效。验证范围是解析→typed request→序列化→再次解析，没有渲染坏输入或声称已复现崩溃。另重新审计原620项和81-case原始证据：81张PNG与PR05逐张SHA-256仍相同，四指标差值0，原始79通过+2既有例外/batch2/editor0/0不变；本次没有重跑620项或81-case渲染。
+
+**本次没有修改生产/测试源码或插件DLL、没有暂存/提交**。418个Source文件、2个DLL、248个受保护文件与原冻结指纹一致，HEAD仍为`96344eec46d6ecd07b21ddb7cf6ba556435a350f`。仅追加审查材料并更正本阶段计划。证据：`Saved/PR06/self-review-20260918/review.md`、`probe-results.json`、`probe-editor.log`、`probe-process.json`、`review-assessment.json`与`review-integrity.json`。**下一步是PR-06局部收口，不是实施PR-07。**
+
+---
+
+### 2026-09-18 自审问题收口（最新验收依据）
+
+用户批准收掉本阶段全部自审问题后，本次完成R1、R2及前次指出的局部整理；原实施、撤回结论和失败证据均保留。开始/结束HEAD为`96344eec46d6ecd07b21ddb7cf6ba556435a350f`，未暂存、未提交，不修改PR-01～PR-05及后续阶段正文。
+
+**R1：Shape输入边界。** 原有有限数值判断在同一parser内复用，局部Shape读取函数要求正确JSON类型，浮点数及四个圆角分量必须有限且可表示为float。非法字段诊断后不设置，合法兄弟字段保留；错误圆角数组整组拒绝，不发布半有效值。整数保留原int32范围和数值舍入，颜色保留原字符串词法；缺省、明确0及显式空Shape保持独立语义。没有在serializer把inf改成零，也没有给下游渲染器加第二层修补。
+
+**R2：Prototype按键。** `FDesignPrototypeInteraction::TriggerKeyCodes`承接源入口提取后的列表，graph assembler直接传递，不再读取TriggerJson中的keyCodes/keyCode，两个JSON相关include及原解析函数已删除。原始TriggerJson只保留源信息，不能覆盖或补回typed列表；没有新增旧IR兼容。原大小写、去重、顺序及missing-key诊断保持。
+
+**局部整理与规模。** 修正“四字段”过时注释、重复canonical断言及相关旧措辞，迁移测试先检查Shape owner再做字段断言，移除长串重复owner判断；rich-text样式map在最终交接处移动而不复制。本次6个生产文件净增35行、7个测试文件新增3项；没有新增生产文件/模块/配置/框架。整个PR-06生产代码相对最初进入快照净减少140行，完整增量见`phase06-total.diff`。`Docs/PropertyTyping.md`及`protocol-inventory.md`同步新边界与保留理由，不声称全插件不再使用任何JSON。
+
+| 本轮真实检查 | 结果 | 证据（`Saved/PR06/closure-20260918/`） |
+|---|---|---|
+| 缺口红绿验证 | Shape两项在原生产实现失败后通过；107个坏输入逐字段精确诊断，3个有效对照；Prototype有效夹具在原实现中丢失/改变按键，修复后通过 | `red-tests-01-*`、`red-prototype-03-*`、`red-green-assessment.json` |
+| 真实项目编译 | `FPSRoguelikeEditor Win64 Development`成功，exit0 | `build-01-*` |
+| 针对性测试 | typed8/8、numeric12/12，完成标记及editor均0 | `focused-*`、`numeric-tests-*` |
+| 全插件自动化 | **623/623**，原620个ID全部保留，新3项；完成标记与editor exit0 | `all-tests-*`、`automation-assessment.json` |
+| 完整81-case | 无筛选；**81张候选图与收口前PR06逐张SHA-256相同，四项像素指标逐例差值0**；身份/生成/结构/尺寸/产物检查通过，editor0/0 | `full81-*`、`full81-assessment.json` |
+| 原始门禁 | **79通过+原批准2例外**，batch2，历史阻断原因和数值不变，无新增或扩大退步；未改阈值和注册基线 | full run原始summary/history |
+| 完整性 | 418源码、2DLL匹配冻结指纹，248保护文件未变；其他阶段正文及无关已有改动不变，UTF-8无BOM、diff检查通过 | `final-integrity.json` |
+
+Prototype前两次红测存在夹具问题（第二页缺失或为空，被既有规则剔除），不作为产品失败证据；`red-prototype-03`已使用两份有可见内容的页面并验证初始3个绑定有效。修正仅在测试，未改变生产导航/布局规则。预期Warning在自动化日志中降级显示为Verbose；本次独立计数按字段核对107条，未放宽告警次数。
+
+完整运行：`G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/pr06-closure-final-full81-20260918`。相邻实现对照为`pr06-full81-20260918`；正式reference仍为`review-batch-transaction-full-20260915`。原两项例外仅为`pen_pencil-shadcn_shadcn-design-system-components`和`pen_pencil-welcome_step-1-frame`，不能理解为原始门禁零例外通过。
+
+**本轮视觉环境说明：** 首轮一个分片在UE UdpMessaging异步反序列化期间触发保存/GC对象查找断言，原自动补跑及异常记录保留在`failed-full81-*`和`pr06-closure-full81-20260918`，不作为最终干净运行。最初单例复测与原脚本自动补跑重叠，仅作补充。确认原批次及所有编辑器退出后，再执行真正独占的`exclusive-uswds`（exit0、图像/指标/身份一致），随后重跑本节完整81-case。复测仅通过现有`DESIGN2UMG_EDITOR_EXTRA_ARGS`给视觉子进程添加`-UDPMESSAGING_TRANSPORT_ENABLE=false`；不改引擎源码、插件、持久配置、输入、参考或阈值。完整623项自动化仍在正常UDP环境下通过；并不声称修复了引擎消息模块。具体见`validation-environment.json`、`exclusive-preflight.json`、`exclusive-uswds-assessment.json`。
+
+**四项自审结论：** 方案与本次边界相称，替换旧复杂度而非追加框架；R1/R2及已指出局部冗余已闭环；输入校验/源键提取/typed传递/UE消费职责清楚，不继续扩大拆分；本阶段未确认遗留阻断问题。仍保留本机Windows/Win64范围、原两项视觉例外和明确的开放/源信息/输出格式，不声称全面加固所有手工IR与全插件原生数值。详见`self-review.md`、`protocol-inventory.md`。
+
+**最新证据入口：`Saved/PR06/closure-20260918/verification.json`。** 所有本轮构建、测试、视觉命令均保存为`*-command.json`，真实项目始终为`G:/UE5/FPSRoguelike/FPSRoguelike.uproject`。按原有批准例外口径恢复PR-06为`VERIFIED`，PR-07未实施。
 
 ---
 
@@ -1127,12 +1209,16 @@ Visual Mapper：
 | 2026-09-17 | PR-04 optional-output continuation | PR-04 | `VERIFIED → IN_PROGRESS → IMPLEMENTED → VERIFIED` | 本次未提交；HEAD `50f18d7` 已含此前PR01～04 | 修复无可选诊断输出时 wiring skip 被误报为普通成功；真实红/绿同测255→0，最终编译0、全插件599/599；81图及四指标与原PR04完全一致，原始79+2/batch2及历史blocked保留且例外未扩大；397源码/2DLL/248保护文件一致；见 `Saved/PR04/continuation-20260917/verification.json` |
 | 2026-09-17 | PR-04 review closure | PR-04 | `VERIFIED → IN_PROGRESS → IMPLEMENTED → VERIFIED` | 未提交；HEAD `50f18d7` | 补齐组件/输入/实例插槽降级，完善报告契约；原3项红断言255→0，最终9/9、全603/603、完整81图及四指标同前版；86份保留报告无矛盾，9份旧夹具清理单列；原79+2/batch2不改写；见 `Saved/PR04/review-closure-20260917/verification.json` |
 
+| 2026-09-18 | PR-06 implementation and continuation | PR-06 | `IN_PROGRESS → VERIFIED` | 未提交；HEAD `96344eec` | 固定shape/rich-text typed化、gradient去双写、image单owner；真实build0、typed5/5、numeric12/12、全620/620；完整81图及四指标同PR05，原79+2/batch2例外不变；418源码/2DLL/248保护文件一致，续作核验原始证据并同步文档；见 `Saved/PR06/20260918/verification.json` |
+| 2026-09-18 | PR-06 self review | PR-06 | `VERIFIED → IN_PROGRESS` | 未提交；HEAD `96344eec` | 13组原DLL探针确认Shape溢出进入inf并破坏JSON往返；发现prototype按键内部JSON盘点遗漏。原620项/81图证据重新审计有效，不改源码/DLL/保护文件；见 `Saved/PR06/self-review-20260918/review.md` |
+| 2026-09-18 | PR-06 review closure | PR-06 | `IN_PROGRESS → IMPLEMENTED → VERIFIED` | 未提交；HEAD `96344eec` | Shape107坏输入精确诊断/往返，Prototype源键typed直传及局部整理；build0、typed8/8、numeric12/12、全623/623；完整81图及4指标同前版，原79+2/batch2例外不变；418源码/2DLL/248保护文件一致；见 `Saved/PR06/closure-20260918/verification.json` |
+
 ---
 
 # 6. 当前下一步
 
-**下一阶段：PR-05 — 删除确定无效复杂度并修严输入解析。**
+**下一阶段：PR-07 — 单次树索引与身份歧义检测。**
 
-PR-04自审列出的缺口及同链路实例插槽遗漏已修复并重新验证。PR-01～PR-03状态不变，PR-05及后续阶段未实施。最新证据入口为 `Saved/PR04/review-closure-20260917/verification.json`；先前验收及中间失败证据全部保留。本次与上一轮工作区修改均未暂存、未提交，HEAD仍为 `50f18d7`。
+PR-06自审列出的Shape输入边界、Prototype按键内部JSON往返及局部冗余已收口，并重新执行真实编译、623项全插件自动化及完整81-case验证。最新证据入口为`Saved/PR06/closure-20260918/verification.json`；原实施和自审证据均保留。PR-01～PR-05状态不变，PR-07及后续阶段未实施。
 
-完整81-case原始门禁仍为79通过和2项既有批准例外；候选图与四项指标未变化。后续继续使用冻结参考和相同身份检查，不得新增或扩大例外，不得以代码更简洁为由接受退步。
+本次及进入时工作区修改均未暂存、未提交；HEAD仍为`96344eec46d6ecd07b21ddb7cf6ba556435a350f`。完整81-case原始门禁仍为79通过与两项既有批准例外；全部候选图和四项指标相对收口前PR06完全不变。后续不得新增或扩大例外、移动注册基线或以简化代码为由接受退步。

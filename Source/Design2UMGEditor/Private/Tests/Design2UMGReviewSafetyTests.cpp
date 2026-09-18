@@ -410,7 +410,7 @@ bool FGeneratedRasterAllocationLimitsTest::RunTest(const FString&)
 	TestTrue(TEXT("Successful crop clears errors"), Error.IsEmpty());
 	FProceduralShapeGenerator::ReleaseTransientTexture(Crop);
 	FUMGWidgetNode Node;
-	Node.WidgetStyle.ImageMode = TEXT("Crop");
+	Node.Brush.Image.Mode = TEXT("Crop");
 	FUMGVisualBrushData::FImageTransformData Transform;
 	Transform.B = 0.5f;
 	Node.Brush.Image.Transform = Transform;

@@ -572,7 +572,17 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	Node.Text.WrapTextAt = 180.0f;
 	Node.Text.LineHeightPercentage = 1.25f;
 	Node.Text.Color = FLinearColor(0.1f, 0.2f, 0.3f, 1.0f);
-	Node.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\"},\"d2u_run_1\":{\"FontSize\":22.5,\"Color\":\"#224466FF\",\"Underline\":true,\"Href\":\"https://docs.example.com\"},\"d2u_run_2\":{\"FontSize\":0.375}}");
+	TMap<FString, FUMGRichTextStyleRowData> StyleRows;
+	FUMGRichTextStyleRowData& Row0 = StyleRows.Add(TEXT("d2u_run_0"));
+	Row0.Color = FUMGValueParser::ParseColor(TEXT("#112233FF"));
+	FUMGRichTextStyleRowData& Row1 = StyleRows.Add(TEXT("d2u_run_1"));
+	Row1.FontSize = 22.5f;
+	Row1.Color = FUMGValueParser::ParseColor(TEXT("#224466FF"));
+	Row1.bUnderline = true;
+	Row1.Href = TEXT("https://docs.example.com");
+	FUMGRichTextStyleRowData& Row2 = StyleRows.Add(TEXT("d2u_run_2"));
+	Row2.FontSize = 0.375f;
+	Node.Text.RichTextStyleRows = MoveTemp(StyleRows);
 	Node.TextStyle.FontSize = 18.0f;
 	Node.TextStyle.SourceFontSize = 18.0f;
 	Node.TextStyle.LetterSpacing = 1.5f;
@@ -993,9 +1003,10 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	URichTextBlock* RichTextWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Rich text spacing widget created"));
 	if (RichTextWidget)
 	{
-		UMGTextStyleApplication::ApplyRichTextStyleRows(
-			RichTextWidget,
-			TEXT("{\"row\":{\"FontSize\":12.0,\"LetterSpacing\":-1.25}}"));
+		FUMGRichTextStyleRowData SpacingStyle;
+		SpacingStyle.FontSize = 12.0f;
+		SpacingStyle.LetterSpacing = -1.25f;
+		UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextWidget, { { TEXT("row"), SpacingStyle } });
 		const UDataTable* StyleSet = RichTextWidget->GetTextStyleSet();
 		const FRichTextStyleRow* Row = StyleSet
 			? StyleSet->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("LetterSpacingConversion"))
@@ -1050,7 +1061,20 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.Id = TEXT("typed_rich_text");
 	SourceNode.Name = TEXT("TypedRichText");
 	SourceNode.Text.Text = TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>");
-	SourceNode.Text.RichTextStyleRowsJson = TEXT("{\"d2u_run_0\":{\"Color\":\"#112233FF\",\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"TypefaceFontName\":\"Regular\"},\"d2u_run_1\":{\"Color\":\"#224466FF\",\"FontFamily\":\"/Game/Design2UMG/Fonts/Geist.Geist\",\"FontSize\":27.0,\"Href\":\"https://docs.example.com\",\"TypefaceFontName\":\"Bold\",\"Underline\":true}}");
+	TMap<FString, FUMGRichTextStyleRowData> StyleRows;
+	FUMGRichTextStyleRowData& Row0 = StyleRows.Add(TEXT("d2u_run_0"));
+	Row0.Color = FUMGValueParser::ParseColor(TEXT("#112233FF"));
+	Row0.FontFamily = TEXT("/Game/Design2UMG/Fonts/Geist.Geist");
+	Row0.FontSize = 27.0f;
+	Row0.TypefaceFontName = TEXT("Regular");
+	FUMGRichTextStyleRowData& Row1 = StyleRows.Add(TEXT("d2u_run_1"));
+	Row1.Color = FUMGValueParser::ParseColor(TEXT("#224466FF"));
+	Row1.FontFamily = TEXT("/Game/Design2UMG/Fonts/Geist.Geist");
+	Row1.FontSize = 27.0f;
+	Row1.Href = TEXT("https://docs.example.com");
+	Row1.TypefaceFontName = TEXT("Bold");
+	Row1.bUnderline = true;
+	SourceNode.Text.RichTextStyleRows = MoveTemp(StyleRows);
 	SourceNode.Text.FontFamily = TEXT("/Game/Design2UMG/Fonts/Geist.Geist");
 	SourceNode.Text.TypefaceFontName = TEXT("Regular");
 	SourceNode.Text.Justification = TEXT("Center");
@@ -1084,7 +1108,9 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Parsed rich text markup preserved"), ParsedNode->Text.Text, SourceNode.Text.Text);
-	TestEqual(TEXT("Parsed rich text style rows preserved"), ParsedNode->Text.RichTextStyleRowsJson, SourceNode.Text.RichTextStyleRowsJson);
+	TestTrue(TEXT("Parsed rich text style rows preserve every field and optional presence"),
+		ParsedNode->Text.RichTextStyleRows.IsSet()
+		&& ParsedNode->Text.RichTextStyleRows->OrderIndependentCompareEqual(SourceNode.Text.RichTextStyleRows.GetValue()));
 	TestEqual(TEXT("Parsed rich text font family preserved"), ParsedNode->Text.FontFamily, SourceNode.Text.FontFamily);
 	TestEqual(TEXT("Parsed rich text typeface preserved"), ParsedNode->Text.TypefaceFontName, SourceNode.Text.TypefaceFontName);
 	TestTrue(TEXT("Parsed rich text wrap width preserved"), ParsedNode->Text.WrapTextAt.IsSet() && FMath::IsNearlyEqual(ParsedNode->Text.WrapTextAt.GetValue(), SourceNode.Text.WrapTextAt.GetValue(), 0.001f));

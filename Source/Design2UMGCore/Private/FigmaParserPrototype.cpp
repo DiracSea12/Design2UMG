@@ -220,6 +220,42 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 	}
 }
 
+static TArray<FString> ParsePrototypeTriggerKeyCodes(const TSharedPtr<FJsonObject>& TriggerObject)
+{
+	TArray<FString> KeyCodes;
+
+	if (!TriggerObject.IsValid())
+	{
+		return KeyCodes;
+	}
+
+	if (const TArray<TSharedPtr<FJsonValue>>* KeyCodeArray =
+		DesignJsonUtils::GetArray(TriggerObject, TEXT("keyCodes")))
+	{
+		for (const TSharedPtr<FJsonValue>& KeyCodeValue : *KeyCodeArray)
+		{
+			if (!KeyCodeValue.IsValid())
+			{
+				continue;
+			}
+
+			FString KeyCodeString;
+			if (KeyCodeValue->TryGetString(KeyCodeString) && !KeyCodeString.IsEmpty())
+			{
+				KeyCodes.AddUnique(KeyCodeString.ToUpper());
+			}
+		}
+	}
+
+	const FString SingleKeyCode = DesignJsonUtils::GetString(TriggerObject, TEXT("keyCode"));
+	if (!SingleKeyCode.IsEmpty())
+	{
+		KeyCodes.AddUnique(SingleKeyCode.ToUpper());
+	}
+
+	return KeyCodes;
+}
+
 static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArray<FDesignPrototypeInteraction>& OutInteractions)
 {
 	const TArray<TSharedPtr<FJsonValue>>* Interactions = DesignJsonUtils::GetArray(Obj, TEXT("interactions"));
@@ -238,7 +274,9 @@ static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArra
 		if (TriggerField.IsValid())
 			Interaction.TriggerJson = DesignJsonUtils::ToPrettyString(TriggerField);
 
-		const FString TriggerType = DesignJsonUtils::GetString(DesignJsonUtils::GetObject(IObj, TEXT("trigger")), TEXT("type"));
+		const TSharedPtr<FJsonObject> TriggerObject = DesignJsonUtils::GetObject(IObj, TEXT("trigger"));
+		Interaction.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(TriggerObject);
+		const FString TriggerType = DesignJsonUtils::GetString(TriggerObject, TEXT("type"));
 		if (!TriggerType.IsEmpty())
 			Interaction.TriggerType = TriggerType;
 

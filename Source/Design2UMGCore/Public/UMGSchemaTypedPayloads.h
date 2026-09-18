@@ -30,8 +30,6 @@ struct FUMGWidgetStyleData
 	TOptional<FMargin> SlotPadding;
 	TOptional<FMargin> StrokePadding;
 	TOptional<FMargin> StrokeMargin;
-	TOptional<FString> ImageMode;
-	TOptional<FString> ImageTransform;
 	TOptional<FString> Stretch;
 	TOptional<FString> StretchDirection;
 	TOptional<FLinearColor> BackgroundColor;
@@ -54,8 +52,6 @@ struct FUMGWidgetStyleData
 			|| SlotPadding.IsSet()
 			|| StrokePadding.IsSet()
 			|| StrokeMargin.IsSet()
-			|| ImageMode.IsSet()
-			|| ImageTransform.IsSet()
 			|| Stretch.IsSet()
 			|| StretchDirection.IsSet()
 			|| BackgroundColor.IsSet()
@@ -69,10 +65,24 @@ struct FUMGWidgetStyleData
 	}
 };
 
+struct FUMGRichTextStyleRowData
+{
+	FString FontFamily;
+	FString TypefaceFontName;
+	TOptional<float> FontSize;
+	TOptional<float> LetterSpacing;
+	TOptional<FLinearColor> Color;
+	bool bUnderline = false;
+	bool bStrikethrough = false;
+	FString Href;
+
+	bool operator==(const FUMGRichTextStyleRowData&) const = default;
+};
+
 struct FUMGTextData
 {
 	TOptional<FString> Text;
-	TOptional<FString> RichTextStyleRowsJson;
+	TOptional<TMap<FString, FUMGRichTextStyleRowData>> RichTextStyleRows;
 	TOptional<FString> HintText;
 	TOptional<FString> FontFamily;
 	TOptional<FString> TypefaceFontName;
@@ -94,7 +104,7 @@ struct FUMGTextData
 	bool HasAny() const
 	{
 		return Text.IsSet()
-			|| RichTextStyleRowsJson.IsSet()
+			|| RichTextStyleRows.IsSet()
 			|| HintText.IsSet()
 			|| FontFamily.IsSet()
 			|| TypefaceFontName.IsSet()
@@ -171,6 +181,22 @@ struct FUMGVisualBrushData
 		}
 	};
 
+	struct FShapeData
+	{
+		TOptional<FLinearColor> Color;
+		TOptional<float> Thickness;
+		// Radii are normalized fractions of the half-minimum shape extent.
+		TOptional<float> CornerRadius;
+		TOptional<FVector4> CornerRadii;
+		TOptional<float> BlurPadding;
+		TOptional<FLinearColor> StripeColor;
+		TOptional<int32> StripeWidth;
+		TOptional<int32> StripeGap;
+		TOptional<int32> Inset;
+
+		bool operator==(const FShapeData&) const = default;
+	};
+
 	TOptional<float> OutlineCornerRadius;
 	TOptional<FVector4> CornerRadii;
 	TOptional<float> OutlineThickness;
@@ -179,11 +205,9 @@ struct FUMGVisualBrushData
 	TOptional<FLinearColor> BrushColor;
 	TOptional<FLinearColor> OutlineColor;
 	TOptional<FString> MaterialRef;
+	// Explicit user material parameters; generated shapes and gradients stay typed.
 	TOptional<FString> MaterialParams;
-	// Legacy resolved asset path. Image.TexturePath holds the source-side reference
-	// (URL/path) and wins at import time; after resolution the importer migrates the
-	// resolved path into Image.TexturePath and clears this top-level field.
-	FString TexturePath;
+	TOptional<FShapeData> Shape;
 	FImageData Image;
 	FGradientData Gradient;
 };

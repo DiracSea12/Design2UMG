@@ -13,6 +13,7 @@
 #include "UMGValueParser.h"
 #include "UMGWidgetTypes.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
+#include <cmath>
 
 namespace
 {
@@ -161,7 +162,7 @@ namespace
 			|| Brush.OutlineColor.IsSet()
 			|| Brush.MaterialRef.IsSet()
 			|| Brush.MaterialParams.IsSet()
-			|| !Brush.TexturePath.IsEmpty()
+			|| Brush.Shape.IsSet()
 			|| Brush.Image.HasAny()
 			|| Brush.Gradient.HasAny();
 	}
@@ -225,6 +226,18 @@ namespace
 		return Design2UMGGeneratedNameSuffixes::Shadow(ShadowIndex);
 	}
 
+	float QuantizeShadowParameter(float Value)
+	{
+		return static_cast<float>(std::nearbyint(static_cast<double>(Value) * 1000.0) / 1000.0);
+	}
+
+	float NormalizeShadowRadius(float Value)
+	{
+		// Preserve the existing raster precision and percentage/fraction convention.
+		Value = QuantizeShadowParameter(Value);
+		return Value > 1.0f ? Value / 100.0f : Value;
+	}
+
 	FUMGWidgetNode BuildBoxShadowLayerImage(
 		const TSharedPtr<FDesignNode>& Node,
 		const FUMGBoxShadowLayerData& ShadowLayer,
@@ -236,7 +249,8 @@ namespace
 		const float OffY = ShadowLayer.Offset.Y;
 		const float Blur = ShadowLayer.Blur;
 		const float Spread = ShadowLayer.Spread;
-		const FString ShadowColor = Design2UMGWidgetNodeAccess::SerializeWidgetColor(ShadowLayer.Color);
+		FUMGVisualBrushData::FShapeData Shape;
+		Shape.Color = FLinearColor::FromSRGBColor(ShadowLayer.Color.ToFColor(true));
 
 		const float PositiveSpread = FMath::Max(0.0f, Spread);
 		const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
@@ -266,100 +280,57 @@ namespace
 			? TEXT("ellipseshadow") : ((Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect);
 		Shadow.Shadow.ShadowBlur = Blur;
 
+		float RadiusHalfMin;
+		float RadiusExpansion;
 		if (bDeclaredShape)
 		{
-			// The gaussian kernel uses sigma = Blur * 0.5 with a 3-sigma radius, so the
-			// texture needs a 1.5 * Blur margin per side for the falloff to reach ~0.
-		const float BlurPaddingExtent = Blur * 1.5f;
-		// CSS shadow semantics: positive spread grows the shape around its center,
-		// negative spread shrinks it. The corner radius grows/shrinks with it.
-		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
-		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
-
-		// Shadow texture parameters: the shape sits centered inside the texture with
-		// a pure falloff margin, delivered through the "BlurPadding" material param.
-		const int32 TexW = RoundPositivePixelExtent(ShapeWidth + BlurPaddingExtent * 2.0f);
-		const int32 TexH = RoundPositivePixelExtent(ShapeHeight + BlurPaddingExtent * 2.0f);
-		Shadow.WidgetStyle.WidthOverride = TexW;
-		Shadow.WidgetStyle.HeightOverride = TexH;
-
-		// The centered shape (ShapeWidth x ShapeHeight) carries the radius; blur does
-		// not expand corners, spread does.
-		const float RadiusHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
-		auto NormalizeShadowRadius = [&](float SourceRadius)
+			// The 3-sigma falloff needs 1.5 * Blur pixels on each side. Spread changes
+			// the shape extent; the blur padding changes only the texture extent.
+			const float BlurPaddingExtent = Blur * 1.5f;
+			Shape.BlurPadding = QuantizeShadowParameter(BlurPaddingExtent);
+			const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
+			const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
+			Shadow.WidgetStyle.WidthOverride = RoundPositivePixelExtent(ShapeWidth + BlurPaddingExtent * 2.0f);
+			Shadow.WidgetStyle.HeightOverride = RoundPositivePixelExtent(ShapeHeight + BlurPaddingExtent * 2.0f);
+			RadiusHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
+			RadiusExpansion = PositiveSpread;
+			// Unlike centered children, fill children with negative padding can
+			// extend past SOverlay's parent rect without being clamped.
+			Shadow.Slot.Padding = FMargin(-BlurPaddingExtent);
+			Shadow.Render.RenderTranslation = FVector2D(OffX, OffY);
+		}
+		else
 		{
-			const float EffectiveRadius = SourceRadius + PositiveSpread;
-			return (RadiusHalfMin > 0.0f) ? EffectiveRadius / RadiusHalfMin : 0.0f;
+			// Fill-sized shapes keep stretch-to-wrapper semantics: the falloff
+			// stays inside the texture, and translation compensates its extent.
+			const float ShadowTextureExtent = Blur + PositiveSpread;
+			const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
+			const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
+			const int32 TexW = RoundPositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
+			const int32 TexH = RoundPositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
+			Shadow.WidgetStyle.WidthOverride = TexW;
+			Shadow.WidgetStyle.HeightOverride = TexH;
+			RadiusHalfMin = FMath::Min(TexW, TexH) * 0.5f;
+			RadiusExpansion = ShadowTextureExtent;
+			Shadow.Render.RenderTranslation = FVector2D(
+				OffX - ShadowTextureExtent + NegativeSpreadInset,
+				OffY - ShadowTextureExtent + NegativeSpreadInset);
+		}
+		const auto ResolveRadius = [&](float SourceRadius)
+		{
+			return NormalizeShadowRadius(RadiusHalfMin > 0.0f ? (SourceRadius + RadiusExpansion) / RadiusHalfMin : 0.0f);
 		};
 		if (Node->Visual.CornerRadius.bUniform)
 		{
-			Shadow.Brush.MaterialParams = FString::Printf(
-				TEXT("{\"BlurPadding\":%.3f,\"Color\":\"%s\",\"CornerRadius\":%.3f}"),
-				BlurPaddingExtent,
-				*ShadowColor,
-				NormalizeShadowRadius(Node->Visual.CornerRadius.Uniform));
+			Shape.CornerRadius = ResolveRadius(Node->Visual.CornerRadius.Uniform);
 		}
 		else
 		{
-			Shadow.Brush.MaterialParams = FString::Printf(
-				TEXT("{\"BlurPadding\":%.3f,\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
-				BlurPaddingExtent,
-				*ShadowColor,
-				NormalizeShadowRadius(Node->Visual.CornerRadius.TopLeft), NormalizeShadowRadius(Node->Visual.CornerRadius.TopRight),
-				NormalizeShadowRadius(Node->Visual.CornerRadius.BottomRight), NormalizeShadowRadius(Node->Visual.CornerRadius.BottomLeft));
+			Shape.CornerRadii = FVector4(
+				ResolveRadius(Node->Visual.CornerRadius.TopLeft), ResolveRadius(Node->Visual.CornerRadius.TopRight),
+				ResolveRadius(Node->Visual.CornerRadius.BottomRight), ResolveRadius(Node->Visual.CornerRadius.BottomLeft));
 		}
-
-		// SOverlay clamps aligned (non-fill) children to the panel rect
-		// (AlignChild's bClampToParent), so a centered shadow image could never
-		// extend past the wrapper. A fill child with negative padding can: the
-		// fill branch has no clamp, and each -Extent margin side grows the
-		// allotted rect past the panel by that amount.
-		Shadow.Slot.Padding = FMargin(-BlurPaddingExtent);
-		// The padded fill rect is the texture rect centered on the wrapper; the
-		// shape is centered in the texture, so translating by the source offset
-		// lands the shape center exactly on (wrapper center + offset).
-		Shadow.Render.RenderTranslation = FVector2D(OffX, OffY);
-		}
-		else
-		{
-		// Stretch-to-wrapper fallback: the texture (and its shape) is stretched
-		// to the wrapper rect, so the shadow tracks whatever size the layout
-		// resolves. The blur falloff lives inside the texture and the layer is
-		// shifted so the shape edge sits at (wrapper edge + offset - extent).
-		const float ShadowTextureExtent = Blur + PositiveSpread;
-		const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
-		const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
-		const int32 TexW = RoundPositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
-		const int32 TexH = RoundPositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
-		Shadow.WidgetStyle.WidthOverride = TexW;
-		Shadow.WidgetStyle.HeightOverride = TexH;
-
-		const float RadiusHalfMin = FMath::Min(TexW, TexH) * 0.5f;
-		auto NormalizeShadowRadius = [&](float SourceRadius)
-		{
-			const float EffectiveRadius = SourceRadius + ShadowTextureExtent;
-			return (RadiusHalfMin > 0.0f) ? EffectiveRadius / RadiusHalfMin : 0.0f;
-		};
-		if (Node->Visual.CornerRadius.bUniform)
-		{
-			Shadow.Brush.MaterialParams = FString::Printf(
-				TEXT("{\"Color\":\"%s\",\"CornerRadius\":%.3f}"),
-				*ShadowColor,
-				NormalizeShadowRadius(Node->Visual.CornerRadius.Uniform));
-		}
-		else
-		{
-			Shadow.Brush.MaterialParams = FString::Printf(
-				TEXT("{\"Color\":\"%s\",\"CornerRadii\":[%.3f,%.3f,%.3f,%.3f]}"),
-				*ShadowColor,
-				NormalizeShadowRadius(Node->Visual.CornerRadius.TopLeft), NormalizeShadowRadius(Node->Visual.CornerRadius.TopRight),
-				NormalizeShadowRadius(Node->Visual.CornerRadius.BottomRight), NormalizeShadowRadius(Node->Visual.CornerRadius.BottomLeft));
-		}
-
-		Shadow.Render.RenderTranslation = FVector2D(
-			OffX - ShadowTextureExtent + NegativeSpreadInset,
-			OffY - ShadowTextureExtent + NegativeSpreadInset);
-		}
+		Shadow.Brush.Shape = MoveTemp(Shape);
 		Shadow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 		Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		return Shadow;
@@ -367,50 +338,6 @@ namespace
 
 	void TransferBorderBackgroundProperties(FUMGWidgetNode& Border, FUMGWidgetNode& Widget)
 	{
-		// Direct typed reads: identical semantics to the descriptor lookup
-		// (same presence rules), without the typed->string->parse roundtrip.
-		if (!Border.Brush.BrushColor.IsSet() && Widget.Brush.BrushColor.IsSet())
-		{
-			Border.Brush.BrushColor = Widget.Brush.BrushColor.GetValue();
-		}
-		if (!Border.Brush.Image.TexturePath.IsSet() && Widget.Brush.Image.TexturePath.IsSet())
-		{
-			Border.Brush.Image.TexturePath = Widget.Brush.Image.TexturePath.GetValue();
-		}
-		if (!Border.Brush.MaterialRef.IsSet())
-		{
-			// Mirror the MaterialRef descriptor precedence: gradient first, then explicit ref.
-			if (Widget.Brush.Gradient.HasAny())
-			{
-				Border.Brush.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Widget.Brush.Gradient);
-			}
-			else if (Widget.Brush.MaterialRef.IsSet())
-			{
-				Border.Brush.MaterialRef = Widget.Brush.MaterialRef.GetValue();
-			}
-		}
-		if (!Border.Brush.MaterialParams.IsSet())
-		{
-			// Mirror the MaterialParams descriptor precedence: gradient params
-			// first, then the explicit params payload.
-			FString TransferParams;
-			bool bHasTransferParams = false;
-			if (Widget.Brush.Gradient.HasAny())
-			{
-				TransferParams = Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(Widget.Brush.Gradient);
-				bHasTransferParams = !TransferParams.IsEmpty();
-			}
-			if (!bHasTransferParams && Widget.Brush.MaterialParams.IsSet())
-			{
-				TransferParams = Widget.Brush.MaterialParams.GetValue();
-				bHasTransferParams = true;
-			}
-			if (bHasTransferParams)
-			{
-				Border.Brush.MaterialParams = MoveTemp(TransferParams);
-			}
-		}
-
 		bool bHasBackgroundProperty = false;
 		if (Widget.WidgetStyle.WidthOverride.IsSet())
 		{
@@ -424,23 +351,12 @@ namespace
 			Widget.WidgetStyle.HeightOverride.Reset();
 			bHasBackgroundProperty = true;
 		}
-		if (Widget.WidgetStyle.ImageMode.IsSet())
-		{
-			Border.WidgetStyle.ImageMode = Widget.WidgetStyle.ImageMode;
-			Widget.WidgetStyle.ImageMode.Reset();
-			bHasBackgroundProperty = true;
-		}
-		if (Widget.WidgetStyle.ImageTransform.IsSet())
-		{
-			Border.WidgetStyle.ImageTransform = Widget.WidgetStyle.ImageTransform;
-			Widget.WidgetStyle.ImageTransform.Reset();
-			bHasBackgroundProperty = true;
-		}
 
 		bHasBackgroundProperty = bHasBackgroundProperty
 			|| Border.Brush.BrushColor.IsSet()
 			|| Border.Brush.Image.TexturePath.IsSet()
-			|| Border.Brush.MaterialRef.IsSet();
+			|| Border.Brush.MaterialRef.IsSet()
+			|| Border.Brush.Gradient.HasAny();
 
 		if (!bHasBackgroundProperty)
 		{

@@ -65,9 +65,11 @@ bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
 
 	const FUMGWidgetNode& GradientLayer = Wrapped.Children[1];
 	TestEqual(TEXT("Gradient fill layer becomes image material"), GradientLayer.Type, FString(TEXT("Image")));
-	TestTrue(TEXT("Gradient layer carries typed material ref"), GradientLayer.Brush.MaterialRef.IsSet());
+	TestTrue(TEXT("Gradient layer carries typed gradient data"), GradientLayer.Brush.Gradient.HasAny());
+	TestFalse(TEXT("Gradient layer does not duplicate the derived material ref"), GradientLayer.Brush.MaterialRef.IsSet());
+	TestFalse(TEXT("Gradient layer carries no generated JSON"), GradientLayer.Brush.MaterialParams.IsSet());
 	TestEqual(TEXT("Radial gradient resolves to radial material"),
-		GradientLayer.Brush.MaterialRef.GetValue(),
+		Design2UMGWidgetNodeAccess::GetGradientMaterialRef(GradientLayer.Brush.Gradient),
 		FString(TEXT("radialgradient")));
 	TestTrue(TEXT("Gradient layer carries typed gradient stops"), GradientLayer.Brush.Gradient.Stops.Num() == 2);
 	TestFalse(TEXT("Empty original widget is elided from the wrapper"), Wrapped.Children.ContainsByPredicate(

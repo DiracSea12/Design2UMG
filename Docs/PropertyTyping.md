@@ -21,7 +21,7 @@ Design2UMG now keeps import and generation responsibilities split as follows:
 | Text style | `FUMGTextStyleData` |
 | Widget style | `FUMGWidgetStyleData` |
 | Text content and behavior | `FUMGTextData` |
-| Brush, image, and gradient data | `FUMGVisualBrushData` |
+| Brush, image, shape, and gradient data | `FUMGVisualBrushData` |
 | Effects | `FUMGEffectData` |
 | Path and vector data | `FUMGPathData` |
 | Shadow data | `FUMGShadowData` |
@@ -57,27 +57,43 @@ The old generic bag bridge is not a supported current contract. New final-consum
 
 ### `Design2UMGWidgetNodeAccess`
 
-`Design2UMGWidgetNodeAccess` remains the cross-module typed inspection facade owned by Core. It is useful for focused tests, diagnostics, and internal typed-domain helpers that need stable serialized key behavior.
+Core owns primitive serialization, image-transform parsing, material-ref derivation, and verbose presentation through this facade. These functions serve explicit interchange, diagnostic, and test boundaries; final consumers read their typed domain instead of performing keyed lookups.
 
-Common retained entries:
+`TryGetWidget*` helpers retained in test headers are not public production APIs. Procedural request construction belongs to the separate `Design2UMGWidgetNodeProceduralResourceAccess` namespace.
 
-| Entry | Use |
-|-------|-----|
-| `TryGetWidget*` | Typed inspection helper for Core-internal mapping and focused tests; not the preferred final-consumer production path |
-| `TryGet*TypedWidgetString` | Domain string serialization for tests and cross-module typed contract checks |
-| `SerializeWidget*` | Shared primitive serialization helpers |
-| `TryBuildProceduralResourceRequest` | Narrow procedural/material/image DTO construction |
+## Fixed Resource And Text Payloads
 
-## Gradients And Material Parameters
+| Domain | Canonical owner | Final consumer |
+|--------|-----------------|----------------|
+| Gradients | `Brush.Gradient` | Typed `FUMGProceduralResourceRequest::Gradient` |
+| Generated shapes, shadows, and placeholders | `Brush.Shape` plus `Brush.MaterialRef` | Typed `FUMGProceduralResourceRequest::Shape` |
+| Rich-text style rows | `Text.RichTextStyleRows`, an optional map of `FUMGRichTextStyleRowData` | `UMGTextStyleApplication::ApplyRichTextStyleRows` |
+| Image path, mode, and transform | `Brush.Image` | Importer, crop helper, resource binder, and brush applier |
+| Prototype trigger keys | `FDesignPrototypeInteraction::TriggerKeyCodes` | Direct copy to `FUMGPrototypeNavigationBinding::TriggerKeyCodes` |
 
-Gradients already have a current typed contract:
+Mappers do not duplicate gradients into `MaterialRef` / `MaterialParams`. The procedural request derives the gradient selector and carries its typed data. `SerializeGradientMaterialParams` remains a serialization helper used by test adapters and external-input parity tests, not an internal resource-generation step.
 
-- typed data structure: `FUMGVisualBrushData::FGradientData`
-- material ref derivation: `Design2UMGWidgetNodeAccess::GetGradientMaterialRef`
-- material params serialization: `Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams`
-- final procedural request: `Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest`
+Shape radii and thickness use normalized fractions; optional fields retain the generator's defaults when absent. A present shape payload, including an explicitly empty one, is authoritative and is not merged with `MaterialParams`. Gradient data has precedence over shape and external parameters. Resource cache identity includes the active typed fields and their presence; successful materialization replaces them with the resolved image path.
 
-Do not treat `MaterialParams` as an open untyped backlog item when maintaining gradients. The main path is: parser / mapper writes `Brush.Gradient`, Core serializes the specific material request fields, and Editor consumers pass the typed request DTO to the procedural resource resolver.
+The Shape JSON boundary accepts numeric fields only as JSON numbers. Floating-point fields and all four corner-radii components must be finite and fit in a float before narrowing. Integer fields retain the existing int32 range and numeric rounding behavior; colors retain the existing color-string parser. Invalid declared fields produce a warning and remain absent, without discarding valid sibling fields. Invalid corner arrays are rejected as a whole. An invalid Shape object is diagnosed and omitted; an explicit empty object stays present. This is input normalization, not a second validation layer in the renderer.
+
+Prototype key codes are extracted once from the source trigger object in `FigmaParserPrototype.cpp`. The source extension carries the normalized, ordered unique list to the graph assembler, which no longer parses `TriggerJson`. Raw trigger metadata remains available for preservation and reporting, but cannot override or refill the typed key list. A keyboard trigger with an empty typed list retains the existing skip diagnostic.
+
+Rich-text builders produce typed rows directly. The JSON parser and serializer retain the existing `TextData.RichTextStyleRows` encoded-string interchange format at the boundary only. Absent or invalid row input does not replace a style set; a present empty map clears it. Optional size, spacing, and color retain their existing application and inheritance semantics.
+
+Byte-color and established raster-parameter precision are preserved without string conversion. This cleanup does not change font measurement, shadow layout, or source unit conventions.
+
+## Input Aliases And Open Parameters
+
+`FUMGJsonParser::ParseBrushPayload` is the only normalization point for the existing image aliases:
+
+- `Brush.Image.TexturePath` wins over the root `Brush.TexturePath`, including an explicit empty canonical value. A conflicting nonempty root value retains its warning.
+- `WidgetStyle.ImageMode` keeps its established precedence over `Brush.Image.Mode`.
+- A valid `Brush.Image.Transform` wins; an existing `WidgetStyle.ImageTransform` string is used only when no valid canonical transform was supplied. Invalid transforms are diagnosed at input.
+
+The IR and serialized output contain only `Brush.Image`; downstream code does not carry or resolve duplicate owners. These are retained input forms, not permission to add another compatibility path.
+
+`MaterialParams` remains opaque string/JSON input for explicit user parameters and the existing external material-input interface. Its external parser is retained; internal shape and gradient producers do not generate it. Text markup, vector geometry, and interchange/log serialization remain their existing domain formats rather than being replaced by a generic schema or property framework.
 
 ## Adding A Property
 

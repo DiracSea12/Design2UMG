@@ -1,12 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGImageCropUtils.h"
-#include "Design2UMGLog.h"
 
 #include "ProceduralShapeGenerator.h"
 #include "DesignImageResourceLimits.h"
-#include "UMGPropertyKeys.h"
-#include "UMGWidgetNodeAccess.h"
 
 #include "Engine/Texture2D.h"
 #include "Styling/SlateBrush.h"
@@ -21,28 +18,14 @@ namespace
 
 bool UMGImageCropUtils::TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest)
 {
-	const FString Mode = Node.WidgetStyle.ImageMode.Get(Node.Brush.Image.Mode.Get(FString()));
+	const FString Mode = Node.Brush.Image.Mode.Get(FString());
 	if (!IsCropMode(Mode))
 	{
 		return false;
 	}
 
-	if (Node.Brush.Image.Transform.IsSet())
-	{
-		OutRequest.Transform = Node.Brush.Image.Transform.GetValue();
-	}
-	else
-	{
-		if (!Node.WidgetStyle.ImageTransform.IsSet())
-		{
-			return false;
-		}
-		if (!Design2UMGWidgetNodeAccess::TryParseImageTransform(Node.WidgetStyle.ImageTransform.GetValue(), OutRequest.Transform))
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("UMGImageCropUtils: Invalid image transform '%s'; skipping crop."), *Node.WidgetStyle.ImageTransform.GetValue());
-			return false;
-		}
-	}
+	if (!Node.Brush.Image.Transform.IsSet()) return false;
+	OutRequest.Transform = Node.Brush.Image.Transform.GetValue();
 
 	const float CropWidth = Node.WidgetStyle.WidthOverride.Get(64.0f);
 	const float CropHeight = Node.WidgetStyle.HeightOverride.Get(64.0f);

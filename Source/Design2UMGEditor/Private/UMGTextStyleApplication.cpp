@@ -3,10 +3,7 @@
 #include "UMGTextStyleApplication.h"
 
 #include "DesignResourceResolver.h"
-#include "DesignJsonUtils.h"
 #include "UMGPropertyApplierSupport.h"
-#include "UMGPropertyKeys.h"
-#include "UMGValueParsing.h"
 #include "TextStyleUtils.h"
 
 #include "Brushes/SlateColorBrush.h"
@@ -14,7 +11,6 @@
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Components/TextWidgetTypes.h"
-#include "Dom/JsonObject.h"
 #include "Engine/DataTable.h"
 
 namespace UMGTextStyleApplication
@@ -248,18 +244,9 @@ namespace UMGTextStyleApplication
 		RichTextBlock->SetDefaultTextStyle(DefaultStyle);
 	}
 
-	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const FString& StyleRowsJson)
+	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const TMap<FString, FUMGRichTextStyleRowData>& StyleRows)
 	{
-		if (!RichTextBlock || StyleRowsJson.IsEmpty())
-		{
-			return;
-		}
-
-		TSharedPtr<FJsonObject> RootObject;
-		if (!DesignJsonUtils::TryParseObject(StyleRowsJson, RootObject))
-		{
-			return;
-		}
+		if (!RichTextBlock) return;
 
 		const FName GeneratedStyleSetName(*FString::Printf(TEXT("%s_D2UStyleSet"), *RichTextBlock->GetName()));
 		UDataTable* StyleSet = RichTextBlock->GetTextStyleSet();
@@ -276,83 +263,26 @@ namespace UMGTextStyleApplication
 		StyleSet->EmptyTable();
 
 		const FTextBlockStyle BaseStyle = ResolveRichTextBaseStyle(RichTextBlock);
-		for (const auto& Pair : RootObject->Values)
+		for (const auto& Pair : StyleRows)
 		{
-			if (!Pair.Value.IsValid() || Pair.Value->Type != EJson::Object)
-			{
-				continue;
-			}
-
-			const TSharedPtr<FJsonObject> RowObject = Pair.Value->AsObject();
-			if (!RowObject.IsValid())
-			{
-				continue;
-			}
-
+			const FUMGRichTextStyleRowData& Style = Pair.Value;
 			FRichTextStyleRow Row;
 			Row.TextStyle = BaseStyle;
-
-			FSlateFontInfo FontInfo = Row.TextStyle.Font;
-			bool bFontChanged = false;
-			FString StringValue;
-			if (RowObject->TryGetStringField(UMGPropertyKeys::FontFamily, StringValue) && !StringValue.IsEmpty())
+			FSlateFontInfo& FontInfo = Row.TextStyle.Font;
+			if (!Style.FontFamily.IsEmpty()) DesignResourceResolver::ApplyFontFamily(FontInfo, Style.FontFamily, false);
+			if (!Style.TypefaceFontName.IsEmpty()) FontInfo.TypefaceFontName = FName(*Style.TypefaceFontName);
+			if (Style.FontSize.IsSet() && FMath::IsFinite(Style.FontSize.GetValue()) && Style.FontSize.GetValue() > 0.0f)
 			{
-				DesignResourceResolver::ApplyFontFamily(FontInfo, StringValue, false);
-				bFontChanged = true;
+				FontInfo.Size = Style.FontSize.GetValue();
 			}
-			if (RowObject->TryGetStringField(UMGPropertyKeys::TypefaceFontName, StringValue) && !StringValue.IsEmpty())
+			if (Style.LetterSpacing.IsSet() && FontInfo.Size > 0)
 			{
-				FontInfo.TypefaceFontName = FName(*StringValue);
-				bFontChanged = true;
+				FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(Style.LetterSpacing.GetValue(), FontInfo.Size);
 			}
-
-			double NumberValue = 0.0;
-			if (RowObject->TryGetNumberField(UMGPropertyKeys::FontSize, NumberValue))
-			{
-				const float RowFontSize = static_cast<float>(NumberValue);
-				if (FMath::IsFinite(RowFontSize) && RowFontSize > 0.0f)
-				{
-					FontInfo.Size = RowFontSize;
-					bFontChanged = true;
-				}
-			}
-			if (RowObject->TryGetNumberField(UMGPropertyKeys::LetterSpacing, NumberValue))
-			{
-				if (FontInfo.Size > 0)
-				{
-					FontInfo.LetterSpacing = TextStyleUtils::ConvertLetterSpacingPxToTracking(
-						static_cast<float>(NumberValue),
-						FontInfo.Size);
-				}
-				bFontChanged = true;
-			}
-
-			if (bFontChanged)
-			{
-				Row.TextStyle.Font = FontInfo;
-			}
-
-			if (RowObject->TryGetStringField(UMGPropertyKeys::Color, StringValue) && !StringValue.IsEmpty())
-			{
-				Row.TextStyle.ColorAndOpacity = FSlateColor(FUMGValueParser::ParseColor(StringValue));
-			}
-
-			bool bUnderline = false;
-			RowObject->TryGetBoolField(UMGPropertyKeys::Underline, bUnderline);
-			bool bStrikethrough = false;
-			RowObject->TryGetBoolField(UMGPropertyKeys::Strikethrough, bStrikethrough);
-			FString HrefValue;
-			const bool bHasHref = RowObject->TryGetStringField(UMGPropertyKeys::Href, HrefValue) && !HrefValue.IsEmpty();
+			if (Style.Color.IsSet()) Row.TextStyle.ColorAndOpacity = FSlateColor(Style.Color.GetValue());
 			const FLinearColor DecorationColor = Row.TextStyle.ColorAndOpacity.GetSpecifiedColor();
-			if (bUnderline || bHasHref)
-			{
-				Row.TextStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
-			}
-			if (bStrikethrough)
-			{
-				Row.TextStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
-			}
-
+			if (Style.bUnderline || !Style.Href.IsEmpty()) Row.TextStyle.UnderlineBrush = MakeTextDecorationBrush(DecorationColor);
+			if (Style.bStrikethrough) Row.TextStyle.StrikeBrush = MakeTextDecorationBrush(DecorationColor);
 			StyleSet->AddRow(FName(*Pair.Key), Row);
 		}
 

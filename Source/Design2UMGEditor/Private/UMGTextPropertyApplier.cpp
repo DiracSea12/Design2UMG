@@ -173,9 +173,9 @@ namespace UMGTextPropertyApplier
 
 		UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichTextBlock, Node);
 
-		if (Node.Text.RichTextStyleRowsJson.IsSet())
+		if (Node.Text.RichTextStyleRows.IsSet())
 		{
-			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRowsJson.GetValue());
+			UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextBlock, Node.Text.RichTextStyleRows.GetValue());
 		}
 
 		UMGTextStyleApplication::ApplyTypedTextLayoutProps(RichTextBlock, Node);

@@ -65,7 +65,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	}
 
 	// --- texture fallback path ---
-	const FString TexPath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+	const FString TexPath = Node.Brush.Image.TexturePath.Get(FString());
 	const FString TrimmedPath = TexPath.TrimStartAndEnd();
 	if (TrimmedPath.IsEmpty())
 	{

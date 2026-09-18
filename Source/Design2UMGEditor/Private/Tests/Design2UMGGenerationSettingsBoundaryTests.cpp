@@ -64,19 +64,19 @@ namespace
 		return Node;
 	}
 
-	const FUMGWidgetNode* FindWidgetNodeByMaterialParamFragment(
+	const FUMGWidgetNode* FindWidgetNodeByShapeColor(
 		const FUMGWidgetNode& Node,
-		const FString& Fragment)
+		const FLinearColor& Color)
 	{
-		if (Node.Brush.MaterialParams.IsSet()
-			&& Node.Brush.MaterialParams.GetValue().Contains(Fragment))
+		if (Node.Brush.Shape.IsSet() && Node.Brush.Shape->Color.IsSet()
+			&& Node.Brush.Shape->Color->Equals(Color))
 		{
 			return &Node;
 		}
 
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
-			if (const FUMGWidgetNode* Match = FindWidgetNodeByMaterialParamFragment(Child, Fragment))
+			if (const FUMGWidgetNode* Match = FindWidgetNodeByShapeColor(Child, Color))
 			{
 				return Match;
 			}
@@ -319,22 +319,19 @@ bool FImportPlanningUsesExplicitSettingsSnapshotTest::RunTest(const FString& Par
 	const FImportAnalysisResult Result = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
 
 	const FUMGWidgetNode& RootWidget = Result.Data.RootWidget;
+	if (!TestTrue(TEXT("Typed shape payload is present"), RootWidget.Brush.Shape.IsSet())) return false;
+	const auto& Shape = RootWidget.Brush.Shape.GetValue();
 	TestEqual(TEXT("Placeholder converts to image"), RootWidget.Type, FString(TEXT("Image")));
 	TestTrue(TEXT("Import planning uses captured placeholder base fill"),
-		RootWidget.Brush.MaterialParams.IsSet()
-		&& RootWidget.Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#123456\"")));
+		Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#123456")))));
 	TestTrue(TEXT("Import planning uses captured placeholder stripe color"),
-		RootWidget.Brush.MaterialParams.IsSet()
-		&& RootWidget.Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
+		Shape.StripeColor.IsSet() && Shape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#ABCDEF")))));
 	TestTrue(TEXT("Import planning uses captured placeholder stripe width"),
-		RootWidget.Brush.MaterialParams.IsSet()
-		&& RootWidget.Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeWidth\":7")));
+		Shape.StripeWidth.IsSet() && Shape.StripeWidth.GetValue() == 7);
 	TestTrue(TEXT("Import planning uses captured placeholder stripe gap"),
-		RootWidget.Brush.MaterialParams.IsSet()
-		&& RootWidget.Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeGap\":11")));
+		Shape.StripeGap.IsSet() && Shape.StripeGap.GetValue() == 11);
 	TestFalse(TEXT("Import planning does not late-read current placeholder base fill"),
-		RootWidget.Brush.MaterialParams.IsSet()
-		&& RootWidget.Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#654321\"")));
+		Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#654321")))));
 	return true;
 }
 
@@ -419,7 +416,7 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 	TestTrue(TEXT("Pen source converts using explicit snapshot"), bParsed);
 
 	const FUMGWidgetNode* PlaceholderNode =
-		FindWidgetNodeByMaterialParamFragment(Data.RootWidget, TEXT("\"Color\":\"#123456\""));
+		FindWidgetNodeByShapeColor(Data.RootWidget, FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#123456"))));
 	TestNotNull(TEXT("Converted placeholder node with snapshot hatch exists"), PlaceholderNode);
 	if (!PlaceholderNode)
 	{
@@ -427,12 +424,12 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 	}
 
 	TestEqual(TEXT("Converted placeholder becomes image"), PlaceholderNode->Type, FString(TEXT("Image")));
+	if (!TestTrue(TEXT("Typed shape payload is present"), PlaceholderNode->Brush.Shape.IsSet())) return false;
+	const auto& Shape = PlaceholderNode->Brush.Shape.GetValue();
 	TestTrue(TEXT("Bridge conversion uses captured placeholder base fill"),
-		PlaceholderNode->Brush.MaterialParams.IsSet()
-		&& PlaceholderNode->Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#123456\"")));
+		Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#123456")))));
 	TestTrue(TEXT("Bridge conversion uses captured placeholder stripe color"),
-		PlaceholderNode->Brush.MaterialParams.IsSet()
-		&& PlaceholderNode->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
+		Shape.StripeColor.IsSet() && Shape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#ABCDEF")))));
 
 	if (Data.RootWidget.Bounds.W <= 1.0f || Data.RootWidget.Bounds.H <= 1.0f)
 	{

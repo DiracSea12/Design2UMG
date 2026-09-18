@@ -119,7 +119,11 @@ bool FDesignFontSettingsSnapshotIsolationTest::RunTest(const FString&)
 		TestEqual(TEXT("Fit-content width remains stable"), B->Bounds.W, A->Bounds.W);
 		TestEqual(TEXT("Fit-content height remains stable"), B->Bounds.H, A->Bounds.H);
 		TestEqual(TEXT("Line height remains stable"), B->Text.LineHeightPercentage.Get(0), A->Text.LineHeightPercentage.Get(0));
-		TestEqual(TEXT("Rich-text font rows remain stable"), B->Text.RichTextStyleRowsJson.Get(FString()), A->Text.RichTextStyleRowsJson.Get(FString()));
+		TestEqual(TEXT("Rich-text row presence remains stable"), B->Text.RichTextStyleRows.IsSet(), A->Text.RichTextStyleRows.IsSet());
+		if (A->Text.RichTextStyleRows.IsSet() && B->Text.RichTextStyleRows.IsSet())
+		{
+			TestTrue(TEXT("Every rich-text row field remains stable"), B->Text.RichTextStyleRows->OrderIndependentCompareEqual(A->Text.RichTextStyleRows.GetValue()));
+		}
 	}
 	TestEqual(TEXT("Source tree is not mutated by sizing"), Plain->Transform.Width.Value, 0.0f);
 	return true;

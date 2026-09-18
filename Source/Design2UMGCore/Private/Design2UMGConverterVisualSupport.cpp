@@ -6,6 +6,7 @@
 #include "DesignColorUtils.h"
 #include "LayoutMapper.h"
 #include "UMGWidgetTypes.h"
+#include "UMGValueParser.h"
 
 namespace
 {
@@ -202,13 +203,13 @@ namespace Design2UMGConverterVisualSupport
 			PlaceholderInsetMaxPx);
 		Widget.Brush = FUMGVisualBrushData();
 		Widget.Brush.MaterialRef = TEXT("placeholdersurface");
-		Widget.Brush.MaterialParams = FString::Printf(
-			TEXT("{\"Color\":\"%s\",\"StripeColor\":\"%s\",\"StripeWidth\":%d,\"StripeGap\":%d,\"Inset\":%d}"),
-			*PlaceholderFillColor,
-			*PlaceholderOutlineColor,
-			Style.StripeWidthPx,
-			Style.StripeGapPx,
-			InsetPx);
+		FUMGVisualBrushData::FShapeData Shape;
+		Shape.Color = FUMGValueParser::ParseColor(PlaceholderFillColor);
+		Shape.StripeColor = FUMGValueParser::ParseColor(PlaceholderOutlineColor);
+		Shape.StripeWidth = Style.StripeWidthPx;
+		Shape.StripeGap = Style.StripeGapPx;
+		Shape.Inset = InsetPx;
+		Widget.Brush.Shape = MoveTemp(Shape);
 		if (Node->Transform.Width.Value > 0.0f)
 		{
 			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;

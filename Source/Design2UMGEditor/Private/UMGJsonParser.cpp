@@ -49,6 +49,11 @@ namespace
 		return {};
 	}
 
+	bool TryReadFiniteFloat(const FJsonValue& Value, double& OutValue)
+	{
+		return Value.TryGetNumber(OutValue) && FMath::IsFinite(OutValue) && FMath::Abs(OutValue) <= MAX_flt;
+	}
+
 	// Keep double precision for pre-narrowing rules such as the negative radius sentinel.
 	bool TryGetFiniteFloatField(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, double& OutValue)
 	{
@@ -58,13 +63,71 @@ namespace
 			return false;
 		}
 		double Parsed;
-		if (Value->TryGetNumber(Parsed) && FMath::IsFinite(Parsed) && FMath::Abs(Parsed) <= MAX_flt)
+		if (TryReadFiniteFloat(*Value, Parsed))
 		{
 			OutValue = Parsed;
 			return true;
 		}
 		UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid %s; expected a finite float-range number."), Field);
 		return false;
+	}
+
+	TOptional<FUMGVisualBrushData::FShapeData> ParseShapeValue(const TSharedPtr<FJsonValue>& Value)
+	{
+		const TSharedPtr<FJsonObject>* Object = nullptr;
+		if (!Value->TryGetObject(Object))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape; expected an object."));
+			return {};
+		}
+
+		FUMGVisualBrushData::FShapeData Shape;
+		const auto ReadFloat = [&](const TCHAR* Field, TOptional<float>& Out)
+		{
+			const auto FieldValue = DesignJsonUtils::TryGetField(*Object, Field);
+			if (!FieldValue) return;
+			double Number;
+			if (FieldValue->Type == EJson::Number && TryReadFiniteFloat(*FieldValue, Number)) Out = static_cast<float>(Number);
+			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.%s; expected a finite float-range number."), Field);
+		};
+		const auto ReadInt = [&](const TCHAR* Field, TOptional<int32>& Out)
+		{
+			const auto FieldValue = DesignJsonUtils::TryGetField(*Object, Field);
+			if (!FieldValue) return;
+			int32 Number;
+			if (FieldValue->Type == EJson::Number && FieldValue->TryGetNumber(Number)) Out = Number;
+			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.%s; expected an int32-range number."), Field);
+		};
+		const auto ReadColor = [&](const TCHAR* Field, TOptional<FLinearColor>& Out)
+		{
+			const auto FieldValue = DesignJsonUtils::TryGetField(*Object, Field);
+			if (!FieldValue) return;
+			if (FieldValue->Type == EJson::String) Out = FUMGValueParser::ParseColor(FieldValue->AsString());
+			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.%s; expected a color string."), Field);
+		};
+		ReadFloat(TEXT("Thickness"), Shape.Thickness);
+		ReadFloat(TEXT("CornerRadius"), Shape.CornerRadius);
+		ReadFloat(TEXT("BlurPadding"), Shape.BlurPadding);
+		ReadInt(TEXT("StripeWidth"), Shape.StripeWidth);
+		ReadInt(TEXT("StripeGap"), Shape.StripeGap);
+		ReadInt(TEXT("Inset"), Shape.Inset);
+		ReadColor(TEXT("Color"), Shape.Color);
+		ReadColor(TEXT("StripeColor"), Shape.StripeColor);
+		if (const auto RadiiValue = DesignJsonUtils::TryGetField(*Object, TEXT("CornerRadii")))
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+			bool bValid = RadiiValue->TryGetArray(Values) && Values->Num() == 4;
+			FVector4 Radii;
+			for (int32 Index = 0; bValid && Index < 4; ++Index)
+			{
+				double Number;
+				bValid = (*Values)[Index]->Type == EJson::Number && TryReadFiniteFloat(*(*Values)[Index], Number);
+				if (bValid) Radii[Index] = Number;
+			}
+			if (bValid) Shape.CornerRadii = Radii;
+			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.CornerRadii; expected four finite float-range numbers."));
+		}
+		return Shape;
 	}
 
 	TOptional<FMargin> ParsePaddingValue(const TSharedPtr<FJsonValue>& Value, const TCHAR* Field)
@@ -263,22 +326,6 @@ void FUMGJsonParser::ParseWidgetStylePayload(const TSharedPtr<FJsonObject>& Node
 		{
 			OutWidgetStyle.StrokeMargin = ParsePaddingValue(JsonValue, UMGPropertyKeys::StrokeMargin);
 		}
-		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageMode, Str))
-		{
-			OutWidgetStyle.ImageMode = Str;
-		}
-		if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::ImageTransform); TransformValue.IsValid())
-		{
-			FUMGVisualBrushData::FImageTransformData Transform;
-			if (TransformValue->Type == EJson::String && Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformValue->AsString(), Transform))
-			{
-				OutWidgetStyle.ImageTransform = TransformValue->AsString();
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform; ignoring value."));
-			}
-		}
 		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::Stretch, Str))
 		{
 			OutWidgetStyle.Stretch = Str;
@@ -339,7 +386,29 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		}
 		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::RichTextStyleRows, Str))
 		{
-			OutText.RichTextStyleRowsJson = Str;
+			TSharedPtr<FJsonObject> RowsObject;
+			if (DesignJsonUtils::TryParseObject(Str, RowsObject))
+			{
+				TMap<FString, FUMGRichTextStyleRowData> Rows;
+				for (const auto& Pair : RowsObject->Values)
+				{
+					const TSharedPtr<FJsonObject>* RowObject = nullptr;
+					if (!Pair.Value->TryGetObject(RowObject) || !RowObject || !RowObject->IsValid()) continue;
+					FUMGRichTextStyleRowData Row;
+					float Number;
+					FString Color;
+					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::FontFamily, Row.FontFamily);
+					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::TypefaceFontName, Row.TypefaceFontName);
+					if (DesignJsonUtils::TryGetFloat(*RowObject, UMGPropertyKeys::FontSize, Number)) Row.FontSize = Number;
+					if (DesignJsonUtils::TryGetFloat(*RowObject, UMGPropertyKeys::LetterSpacing, Number)) Row.LetterSpacing = Number;
+					if (DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::Color, Color) && !Color.IsEmpty()) Row.Color = FUMGValueParser::ParseColor(Color);
+					DesignJsonUtils::TryGetBool(*RowObject, UMGPropertyKeys::Underline, Row.bUnderline);
+					DesignJsonUtils::TryGetBool(*RowObject, UMGPropertyKeys::Strikethrough, Row.bStrikethrough);
+					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::Href, Row.Href);
+					Rows.Add(Pair.Key, MoveTemp(Row));
+				}
+				OutText.RichTextStyleRows = MoveTemp(Rows);
+			}
 		}
 		if (DesignJsonUtils::TryGetString(*TextDataObject, UMGPropertyKeys::HintText, Str))
 		{
@@ -451,10 +520,8 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		{
 			OutBrush.MaterialParams = Str;
 		}
-		if (DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::TexturePath, Str))
-		{
-			OutBrush.TexturePath = Str;
-		}
+		FString LegacyTexturePath;
+		DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::TexturePath, LegacyTexturePath);
 		if (const TSharedPtr<FJsonValue> RadiiValue = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::CornerRadii); RadiiValue.IsValid())
 		{
 			FVector4 Radii;
@@ -466,6 +533,10 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.CornerRadii = Radii;
 			}
+		}
+		if (const auto ShapeValue = DesignJsonUtils::TryGetField(*BrushObject, TEXT("Shape")))
+		{
+			OutBrush.Shape = ParseShapeValue(ShapeValue);
 		}
 		const TSharedPtr<FJsonObject>* ImageObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Image"), ImageObject))
@@ -491,11 +562,16 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 				}
 			}
 		}
-		FString BrushTextureDiagnostic;
-		if (Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(OutBrush, &BrushTextureDiagnostic)
-			&& !BrushTextureDiagnostic.IsEmpty())
+		// Existing root alias is accepted only here. The IR has one texture owner.
+		if (!OutBrush.Image.TexturePath.IsSet())
 		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: %s"), *BrushTextureDiagnostic);
+			if (!LegacyTexturePath.IsEmpty()) OutBrush.Image.TexturePath = LegacyTexturePath;
+		}
+		else if (!LegacyTexturePath.IsEmpty() && LegacyTexturePath != OutBrush.Image.TexturePath.GetValue())
+		{
+			UE_LOG(LogDesign2UMG, Warning,
+				TEXT("FUMGJsonParser: Brush.TexturePath conflicts with Brush.Image.TexturePath; using Brush.Image.TexturePath ('%s') instead of legacy/root '%s'."),
+				*OutBrush.Image.TexturePath.GetValue(), *LegacyTexturePath);
 		}
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
@@ -547,6 +623,29 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			}
 		}
 	}
+	// Preserve the existing input precedence, without carrying two owners downstream.
+	const TSharedPtr<FJsonObject>* WidgetStyleObject = nullptr;
+	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("WidgetStyle"), WidgetStyleObject))
+	{
+		FString Str;
+		if (DesignJsonUtils::TryGetString(*WidgetStyleObject, UMGPropertyKeys::ImageMode, Str))
+		{
+			OutBrush.Image.Mode = Str;
+		}
+		if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::ImageTransform); TransformValue.IsValid())
+		{
+			FUMGVisualBrushData::FImageTransformData Transform;
+			if (TransformValue->Type == EJson::String && Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformValue->AsString(), Transform))
+			{
+				if (!OutBrush.Image.Transform.IsSet()) OutBrush.Image.Transform = Transform;
+			}
+			else
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform; ignoring value."));
+			}
+		}
+	}
+
 }
 
 void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObject, FUMGEffectData& OutEffect)

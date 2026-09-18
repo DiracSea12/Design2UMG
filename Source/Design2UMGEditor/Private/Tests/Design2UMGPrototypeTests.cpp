@@ -444,4 +444,57 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeKeysIndependentOfRawJsonTest,
+	"Design2UMG.TypedPayload.PrototypeKeysIndependentOfRawJson",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPrototypeKeysIndependentOfRawJsonTest::RunTest(const FString&)
+{
+	const FString Triggers = TEXT(R"(,"interactions":[
+		{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["enter","ENTER",null,{},[],"","escape"],"keyCode":"tab"},"actions":[{"type":"BACK"}]},
+		{"trigger":{"type":"ON_KEY_UP","keyCode":"escape"},"actions":[{"type":"BACK"}]},
+		{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK"}]}
+	])");
+	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("page"), TEXT("Page"), TEXT("FRAME"), 0, 0, 320, 200,
+		MakeLeafNode(TEXT("hotspot"), TEXT("Hotspot"), TEXT("RECTANGLE"), 10, 10, 60, 40, FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.4, 0.6)) + Triggers))
+		+ TEXT(",") + MakeContainerNode(TEXT("other_page"), TEXT("OtherPage"), TEXT("FRAME"), 0, 0, 320, 200, MakeLeafNode(TEXT("other_rect"), TEXT("OtherRect"), TEXT("RECTANGLE"), 10, 10, 60, 40,
+			FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.4, 0.6)))));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Keyboard source parses"), FFigmaParser::ParseDocument(Json, Document))) return false;
+	if (!TestEqual(TEXT("Two pages parsed"), Document.Children.Num(), 2)
+		|| !TestEqual(TEXT("One hotspot parsed"), Document.Children[0]->Children.Num(), 1)) return false;
+	auto& Interactions = Document.Children[0]->Children[0]->MutableSource().Prototype.Interactions;
+	if (!TestEqual(TEXT("All interactions parsed"), Interactions.Num(), 3)) return false;
+	const TArray<FString> DownKeys = { TEXT("ENTER"), TEXT("ESCAPE"), TEXT("TAB") };
+	const TArray<FString> UpKeys = { TEXT("ESCAPE") };
+	TestTrue(TEXT("Parser owns the normalized key list"), Interactions[0].TriggerKeyCodes == DownKeys);
+	TestTrue(TEXT("Parser owns the single-key form"), Interactions[1].TriggerKeyCodes == UpKeys);
+	TestTrue(TEXT("Key-free triggers stay key-free"), Interactions[2].TriggerKeyCodes.IsEmpty());
+	const FUMGWidgetData Baseline = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	if (!TestEqual(TEXT("Fixture has working bindings before changing metadata"), Baseline.PrototypeNavigation().ClickBindings.Num(), 3)) return false;
+	for (const TCHAR* Raw : { TEXT("not-json"), TEXT(R"({"keyCodes":["OTHER"]})") })
+	{
+		for (auto& Interaction : Interactions) Interaction.TriggerJson = Raw;
+		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+		const auto& Bindings = Data.PrototypeNavigation().ClickBindings;
+		TestEqual(TEXT("Raw metadata cannot remove keyboard bindings"), Bindings.Num(), 3);
+		for (const auto& Binding : Bindings)
+		{
+			TestEqual(TEXT("Raw metadata is preserved without interpreting it"), Binding.TriggerJson, FString(Raw));
+			if (Binding.UsesKeyDownTrigger()) TestTrue(TEXT("Ordered, normalized unique keys survive without JSON"), Binding.TriggerKeyCodes == DownKeys);
+			if (Binding.UsesKeyUpTrigger()) TestTrue(TEXT("Single key source survives without JSON"), Binding.TriggerKeyCodes == UpKeys);
+			if (Binding.UsesClickTrigger()) TestTrue(TEXT("Raw metadata cannot synthesize click keys"), Binding.TriggerKeyCodes.IsEmpty());
+		}
+	}
+	Interactions[0].TriggerKeyCodes.Reset();
+	Interactions[0].TriggerJson = TEXT(R"({"keyCodes":["ENTER"]})");
+	const FUMGWidgetData Cleared = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	TestFalse(TEXT("Raw JSON cannot refill an empty typed key list"),
+		Cleared.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding) { return Binding.UsesKeyDownTrigger(); }));
+	TestTrue(TEXT("Missing typed keyboard keys retain the existing diagnostic"),
+		Cleared.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("missing keyCodes")); }));
+	TestEqual(TEXT("Unrelated bindings survive an empty key list"), Cleared.PrototypeNavigation().ClickBindings.Num(), 2);
+	return true;
+}
+
 #endif

@@ -209,39 +209,6 @@ bool Design2UMGWidgetNodeAccess::TryParseDrawAs(const FString& Value, ESlateBrus
 	return false;
 }
 
-bool Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(FUMGVisualBrushData& Brush, FString* OutDiagnostic)
-{
-	if (OutDiagnostic)
-	{
-		OutDiagnostic->Reset();
-	}
-
-	if (!Brush.Image.TexturePath.IsSet())
-	{
-		if (Brush.TexturePath.IsEmpty())
-		{
-			return false;
-		}
-
-		Brush.Image.TexturePath = Brush.TexturePath;
-		Brush.TexturePath.Empty();
-		return true;
-	}
-
-	if (!Brush.TexturePath.IsEmpty() && Brush.TexturePath != Brush.Image.TexturePath.GetValue())
-	{
-		if (OutDiagnostic)
-		{
-			*OutDiagnostic = FString::Printf(
-				TEXT("Brush.TexturePath conflicts with Brush.Image.TexturePath; using Brush.Image.TexturePath ('%s') instead of legacy/root '%s'."),
-				*Brush.Image.TexturePath.GetValue(),
-				*Brush.TexturePath);
-		}
-	}
-
-	Brush.TexturePath.Empty();
-	return true;
-}
 
 namespace
 {
@@ -264,8 +231,7 @@ namespace
 
 	void AppendWidgetStyleVerboseDump(FString& Dump, const FUMGWidgetNode& Node)
 	{
-	// Widget style. ImageMode/ImageTransform prefer the widget style payload
-	// and fall back to the brush image payload, mirroring the old key lookup order.
+	// Widget style and canonical image payload.
 	if (Node.WidgetStyle.WidthOverride.IsSet())
 	{
 		AppendVerboseFloat(Dump, UMGPropertyKeys::WidthOverride, Node.WidgetStyle.WidthOverride.GetValue());
@@ -304,17 +270,10 @@ namespace
 	{
 		AppendVerboseMargin(Dump, UMGPropertyKeys::StrokeMargin, Node.WidgetStyle.StrokeMargin.GetValue());
 	}
-	AppendVerboseProperty(
-		Dump, UMGPropertyKeys::ImageMode,
-		Node.WidgetStyle.ImageMode.IsSet() ? Node.WidgetStyle.ImageMode : Node.Brush.Image.Mode);
-	if (Node.WidgetStyle.ImageTransform.IsSet())
+	AppendVerboseProperty(Dump, UMGPropertyKeys::ImageMode, Node.Brush.Image.Mode);
+	if (Node.Brush.Image.Transform.IsSet())
 	{
-		AppendVerboseProperty(Dump, UMGPropertyKeys::ImageTransform, Node.WidgetStyle.ImageTransform.GetValue());
-	}
-	else if (Node.Brush.Image.Transform.IsSet())
-	{
-		AppendVerboseProperty(
-			Dump, UMGPropertyKeys::ImageTransform,
+		AppendVerboseProperty(Dump, UMGPropertyKeys::ImageTransform,
 			Design2UMGWidgetNodeAccess::SerializeImageTransform(Node.Brush.Image.Transform.GetValue()));
 	}
 	AppendVerboseProperty(Dump, UMGPropertyKeys::Stretch, Node.WidgetStyle.Stretch);
@@ -345,7 +304,7 @@ namespace
 	{
 	// Text.
 	AppendVerboseProperty(Dump, UMGPropertyKeys::Text, Text.Text);
-	AppendVerboseProperty(Dump, UMGPropertyKeys::RichTextStyleRows, Text.RichTextStyleRowsJson);
+	if (Text.RichTextStyleRows.IsSet()) AppendVerboseInt(Dump, UMGPropertyKeys::RichTextStyleRows, Text.RichTextStyleRows.GetValue().Num());
 	AppendVerboseProperty(Dump, UMGPropertyKeys::HintText, Text.HintText);
 	AppendVerboseProperty(Dump, UMGPropertyKeys::FontFamily, Text.FontFamily);
 	AppendVerboseProperty(Dump, UMGPropertyKeys::TypefaceFontName, Text.TypefaceFontName);

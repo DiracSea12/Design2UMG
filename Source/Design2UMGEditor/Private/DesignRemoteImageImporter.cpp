@@ -716,7 +716,7 @@ namespace
 
 	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
 	{
-		FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		FString TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		if (!TexturePath.IsEmpty())
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
@@ -727,7 +727,6 @@ namespace
 				Node.Id,
 				Context);
 			// Keep the canonical typed owner in sync after import-time path rewriting.
-			Node.Brush.TexturePath.Empty();
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;
 		}
 
@@ -739,7 +738,7 @@ namespace
 
 	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
 	{
-		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath);
+		const FString TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		const FString NormalizedUrl = TryNormalizeRemoteUrl(TexturePath);
 		if (!NormalizedUrl.IsEmpty())
 		{

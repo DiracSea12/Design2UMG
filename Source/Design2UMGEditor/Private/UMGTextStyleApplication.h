@@ -26,5 +26,5 @@ namespace UMGTextStyleApplication
 	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color);
 	FTextBlockStyle ResolveRichTextBaseStyle(const URichTextBlock* RichTextBlock);
 	void ApplyRichTextDefaultStyle(URichTextBlock* RichTextBlock, const FUMGWidgetNode& Node);
-	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const FString& StyleRowsJson);
+	void ApplyRichTextStyleRows(URichTextBlock* RichTextBlock, const TMap<FString, FUMGRichTextStyleRowData>& StyleRows);
 }

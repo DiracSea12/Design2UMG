@@ -11,9 +11,10 @@
 struct DESIGN2UMGCORE_API FUMGProceduralResourceRequest
 {
 	FString MaterialRef;
-	// Internal gradients stay typed; MaterialParams is the explicit shape-input payload.
+	// Generated resources stay typed; MaterialParams is explicit external input.
 	FUMGVisualBrushData::FGradientData Gradient;
 	TOptional<FString> MaterialParams;
+	TOptional<FUMGVisualBrushData::FShapeData> Shape;
 	TOptional<float> WidthOverride;
 	TOptional<float> HeightOverride;
 	TOptional<float> ShadowBlur;

@@ -74,7 +74,6 @@ namespace
 	};
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenEmptySlotSemanticHintTest,
 	"Design2UMG.PenParser.EmptySlotSemanticHint",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -179,20 +178,24 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	const FString SlotParams = GetWidgetProperty(*SlotCell, TEXT("MaterialParams"));
-	const FString PageParams = GetWidgetProperty(*PageSlot, TEXT("MaterialParams"));
+
 	TestEqual(TEXT("slotCell uses Image"), SlotCell->Type, TEXT("Image"));
+	if (!TestTrue(TEXT("Typed shape payload is present"), PageSlot->Brush.Shape.IsSet())) return false;
+	const auto& PageShape = PageSlot->Brush.Shape.GetValue();
+	if (!TestTrue(TEXT("Typed shape payload is present"), SlotCell->Brush.Shape.IsSet())) return false;
+	const auto& SlotShape = SlotCell->Brush.Shape.GetValue();
+	TestFalse(TEXT("Generated placeholder carries no JSON parameters"), SlotCell->Brush.MaterialParams.IsSet());
 	TestEqual(TEXT("slotCell placeholder material"), GetWidgetProperty(*SlotCell, TEXT("MaterialRef")), TEXT("placeholdersurface"));
-	TestTrue(TEXT("slotCell placeholder keeps canonical fill color when custom style disabled"), SlotParams.Contains(TEXT("#D282FF33")));
-	TestTrue(TEXT("slotCell placeholder keeps canonical outline color when custom style disabled"), SlotParams.Contains(TEXT("#D480FF")));
-	TestTrue(TEXT("slotCell placeholder keeps canonical stripe width when custom style disabled"), SlotParams.Contains(TEXT("\"StripeWidth\":1")));
-	TestTrue(TEXT("slotCell placeholder keeps canonical stripe gap when custom style disabled"), SlotParams.Contains(TEXT("\"StripeGap\":4")));
+	TestTrue(TEXT("slotCell placeholder keeps canonical fill color when custom style disabled"), SlotShape.Color.IsSet() && SlotShape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#D282FF33")))));
+	TestTrue(TEXT("slotCell placeholder keeps canonical outline color when custom style disabled"), SlotShape.StripeColor.IsSet() && SlotShape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#D480FF")))));
+	TestTrue(TEXT("slotCell placeholder keeps canonical stripe width when custom style disabled"), SlotShape.StripeWidth.IsSet() && SlotShape.StripeWidth.GetValue() == 1);
+	TestTrue(TEXT("slotCell placeholder keeps canonical stripe gap when custom style disabled"), SlotShape.StripeGap.IsSet() && SlotShape.StripeGap.GetValue() == 4);
 	TestTrue(TEXT("slotCell placeholder width override exists"), HasWidgetProperty(*SlotCell, TEXT("WidthOverride")));
 	TestTrue(TEXT("slotCell placeholder height override exists"), HasWidgetProperty(*SlotCell, TEXT("HeightOverride")));
 	TestEqual(TEXT("pageSlot uses Image"), PageSlot->Type, TEXT("Image"));
 	TestEqual(TEXT("pageSlot placeholder material"), GetWidgetProperty(*PageSlot, TEXT("MaterialRef")), TEXT("placeholdersurface"));
-	TestTrue(TEXT("pageSlot placeholder keeps canonical fill color when custom style disabled"), PageParams.Contains(TEXT("#D282FF33")));
-	TestTrue(TEXT("pageSlot placeholder keeps canonical outline color when custom style disabled"), PageParams.Contains(TEXT("#D480FF")));
+	TestTrue(TEXT("pageSlot placeholder keeps canonical fill color when custom style disabled"), PageShape.Color.IsSet() && PageShape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#D282FF33")))));
+	TestTrue(TEXT("pageSlot placeholder keeps canonical outline color when custom style disabled"), PageShape.StripeColor.IsSet() && PageShape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#D480FF")))));
 	return true;
 }
 
@@ -234,11 +237,13 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	TestTrue(TEXT("slotBase exists"), BaseSlot != nullptr);
 	if (BaseSlot != nullptr)
 	{
-		const FString Params = GetWidgetProperty(*BaseSlot, TEXT("MaterialParams"));
-		TestTrue(TEXT("Base placeholder keeps configured palette"), Params.Contains(TEXT("#10203033")));
-		TestTrue(TEXT("Base placeholder keeps configured outline"), Params.Contains(TEXT("#112233")));
-		TestTrue(TEXT("Base placeholder keeps configured stripe width"), Params.Contains(TEXT("\"StripeWidth\":3")));
-		TestTrue(TEXT("Base placeholder keeps configured stripe gap"), Params.Contains(TEXT("\"StripeGap\":9")));
+		if (!TestTrue(TEXT("Typed shape payload is present"), BaseSlot->Brush.Shape.IsSet())) return false;
+		const auto& Shape = BaseSlot->Brush.Shape.GetValue();
+
+		TestTrue(TEXT("Base placeholder keeps configured palette"), Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#10203033")))));
+		TestTrue(TEXT("Base placeholder keeps configured outline"), Shape.StripeColor.IsSet() && Shape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#112233")))));
+		TestTrue(TEXT("Base placeholder keeps configured stripe width"), Shape.StripeWidth.IsSet() && Shape.StripeWidth.GetValue() == 3);
+		TestTrue(TEXT("Base placeholder keeps configured stripe gap"), Shape.StripeGap.IsSet() && Shape.StripeGap.GetValue() == 9);
 	}
 
 	const FString Json = TEXT(R"JSON({
@@ -274,11 +279,13 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 	TestTrue(TEXT("slotInstance exists"), SlotInstance != nullptr);
 	if (SlotInstance != nullptr)
 	{
-		const FString Params = GetWidgetProperty(*SlotInstance, TEXT("MaterialParams"));
-		TestTrue(TEXT("Expanded ref placeholder uses configured instance palette"), Params.Contains(TEXT("#44556633")));
-		TestTrue(TEXT("Expanded ref placeholder uses configured instance outline"), Params.Contains(TEXT("#778899")));
-		TestTrue(TEXT("Expanded ref placeholder keeps configured stripe width"), Params.Contains(TEXT("\"StripeWidth\":3")));
-		TestTrue(TEXT("Expanded ref placeholder keeps configured stripe gap"), Params.Contains(TEXT("\"StripeGap\":9")));
+		if (!TestTrue(TEXT("Typed shape payload is present"), SlotInstance->Brush.Shape.IsSet())) return false;
+		const auto& Shape = SlotInstance->Brush.Shape.GetValue();
+
+		TestTrue(TEXT("Expanded ref placeholder uses configured instance palette"), Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#44556633")))));
+		TestTrue(TEXT("Expanded ref placeholder uses configured instance outline"), Shape.StripeColor.IsSet() && Shape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#778899")))));
+		TestTrue(TEXT("Expanded ref placeholder keeps configured stripe width"), Shape.StripeWidth.IsSet() && Shape.StripeWidth.GetValue() == 3);
+		TestTrue(TEXT("Expanded ref placeholder keeps configured stripe gap"), Shape.StripeGap.IsSet() && Shape.StripeGap.GetValue() == 9);
 	}
 	return true;
 }

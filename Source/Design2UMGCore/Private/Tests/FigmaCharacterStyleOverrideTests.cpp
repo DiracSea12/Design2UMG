@@ -138,20 +138,17 @@ bool FFigmaCharacterStyleColorTest::RunTest(const FString&)
 		return false;
 	}
 	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Document.Children[0]);
-	if (!TestTrue(TEXT("Color-only override produces style rows"), Widget.Text.RichTextStyleRowsJson.IsSet()))
+	if (!TestTrue(TEXT("Color-only override produces style rows"), Widget.Text.RichTextStyleRows.IsSet()))
 	{
 		return false;
 	}
-	TSharedPtr<FJsonObject> Rows;
-	if (!TestTrue(TEXT("Style rows parse"), FJsonSerializer::Deserialize(
-		TJsonReaderFactory<>::Create(Widget.Text.RichTextStyleRowsJson.GetValue()), Rows)))
-	{
-		return false;
-	}
-	const FString DefaultColor = Rows->GetObjectField(TEXT("d2u_run_0"))->GetStringField(UMGPropertyKeys::Color);
-	const FString OverrideColor = Rows->GetObjectField(TEXT("d2u_run_1"))->GetStringField(UMGPropertyKeys::Color);
-	TestNotEqual(TEXT("Run color differs from base color"), OverrideColor, DefaultColor);
-	const FLinearColor AppliedColor = FUMGValueParser::ParseColor(OverrideColor);
+	const auto& Rows = Widget.Text.RichTextStyleRows.GetValue();
+	const auto* DefaultRow = Rows.Find(TEXT("d2u_run_0"));
+	const auto* OverrideRow = Rows.Find(TEXT("d2u_run_1"));
+	if (!TestNotNull(TEXT("Base row exists"), DefaultRow) || !TestNotNull(TEXT("Override row exists"), OverrideRow)) return false;
+	if (!TestTrue(TEXT("Both rows carry explicit colors"), DefaultRow->Color.IsSet() && OverrideRow->Color.IsSet())) return false;
+	const FLinearColor AppliedColor = OverrideRow->Color.GetValue();
+	TestFalse(TEXT("Run color differs from base color"), AppliedColor.Equals(DefaultRow->Color.GetValue()));
 	TestTrue(TEXT("Override retains red"), FMath::IsNearlyEqual(AppliedColor.R, 1.0f));
 	TestTrue(TEXT("Override retains half opacity within source byte precision"),
 		FMath::IsNearlyEqual(AppliedColor.A, 0.5f, 1.0f / 255.0f));

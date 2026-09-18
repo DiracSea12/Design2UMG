@@ -1,9 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
 #include "DesignResourceResolver.h"
-#include "UMGWidgetNodeAccess.h"
-#include "UMGPropertyKeys.h"
-#include "UMGValueParsing.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetTypes.h"
 #include "UMGImageCropUtils.h"
@@ -35,7 +32,7 @@ namespace
 		Node.Path = FUMGPathData();
 		Node.Brush.MaterialRef.Reset();
 		Node.Brush.MaterialParams.Reset();
-		Node.Brush.TexturePath.Empty();
+		Node.Brush.Shape.Reset();
 		Node.Brush.Image.TexturePath = TexturePath;
 		Node.Brush.Gradient = FUMGVisualBrushData::FGradientData();
 	}
@@ -62,6 +59,14 @@ namespace
 		FMemoryWriter Writer(Key);
 		Writer << Request.MaterialRef << Request.MaterialParams << Request.WidthOverride
 			<< Request.HeightOverride << Request.ShadowBlur << Request.BrushColor;
+		bool bHasShape = Request.Shape.IsSet();
+		Writer << bHasShape;
+		if (bHasShape)
+		{
+			auto& Shape = Request.Shape.GetValue();
+			Writer << Shape.Color << Shape.Thickness << Shape.CornerRadius << Shape.CornerRadii
+				<< Shape.BlurPadding << Shape.StripeColor << Shape.StripeWidth << Shape.StripeGap << Shape.Inset;
+		}
 		auto& Gradient = Request.Gradient;
 		Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint
 			<< Gradient.Center << Gradient.Size;
@@ -253,8 +258,6 @@ namespace
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
 		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::FillRule : Node.Path.FillRule.GetValue();
-		const FString FillColor = Node.Path.FillColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.FillColor.GetValue()) : FString();
-		const FString StrokeColor = Node.Path.StrokeColor.IsSet() ? Design2UMGWidgetNodeAccess::SerializeWidgetColor(Node.Path.StrokeColor.GetValue()) : FString();
 		const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeCap : Node.Path.StrokeCap.GetValue();
 		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeJoin : Node.Path.StrokeJoin.GetValue();
 		const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
@@ -263,11 +266,14 @@ namespace
 		FIntPoint RasterSize;
 		if (!FDesignPathRasterizer::TryGetRasterSize(Width, Height, RasterSize)) return nullptr;
 
-		const TOptional<FLinearColor> OptFill = FillColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(FillColor));
-		const TOptional<FLinearColor> OptStroke = StrokeColor.IsEmpty() ? TOptional<FLinearColor>() : TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColor));
+		// Preserve the rasterizer's existing byte-color precision without a string round trip.
+		TOptional<FLinearColor> Fill = Node.Path.FillColor;
+		if (Fill.IsSet()) Fill = FLinearColor::FromSRGBColor(Fill->ToFColor(true));
+		TOptional<FLinearColor> Stroke = Node.Path.StrokeColor;
+		if (Stroke.IsSet()) Stroke = FLinearColor::FromSRGBColor(Stroke->ToFColor(true));
 		return FDesignPathRasterizer::Rasterize(
 			*Geometry, RasterSize.X, RasterSize.Y,
-			OptFill, FillRule, OptStroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError);
+			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError);
 	}
 
 	bool TryBuildProceduralTextureMaterializationPlan(
@@ -302,7 +308,7 @@ namespace
 		const FString& AssetPrefix,
 		FTextureMaterializationPlan& OutPlan)
 	{
-		const FString TexturePath = Node.Brush.Image.TexturePath.Get(Node.Brush.TexturePath).TrimStartAndEnd();
+		const FString TexturePath = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
 		if (TexturePath.IsEmpty()
 			|| !UMGImageCropUtils::TryBuildCropRequest(Node, OutPlan.ImageCropRequest)
 			|| UMGImageCropUtils::CanUseUvRegion(OutPlan.ImageCropRequest.Transform))
@@ -352,9 +358,7 @@ namespace
 		if (Kind == FTextureMaterializationPlan::EKind::ImageTransform)
 		{
 			Node.Brush.Image.Transform.Reset();
-			Node.WidgetStyle.ImageTransform.Reset();
 			Node.Brush.Image.Mode.Reset();
-			Node.WidgetStyle.ImageMode.Reset();
 		}
 	}
 

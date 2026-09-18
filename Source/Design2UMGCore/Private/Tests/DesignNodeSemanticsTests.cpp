@@ -966,13 +966,15 @@ bool FConversionPlaceholderTintSettingsPayloadTest::RunTest(const FString& Param
 	}
 
 	TestEqual(TEXT("Placeholder widget uses direct image material"), PlaceholderWidget->Type, FString(TEXT("Image")));
+	if (!TestTrue(TEXT("Typed placeholder shape is present"), PlaceholderWidget->Brush.Shape.IsSet())) return false;
+	const auto& Shape = PlaceholderWidget->Brush.Shape.GetValue();
 	TestTrue(TEXT("Placeholder widget uses placeholder surface material ref"),
 		PlaceholderWidget->Brush.MaterialRef.IsSet()
 		&& PlaceholderWidget->Brush.MaterialRef.GetValue() == TEXT("placeholdersurface"));
-	TestTrue(TEXT("Placeholder material params use injected base fill color"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"Color\":\"#123456\"")));
-	TestTrue(TEXT("Placeholder material params use injected base stripe color"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeColor\":\"#ABCDEF\"")));
-	TestTrue(TEXT("Placeholder material params use injected stripe width"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeWidth\":7")));
-	TestTrue(TEXT("Placeholder material params use injected stripe gap"), PlaceholderWidget->Brush.MaterialParams.IsSet() && PlaceholderWidget->Brush.MaterialParams.GetValue().Contains(TEXT("\"StripeGap\":11")));
+	TestTrue(TEXT("Placeholder shape parameters use injected base fill color"), Shape.Color.IsSet() && Shape.Color->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#123456")))));
+	TestTrue(TEXT("Placeholder shape parameters use injected base stripe color"), Shape.StripeColor.IsSet() && Shape.StripeColor->Equals(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("#ABCDEF")))));
+	TestTrue(TEXT("Placeholder shape parameters use injected stripe width"), Shape.StripeWidth.IsSet() && Shape.StripeWidth.GetValue() == 7);
+	TestTrue(TEXT("Placeholder shape parameters use injected stripe gap"), Shape.StripeGap.IsSet() && Shape.StripeGap.GetValue() == 11);
 	return true;
 }
 

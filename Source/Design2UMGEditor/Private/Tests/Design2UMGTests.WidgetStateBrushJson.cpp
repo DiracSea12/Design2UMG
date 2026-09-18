@@ -134,15 +134,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushLegacyTexturePathNormalizationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FBrushLegacyTexturePathNormalizationTest::RunTest(const FString& Parameters)
 {
-	FUMGVisualBrushData LegacyOnlyBrush;
-	LegacyOnlyBrush.TexturePath = TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush");
-	FString NormalizationDiagnostic;
-	TestTrue(TEXT("Legacy/root texture path normalizes into canonical image owner"),
-		Design2UMGWidgetNodeAccess::NormalizeBrushTexturePathOwner(LegacyOnlyBrush, &NormalizationDiagnostic));
-	TestTrue(TEXT("Legacy/root normalization records no conflict diagnostic"), NormalizationDiagnostic.IsEmpty());
-	TestTrue(TEXT("Normalized texture path moved into image owner"),
-		LegacyOnlyBrush.Image.TexturePath.IsSet() && LegacyOnlyBrush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush"));
-	TestTrue(TEXT("Normalization clears legacy/root owner"), LegacyOnlyBrush.TexturePath.IsEmpty());
+	FUMGWidgetData Data;
+	TestTrue(TEXT("Existing root texture input parses"), FUMGJsonParser::ParseJson(
+		TEXT(R"({"RootWidget":{"Type":"Image","Name":"RootTexture","Brush":{"TexturePath":"/Game/UI/T_LegacyBrush.T_LegacyBrush"}}})"), Data));
+	TestTrue(TEXT("Root input is normalized into the only image owner"),
+		Data.RootWidget.Brush.Image.TexturePath.IsSet()
+		&& Data.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush"));
+	const auto SerializedBrush = FUMGJsonSerializer::SerializeWidgetNode(Data.RootWidget)->GetObjectField(TEXT("Brush"));
+	TestFalse(TEXT("Serialization never emits the root alias"), SerializedBrush->HasField(TEXT("TexturePath")));
 	return true;
 }
 
@@ -181,7 +180,8 @@ bool FBrushTexturePathConflictNormalizationJsonTest::RunTest(const FString& Para
 	TestTrue(TEXT("Parser normalizes texture path into canonical image owner"),
 		ParsedData.RootWidget.Brush.Image.TexturePath.IsSet()
 		&& ParsedData.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_CanonicalBrush.T_CanonicalBrush"));
-	TestTrue(TEXT("Parser clears legacy/root texture owner after normalization"), ParsedData.RootWidget.Brush.TexturePath.IsEmpty());
+	TestFalse(TEXT("Normalized output has no duplicate root owner"),
+		FUMGJsonSerializer::SerializeWidgetNode(ParsedData.RootWidget)->GetObjectField(TEXT("Brush"))->HasField(TEXT("TexturePath")));
 	TestEqual(TEXT("Typed accessor exposes canonical image texture path"),
 		GetWidgetProperty(ParsedData.RootWidget, TEXT("TexturePath")),
 		FString(TEXT("/Game/UI/T_CanonicalBrush.T_CanonicalBrush")));

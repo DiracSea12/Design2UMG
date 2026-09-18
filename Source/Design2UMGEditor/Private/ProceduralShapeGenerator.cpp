@@ -298,6 +298,23 @@ namespace
 		}
 	}
 
+	void ApplyShapeParams(const FUMGVisualBrushData::FShapeData& Shape, FMaterialRefParams& P)
+	{
+		P.Color = Shape.Color.Get(P.Color);
+		P.Thickness = Shape.Thickness.Get(P.Thickness);
+		P.CornerRadius = Shape.CornerRadius.Get(P.CornerRadius);
+		if (Shape.CornerRadii.IsSet())
+		{
+			for (int32 Index = 0; Index < 4; ++Index) P.CornerRadii[Index] = static_cast<float>(Shape.CornerRadii.GetValue()[Index]);
+		}
+		if (Shape.BlurPadding.IsSet()) P.BoxShadowBlurPadding = FMath::Max(0.0f, Shape.BlurPadding.GetValue());
+		P.StripeColor = Shape.StripeColor.Get(P.StripeColor);
+		P.StripeWidthPx = FMath::Max(1, Shape.StripeWidth.Get(P.StripeWidthPx));
+		P.StripeGapPx = FMath::Max(1, Shape.StripeGap.Get(P.StripeGapPx));
+		P.InsetPx = FMath::Max(0, Shape.Inset.Get(P.InsetPx));
+	}
+
+	// Explicit external MaterialParams input only; internal producers use typed payloads.
 	void ParseMaterialRefParams(const FUMGProceduralResourceRequest& Request, FMaterialRefParams& P)
 	{
 		if (!Request.MaterialParams.IsSet())
@@ -630,6 +647,7 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
 	}
 	FMaterialRefParams P;
 	if (Request.Gradient.HasAny()) ApplyGradientParams(Request.Gradient, P);
+	else if (Request.Shape.IsSet()) ApplyShapeParams(Request.Shape.GetValue(), P);
 	else ParseMaterialRefParams(Request, P);
 
 	bool bRecognized = false;
