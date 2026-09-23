@@ -113,14 +113,14 @@ def build_automation_asset_root(output_dir: Path, game_output_base: str = "", ca
     return f"/Game/Design2UMG/Automation/{case_segment}"
 
 
-def build_automation_phase_output(game_output_root: str, phase_name: str) -> str:
+def build_automation_variant_output(game_output_root: str, variant_name: str) -> str:
     normalized_root = (game_output_root or "").strip().rstrip("/")
-    phase_segment = sanitize_case_name(phase_name)
+    variant_segment = sanitize_case_name(variant_name)
     if not normalized_root:
         raise ValueError("game_output_root must not be empty")
-    if not phase_segment:
+    if not variant_segment:
         return normalized_root
-    return f"{normalized_root}/{phase_segment}"
+    return f"{normalized_root}/{variant_segment}"
 
 
 def find_node_by_id(nodes, target_id):
@@ -1879,9 +1879,6 @@ def run_editor(
                 )
 
             if time.time() - last_progress_time > idle_timeout_sec:
-                if result_seen and log_indicates_clean_editor_shutdown(log_path):
-                    terminate_owned_editor_process(process)
-                    return 0
                 terminate_owned_editor_process(process)
                 raise TimeoutError(
                     f"Editor made no progress for {idle_timeout_sec}s. "
@@ -2068,31 +2065,6 @@ def add_name_suffix(path: Path, suffix: str) -> Path:
     return path.with_name(f"{path.stem}{suffix}{path.suffix}")
 
 
-def log_indicates_clean_editor_shutdown(log_path: Path) -> bool:
-    if not log_path.is_file():
-        return False
-
-    try:
-        with open(log_path, "rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            tail_size = min(handle.tell(), 128 * 1024)
-            handle.seek(-tail_size, os.SEEK_END)
-            tail_text = handle.read().decode("utf-8-sig", errors="ignore")
-    except OSError:
-        return False
-
-    fatal_markers = (
-        "Fatal error",
-        "Unhandled Exception",
-        "Access violation",
-        "Assertion failed",
-    )
-    if any(marker in tail_text for marker in fatal_markers):
-        return False
-
-    return "LogExit: Exiting." in tail_text or "LogExit: Editor shut down" in tail_text
-
-
 def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict):
     result_path = Path(spec["result_json_path"])
     write_json(spec_path, spec)
@@ -2119,8 +2091,6 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     if not result_path.is_file():
         raise RuntimeError(f"UE result json not found: {result_path}")
     ue_result = load_ue_result(result_path)
-    if editor_exit_code != 0 and log_indicates_clean_editor_shutdown(log_path):
-        editor_exit_code = 0
     return {
         "editor_exit_code": editor_exit_code,
         "log_path": str(log_path),
@@ -2164,8 +2134,8 @@ def run_native_self_check(
 
     native_path = output_dir / "candidate.native.png"
     native_bootstrap_path = add_name_suffix(native_path, ".bootstrap")
-    native_generate_output = build_automation_phase_output(game_output_root, "native")
-    native_asset_output = build_automation_phase_output(game_output_root, "native-asset")
+    native_generate_output = build_automation_variant_output(game_output_root, "native")
+    native_asset_output = build_automation_variant_output(game_output_root, "native-asset")
     result = {
         "available": True,
         "reason": "",
@@ -2410,6 +2380,35 @@ def write_invalid_reference_report(
     return report_path
 
 
+def select_editor_process_outcome(*process_results: dict) -> tuple[int, Path]:
+    if not process_results:
+        raise ValueError("At least one editor process result is required")
+    selected = next(
+        (result for result in process_results if int(result["editor_exit_code"]) != 0),
+        process_results[-1],
+    )
+    return int(selected["editor_exit_code"]), Path(selected["log_path"])
+
+
+def select_render_chain_editor_process_outcome(render_chain: dict) -> tuple[int, Path]:
+    process_results = [
+        render_chain[key]
+        for key in ("generation", "asset_render")
+        if isinstance(render_chain.get(key), dict)
+    ]
+    native_self_check = render_chain.get("native_self_check") or {}
+    process_results.extend(
+        native_self_check[key]
+        for key in ("generation", "asset_render")
+        if isinstance(native_self_check.get(key), dict)
+    )
+    return select_editor_process_outcome(*process_results)
+
+
+def determine_single_run_exit_code(structure_passed: bool, editor_exit_code: int) -> int:
+    return 0 if structure_passed and editor_exit_code == 0 else 1
+
+
 def main():
     args = parse_args()
     args.editor = resolve_unreal_editor_path(args.editor)
@@ -2432,7 +2431,7 @@ def main():
     finalize_reference_context(args, reference_path, reference_context)
     # When an external reference PNG is already provided, structure validation will
     # fall back to the generated local design snapshot if no live Pencil snapshot is
-    # present. Avoid a redundant MCP round-trip on that path.
+    # present. Avoid a redundant MCP serialization on that path.
     if args.mode == "pen" and not args.reference:
         live_node_name = try_get_pen_node_name(args.source, args.node)
         live_source_structure = try_fetch_pencil_source_structure_snapshot(
@@ -2450,8 +2449,8 @@ def main():
 
     candidate_path = output_dir / "candidate.png"
     game_output_root = build_automation_asset_root(output_dir, args.game_output, infer_single_case_name(args, output_dir))
-    primary_game_output = build_automation_phase_output(game_output_root, "primary")
-    asset_only_output = build_automation_phase_output(game_output_root, "asset")
+    primary_game_output = build_automation_variant_output(game_output_root, "primary")
+    asset_only_output = build_automation_variant_output(game_output_root, "asset")
     mode_map = {
         "pen": "pen",
         "local-figma": "local_figma",
@@ -2477,8 +2476,6 @@ def main():
             spec,
         )
         ue_result = render_result["ue_result"]
-        editor_exit_code = render_result["editor_exit_code"]
-        ue_log_path = Path(render_result["log_path"])
         render_chain = {
             "final_render_mode": "asset",
             "asset_render": render_result,
@@ -2525,8 +2522,6 @@ def main():
             asset_spec,
         )
         ue_result = asset_result["ue_result"]
-        editor_exit_code = asset_result["editor_exit_code"]
-        ue_log_path = Path(asset_result["log_path"])
         render_chain = {
             "final_render_mode": "asset_reload",
             "generation": generate_result,
@@ -2554,6 +2549,7 @@ def main():
         args.node,
         generated_asset_path,
     )
+    editor_exit_code, ue_log_path = select_render_chain_editor_process_outcome(render_chain)
 
     reference_validation = apply_render_size_authority(
         reference_context,
@@ -2630,7 +2626,7 @@ def main():
     print(f"reference={reference_path}")
     print(f"candidate={candidate_path}")
     print(f"log={ue_log_path}")
-    sys.exit(0 if structure_passed else 1)
+    sys.exit(determine_single_run_exit_code(structure_passed, editor_exit_code))
 
 
 if __name__ == "__main__":

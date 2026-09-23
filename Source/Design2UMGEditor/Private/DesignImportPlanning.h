@@ -7,7 +7,13 @@
 
 namespace DesignImportPlanning
 {
+	/** Mark download-stage warnings so a successful download retry can retract them. */
+	FString MakeResourceResolutionWarning(const FString& Message);
+
 	void ResolveImages(FUMGWidgetData& Data, FString* OutReport = nullptr);
+
+	/** Preserve unresolved Figma refs until the source is resolved and converted again. */
+	void RecordImageResolutionFailure(FUMGWidgetData& Data);
 
 	FImportAnalysisResult AnalyzeWidgetData(
 		FUMGWidgetData& Data,

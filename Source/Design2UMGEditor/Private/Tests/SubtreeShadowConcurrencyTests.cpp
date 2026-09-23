@@ -38,16 +38,16 @@ bool FSubtreeShadowConcurrentCreationTest::RunTest(const FString& Nonce)
 	const FString Directory = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ShadowConcurrency")
 		/ FString::Printf(TEXT("%08x"), Seed);
 	IFileManager::Get().MakeDirectory(*Directory, true);
-	for (int32 Round = 0; Round < 3; ++Round)
+	for (int32 Iteration = 0; Iteration < 3; ++Iteration)
 	{
-		const FString Marker = Directory / FString::Printf(TEXT("%d_%u.ready"), Round, FPlatformProcess::GetCurrentProcessId());
+		const FString Marker = Directory / FString::Printf(TEXT("%d_%u.ready"), Iteration, FPlatformProcess::GetCurrentProcessId());
 		if (!TestTrue(TEXT("Publish participant"), FFileHelper::SaveStringToFile(TEXT("ready"), *Marker))) return false;
 		const double Deadline = FPlatformTime::Seconds() + 60.0;
 		TArray<FString> Participants;
 		do
 		{
 			Participants.Reset();
-			IFileManager::Get().FindFiles(Participants, *(Directory / FString::Printf(TEXT("%d_*.ready"), Round)), true, false);
+			IFileManager::Get().FindFiles(Participants, *(Directory / FString::Printf(TEXT("%d_*.ready"), Iteration)), true, false);
 			if (Participants.Num() == 2) break;
 			FPlatformProcess::Sleep(0.01f);
 		} while (FPlatformTime::Seconds() < Deadline);
@@ -61,16 +61,16 @@ bool FSubtreeShadowConcurrentCreationTest::RunTest(const FString& Nonce)
 		Root.Effect.EffectMaterial = UMGPropertyKeys::RetainerSubtreeShadowEffectRef;
 		FUMGBoxShadowLayerData Layer;
 		Layer.Color = FLinearColor(0.1f, 0.2f, 0.3f, 0.5f);
-		Layer.Offset = FVector2D(1 + Round, 2);
+		Layer.Offset = FVector2D(1 + Iteration, 2);
 		Root.Shadow.BoxShadows.Add(Layer);
 		FString Error;
 		const bool bPrepared = Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Root, Error);
-		TestTrue(FString::Printf(TEXT("Both editors prepare round %d: %s"), Round, *Error), bPrepared);
+		TestTrue(FString::Printf(TEXT("Both editors prepare iteration %d: %s"), Iteration, *Error), bPrepared);
 		if (bPrepared)
 		{
 			const FString ObjectPath = Root.Effect.EffectMaterial.Get(FString());
 			TestTrue(TEXT("Shared material is persisted"), FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(ObjectPath)));
-			AddInfo(FString::Printf(TEXT("Round %d material=%s"), Round, *ObjectPath));
+			AddInfo(FString::Printf(TEXT("Iteration %d material=%s"), Iteration, *ObjectPath));
 		}
 	}
 	return true;

@@ -9,6 +9,7 @@
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGFileFailureFixture.h"
 #include "Misc/Paths.h"
 #include "Misc/PackageName.h"
 #include "Misc/ScopeExit.h"
@@ -17,6 +18,7 @@
 #include "Rendering/SlateRenderer.h"
 #include "Fonts/FontMeasure.h"
 #include "UObject/Package.h"
+#include "Misc/FileHelper.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -91,28 +93,44 @@ bool FDesignLocalFontIndexLifetimeTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { IFileManager::Get().Delete(*AddedPath); };
 	DesignLocalFontImport::FSourceIndex CurrentImport;
 	const int32 OriginalCount = CurrentImport.GetFaces().Num();
+	int32 MetadataReads = 0;
+	TSet<FString> ReadPaths;
+	Design2UMGEditorTests::FScopedFileFailures Files;
+	Files.OnRead = [&](const FString& Path)
+	{
+		const FString Extension = FPaths::GetExtension(Path).ToLower();
+		if (Extension == TEXT("ttf") || Extension == TEXT("otf") || Extension == TEXT("ttc"))
+		{
+			++MetadataReads;
+			ReadPaths.Add(Path);
+		}
+	};
 	DesignLocalFontImport::FSourceIndex UnchangedImport;
 	TestEqual(TEXT("Unchanged import sees same font set"), UnchangedImport.GetFaces().Num(), OriginalCount);
-	TestEqual(TEXT("All successfully parsed fonts are reused"), UnchangedImport.GetMetadataCacheHits(), OriginalCount);
+	for (const auto& Face : UnchangedImport.GetFaces())
+		TestFalse(TEXT("Cached font bytes are not read again"), ReadPaths.Contains(FPaths::ConvertRelativePathToFull(Face.Path)));
 	// Rejected/unreadable files are retried rather than negatively cached.
-	const int32 RetriedReads = UnchangedImport.GetMetadataReadCount();
+	const int32 RetriedReads = MetadataReads;
 	TestEqual(TEXT("Copy font after the first scan"), IFileManager::Get().Copy(*AddedPath,
 		*(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"))), COPY_OK);
 	TestEqual(TEXT("Same import reuses its index, not a second directory scan"), CurrentImport.GetFaces().Num(), OriginalCount);
+	MetadataReads = 0;
 	DesignLocalFontImport::FSourceIndex NextImport;
 	TestTrue(TEXT("Next import discovers added font"), NextImport.GetFaces().ContainsByPredicate(
 		[&](const DesignLocalFontImport::FFace& Face) { return FPaths::IsSamePath(Face.Path, AddedPath); }));
-	TestEqual(TEXT("Only the added font adds a metadata read"), NextImport.GetMetadataReadCount(), RetriedReads + 1);
+	TestEqual(TEXT("Only the added font adds a metadata read"), MetadataReads, RetriedReads + 1);
 	const FString Replacement = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"))->GetBaseDir() / TEXT("Fonts/Biryani-Bold.ttf");
 	if (!TestEqual(TEXT("Replace font at same path"), IFileManager::Get().Copy(*AddedPath, *Replacement), COPY_OK)) return false;
+	MetadataReads = 0;
 	DesignLocalFontImport::FSourceIndex ReplacedImport;
 	TestTrue(TEXT("Changed file refreshes metadata"), ReplacedImport.GetFaces().ContainsByPredicate(
 		[&](const DesignLocalFontImport::FFace& Face) { return FPaths::IsSamePath(Face.Path, AddedPath) && Face.Family == TEXT("Biryani"); }));
-	TestEqual(TEXT("Only changed file adds a metadata read"), ReplacedImport.GetMetadataReadCount(), RetriedReads + 1);
+	TestEqual(TEXT("Only changed file adds a metadata read"), MetadataReads, RetriedReads + 1);
 	IFileManager::Get().SetTimeStamp(*AddedPath, IFileManager::Get().GetTimeStamp(*AddedPath) + FTimespan::FromSeconds(2));
+	MetadataReads = 0;
 	DesignLocalFontImport::FSourceIndex RetimedImport;
 	RetimedImport.GetFaces();
-	TestEqual(TEXT("Timestamp invalidates unchanged-size file"), RetimedImport.GetMetadataReadCount(), RetriedReads + 1);
+	TestEqual(TEXT("Timestamp invalidates unchanged-size file"), MetadataReads, RetriedReads + 1);
 	IFileManager::Get().Delete(*AddedPath);
 	DesignLocalFontImport::FSourceIndex DeletedImport;
 	TestFalse(TEXT("Deleted fonts disappear next import"), DeletedImport.GetFaces().ContainsByPredicate(

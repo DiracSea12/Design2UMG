@@ -2,23 +2,24 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGFileFailureFixture.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "GeneratedAssetLifecycle.h"
-#include "Tests/Design2UMGReimportQATestFixtures.h"
+#include "Tests/Design2UMGReimportTestFixtures.h"
 #include "Components/TextBlock.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Misc/ScopeExit.h"
 
-using namespace Design2UMGReimportQA;
+using namespace Design2UMGReimportFixtures;
 
 namespace
 {
 	FString CommitDocument(const TCHAR* Text)
 	{
-		return MakeQADoc(MakeQAPanel(TEXT("panel"), TEXT("Panel"), 24, 24,
-			MakeQAText(TEXT("head"), TEXT("Head"), 32, 32, Text)));
+		return MakeFixtureDoc(MakeFixturePanel(TEXT("panel"), TEXT("Panel"), 24, 24,
+			MakeFixtureText(TEXT("head"), TEXT("Head"), 32, 32, Text)));
 	}
 
 	FUMGWidgetData CommitWidgetData()
@@ -38,11 +39,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCommitImportMetadataFailureTest,
 	"Design2UMG.CommitResult.ImportMetadataFailure", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCommitImportMetadataFailureTest::RunTest(const FString&)
 {
-	AddExpectedError(TEXT("automation-injected sidecar write failure"), EAutomationExpectedErrorFlags::Contains, 3);
+	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 3);
 	AddExpectedError(TEXT("Widget Blueprint compile or save failed"), EAutomationExpectedErrorFlags::Contains, 3);
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitMetadata");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	QAWipeOutput(Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	FixtureWipeOutput(Folder);
 	for (const auto Mode : {EDesignBlueprintGenerationMode::BlueprintOnly,
 		EDesignBlueprintGenerationMode::BlueprintAndPng, EDesignBlueprintGenerationMode::BlueprintAndCompiledPng})
 	{
@@ -51,7 +52,8 @@ bool FCommitImportMetadataFailureTest::RunTest(const FString&)
 		Request.OutputPath = Folder;
 		Request.Generation.Mode = Mode;
 		Request.Generation.CompiledPngFilePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG/CommitMetadataTest.png");
-		Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
+		Design2UMGEditorTests::FScopedFileFailures FileFailures;
+	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
 		const FArtifactGenerationResult Result = DesignImportPipeline::GenerateArtifacts(Data, Request);
 		TestFalse(TEXT("Partial commit is not artifact-generation success"), Result.bSucceeded);
 		TestTrue(TEXT("Explicit metadata failure"), Result.Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
@@ -62,7 +64,7 @@ bool FCommitImportMetadataFailureTest::RunTest(const FString&)
 		TestEqual(TEXT("Artifact and commit refer to the same saved asset"), Result.GeneratedAssetPath, Result.Commit.AssetPath);
 		TestFalse(TEXT("Failure explains the partial commit"), Result.ErrorMessage.IsEmpty());
 		const FString Package = FPackageName::ObjectPathToPackageName(Result.GeneratedAssetPath);
-		TestTrue(TEXT("Asset actually exists on disk"), FPaths::FileExists(QAAssetFilePath(Package)));
+		TestTrue(TEXT("Asset actually exists on disk"), FPaths::FileExists(FixtureAssetFilePath(Package)));
 		TestFalse(TEXT("No manifest was created"), FPaths::FileExists(Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package)));
 		TestNotNull(TEXT("Committed asset remains loadable"), LoadObject<UWidgetBlueprint>(nullptr, *Result.GeneratedAssetPath));
 	}
@@ -73,31 +75,33 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCommitReimportUndoFailureTest,
 	"Design2UMG.CommitResult.ReimportUndoFailure", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCommitReimportUndoFailureTest::RunTest(const FString&)
 {
-	AddExpectedError(TEXT("automation-injected save failure"), EAutomationExpectedErrorFlags::Contains, 1);
+	Design2UMGEditorTests::FScopedTransactionBuffer Transactions;
+	AddExpectedError(TEXT("SaveWidgetBlueprint: failed to save"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitUndoFailure");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	UWidgetBlueprint* Blueprint = QAImport(CommitDocument(TEXT("Before")), nullptr, Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	UWidgetBlueprint* Blueprint = FixtureImport(CommitDocument(TEXT("Before")), nullptr, Folder);
 	if (!TestNotNull(TEXT("Initial asset saved"), Blueprint)) return false;
 	const FString Package = Blueprint->GetOutermost()->GetName();
 	const FString Hash = Design2UMGGenerationManifest::ComputeSavedAssetHash(Package);
 	FString Before;
-	if (!TestTrue(TEXT("Initial manifest readable"), QAReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package), Before))) return false;
-	FUMGGenerator::ArmAutomationSaveFailureOnce();
-	GeneratedAssetLifecycle::ArmAutomationUndoFailureOnce();
-	const FDesignReimportResult Result = QAReimport(CommitDocument(TEXT("After")), nullptr, Package);
+	if (!TestTrue(TEXT("Initial manifest readable"), FixtureReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package), Before))) return false;
+	Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure(Design2UMGEditorTests::IsPackageSaveTargetFile);
+	Transactions.Buffer->bRejectUndo = true;
+	const FDesignReimportResult Result = FixtureReimport(CommitDocument(TEXT("After")), nullptr, Package);
 	TestFalse(TEXT("Failed recovery is not success"), Result.bSucceeded);
 	TestTrue(TEXT("Undo failure explicitly incomplete"), Result.Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete);
 	TestTrue(TEXT("Memory recovery failed"), Result.Commit.Memory == EDesign2UMGMemoryState::RecoveryFailed);
-	TestTrue(TEXT("Asset unchanged on disk"), Result.Commit.Asset == EDesign2UMGFileState::Unchanged);
+	TestTrue(TEXT("Failed write reports uncertain disk state"), Result.Commit.Asset == EDesign2UMGFileState::Indeterminate);
 	TestTrue(TEXT("Manifest unchanged on disk"), Result.Commit.Manifest == EDesign2UMGFileState::Unchanged);
 	TestEqual(TEXT("Actual asset hash unchanged"), Design2UMGGenerationManifest::ComputeSavedAssetHash(Package), Hash);
 	FString After;
-	TestTrue(TEXT("Manifest still readable"), QAReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package), After));
+	TestTrue(TEXT("Manifest still readable"), FixtureReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package), After));
 	TestEqual(TEXT("Actual manifest unchanged"), After, Before);
 	UTextBlock* Head = Cast<UTextBlock>(Blueprint->WidgetTree->FindWidget(TEXT("Head")));
 	if (TestNotNull(TEXT("Modified widget retained"), Head))
 		TestEqual(TEXT("Failed undo really leaves new memory"), Head->GetText().ToString(), FString(TEXT("After")));
-	TestFalse(TEXT("No false rollback claim"), QAHasMessage(Result, TEXT("reimport_save_failed"), TEXT("transaction rolled back")));
+	TestFalse(TEXT("No false rollback claim"), FixtureHasMessage(Result, TEXT("reimport_save_failed"), TEXT("transaction rolled back")));
+	Transactions.Buffer->bRejectUndo = false;
 	TestTrue(TEXT("Caller can still undo the failed operation"), GEditor->UndoTransaction(false));
 	return true;
 }
@@ -106,19 +110,19 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCommitOuterTransactionTest,
 	"Design2UMG.CommitResult.OuterTransactionPreserved", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCommitOuterTransactionTest::RunTest(const FString&)
 {
-	AddExpectedError(TEXT("automation-injected save failure"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("SaveWidgetBlueprint: failed to save"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitOuterTransaction");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	UWidgetBlueprint* Blueprint = QAImport(CommitDocument(TEXT("Before")), nullptr, Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	UWidgetBlueprint* Blueprint = FixtureImport(CommitDocument(TEXT("Before")), nullptr, Folder);
 	if (!TestNotNull(TEXT("Initial asset saved"), Blueprint)) return false;
 	const FString Package = Blueprint->GetOutermost()->GetName();
 	const FString Hash = Design2UMGGenerationManifest::ComputeSavedAssetHash(Package);
 	GEditor->BeginTransaction(TEXT("Caller-owned test transaction"), FText::FromString(TEXT("Caller-owned test transaction")), Blueprint);
 	const FGuid TransactionId = GUndo->GetContext().TransactionId;
-	FUMGGenerator::ArmAutomationSaveFailureOnce();
-	const FDesignReimportResult Result = QAReimport(CommitDocument(TEXT("After")), nullptr, Package);
+	Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure(Design2UMGEditorTests::IsPackageSaveTargetFile);
+	const FDesignReimportResult Result = FixtureReimport(CommitDocument(TEXT("After")), nullptr, Package);
 	TestFalse(TEXT("Uncommitted update fails"), Result.bSucceeded);
-	TestTrue(TEXT("No commit"), Result.Commit.Status == EDesign2UMGCommitStatus::NotCommitted);
+	TestTrue(TEXT("No commit"), Result.Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete);
 	TestTrue(TEXT("Caller retains memory changes"), Result.Commit.Memory == EDesign2UMGMemoryState::Modified);
 	TestTrue(TEXT("Outer transaction stays active"), GEditor->IsTransactionActive());
 	TestEqual(TEXT("Disk remains unchanged"), Design2UMGGenerationManifest::ComputeSavedAssetHash(Package), Hash);
@@ -132,8 +136,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCommitSuccessfulExecutionTest,
 bool FCommitSuccessfulExecutionTest::RunTest(const FString&)
 {
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitExecution");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	QAWipeOutput(Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	FixtureWipeOutput(Folder);
 	FUMGWidgetData Data = CommitWidgetData();
 	FDesignImportRequest Request;
 	Request.OutputPath = Folder;
@@ -190,21 +194,22 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCommitResolutionCopyMetadataTest,
 	"Design2UMG.CommitResult.ResolutionCopyMetadataFailure", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCommitResolutionCopyMetadataTest::RunTest(const FString&)
 {
-	AddExpectedError(TEXT("automation-injected sidecar write failure"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitResolutionCopy");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	UWidgetBlueprint* Original = QAImport(CommitDocument(TEXT("Before")), nullptr, Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	UWidgetBlueprint* Original = FixtureImport(CommitDocument(TEXT("Before")), nullptr, Folder);
 	if (!TestNotNull(TEXT("Original imported"), Original)) return false;
 	const FString Package = Original->GetOutermost()->GetName();
 	const FString Hash = Design2UMGGenerationManifest::ComputeSavedAssetHash(Package);
 	FDesignDocument Document;
 	if (!TestTrue(TEXT("Conflicting source parsed"), FFigmaParser::ParseDocument(
-		CommitDocument(TEXT("After")).Replace(QAReimportScope, QAReimportOtherScope), Document))) return false;
+		CommitDocument(TEXT("After")).Replace(FixtureReimportScope, FixtureReimportOtherScope), Document))) return false;
 	FDesignReimportRequest Request;
 	Request.TargetAssetPath = Package;
-	Request.SettingsSnapshot = MakeQASnapshot(nullptr);
+	Request.SettingsSnapshot = MakeFixtureSnapshot(nullptr);
 	Request.bGenerateResolutionCopy = true;
-	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
+	Design2UMGEditorTests::FScopedFileFailures FileFailures;
+	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
 	TestFalse(TEXT("Original not updated"), Result.bSucceeded);
 	TestTrue(TEXT("Conflict explicitly reported"), Result.Commit.Status == EDesign2UMGCommitStatus::Conflict);
@@ -228,16 +233,17 @@ bool FCommitManifestFinalizeFailureTest::RunTest(const FString&)
 	AddExpectedError(TEXT("Error moving file"), EAutomationExpectedErrorFlags::Contains, 1);
 	AddExpectedError(TEXT("GenerationManifest: failed to finalize manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/CommitFinalizeFailure");
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	UWidgetBlueprint* Blueprint = QAImport(CommitDocument(TEXT("Before")), nullptr, Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	UWidgetBlueprint* Blueprint = FixtureImport(CommitDocument(TEXT("Before")), nullptr, Folder);
 	if (!TestNotNull(TEXT("Initial asset saved"), Blueprint)) return false;
 	const FString Package = Blueprint->GetOutermost()->GetName();
 	const FString Sidecar = Design2UMGGenerationManifest::BuildSidecarPathForAsset(Package);
 	const FString BeforeHash = Design2UMGGenerationManifest::ComputeSavedAssetHash(Package);
 	if (!TestTrue(TEXT("Original manifest exists"), FPaths::FileExists(Sidecar))) return false;
 
-	Design2UMGGenerationManifest::ArmAutomationSidecarFinalizeFailureOnce();
-	const FDesignReimportResult Result = QAReimport(CommitDocument(TEXT("After")), nullptr, Package);
+	Design2UMGEditorTests::FScopedFileFailures FinalizeFailure;
+	FinalizeFailure.RejectMove = [](const FString& Path, const FString&) { return Path.EndsWith(TEXT(".d2u.json")); };
+	const FDesignReimportResult Result = FixtureReimport(CommitDocument(TEXT("After")), nullptr, Package);
 	TestFalse(TEXT("Partial commit is not success"), Result.bSucceeded);
 	TestTrue(TEXT("Saved asset with failed metadata"), Result.Commit.Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
 	TestTrue(TEXT("Asset saved"), Result.Commit.Asset == EDesign2UMGFileState::Saved);
@@ -250,7 +256,7 @@ bool FCommitManifestFinalizeFailureTest::RunTest(const FString&)
 	UTextBlock* Head = Cast<UTextBlock>(Blueprint->WidgetTree->FindWidget(TEXT("Head")));
 	if (TestNotNull(TEXT("Updated widget retained"), Head))
 		TestEqual(TEXT("Memory agrees with the committed asset"), Head->GetText().ToString(), FString(TEXT("After")));
-	TestFalse(TEXT("No false rollback claim"), QAHasMessage(Result, TEXT("reimport_save_failed"), TEXT("transaction rolled back")));
+	TestFalse(TEXT("No false rollback claim"), FixtureHasMessage(Result, TEXT("reimport_save_failed"), TEXT("transaction rolled back")));
 	return true;
 }
 

@@ -67,6 +67,11 @@ public:
 	UPROPERTY(Config)
 	bool bFirstRunCompleted = false;
 
+	// ========== Generated Textures ==========
+	/** Cumulative new raster allocation allowance for each generation or preview. */
+	UPROPERTY(Config, EditAnywhere, Category = "Generated Textures", meta = (DisplayName = "Generated Texture Budget (MiB)", ClampMin = "1", ToolTip = "Maximum cumulative new image pixel data per generation or preview. Cached reuse is not charged again. Does not limit total editor memory or remote image downloads. Changes apply to the next operation."))
+	int32 GeneratedTextureBudgetMiB = 512;
+
 	// ========== Remote Image Import ==========
 
 	UPROPERTY(Config, EditAnywhere, Category = "Remote Image Import", meta = (DisplayName = "Enable Remote Image Import"))

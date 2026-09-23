@@ -38,12 +38,8 @@ public:
 
 private:
 	/**
-	 * Shared per-launch state. The connect/retry callbacks capture a shared
-	 * pointer to this (plus value copies of what they need) instead of
-	 * capturing the connector, so a callback that outlives the connector
-	 * never touches freed memory. The cancelled flag is the generation
-	 * check: Shutdown and every new LaunchAsync mark the previous attempt
-	 * cancelled, and each callback re-validates it before running.
+	 * Shared launch state retained by connect/retry callbacks.
+	 * Shutdown and replacement mark it cancelled; callbacks check that flag before use.
 	 */
 	struct FLaunchSession
 	{

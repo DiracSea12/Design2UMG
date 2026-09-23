@@ -51,21 +51,14 @@ namespace
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
 
-#if WITH_DEV_AUTOMATION_TESTS
-	bool GFailGeometryMaskSaveOnce = false;
-#endif
 
 	bool SaveGeometryMaskAsset(UObject* Asset, const FString& FileName)
 	{
 		UPackage* Package = Asset->GetOutermost();
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-		bool bForceFailure = false;
-#if WITH_DEV_AUTOMATION_TESTS
-		bForceFailure = GFailGeometryMaskSaveOnce;
-		GFailGeometryMaskSaveOnce = false;
-#endif
-		if (!bForceFailure && UPackage::SavePackage(Package, Asset, *FileName, SaveArgs)) return true;
+		SaveArgs.SaveFlags = SAVE_NoError;
+		if (UPackage::SavePackage(Package, Asset, *FileName, SaveArgs)) return true;
 
 		// A failed new asset must not be returned by LoadObject on the next attempt.
 		Asset->RemoveFromRoot();
@@ -181,7 +174,7 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		OutError = FString::Printf(TEXT("Subtree shadow '%s' has no valid capture size"), *Root.Name);
 		return false;
 	}
-	FString Code = TEXT("// Subtree shadow v1: all layers sample the original composed alpha.\nfloat4 Base = Texture.SampleLevel(TextureSampler, UV, 0);\nfloat4 Shadow = float4(0,0,0,0);\n");
+	FString Code = TEXT("// Subtree shadow: all layers sample the original composed alpha.\nfloat4 Base = Texture.SampleLevel(TextureSampler, UV, 0);\nfloat4 Shadow = float4(0,0,0,0);\n");
 	for (int32 Index = Root.Shadow.BoxShadows.Num() - 1; Index >= 0; --Index)
 	{
 		const FUMGBoxShadowLayerData& Layer = Root.Shadow.BoxShadows[Index];
@@ -629,12 +622,6 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	return Instance.Get();
 }
 
-#if WITH_DEV_AUTOMATION_TESTS
-void Design2UMGEffectMaterialBuilder::ArmGeometryMaskSaveFailureOnce()
-{
-	GFailGeometryMaskSaveOnce = true;
-}
-#endif
 
 bool Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(
 	FUMGWidgetNode& Root, TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError)

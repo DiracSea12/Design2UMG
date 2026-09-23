@@ -1,5 +1,7 @@
 # Design2UMG
 
+验证工具使用用户自己的用例目录，实际发现多少项就运行多少项，没有固定数量门槛。维护者私有视觉测试集不随开源仓库提供，也不是运行前提；空目录代表0项测试，不代表视觉门禁通过。见 [工具说明](Tools/README.md)。
+
 English canonical: [README.md](README.md)
 
 Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
@@ -83,6 +85,12 @@ MCP JSON 导入只作为 bridge/debug utility：
 ```text
 Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]
 ```
+
+## 生成图片预算设置
+
+在 `Edit → Editor Preferences → Plugins → Design2UMG → Generated Textures` 中调整 `Generated Texture Budget (MiB)`。
+默认 512 MiB，最小 1 MiB，限制一次正式生成或预览中新生成图片的累计像素数据。修改从下一次操作生效；缓存复用不重复计费，重新生成仍计费。
+此设置不改变下载、输入图片解码及单张图片的限制，也不代表编辑器总内存上限。提高数值会允许更多资源分配，应结合机器内存调整。
 
 ## 自动化和 HostProject 边界
 

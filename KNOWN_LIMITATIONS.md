@@ -32,8 +32,7 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Build Context And Measurement
 
-- `EffectiveDesignSize` is snapshotted once per recursive widget build so one build pass no longer observes mid-recursion drift from the process-global value.
-- The top-level build entry still receives design size through the legacy global handoff, so cross-run callers must continue to set it correctly before conversion.
+- The root handoff derives design size from source root bounds and passes it explicitly through the recursive widget build. Invalid source dimensions fail generation rather than borrowing a process-global size.
 - Font resolution and text measurement caches are now synchronized, but text sizing is still heuristic because UE font metrics and design-tool/web font metrics are not identical.
 
 ## Ellipse / Vector Fidelity
@@ -66,19 +65,19 @@ This document tracks current limitations that are known and accepted for now.
 ## Interaction and Animation
 
 - Prototype export still produces typed navigation IR: synthesized switcher roots for multi-page flows, button-wrapped trigger nodes, typed trigger/action bindings, and conditional step programs (`ON_CLICK/ON_HOVER/ON_PRESS/ON_DRAG/ON_KEY_DOWN/ON_KEY_UP + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK`).
-- Generated widget blueprints bake no runtime navigation: the former opt-in `RuntimeExtension` / `TagHelper` generation modes are gone, generated assets structurally contain only standard UMG classes, and no transition `UWidgetAnimation` assets are generated.
-- Wiring click navigation, overlay show/hide, history/back, open-link, and transition playback in an actual game world is intentionally left to the project side.
+- Generated blueprints wire the supported single-step mouse actions (navigate, open-link, overlay and back) and keyboard actions (navigate and open-link) through native Blueprint graphs. Supported navigation transitions use generated `UWidgetAnimation` subobjects; the removed `RuntimeExtension` / `TagHelper` modes are not required.
+- Exported interaction IR is broader than executable wiring. Unsupported trigger/action combinations, multi-step programs and unresolved targets remain unwired with diagnostics; this is not a general interaction-graph compiler.
 
-## Explicit Non-Goals For This Round
+## Explicit Non-Goals
 
 - Full `TEXT_PATH` reproduction is still out of scope because the current runtime tree has no text-on-path shaping / geometry rendering path.
 - Full semantic blur / inner-shadow parity is still out of scope because the current effect pipeline is built on `RetainerBox + EffectMaterial` / `UBackgroundBlur`, not custom multi-pass Slate rendering.
-- Full prototype overlay layer semantics / generalized interaction graph generation is still out of scope because the current export stops at typed navigation IR over `WidgetSwitcher` page structure plus a lightweight overlay host, not a generic state machine / event graph compiler.
+- Full prototype overlay-layer parity and generalized interaction graphs remain out of scope. The generated `WidgetSwitcher` / overlay host and supported native graph bindings do not implement every exported interaction program.
 
 ## Verification Boundary
 
 - Claims like "historical best visual fidelity" are not treated as static facts in this document.
-- Final parity conclusions must come from the current full-batch baseline protocol and real-project reruns, not from code inspection alone.
+- Final parity conclusions must come from the current full-suite baseline protocol and real-project reruns, not from code inspection alone.
 - Release validation in this repository uses a maintainer-owned canonical runtime boundary; HostProject fallback is not part of the supported workflow.
 - Public documentation should describe that boundary by role, not by maintainer machine path.
 

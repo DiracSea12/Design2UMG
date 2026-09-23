@@ -15,6 +15,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGTestUtils;

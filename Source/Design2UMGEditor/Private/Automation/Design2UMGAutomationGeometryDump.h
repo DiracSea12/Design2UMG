@@ -7,18 +7,9 @@
 class UWidgetTree;
 
 /**
- * Validation layer 2 (geometry golden): runtime-facts-only dump of the compiled
- * widget tree geometry. Writes a byte-stable geometry_dump.json (object keys
- * sorted, floats via %.9g, nodes in deterministic pre-order tree walk) taken at
- * the "compiled-after-draw" site so consecutive runs can be diffed against an
- * IR-derived expectation and a frozen golden.
- *
- * No expectation derivation happens here: policies and expected values are
- * computed by Tools/design2umg_geometry_compare.py from the same run's
- * ir_dump.json. Off by default: gated by the design2umgAutomation.GeometryDump
- * console variable plus a non-empty automation dump path (set by the automation
- * driver per render spec via TGuardValue, mirroring
- * GDesign2UMGAutomationIrDumpPath).
+ * Dump compiled-after-draw widget geometry in deterministic tree order.
+ * Keys are sorted and floats use %.9g. The Python geometry comparator derives expectations.
+ * Requires design2umgAutomation.GeometryDump and a non-empty per-render output path.
  */
 namespace Design2UMGAutomationGeometryDump
 {

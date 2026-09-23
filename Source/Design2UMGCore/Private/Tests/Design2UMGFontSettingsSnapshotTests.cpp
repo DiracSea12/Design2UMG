@@ -28,7 +28,7 @@ namespace
 		Face->FontFaceData = FFontFaceData::MakeFontFaceData(MoveTemp(Bytes));
 		FTypefaceEntry Entry(TEXT("Regular"));
 		Entry.Font = FFontData(Face);
-		Font->CompositeFont.DefaultTypeface.Fonts.Add(Entry);
+		Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(Entry);
 		return Font;
 	}
 
@@ -44,7 +44,7 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignFontSettingsSnapshotIsolationTest,
-	"Design2UMG.ReviewSafety.FontSettingsSnapshotIsolation",
+	"Design2UMG.Resources.Rasterization.FontSettingsSnapshotIsolation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FDesignFontSettingsSnapshotIsolationTest::RunTest(const FString&)
@@ -52,7 +52,7 @@ bool FDesignFontSettingsSnapshotIsolationTest::RunTest(const FString&)
 	UDesign2UMGSettings* Global = UDesign2UMGSettings::Get();
 	if (!TestNotNull(TEXT("Editor settings available"), Global)) return false;
 	const FDesign2UMGFontMappings SavedMappings = Global->ExplicitFontMappings;
-	UPackage* Package = CreatePackage(*(TEXT("/Game/Design2UMG/ReviewFontSnapshot_") + FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	UPackage* Package = CreatePackage(*(TEXT("/Game/Design2UMG/FontSettingsSnapshot_") + FGuid::NewGuid().ToString(EGuidFormats::Digits)));
 	TStrongObjectPtr<UFont> FontA(MakeSnapshotTestFont(Package, TEXT("FontA"), TEXT("Roboto-Regular.ttf")));
 	TStrongObjectPtr<UFont> FontB(MakeSnapshotTestFont(Package, TEXT("FontB"), TEXT("DroidSansMono.ttf")));
 	ON_SCOPE_EXIT
@@ -67,8 +67,8 @@ bool FDesignFontSettingsSnapshotIsolationTest::RunTest(const FString&)
 	};
 	if (!TestNotNull(TEXT("Proportional test font"), FontA.Get()) || !TestNotNull(TEXT("Monospace test font"), FontB.Get())) return false;
 
-	const FString Family = TEXT("D2UReviewSnapshotFamily");
-	const FString PostScript = TEXT("D2UReviewSnapshotPS");
+	const FString Family = TEXT("D2UFontSettingsSnapshotFamily");
+	const FString PostScript = TEXT("D2UFontSettingsSnapshotPS");
 	Global->ExplicitFontMappings.Add(Family, FontA.Get());
 	Global->ExplicitFontMappings.Add(PostScript, FontA.Get());
 	const FDesign2UMGConversionSettings Snapshot = FDesign2UMGConversionSettings::FromSettings(Global);

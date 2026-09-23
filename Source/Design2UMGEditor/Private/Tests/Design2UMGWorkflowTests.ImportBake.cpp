@@ -84,7 +84,7 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTargetNodeAndImageMappingWorkflowTest,
-	"Design2UMG.BatchImport.FigmaTargetNodeAndImageMapping",
+	"Design2UMG.BulkImport.FigmaTargetNodeAndImageMapping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -136,7 +136,7 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalVectorExplicitClearWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalVectorExplicitClear",
+	"Design2UMG.BulkImport.FigmaLocalVectorExplicitClear",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -183,7 +183,7 @@ bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Paramete
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLuminosityBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLuminosityBake",
+	"Design2UMG.BulkImport.FigmaLocalLuminosityBake",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -246,7 +246,7 @@ bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLuminosityBakeScalingFactorWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLuminosityBakeScalingFactor",
+	"Design2UMG.BulkImport.FigmaLocalLuminosityBakeScalingFactor",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -318,7 +318,7 @@ bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& 
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalBlendModeBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalBlendModeBake",
+	"Design2UMG.BulkImport.FigmaLocalBlendModeBake",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -408,7 +408,7 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenLocalBlendModeBakeWorkflowTest,
-	"Design2UMG.BatchImport.PenLocalBlendModeBake",
+	"Design2UMG.BulkImport.PenLocalBlendModeBake",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 {
@@ -534,7 +534,7 @@ bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalLayerBlurBakeWorkflowTest,
-	"Design2UMG.BatchImport.FigmaLocalLayerBlurBake",
+	"Design2UMG.BulkImport.FigmaLocalLayerBlurBake",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
 {

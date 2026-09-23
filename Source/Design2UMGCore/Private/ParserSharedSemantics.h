@@ -50,7 +50,7 @@ namespace ParserSharedSemantics
 	{
 		if (Value.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
 		{
-			OutCap = EDesignStrokeCap::Round;
+			OutCap = EDesignStrokeCap::Circular;
 			return true;
 		}
 		if (Value.Equals(TEXT("SQUARE"), ESearchCase::IgnoreCase))
@@ -65,7 +65,7 @@ namespace ParserSharedSemantics
 	{
 		if (Value.Equals(TEXT("ROUND"), ESearchCase::IgnoreCase))
 		{
-			OutJoin = EDesignStrokeJoin::Round;
+			OutJoin = EDesignStrokeJoin::Circular;
 			return true;
 		}
 		if (Value.Equals(TEXT("BEVEL"), ESearchCase::IgnoreCase))

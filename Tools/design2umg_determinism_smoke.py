@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -12,11 +13,6 @@ from design2umg_verify_lib.json_io import load_json as helper_load_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 
 
-CANONICAL_SENTINEL_CASES = (
-    "pen_pencil-new_gamehud-1920x1080",
-    "pen_pencil-welcome_step-2-frame",
-)
-CANONICAL_SENTINEL_OWNER = "Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES"
 DETERMINISM_SUMMARY_FILENAME = "determinism_smoke_summary.json"
 ZERO_DRIFT_EPSILON = 1e-9
 STRUCTURE_COUNT_FIELDS = (
@@ -43,21 +39,10 @@ def write_json(path: Path, payload: dict) -> None:
     helper_write_json(path, payload)
 
 
-def canonical_sentinel_cases() -> list[str]:
-    return list(CANONICAL_SENTINEL_CASES)
-
-
-def canonical_sentinel_regex() -> str:
-    escaped = [case.replace("-", r"\-") for case in CANONICAL_SENTINEL_CASES]
-    return f"^({'|'.join(escaped)})$"
-
-
 def make_summary_stub(run_root: Path) -> dict:
     return {
         "passed": False,
         "run_root": str(run_root),
-        "canonical_sentinel_owner": CANONICAL_SENTINEL_OWNER,
-        "sentinel_cases": canonical_sentinel_cases(),
         "run_scope_case_names": [],
         "summary_case_names": [],
         "case_results": [],
@@ -189,10 +174,10 @@ def validate_zero_drift_metrics(case_name: str, render_chain: dict, case_result:
     for metric_name in GENERATION_VS_ASSET_METRICS:
         metric_value = generation_vs_asset.get(metric_name)
         case_result[metric_name] = metric_value
-        if not isinstance(metric_value, (int, float)):
+        if type(metric_value) not in (int, float) or not math.isfinite(metric_value) or metric_value < 0:
             append_blocked_reason(
                 summary,
-                "generation_vs_asset_metric_missing",
+                "generation_vs_asset_metric_invalid",
                 case=case_name,
                 metric=metric_name,
             )
@@ -232,7 +217,8 @@ def validate_structure_parity(case_name: str, render_chain: dict, case_result: d
         )
 
     for left_key, right_key in STRUCTURE_COUNT_FIELDS:
-        if structure.get(left_key) != structure.get(right_key):
+        if (type(structure.get(left_key)) is not int or type(structure.get(right_key)) is not int
+                or structure[left_key] < 0 or structure[left_key] != structure[right_key]):
             append_blocked_reason(
                 summary,
                 "generation_vs_asset_structure_mismatch",
@@ -261,6 +247,7 @@ def validate_case_report(
     summary_case: dict | None,
     summary: dict,
 ) -> None:
+    previous_errors = len(summary["blocked_reason_details"])
     expected_report_path = resolve_expected_report_path(run_root, case_name)
     case_result = {
         "case": case_name,
@@ -325,7 +312,7 @@ def validate_case_report(
         )
         return
 
-    case_result["passed"] = True
+    case_result["passed"] = len(summary["blocked_reason_details"]) == previous_errors
 
 
 def validate_run_root(run_root: Path) -> dict:
@@ -335,7 +322,7 @@ def validate_run_root(run_root: Path) -> dict:
 
     summary = make_summary_stub(resolved_run_root)
     run_scope_path = resolved_run_root / "run_scope.json"
-    batch_summary_path = resolved_run_root / "summary.json"
+    suite_summary_path = resolved_run_root / "summary.json"
 
     try:
         run_scope = load_json(run_scope_path)
@@ -344,49 +331,37 @@ def validate_run_root(run_root: Path) -> dict:
         run_scope = {}
 
     try:
-        batch_summary = load_json(batch_summary_path)
+        suite_summary = load_json(suite_summary_path)
     except RuntimeError as exc:
-        append_blocked_reason(summary, "missing_summary", path=str(batch_summary_path), detail=str(exc))
-        batch_summary = {}
+        append_blocked_reason(summary, "missing_summary", path=str(suite_summary_path), detail=str(exc))
+        suite_summary = {}
 
-    run_scope_case_names = list((run_scope or {}).get("case_names") or [])
-    batch_summary_cases = list((batch_summary or {}).get("cases") or [])
-    batch_summary_case_names = [
-        item.get("name", "")
-        for item in batch_summary_cases
-        if isinstance(item, dict) and item.get("name")
-    ]
-    summary["run_scope_case_names"] = run_scope_case_names
-    summary["summary_case_names"] = batch_summary_case_names
-
-    if run_scope_case_names != canonical_sentinel_cases():
-        append_blocked_reason(
-            summary,
-            "run_scope_case_mismatch",
-            expected=canonical_sentinel_cases(),
-            actual=run_scope_case_names,
-        )
-
-    if batch_summary_case_names != canonical_sentinel_cases():
-        append_blocked_reason(
-            summary,
-            "summary_case_mismatch",
-            expected=canonical_sentinel_cases(),
-            actual=batch_summary_case_names,
-        )
-
-    summary_cases_by_name = {
-        item.get("name"): item
-        for item in batch_summary_cases
-        if isinstance(item, dict) and item.get("name")
-    }
-    for case_name in CANONICAL_SENTINEL_CASES:
-        validate_case_report(
-            run_root=resolved_run_root,
-            case_name=case_name,
-            summary_case=summary_cases_by_name.get(case_name),
-            summary=summary,
-        )
+    if not isinstance(run_scope, dict) or not isinstance(suite_summary, dict):
+        append_blocked_reason(summary, "invalid_run_metadata")
+        return summary
+    expected = run_scope.get("case_names")
+    if (not isinstance(expected, list) or any(not isinstance(name, str) or not name for name in expected)
+            or len(expected) != len(set(expected))):
+        append_blocked_reason(summary, "invalid_run_scope")
+        return summary
+    summary["run_scope_case_names"] = expected
+    if not expected:
+        append_blocked_reason(summary, "no_cases")
+        return summary
+    suite_cases = suite_summary.get("cases")
+    if not isinstance(suite_cases, list):
+        append_blocked_reason(summary, "invalid_summary_cases")
+        return summary
+    names = [item.get("name") for item in suite_cases if isinstance(item, dict)]
+    summary["summary_case_names"] = names
+    if (len(names) != len(suite_cases) or any(not isinstance(name, str) for name in names)
+            or len(names) != len(set(names)) or set(names) != set(expected)):
+        append_blocked_reason(summary, "summary_case_mismatch", expected=expected, actual=names)
+    cases_by_name = {item["name"]: item for item in suite_cases
+                     if isinstance(item, dict) and isinstance(item.get("name"), str)}
+    for case_name in expected:
+        validate_case_report(run_root=resolved_run_root, case_name=case_name,
+                             summary_case=cases_by_name.get(case_name), summary=summary)
 
     summary["passed"] = len(summary["blocked_reasons"]) == 0
     return summary
@@ -398,11 +373,11 @@ def write_determinism_summary(run_root: Path, summary: dict) -> Path:
     return summary_path
 
 
-def build_batch_command(args: argparse.Namespace, resolved_inputs: dict, design_root: Path, output_root: Path) -> list[str]:
-    batch_script = Path(__file__).with_name("design2umg_auto_verify_batch.py")
+def build_suite_command(args: argparse.Namespace, resolved_inputs: dict, design_root: Path, output_root: Path) -> list[str]:
+    suite_script = Path(__file__).with_name("design2umg_auto_verify_suite.py")
     command = [
         sys.executable,
-        str(batch_script),
+        str(suite_script),
         "--design-root",
         str(design_root),
         "--output-root",
@@ -413,41 +388,22 @@ def build_batch_command(args: argparse.Namespace, resolved_inputs: dict, design_
         resolved_inputs["editor"],
         "--reference-root",
         resolved_inputs["reference_root"],
-        "--include",
-        canonical_sentinel_regex(),
         "--parallel-editors",
         "1",
         "--post-workers",
         "1",
         "--reference-cache",
-        "off",
+        "read-write",
     ]
+    if args.include:
+        command.extend(["--include", args.include])
+    for root in args.figma_export_root:
+        command.extend(["--figma-export-root", root])
+    if args.no_publish_history:
+        command.append("--no-publish-history")
     if args.log_cmds:
         command.extend(["--log-cmds", args.log_cmds])
     return command
-
-
-def command_print_sentinels(args: argparse.Namespace) -> int:
-    if args.format == "regex":
-        print(canonical_sentinel_regex())
-        return 0
-    if args.format == "lines":
-        for case_name in CANONICAL_SENTINEL_CASES:
-            print(case_name)
-        return 0
-
-    print(
-        json.dumps(
-            {
-                "canonical_sentinel_owner": CANONICAL_SENTINEL_OWNER,
-                "sentinel_cases": canonical_sentinel_cases(),
-                "include_regex": canonical_sentinel_regex(),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-    return 0
 
 
 def command_validate_inputs(args: argparse.Namespace) -> int:
@@ -455,8 +411,6 @@ def command_validate_inputs(args: argparse.Namespace) -> int:
     payload = {
         **resolved_inputs,
         "design_root": str(resolve_design_root(args.design_root)),
-        "canonical_sentinel_owner": CANONICAL_SENTINEL_OWNER,
-        "sentinel_cases": canonical_sentinel_cases(),
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -477,19 +431,19 @@ def command_run(args: argparse.Namespace) -> int:
     output_root = resolve_run_root(args.output_root, "--output-root")
     output_root.mkdir(parents=True, exist_ok=True)
 
-    command = build_batch_command(args, resolved_inputs, design_root, output_root)
+    command = build_suite_command(args, resolved_inputs, design_root, output_root)
     print("Determinism smoke command:")
     print(" ".join(f'"{part}"' if " " in part else part for part in command))
-    batch_process = subprocess.run(command, check=False)
+    suite_process = subprocess.run(command, check=False)
 
     summary = validate_run_root(output_root)
-    summary["batch_exit_code"] = batch_process.returncode
+    summary["suite_exit_code"] = suite_process.returncode
     summary["command"] = command
-    if batch_process.returncode != 0:
+    if suite_process.returncode != 0:
         append_blocked_reason(
             summary,
-            "batch_exit_code_nonzero",
-            exit_code=batch_process.returncode,
+            "suite_exit_code_nonzero",
+            exit_code=suite_process.returncode,
         )
         summary["passed"] = False
 
@@ -502,10 +456,6 @@ def command_run(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Focused fail-closed Design2UMG determinism smoke")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    print_parser = subparsers.add_parser("print-sentinels", help="Print the canonical sentinel list or regex")
-    print_parser.add_argument("--format", choices=("json", "lines", "regex"), default="json")
-    print_parser.set_defaults(func=command_print_sentinels)
 
     validate_inputs_parser = subparsers.add_parser("validate-inputs", help="Fail closed if project/editor/reference-root is missing")
     validate_inputs_parser.add_argument("--project", default="")
@@ -524,6 +474,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--reference-root", default="")
     run_parser.add_argument("--output-root", default="")
     run_parser.add_argument("--design-root", default="")
+    run_parser.add_argument("--include", default="", help="Optional case-name regex; default validates the entire discovered corpus.")
+    run_parser.add_argument("--figma-export-root", action="append", default=[])
+    run_parser.add_argument("--no-publish-history", action="store_true")
     run_parser.add_argument("--log-cmds", default="")
     run_parser.set_defaults(func=command_run)
 

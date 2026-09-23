@@ -700,7 +700,7 @@ bool FFigmaPrototypeNavigateGraphWiringTest::RunTest(const FString& Parameters)
 		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())
 		&& Cast<UK2Node_VariableGet>(SelfPin->LinkedTo[0]->GetOwningNode())->GetVarName() == Switcher->GetFName());
 
-	// Phase 3: the switch call is preceded by the history push segment. The chain between the
+	// the switch call is preceded by the history push segment. The chain between the
 	// Delay and the switch is GetActiveWidgetIndex -> Array_Add(history, index).
 	UK2Node_CallFunction* PushNode = nullptr;
 	for (UEdGraphNode* Node : WBP->UbergraphPages[0]->Nodes)
@@ -934,7 +934,7 @@ bool FFigmaPrototypeWiringRegenerateIsIdempotentTest::RunTest(const FString& Par
 		return Count;
 	};
 	const int32 NodeCountAfterSave = Ubergraph->Nodes.Num();
-	// The fade transition chain with the Phase 3 history push authors twelve marker nodes (event,
+	// The fade transition chain with the history push authors twelve marker nodes (event,
 	// out get, PlayAnimation, Delay, switcher get, GetActiveWidgetIndex, history get, Array_Add,
 	// SetActiveWidgetIndex, switcher get, in get, PlayAnimation); the total count also pins the
 	// baseline the regenerate below must hold.
@@ -1176,7 +1176,7 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 	}
 
 	// No transition: no animations are authored and the binding keeps the direct wiring with the
-	// Phase 3 history push (bound event -> GetActiveWidgetIndex -> Array_Add -> SetActiveWidgetIndex).
+	// history push (bound event -> GetActiveWidgetIndex -> Array_Add -> SetActiveWidgetIndex).
 	TestEqual(TEXT("No transition animations are generated"), WBP->Animations.Num(), 0);
 	TestFalse(TEXT("No transition animation names are written into the IR"),
 		NavigationData.ClickBindings[0].Transition.HasGeneratedAnimations());
@@ -1217,9 +1217,7 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 	return true;
 }
 
-// Phase 3 Overlay wiring: a single Overlay step on a click trigger shows the generated overlay host.
-// The old runtime reparented the overlay page into the host (not expressible with standard nodes);
-// the decided encoding is host SetVisibility(SelfHitTestInvisible) via a numeric enum literal.
+// An Overlay click makes the generated overlay host SelfHitTestInvisible.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeOverlayGraphWiringTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.Overlay",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1306,7 +1304,7 @@ bool FFigmaPrototypeOverlayGraphWiringTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Phase 3 Back wiring: Branch on Array_IsEmpty(history) guarding SetActiveWidgetIndex(Array_Get at
+// Back wiring: Branch on Array_IsEmpty(history) guarding SetActiveWidgetIndex(Array_Get at
 // Array_LastIndex) -> Array_Remove (still at Array_LastIndex: history stores values, not positions),
 // with the overlay host and every hosted page collapsed first when they exist.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackGraphWiringTest,
@@ -1411,7 +1409,7 @@ bool FFigmaPrototypeBackGraphWiringTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Phase 3 runtime smoke (latent-pump pattern; this fixture has no transition, so switches are
+// runtime smoke (latent-pump pattern; this fixture has no transition, so switches are
 // immediate): navigate once pushes the current index 0, BACK pops it and returns to page 0.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeBackRuntimeSmokeTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.BackRuntimeSmoke",
@@ -1495,7 +1493,7 @@ bool FFigmaPrototypeBackRuntimeSmokeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Phase 3 keyboard wiring: generated OnKeyDown/OnKeyUp override function graphs, one key-equality
+// keyboard wiring: generated OnKeyDown/OnKeyUp override function graphs, one key-equality
 // Branch per key code guarding the Navigate chain, CDO flagged focusable, and the compiled
 // overrides callable via ProcessEvent.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardGraphWiringTest,
@@ -1762,9 +1760,7 @@ bool FFigmaPrototypeKeyboardMixedGraphPreservedTest::RunTest(const FString& Para
 	return true;
 }
 
-// Full reimport path for a mixed keyboard override: ClearGeneratedBindings is called before the
-// tree update and would previously delete the graph; the reimport must keep the user node and
-// surface a conflict diagnostic instead of silently discarding user logic.
+// Reimport preserves a mixed keyboard graph and reports its user-content conflict.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyboardMixedGraphReimportPreservedTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyboardMixedGraphReimportPreserved",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1847,14 +1843,14 @@ bool FFigmaPrototypeKeyboardMixedGraphReimportPreservedTest::RunTest(const FStri
 	return true;
 }
 
-// Phase 3 spike: prove that a UUserWidget::OnKeyDown override (BlueprintImplementableEvent with an
+// Verify that a UUserWidget::OnKeyDown override (BlueprintImplementableEvent with an
 // FEventReply return value, hence NOT placeable as an ubergraph event node) is expressible as a
 // generated function graph that compiles and lands on the generated class. Keyboard wiring is only
 // implemented if this passes.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyDownOverrideSpikeTest,
-	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyDownOverrideSpike",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeKeyDownOverrideTest,
+	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.KeyDownOverride",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaPrototypeKeyDownOverrideSpikeTest::RunTest(const FString& Parameters)
+bool FFigmaPrototypeKeyDownOverrideTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Document;
 	FUMGWidgetData Data;
@@ -1863,14 +1859,14 @@ bool FFigmaPrototypeKeyDownOverrideSpikeTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ProtoNavKeyDownSpike");
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PrototypeKeyboardNavigation");
 	DeleteGeneratedAssetsAtPath(OutputPath);
 
 	FUMGPrototypeNavigationData NavigationData;
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
 		Data, OutputPath, nullptr, nullptr, &NavigationData);
-	if (!TestTrue(TEXT("Build spike widget blueprint"), WBP != nullptr)
-		|| !TestTrue(TEXT("Save spike widget blueprint"),
+	if (!TestTrue(TEXT("Build keyboard widget blueprint"), WBP != nullptr)
+		|| !TestTrue(TEXT("Save keyboard widget blueprint"),
 			FUMGGenerator::SaveWidgetBlueprint(WBP, nullptr, &NavigationData).IsSuccess()))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -1974,8 +1970,7 @@ bool FFigmaPrototypeBackMultiStepRuntimeSmokeTest::RunTest(const FString& Parame
 	SecondNavButton->OnClicked.Broadcast();
 	TestEqual(TEXT("Second navigate switches to page 1"), Switcher->GetActiveWidgetIndex(), 1);
 
-	// Back over history [0, 2]: the last VALUE is 2. Reading the last INDEX instead would switch
-	// to page 1 (a visible no-move) - exactly the regression this test pins.
+	// History [0, 2] must return page value 2, not array index 1.
 	BackButton->OnClicked.Broadcast();
 	TestEqual(TEXT("Back returns to the last recorded page value (2), not the last index (1)"),
 		Switcher->GetActiveWidgetIndex(), 2);
@@ -2624,8 +2619,7 @@ bool FFigmaPrototypeBackClosesOverlayRuntimeSmokeTest::RunTest(const FString& Pa
 	TestEqual(TEXT("Overlay open shows the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::SelfHitTestInvisible);
 	TestEqual(TEXT("Overlay keeps page B active"), Switcher->GetActiveWidgetIndex(), 1);
 
-	// Back with an open overlay: closes the overlay only - page B stays active and the history
-	// is untouched (the old chain popped here and wrongly returned to A).
+	// Back closes the overlay while preserving active page B and its navigation history.
 	BackButton->OnClicked.Broadcast();
 	TestEqual(TEXT("Back closes the overlay host"), Host->GetVisibility(), ESlateVisibility::Collapsed);
 	TestEqual(TEXT("Back collapses the hosted page"), HostedPage->GetVisibility(), ESlateVisibility::Collapsed);
@@ -2790,8 +2784,7 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 	return true;
 }
 
-// MOVE_IN runtime smoke: incoming-only slide transitions switch FIRST and then play the
-// in-animation; the old chain sat behind a pre-switch delay (dead time with nothing playing).
+// Incoming-only transitions switch pages immediately, then play the incoming animation.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeMoveInTransitionRuntimeSmokeTest,
 	"Design2UMG.WidgetBlueprint.PrototypeGraphWiring.MoveInRuntimeSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

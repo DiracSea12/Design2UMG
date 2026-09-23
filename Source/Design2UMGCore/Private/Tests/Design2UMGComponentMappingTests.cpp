@@ -190,7 +190,7 @@ bool FDesignComponentMappingTwoLevelMatchTest::RunTest(const FString&)
 		TryResolveFigmaComponentIdentity(MakeInstanceSource(TEXT("12:34"), FString(), TEXT("component-key-1x")), Scope, NearIdentity));
 	TestNull(TEXT("no fuzzy name matching"), Table.Match(NearIdentity, bSetLevel));
 
-	TestNotNull(TEXT("find entry by key round-trips"),
+	TestNotNull(TEXT("find entry by exact key"),
 		Table.FindEntryByKey(TEXT("figma|file-key-1|component-key-1")));
 	return true;
 }

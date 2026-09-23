@@ -101,7 +101,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetTreeChildBuilderAutoGridLocalRowGrouping
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString& Parameters)
 {
-	// Case 1: homogeneous rows retain the existing clean slot assignment.
+	// homogeneous rows retain the existing clean slot assignment.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
 			{   0.0f,  0.0f, 80.0f, 40.0f },
@@ -121,7 +121,7 @@ bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString&
 		}
 	}
 
-	// Case 2: heterogeneous heights with aligned tops remain in their authored rows.
+	// heterogeneous heights with aligned tops remain in their authored rows.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
 			{   0.0f,   0.0f, 80.0f, 20.0f },
@@ -139,7 +139,7 @@ bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString&
 		}
 	}
 
-	// Case 3: compare each item with a stable row anchor so a three-item center
+	// compare each item with a stable row anchor so a three-item center
 	// chain does not collapse its distant third item into the first row.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
@@ -157,7 +157,7 @@ bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString&
 		}
 	}
 
-	// Case 4: a distant tall outlier must not widen the local threshold enough
+	// a distant tall outlier must not widen the local threshold enough
 	// to merge two short rows.
 	{
 		const TArray<FAutoGridChildSpec> Specs = {
@@ -175,7 +175,7 @@ bool FWidgetTreeChildBuilderAutoGridLocalRowGroupingTest::RunTest(const FString&
 		}
 	}
 
-	// Case 5: extreme vertical gap far exceeding any local threshold stays two
+	// extreme vertical gap far exceeding any local threshold stays two
 	// rows (guards against single-row collapse).
 	{
 		const TArray<FAutoGridChildSpec> Specs = {

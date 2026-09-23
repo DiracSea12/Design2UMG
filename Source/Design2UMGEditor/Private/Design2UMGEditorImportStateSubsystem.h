@@ -8,11 +8,8 @@
 #include "Design2UMGEditorImportStateSubsystem.generated.h"
 
 /**
- * Editor-subsystem owner of the Figma/Pencil import services. Replaces the former
- * FImportOrchestratorTransientState function-local singleton in the import orchestrator:
- * the instance is created by UEditorEngine once editor modules are loaded and destroyed
- * during engine shutdown (UEditorEngine::PreExit), which covers every consumer of the
- * old DLL-lifetime static.
+ * Owns Figma and Pencil import services for the editor subsystem lifetime.
+ * Services are released during editor shutdown.
  */
 UCLASS()
 class UDesign2UMGImportStateSubsystem : public UEditorSubsystem

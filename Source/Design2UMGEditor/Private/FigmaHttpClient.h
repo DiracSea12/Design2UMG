@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HttpModule.h"
 
 /**
  * Figma REST API HTTP client.
@@ -13,7 +14,7 @@
 class DESIGN2UMGEDITOR_API FFigmaHttpClient
 {
 public:
-	FFigmaHttpClient();
+	explicit FFigmaHttpClient(FHttpModule& HttpModule = FHttpModule::Get());
 	~FFigmaHttpClient();
 
 	FFigmaHttpClient(const FFigmaHttpClient&) = delete;

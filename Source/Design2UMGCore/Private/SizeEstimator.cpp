@@ -22,6 +22,17 @@ namespace
 		return Design2UMGCore::DesignNodeSemantics::ShouldSkipNode(Node);
 	}
 
+	bool HasLinearContent(const TSharedPtr<FDesignNode>& Node)
+	{
+		// Ref children are instance overrides, not the complete expanded content.
+		return Node->Type != EDesignNodeType::Ref
+			&& (Node->LayoutData.Layout == EDesignLayout::Horizontal || Node->LayoutData.Layout == EDesignLayout::Vertical)
+			&& Node->Children.ContainsByPredicate([](const TSharedPtr<FDesignNode>& Child)
+			{
+				return !ShouldSkipNodeForSizing(Child);
+			});
+	}
+
 	void MergeEstimatedDimension(float& CurrentValue, const FDesignSize& Size, float Estimate, bool bForceEstimate = false)
 	{
 		if (bForceEstimate || CurrentValue <= 0.0f)
@@ -71,16 +82,19 @@ namespace
 			if (Expanded.IsValid())
 			{
 				const FVector2D RefSize = PromoteFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State, RefResolver);
-				if (Node->Transform.Width.IsFit() && RefSize.X > Node->Transform.Width.Value && !Expanded->Transform.Width.IsFill())
+				if (Node->Transform.Width.IsFit() && !Expanded->Transform.Width.IsFill())
 				{
+					// An unspecified ref size must retain the inherited sizing mode.
+					Node->Transform.Width.Mode = Expanded->Transform.Width.Mode;
 					Node->Transform.Width.Value = static_cast<float>(RefSize.X);
 					// Keep the current expanded working copy in sync with the
 					// promoted instance override.
 					Expanded->Transform.Width = Node->Transform.Width;
 					Expanded->Transform.bHasWidth = true;
 				}
-				if (Node->Transform.Height.IsFit() && RefSize.Y > Node->Transform.Height.Value && !Expanded->Transform.Height.IsFill())
+				if (Node->Transform.Height.IsFit() && !Expanded->Transform.Height.IsFill())
 				{
+					Node->Transform.Height.Mode = Expanded->Transform.Height.Mode;
 					Node->Transform.Height.Value = static_cast<float>(RefSize.Y);
 					Expanded->Transform.Height = Node->Transform.Height;
 					Expanded->Transform.bHasHeight = true;
@@ -162,15 +176,18 @@ namespace
 		if (Node->Transform.Width.IsFit() || Node->Transform.Height.IsFit())
 		{
 			const FVector2D Estimated = EstimateContentSizeImpl(Node, ParentContentWidth, State);
-			if (Node->Transform.Width.IsFit() && Estimated.X > Node->Transform.Width.Value)
+			// A populated linear layout has a measured content size; the declared
+			// fit_content value is only a fallback for an empty slot, not a minimum.
+			const bool bUseContentSize = HasLinearContent(Node);
+			if (Node->Transform.Width.IsFit() && (bUseContentSize || Estimated.X > Node->Transform.Width.Value))
 			{
-				SizeEstimator::PromoteFitNodeDimension(Node, true, Estimated.X);
+				SizeEstimator::SetResolvedNodeDimension(Node, true, Estimated.X, Node->Transform.bSourceHasWidth);
 				FinalW = Node->Transform.Width.Value;
 				UE_LOG(LogDesign2UMG, VeryVerbose, TEXT("PreCompute: '%s' width fit→%.0f"), *Node->Name, Estimated.X);
 			}
-			if (Node->Transform.Height.IsFit() && Estimated.Y > Node->Transform.Height.Value)
+			if (Node->Transform.Height.IsFit() && (bUseContentSize || Estimated.Y > Node->Transform.Height.Value))
 			{
-				SizeEstimator::PromoteFitNodeDimension(Node, false, Estimated.Y);
+				SizeEstimator::SetResolvedNodeDimension(Node, false, Estimated.Y, Node->Transform.bSourceHasHeight);
 				FinalH = Node->Transform.Height.Value;
 				UE_LOG(LogDesign2UMG, VeryVerbose, TEXT("PreCompute: '%s' height fit→%.0f"), *Node->Name, Estimated.Y);
 			}
@@ -333,8 +350,9 @@ namespace
 		if (Node->Children.Num() > 0)
 		{
 			const FVector2D Sub = EstimateContentSizeImpl(Node, ParentContentWidth, State);
-			MergeEstimatedDimension(W, Node->Transform.Width, Sub.X);
-			MergeEstimatedDimension(H, Node->Transform.Height, Sub.Y);
+			const bool bUseContentSize = HasLinearContent(Node);
+			MergeEstimatedDimension(W, Node->Transform.Width, Sub.X, bUseContentSize && Node->Transform.Width.IsFit());
+			MergeEstimatedDimension(H, Node->Transform.Height, Sub.Y, bUseContentSize && Node->Transform.Height.IsFit());
 		}
 
 		return FVector2D(W, H);

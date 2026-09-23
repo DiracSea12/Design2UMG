@@ -11,6 +11,7 @@
 #include "UMGWidgetUtils.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
+#include "TextureResource.h"
 #include "Engine/Texture2D.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -315,9 +316,7 @@ bool FPropertyApplierNormalizesTypedAxisAlignedCropTransform::RunTest(const FStr
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
 
-	// Full-precision expectations: the typed transform reaches the brush UV region
-	// without the historical %.6f serialize/parse round trip, so UV min is (TX, TY)
-	// and UV max is (TX + A, TY + D) evaluated on the raw payload floats above.
+	// Compute UV bounds directly from payload floats: (TX, TY) to (TX + A, TY + D).
 	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
 	TestTrue(TEXT("Typed crop transform reaches brush min X at full precision"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.2500004768371582f, 0.0000001f));
 	TestTrue(TEXT("Typed crop transform reaches brush min Y at full precision"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10000049322843552f, 0.0000001f));

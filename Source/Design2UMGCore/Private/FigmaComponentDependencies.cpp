@@ -247,7 +247,7 @@ namespace FigmaComponentDependencies
 				OutError = TEXT("Instance dependency is missing a node or component identity");
 				return false;
 			}
-			Catalog.InstanceKeys.Add(Pair.Key, Key);
+			Catalog.InstanceKeys.Add(FString(Pair.Key), Key);
 		}
 		for (const auto& Value : *Errors)
 		{

@@ -14,24 +14,38 @@ class FJsonObject;
 
 namespace Design2UMGEditorImportServices
 {
+	enum class EFigmaImportCompletionKind : uint8
+	{
+		Success,
+		Warnings,
+		ImageFailure
+	};
+
+	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(const FUMGWidgetData& Data);
+
 	class FFigmaImportService;
 
 	class FFigmaImportSession : public TSharedFromThis<FFigmaImportSession>
 	{
 	public:
+		using FOnResolvedDocument = TFunction<void(const TSharedRef<FDesignDocument>&, bool)>;
+
 		FFigmaImportSession(
 			FFigmaImportService& InOwner,
 			FString InFileKey,
 			const FString& Token,
 			const uint32 InGeneration,
 			const FDesign2UMGImportSettingsSnapshot& InSettingsSnapshot,
-			FString InSelectedRootId = FString())
+			FOnResolvedDocument InOnResolvedDocument,
+			FString InSelectedRootId = FString(),
+			FHttpModule& HttpModule = FHttpModule::Get())
 			: Owner(InOwner)
 			, FileKey(MoveTemp(InFileKey))
 			, SelectedRootId(MoveTemp(InSelectedRootId))
 			, Generation(InGeneration)
-			, Client(MakeUnique<FFigmaHttpClient>())
+			, Client(MakeUnique<FFigmaHttpClient>(HttpModule))
 			, SettingsSnapshot(InSettingsSnapshot)
+			, OnResolvedDocument(MoveTemp(InOnResolvedDocument))
 		{
 			Client->SetToken(Token);
 		}
@@ -43,10 +57,6 @@ namespace Design2UMGEditorImportServices
 
 		void Start();
 		void CancelRequests();
-#if WITH_DEV_AUTOMATION_TESTS
-		/** Observe the completed dependency source without opening import UI in transport tests. */
-		TFunction<void(const FString&, const TMap<FString, FString>&)> AutomationComponentsResolved;
-#endif
 
 	private:
 		void HandleFileResponse(const bool bSuccess, const FString& Body);
@@ -67,12 +77,16 @@ namespace Design2UMGEditorImportServices
 			const TMap<FString, FString>& IdToUrl);
 		bool IsCancelled() const;
 
+		// Carries image-reference resolution failure into the final import result.
+		bool bImageResolutionFailed = false;
+
 		FFigmaImportService& Owner;
 		FString FileKey;
 		FString SelectedRootId;
 		uint32 Generation = 0;
 		TUniquePtr<FFigmaHttpClient> Client;
 		FDesign2UMGImportSettingsSnapshot SettingsSnapshot;
+		FOnResolvedDocument OnResolvedDocument;
 	};
 
 	class FFigmaImportService
@@ -81,19 +95,7 @@ namespace Design2UMGEditorImportServices
 		void RunImport(
 			const FString& FileKey,
 			const FString& Token,
-			const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
-		{
-			Invalidate();
-			const uint32 ImportGeneration = static_cast<uint32>(Generation.GetValue());
-			const TSharedRef<FFigmaImportSession> Session = MakeShared<FFigmaImportSession>(
-				*this,
-				FileKey,
-				Token,
-				ImportGeneration,
-				SettingsSnapshot);
-			ActiveSession = Session;
-			Session->Start();
-		}
+			const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot);
 
 		void Invalidate()
 		{

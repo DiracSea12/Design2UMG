@@ -68,8 +68,9 @@ namespace
 	}
 
 	// Lossless text rendering of NUMBER values: try increasing precision and take the first representation that
-	// round-trips to the exact same double. The %g default (6 significant digits) silently rounds design values;
-	// a fixed %.17g is lossless but stretches 9.99 into 17 digits of noise. The shortest round-trippable form loses no precision and keeps value text clean in diagnostics and the manifest.
+	// parses to the exact same double. The %g default (6 significant digits) silently rounds design values;
+	// a fixed %.17g is lossless but stretches 9.99 into 17 digits of noise. The shortest exact form keeps diagnostics
+	// and manifest values readable without losing precision.
 	FString NumberToLosslessString(const double NumberValue)
 	{
 		for (int32 Precision = 1; Precision < 17; ++Precision)
@@ -433,7 +434,7 @@ namespace Design2UMGComponentMappingGeneration
 			BuildState.AddDiagnostic(
 				TEXT("mapping_skipped"),
 				FString::Printf(
-					TEXT("Component mapping config ignored for provider '%s'; only figma documents are matched in v1"),
+					TEXT("Component mapping config ignored for provider '%s'; only figma documents are matched"),
 					*Provider));
 			return;
 		}
@@ -589,7 +590,7 @@ namespace Design2UMGComponentMappingGeneration
 				ReportBoth(
 					TEXT("mapping_prototype_inert"),
 					FString::Printf(
-						TEXT("Design interaction (trigger '%s', type '%s') attached to mapped component is inert this phase: mapped WBP interactions are project-owned"),
+						TEXT("Design interaction (trigger '%s', type '%s') attached to a mapped component will not be generated because mapped WBP interactions are project-owned"),
 						*Binding.TriggerWidgetName,
 						*Binding.TriggerType));
 			}
@@ -599,7 +600,7 @@ namespace Design2UMGComponentMappingGeneration
 				ReportBoth(
 					TEXT("mapping_prototype_inert"),
 					FString::Printf(
-						TEXT("Design interaction (trigger '%s', type '%s') inside a mapped component's unexpanded subtree is inert this phase: the subtree is replaced by the project-owned mapped WBP instance"),
+						TEXT("Design interaction (trigger '%s', type '%s') inside a mapped component's unexpanded subtree will not be generated because the subtree is replaced by the project-owned mapped WBP instance"),
 						*Binding.TriggerWidgetName,
 						*Binding.TriggerType));
 			}

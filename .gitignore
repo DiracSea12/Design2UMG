@@ -74,15 +74,24 @@ __pycache__/
 *.pyc
 Tools/FigmaExporter/node_modules/
 
-# Internal development documents (kept locally, not published)
+# Maintainer-only guidance (kept locally, not published)
 /Docs/CONTRIBUTING_INTERNALS.md
+
+# Historical plans and review evidence (kept locally, not published)
+/CODE_QUALITY_OPTIMIZATION_PLAN.md
+/REVIEW_FIX_DEVELOPMENT_PLAN.md
 /Docs/FigmaPencilConversionLayerConvergence.md
-/Docs/Phase31_4_*.md
-/Docs/Phase32B_*.md
+/Docs/Phase31_4_FullScopeCloseout.zh-CN.md
+/Docs/Phase31_4_TextureRefreshRegressionReport.zh-CN.md
+/Docs/Phase32B_PipelineDeterminismPostmortem.zh-CN.md
 /Docs/ProblemFixPlan.md
 /Docs/TextFontStrategy.zh-CN.md
 /Docs/TextMeasurementResearchAndDirection.zh-CN.md
 /Tools/PYTHON_TOOLING_DIAGNOSTICS_LEDGER.md
+/.gates/results/
+/.workbuddy/memory/
+/openspec/changes/archive/
+/openspec/review-sources/
 
 # Test design corpus lives in-repo but stays untracked (101MB of design JSON,
 # images and reference renders; open-source users bring or fetch their own)

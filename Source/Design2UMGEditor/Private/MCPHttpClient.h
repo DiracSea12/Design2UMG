@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HttpModule.h"
 
 class FJsonObject;
 
@@ -17,7 +18,7 @@ private:
 	struct FConnectSession;
 
 public:
-	FMCPHttpClient();
+	explicit FMCPHttpClient(FHttpModule& HttpModule = FHttpModule::Get());
 	~FMCPHttpClient();
 
 	FMCPHttpClient(const FMCPHttpClient&) = delete;
@@ -49,10 +50,6 @@ public:
 
 	bool IsConnected() const { return Session.IsValid() && !Session->SessionId.IsEmpty(); }
 
-#if WITH_DEV_AUTOMATION_TESTS
-	/** Test-only weak handle: proves Disconnect/complete releases the session self-reference. */
-	TWeakPtr<FConnectSession, ESPMode::ThreadSafe> GetSessionWeakForTests() const { return Session; }
-#endif
 
 private:
 	/** Shared delivered-flag for the in-flight request's cancel-failure path. */
@@ -74,11 +71,8 @@ private:
 		/** JSON-RPC id embedded in outgoing request bodies (fresh per session). */
 		int32 NextRpcRequestId = 1;
 		/**
-		 * Failure callback owed to the in-flight request when a new request
-		 * supersedes it: single-flight cancellation would otherwise never fire
-		 * the old callback. The shared state lets the real completion paths mark
-		 * it delivered, so the callback fires at most once. Cleared silently on
-		 * Disconnect.
+		 * Deliver failure once when a request is superseded.
+		 * Disconnect clears this callback without delivery.
 		 */
 		TSharedPtr<FInFlightCancelState, ESPMode::ThreadSafe> InFlightCancelState;
 		TFunction<void()> InFlightCancelFailure;
@@ -90,14 +84,9 @@ private:
 	TSharedPtr<FConnectSession, ESPMode::ThreadSafe> Session;
 
 	/**
-	 * Send one JSON-RPC request and track cancellation for it.
-	 * Static on purpose: every piece of state it touches is shared (the
-	 * client-lifetime slot plus the connection session), so async callbacks
-	 * can invoke it without capturing the client object.
-	 * @param LogLabel              Label used in log lines; defaults to Method when empty.
-	 * @param bLogTransportErrors   When false, connection/HTTP failures are reported to
-	 *                              OnComplete without the transport Error log lines
-	 *                              (tools/call callers own their failure reporting).
+	 * Send a JSON-RPC request using shared slot/session state, without capturing the client.
+	 * An empty LogLabel uses Method. When bLogTransportErrors is false, the caller owns
+	 * connection/HTTP error logging; OnComplete still receives the failure.
 	 */
 	static void SendRequestAsync(
 		const TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe>& State,

@@ -34,10 +34,10 @@ namespace
 }
 
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchCVisualMapperMultiFillSmokeTest,
-	"Design2UMG.BatchC.VisualMapperMultiFillSmoke",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillIntegrationTest,
+	"Design2UMG.VisualMapper.MultiFillSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchCVisualMapperMultiFillSmokeTest::RunTest(const FString& Parameters)
+bool FVisualMapperMultiFillIntegrationTest::RunTest(const FString& Parameters)
 {
 	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
 	Node->Id = TEXT("multi_fill_source");
@@ -167,7 +167,7 @@ bool FVisualMapperExplicitSideStrokeKeepsPaddedSurfaceTest::RunTest(const FStrin
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillElidesEmptyBorderContentTest,
-	"Design2UMG.BatchC.VisualMapperMultiFillElidesEmptyBorderContent",
+	"Design2UMG.VisualMapper.MultiFillElidesEmptyBorderContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperMultiFillElidesEmptyBorderContentTest::RunTest(const FString& Parameters)
 {
@@ -196,7 +196,7 @@ bool FVisualMapperMultiFillElidesEmptyBorderContentTest::RunTest(const FString& 
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillPromotesBorderContentTest,
-	"Design2UMG.BatchC.VisualMapperMultiFillPromotesBorderContent",
+	"Design2UMG.VisualMapper.MultiFillPromotesBorderContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperMultiFillPromotesBorderContentTest::RunTest(const FString& Parameters)
 {
@@ -230,7 +230,7 @@ bool FVisualMapperMultiFillPromotesBorderContentTest::RunTest(const FString& Par
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillElidesEmptyPanelContentTest,
-	"Design2UMG.BatchC.VisualMapperMultiFillElidesEmptyPanelContent",
+	"Design2UMG.VisualMapper.MultiFillElidesEmptyPanelContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperMultiFillElidesEmptyPanelContentTest::RunTest(const FString& Parameters)
 {
@@ -249,7 +249,7 @@ bool FVisualMapperMultiFillElidesEmptyPanelContentTest::RunTest(const FString& P
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillKeepsPaddedBorderContentTest,
-	"Design2UMG.BatchC.VisualMapperMultiFillKeepsPaddedBorderContent",
+	"Design2UMG.VisualMapper.MultiFillKeepsPaddedBorderContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& Parameters)
 {

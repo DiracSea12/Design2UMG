@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGFileFailureFixture.h"
 
 #include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGConverter.h"
@@ -24,7 +25,7 @@
 #include "Misc/PackageName.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Tests/Design2UMGMappingQAWidget.h"
+#include "Tests/Design2UMGComponentInputTestWidget.h"
 #include "UObject/Package.h"
 #include "WidgetBlueprint.h"
 
@@ -38,7 +39,7 @@ namespace
 
 	const TCHAR* ReimportTestScope = TEXT("safe-reimport-file-key");
 	const TCHAR* MappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
-	const TCHAR* OtherMappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappingQAWidget");
+	const TCHAR* OtherMappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
 
 	// ---------------------------------------------------------------------------
 	// Figma fixture builders (v1/v2/v3 share the same node assembly)
@@ -214,11 +215,8 @@ namespace
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Property-level lifecycle (tasks 3.2/3.4):
-// v1 import -> developer customization (add a project child / edit a D2U property) -> v2 reimport ->
-// D2U-owned updated (text/layout/mapped inputs overwritten) while customizations survive and mapped instances are not replaced.
-// ---------------------------------------------------------------------------
+// Reimport refreshes owned properties and mapped inputs while preserving project
+// customizations and mapped-instance identity.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportLifecycleTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportLifecycle",
@@ -333,9 +331,7 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// Structure changes (tasks 4.1/4.2/4.3): add (new top-level node) / move (into a new container) / remove (pure-D2U delete).
-// ---------------------------------------------------------------------------
+// Reconcile added nodes, moves into new containers and removal of owned subtrees.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportStructureTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportStructure",
@@ -543,10 +539,8 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// Identity conversion (task 4.6): generated -> mapped (v2 adds the mapping) -> generated (v3 drops it).
-// The old subtree is purely D2U-owned both times; each round replaces it with the new form plus diagnostics.
-// ---------------------------------------------------------------------------
+// Changing mapping configuration replaces owned subtrees between generated and mapped
+// forms, with matching manifest records and diagnostics.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportKindChangedTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportKindChanged",
@@ -627,10 +621,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// Conflicts (tasks 4.4/4.5): a Mapped Class change never replaces.
-// (The remove-with-project-content conflict is in SafeReimportRemoveConflict.)
-// ---------------------------------------------------------------------------
+// A mapped-class change preserves the instance and reports a conflict.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportConflictTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportConflict",
@@ -703,10 +694,7 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// remove with project content (task 4.3 conflict surface): the design-deleted node's subtree contains
-// project-added children -> no delete; kept + conflict diagnostic (contrast: the content-free delete is in SafeReimportStructure).
-// ---------------------------------------------------------------------------
+// Keep design-deleted subtrees containing project children and report a removal conflict.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportRemoveConflictTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportRemoveConflict",
@@ -760,10 +748,8 @@ bool FSafeReimportRemoveConflictTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// Sibling-copy fallback (task 4.7): scope mismatch / missing manifest = full conflict;
-// the original asset is kept by default; a sibling WBP + new manifest is generated only on explicit user choice.
-// ---------------------------------------------------------------------------
+// A scope mismatch or missing manifest preserves the original asset.
+// Create a sibling Blueprint and manifest only when explicitly requested.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportResolutionCopyTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportResolutionCopy",
@@ -823,19 +809,15 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 	return true;
 }
 
-// ---------------------------------------------------------------------------
-// Save-failure semantics (task 3.3): save fails -> transaction rollback, the asset keeps its pre-reimport state, the manifest is not updated.
-// The save failure is injected via FUMGGenerator::ArmAutomationSaveFailureOnce() (the engine's SavePackage
-// failure path goes through appError and cannot serve as a test injection vehicle).
-// ---------------------------------------------------------------------------
+// A failed file write rolls back the reimport transaction and preserves the manifest.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportSaveFailureTest,
 	"Design2UMG.WidgetBlueprint.SafeReimportSaveFailure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 {
-	// The failure-injection path logs an error by design; registered as expected.
-	AddExpectedError(TEXT("failed to save"), EAutomationExpectedErrorFlags::Contains, 0);
+	// The failure-injection path logs one error by design; register that exact boundary.
+	AddExpectedError(TEXT("SaveWidgetBlueprint: failed to save"), EAutomationExpectedErrorFlags::Contains, 1);
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/SafeReimportSaveFailure");
 
@@ -853,9 +835,8 @@ bool FSafeReimportSaveFailureTest::RunTest(const FString&)
 
 	const FString V2 = MakeReimportDoc(MakeCardNode(TEXT("re_card"), TEXT("PlainCard"), 24, 24, TEXT("Card v2")));
 
-	// Use the test injection to make the next SaveWidgetBlueprint fail deterministically once (production unaffected).
-	// The engine's SavePackage failure goes through appError and cannot be used as a test injection vehicle.
-	FUMGGenerator::ArmAutomationSaveFailureOnce();
+	// Reject the next package through UE's validation boundary before any file is replaced.
+	Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure(Design2UMGEditorTests::IsPackageSaveTargetFile);
 	const FDesignReimportResult Result = ReimportFromJson(V2, nullptr, TargetPackage);
 
 	TestFalse(TEXT("Reimport reports failure"), Result.bSucceeded);

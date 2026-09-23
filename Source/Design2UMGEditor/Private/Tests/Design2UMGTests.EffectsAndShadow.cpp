@@ -539,13 +539,13 @@ bool FRetainerTypedPayloadExplicitFalseAndRenderingPhaseTest::RunTest(const FStr
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeometryMaskEffectJsonRoundTripTest,
-	"Design2UMG.UMGJson.GeometryMaskEffectRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeometryMaskEffectJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.GeometryMaskEffectSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FGeometryMaskEffectJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FGeometryMaskEffectJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_GeometryMaskEffectRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_GeometryMaskEffectSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("RetainerBox");
 	SourceData.RootWidget.Id = TEXT("geometry_mask_root");
 	SourceData.RootWidget.Name = TEXT("GeometryMaskRoot");
@@ -576,13 +576,13 @@ bool FGeometryMaskEffectJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowEffectJsonRoundTripTest,
-	"Design2UMG.UMGJson.InnerShadowEffectRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowEffectJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.InnerShadowEffectSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FInnerShadowEffectJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FInnerShadowEffectJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_InnerShadowEffectRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_InnerShadowEffectSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("RetainerBox");
 	SourceData.RootWidget.Id = TEXT("inner_shadow_root");
 	SourceData.RootWidget.Name = TEXT("InnerShadowRoot");

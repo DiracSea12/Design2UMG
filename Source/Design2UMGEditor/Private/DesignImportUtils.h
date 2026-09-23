@@ -35,11 +35,7 @@ namespace DesignImportUtils
 	bool IsHttpUrl(const FString& Value);
 
 	/**
-	 * True for automation-imported font assets under a per-case directory
-	 * (e.g. /Game/Design2UMG/Automation/<case>/ImportedFonts/...); the pinned
-	 * global /Game/Design2UMG/Automation/ImportedFonts package stays reusable.
-	 * Owned by the product side so import code does not depend on the
-	 * automation render harness.
+	 * Identify per-case automation font assets; the shared ImportedFonts package is reusable.
 	 */
 	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath);
 

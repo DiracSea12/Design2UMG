@@ -1,94 +1,69 @@
-# Tools
+# Validation tools
 
-This directory contains the maintainer and validation utilities for Design2UMG.
+The tools are public; design corpora and visual baselines are user-owned inputs. No private maintainer corpus is bundled or required. A local run's case count is evidence about that run, not a product limit or a required minimum.
 
-## Public-facing helpers
+## Collect and discover your cases
 
-These scripts are intended for contributors who want to run local validation or reproduce a failure:
+Put supported inputs under one directory of your choice. The suite tool recursively discovers `.pen` files and Figma export directories containing `design.json` plus a top-level reference PNG. It never searches parent directories or a bundled private corpus. Optional repeated `--figma-export-root` arguments explicitly select separate Figma roots instead of the default scan within `--design-root`.
 
-- `Run-Design2UMGAutomationTests.ps1`
-- `Run-Design2UMGDeterminismSmoke.ps1`
-- `Run-DesignerSnapshotValidation.ps1`
-- `Run-StructureSnapshotValidation.ps1`
+```text
+<YourCases>/
+  screens.pen
+  exports/
+    dashboard/
+      design.json
+      reference.png
+```
 
-## Maintainer-only workflows
+A Pen case is an eligible root frame/group/component/ref, not necessarily a whole file. A Figma export contributes the existing `local` and `source` verification paths. Unsupported files are not cases. A directory with design.json but no reference PNG is not yet a runnable Figma case; discovery reports a warning and does not count it. A reference that disappears after discovery blocks execution.
 
-These files support release governance, historical-best validation, or internal automation flows:
+```powershell
+python Tools/design2umg_auto_verify_suite.py --design-root <YourCases> --output-root <RunRoot> --list-cases
+```
 
-- `design2umg_auto_verify.py`
-- `design2umg_auto_verify_batch.py`
-- `design2umg_determinism_smoke.py`
-- `design2umg_determinism_smoke_selftest.py`
-- `design2umg_fresh_process_reload_gate.py`
-- `design2umg_fresh_process_reload_gate_selftest.py`
-- `design2umg_rebuild_admissible_best.py`
-- `design2umg_validate_run.py`
-- `design2umg_render_rule.py`
-- `design2umg_compatibility_selftest.py`
-- `design2umg_diagnostics_selftest.py`
-- `design2umg_run_history_selftest.py`
-- `design2umg_evidence_epoch_selftest.py`
-- `design2umg_batch_report_contract_selftest.py`
-- `design2umg_structure_guard_selftest.py`
-- `design2umg_validation_helpers_selftest.py`
-- `Release/`
+This command requires no Unreal installation. It prints the discovered set and writes `run_scope.json`. Counts follow the input: 0, 1, 100, 1000 or any other discovered total; there is no fixed quota or built-in case-name list. Include/exclude expressions filter this set, and duplicate display names receive deterministic distinct case names.
 
-## Python dependencies
+An empty normal suite writes `summary.json` with `status=empty`, `total=0`, `executed=0`, `passed=null`, starts no editor and exits zero. This means discovery completed without tests, **not** that rendering or regression validation passed. A missing root or malformed input fails instead; an incomplete Figma directory is reported as skipped, not passed.
 
-The maintainer visual-validation scripts use Pillow for image loading and diffing:
+## Run a suite
+
+```powershell
+python Tools/design2umg_auto_verify_suite.py --design-root <YourCases> --output-root <NewRunRoot> --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --reference-root <YourFrozenReferenceRoot> --no-publish-history
+```
+
+Use an existing real project. Runtime execution requires `--project` or `DESIGN2UMG_RUNTIME_PROJECT`; no generated host project is substituted. Omit `--reference-root` when using each Figma export's PNG or the configured Pencil reference provider. Reference cache mode remains `read-write`; external frozen references are copied for comparison, not regenerated.
+
+Each external baseline case directory needs both `reference.png` and `compare_report.json` for available per-case `no_regression`. Keep input/reference identities and baseline pointers frozen during a code comparison. A filtered run is not a full-corpus result. Compare each metric per case, never just an average.
+
+`--no-publish-history` retains the ordinary history check and its run-local reports without replacing the global historical-best manifest. It does not waive regressions or publish anything to a remote service. Keep private cases, PNGs and run logs outside public exports.
+
+## Determinism and fresh-process reload
+
+```powershell
+python Tools/design2umg_determinism_smoke.py validate-run-root --run-root <CompletedRunRoot>
+python Tools/design2umg_fresh_process_reload_gate.py --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --run-root <CompletedRunRoot> --output-root <NewReloadRoot>
+```
+
+Determinism checks every case recorded in `run_scope.json`, including exact set completeness, finite non-negative error metrics, zero pixel drift and structure/text parity. Empty or incomplete evidence cannot prove determinism. To generate a focused replay, use the helper's `run` command (or `Run-Design2UMGDeterminismSmoke.ps1`) with explicit project/editor/design/reference/output roots and an optional `--include` regex (`-Include` in PowerShell). No named maintainer examples are mandatory.
+
+The reload gate's `--run-root` mode derives assets from that same manifest, launches a fresh editor, requires zero process exit, matches exact asset identities and explicit success/reload flags, then checks node counts, text, type statistics and candidate pixels. It does not require a long command line enumerating every asset. Alternatively, `--assets` takes explicit object paths; `--asset-floors` uses zero-based indices, rejects duplicate/out-of-range indices and requires positive floors. Manual asset mode checks those floors, not parity against an absent suite baseline.
+
+## Low-cost checks and CI
 
 ```powershell
 python -m pip install Pillow
+python Tools/run_validation_selftests.py
+pwsh -NoProfile -File Tools/Tests/Test-ValidationProcessIsolation.ps1
+npm --prefix Tools/FigmaExporter ci
+npm --prefix Tools/FigmaExporter test
 ```
 
-No other external Python runtime package is required for the scripts listed above.
+The Python runner compiles the tooling and runs every `design2umg_*_selftest.py`, failing on the first failure. The exporter uses its committed lockfile, compiles TypeScript and runs its Node tests. Public CI uses these same entry points. These tests generate small synthetic fixtures; they do not need or upload any user's design corpus.
 
-The helper-level contract selftest is intentionally UE-free and can run on a plain GitHub runner:
+UE automation remains available through `Run-Design2UMGAutomationTests.ps1`. Full private visual regression is separate from GitHub-hosted checks and from the self-hosted packaged-plugin tests; neither a badge nor a zero-case scan is full visual evidence.
 
-```powershell
-python Tools/design2umg_validation_helpers_selftest.py
-python Tools/design2umg_compatibility_selftest.py
-python Tools/design2umg_diagnostics_selftest.py
-python Tools/design2umg_run_history_selftest.py
-python Tools/design2umg_evidence_epoch_selftest.py
-python Tools/design2umg_batch_report_contract_selftest.py
-python Tools/design2umg_determinism_smoke_selftest.py
-```
+## Snapshot tools and release boundaries
 
-It covers batch case discovery, default Figma export root resolution, run-scope writing, execution sharding, worker-count resolution, and completeness aggregation. Runtime validation still requires an explicit real project path; the batch verifier fails closed when `--project` or `DESIGN2UMG_RUNTIME_PROJECT` is missing and never creates a HostProject fallback.
+`Run-DesignerSnapshotValidation.ps1` and `Run-StructureSnapshotValidation.ps1` reject an already-running editor by default. They never terminate unrelated editor sessions. Save and close sessions first, or explicitly use `-KeepExistingEditor` for intentional debugging.
 
-`design2umg_auto_verify.py` and `design2umg_auto_verify_batch.py` also seed runtime fonts from a discoverable `Content/Design2UMG/Fonts` directory. They copy the prepared UE assets into the runtime project; they do not download fonts or repair invalid font packages. A valid seed font must be a loadable `UFont` whose default typeface contains at least one entry backed by a valid `FontFace` or equivalent font data. Empty composite fonts and orphaned font-face files are invalid evidence for visual validation.
-
-## Determinism smoke
-
-`Run-Design2UMGDeterminismSmoke.ps1` is the focused pre-gate for automation-render parity work. Use it after touching automation render, package reload preparation, transient reset, automation font refresh, or bootstrap render preparation, and before spending a full 81-case formal run.
-
-The canonical sentinel owner lives in `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`. Do not hand-maintain a second list in the wrapper or selftest; inspect the current pair with:
-
-```powershell
-python Tools/design2umg_determinism_smoke.py print-sentinels
-```
-
-The smoke wrapper is fail-closed:
-
-- `--project`, `--editor`, `--reference-root`, and the wrapper `-OutputRoot` must be explicit.
-- It does not fall back to `DESIGN2UMG_RUNTIME_PROJECT`, `DESIGN2UMG_UNREAL_EDITOR`, `UE_ROOT`, a default reference root, or any HostProject.
-- It validates that the current run root really contains the canonical sentinel cases, current compare reports, zero-drift `generation_vs_asset`, and passing `generation_vs_asset_structure` parity before it reports success.
-
-Example:
-
-```powershell
-pwsh -NoProfile -File Tools/Run-Design2UMGDeterminismSmoke.ps1 `
-  -ProjectPath <MaintainerRuntimeProject.uproject> `
-  -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe `
-  -ReferenceRoot <TrustedReferenceRoot> `
-  -OutputRoot <OutputRoot>
-```
-
-This smoke is focused evidence only. It is not a replacement for the full formal 81-case no-regression closeout.
-
-The batch verifier also appends batch-level timing drift history to `Saved/Design2UMG/Automation/batch_timing_history.jsonl`. This is an inspection aid for maintainers, not a release gate by itself.
-
-## Boundary rule
-
-The public repository and packaged release artifacts must keep maintainer-only files out of the shipped boundary. Use `Tools/Release/Assert-PublicRepoBoundary.ps1` when checking that boundary.
+`Release/Assert-PublicRepoBoundary.ps1` checks source/export/package boundaries. Source workspace files, private run reports, source designs and comparison references are not release assets. See [ValidationProtocol](../Docs/ValidationProtocol.md) for the detailed evidence contract.

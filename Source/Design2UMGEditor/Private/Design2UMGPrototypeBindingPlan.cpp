@@ -145,7 +145,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 		if (!bMouse && !bKeyboard)
 		{
 			SkipBinding(OutWarnings, FString::Printf(
-				TEXT("trigger '%s' (%s): binding is not a simple single-action mouse Navigate/OpenLink/Overlay/Back or keyboard Navigate/OpenLink (Phase 3)"),
+				TEXT("trigger '%s' (%s): binding is not a simple single-action mouse Navigate/OpenLink/Overlay/Back or keyboard Navigate/OpenLink"),
 				*Binding.TriggerWidgetId, *Binding.TriggerType));
 			continue;
 		}
@@ -255,13 +255,8 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 				continue;
 			}
 
-			// Mirror-trigger resolution: when the trigger lives on a dual-target/initial overlay page,
-			// BuildRoot also synthesized a mirror copy of that page under the overlay host, and while
-			// the overlay is open the mirror's button is the VISIBLE one - it needs its own chain
-			// (overlay-context semantics, authored in pass 3). The mirror is optional: no twin in the
-			// tree (flow pages, overlay-only pages) or an unusable twin (no class property, or a
-			// non-generated event already bound to it - user content, never masked) leaves the
-			// original binding exactly as it is today.
+			// Wire visible overlay mirrors as separate triggers with overlay-context behavior.
+			// Missing mirrors, missing class properties and user-bound events leave the original binding intact.
 			UButton* MirrorTriggerButton = FUMGWidgetUtils::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
 				FUMGWidgetUtils::SanitizeWidgetName(
 					Binding.TriggerWidgetId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
@@ -273,9 +268,8 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 				Resolved.MirrorTriggerWidgetName = MirrorTriggerButton->GetFName();
 			}
 
-			// Phase 2: a Navigate binding whose transition produced generated animations plays them
-			// around the page switch; missing engine functions or unresolved animation class
-			// properties degrade to the direct wiring with a warning.
+			// Play available Navigate transitions around the page switch. Missing engine functions
+			// or animation properties produce a warning and direct navigation.
 			if (bNavigate && Binding.Transition.HasGeneratedAnimations())
 			{
 				if (!Functions.PlayAnimation || !Functions.Delay)
@@ -362,16 +356,9 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 	UOverlay* OverlayHost = Plan.OverlayHost;
 	auto& MouseBindings = Plan.MouseBindings;
 	auto& KeyboardBindings = Plan.KeyboardBindings;
-	// Pass 2 - structural preparation, all in one place because each mutation needs the same
-	// skeleton refresh (which recreates the class properties, so it must precede pass 3's caching):
-	//   1. The overlay host and its hosted pages must be exposed as variables: UOverlay and the
-	//      hosted page types (e.g. UCanvasPanel) default bIsVariable=false (unlike
-	//      UButton/UWidgetSwitcher), so synthesized hosts/pages never become class properties
-	//      otherwise.
-	//   2. The generated TArray<int32> history member variable, needed by any resolved Navigate
-	//      (push) or Back (pop) wiring. AddMemberVariable refuses to duplicate an existing name,
-	//      which is exactly the regenerate case: the previous run's variable is reused. A
-	//      same-named variable that is not a TArray<int32> (user content) disables history wiring.
+	// Expose overlay hosts/pages and create the TArray<int32> navigation history before
+	// refreshing the skeleton and caching class properties. Reuse a matching history member;
+	// a same-named member of another type disables history wiring.
 	const auto BindingKind = [&NavigationData](const FResolvedBinding& Resolved)
 	{
 		return NavigationData.ClickBindings[Resolved.BindingIndex].Steps[0].Kind;

@@ -63,7 +63,7 @@ namespace
 		const float CrossExtent,
 		const float SegmentStart,
 		const float SegmentEnd,
-		const bool bRoundCap)
+		const bool bCircularCap)
 	{
 		const float SegmentLength = SegmentEnd - SegmentStart;
 		if (SegmentLength <= KINDA_SMALL_NUMBER)
@@ -76,7 +76,7 @@ namespace
 			Geometry += TEXT(" ");
 		}
 
-		if (!bRoundCap)
+		if (!bCircularCap)
 		{
 			Geometry += bVertical
 				? FString::Printf(TEXT("M 0,%.4f L %.4f,%.4f L %.4f,%.4f L 0,%.4f Z"),
@@ -167,7 +167,7 @@ namespace
 			return nullptr;
 		}
 
-		const bool bRoundCap = Node->Visual.Stroke.Cap == EDesignStrokeCap::Round;
+		const bool bCircularCap = Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular;
 		// Loop guard for degenerate dash patterns (near-zero lengths that never advance the cursor).
 		constexpr int32 MaxDashedStrokeSegments = 4096;
 		FString Geometry;
@@ -180,7 +180,7 @@ namespace
 			const float SegmentEnd = FMath::Min(MajorExtent, Cursor + PatternLength);
 			if (bDrawSegment)
 			{
-				AppendDashedCapsule(Geometry, bVertical, StrokeThickness, Cursor, SegmentEnd, bRoundCap);
+				AppendDashedCapsule(Geometry, bVertical, StrokeThickness, Cursor, SegmentEnd, bCircularCap);
 			}
 			Cursor = SegmentEnd;
 			PatternIndex = (PatternIndex + 1) % DashPattern.Num();
@@ -226,13 +226,8 @@ namespace
 			if (Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling
 				|| Node->LayoutData.Overflow == EDesignOverflow::HorizontalScrolling)
 			{
-				// Figma's overflowDirection only marks which axis may scroll; an
-				// explicit auto-layout axis still owns child stacking, and the two
-				// can disagree in source data (e.g. a VERTICAL stack carrying
-				// HORIZONTAL_SCROLLING). Figma renders children stacked along the
-				// layout axis, so the ScrollBox stacking axis follows the explicit
-				// layout axis and falls back to the overflow axis only when the
-				// layout has no single stacking axis (None/Wrap/Grid).
+				// ScrollBox stacking follows an explicit auto-layout axis.
+				// Use the overflow axis only when layout has no single stacking axis.
 				const bool bHasExplicitLayoutAxis =
 					Node->LayoutData.Layout == EDesignLayout::Vertical
 					|| Node->LayoutData.Layout == EDesignLayout::Horizontal;

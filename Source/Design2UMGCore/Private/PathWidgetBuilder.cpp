@@ -14,7 +14,7 @@ namespace
 	{
 		switch (Cap)
 		{
-		case EDesignStrokeCap::Round:
+		case EDesignStrokeCap::Circular:
 			return TEXT("round");
 		case EDesignStrokeCap::Square:
 			return TEXT("square");
@@ -27,7 +27,7 @@ namespace
 	{
 		switch (Join)
 		{
-		case EDesignStrokeJoin::Round:
+		case EDesignStrokeJoin::Circular:
 			return TEXT("round");
 		case EDesignStrokeJoin::Bevel:
 			return TEXT("bevel");
@@ -81,13 +81,6 @@ namespace
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.Colors.Num() > 0)
 		{
 			return PrimaryFill.Gradient.Colors[0].Color;
-		}
-
-		if (Node->Visual.Stroke.HasStroke()
-			&& Node->Visual.Stroke.Fill.IsSet()
-			&& Node->Visual.Stroke.Fill->Type == EDesignFillType::Color)
-		{
-			return Node->Visual.Stroke.Fill->SolidColor;
 		}
 
 		for (const FDesignFill& Fill : Node->Visual.Fills)

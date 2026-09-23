@@ -1,8 +1,17 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "DesignImageResourceLimits.h"
+#include "Design2UMGSettings.h"
 
 namespace DesignImageResources
 {
+	FImageResourceLimits GetGeneratedTextureLimits()
+	{
+		FImageResourceLimits Limits;
+		// Config files bypass the editor's ClampMin; keep their values positive too.
+		Limits.MaxTotalDecodedBytes = static_cast<uint64>(FMath::Max(1, UDesign2UMGSettings::Get()->GeneratedTextureBudgetMiB)) * 1024ull * 1024ull;
+		return Limits;
+	}
+
 	namespace
 	{
 		constexpr uint64 Bgra8BytesPerPixel = 4;
@@ -65,6 +74,47 @@ namespace DesignImageResources
 		TotalDecodedBytes = NewTotal;
 		OutError.Reset();
 		return true;
+	}
+
+	namespace
+	{
+		FImageOperationBudget* GCurrentOperationBudget = nullptr;
+		FString* GCurrentRefusalError = nullptr;
+	}
+
+	FScopedOperationBudget::FScopedOperationBudget(FImageOperationBudget& InBudget, FString* InRefusalError)
+		: PreviousBudget(GCurrentOperationBudget)
+		, PreviousRefusalError(GCurrentRefusalError)
+	{
+		GCurrentOperationBudget = &InBudget;
+		GCurrentRefusalError = InRefusalError;
+		if (GCurrentRefusalError)
+		{
+			GCurrentRefusalError->Reset();
+		}
+	}
+
+	FScopedOperationBudget::~FScopedOperationBudget()
+	{
+		GCurrentOperationBudget = PreviousBudget;
+		GCurrentRefusalError = PreviousRefusalError;
+	}
+
+	FImageOperationBudget* FScopedOperationBudget::GetCurrent()
+	{
+		return GCurrentOperationBudget;
+	}
+
+	FString* FScopedOperationBudget::GetCurrentRefusalError()
+	{
+		return GCurrentRefusalError;
+	}
+
+	FScopedGeneratedTextureOperation::FScopedGeneratedTextureOperation()
+	{
+		if (FScopedOperationBudget::GetCurrent()) return;
+		OwnedBudget = MakeUnique<FImageOperationBudget>(GetGeneratedTextureLimits());
+		OwnedScope = MakeUnique<FScopedOperationBudget>(*OwnedBudget, &RefusalError);
 	}
 
 }

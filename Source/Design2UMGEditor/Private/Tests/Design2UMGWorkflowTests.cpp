@@ -70,10 +70,10 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeWrapFontRegressionTest,
-	"Design2UMG.Text.PencilWelcomeWrapFontRegression",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenWelcomeWrapFontSizingTest,
+	"Design2UMG.Text.PencilWelcomeWrapFontSizing",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPenWelcomeWrapFontRegressionTest::RunTest(const FString& Parameters)
+bool FPenWelcomeWrapFontSizingTest::RunTest(const FString& Parameters)
 {
 	const FString PenFile = GetFixturePath(TEXT("pencil-welcome.pen"));
 	if (PenFile.IsEmpty() || !FPaths::FileExists(PenFile))
@@ -594,9 +594,9 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	Doc.Children.Add(Root);
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* RootWidget = FindWidgetById(Data.RootWidget, TEXT("text-fit-root"));
-	const FUMGWidgetNode* HeaderCellWidget = FindWidgetById(Data.RootWidget, TEXT("header-cell_sz"));
+	const FUMGWidgetNode* HeaderCellWidget = FindWidgetById(Data.RootWidget, TEXT("header-cell"));
 	TestTrue(TEXT("Find single-line text fit root widget"), RootWidget != nullptr);
-	TestTrue(TEXT("Find header cell SizeBox wrapper"), HeaderCellWidget != nullptr);
+	TestTrue(TEXT("Find header cell by its preserved source identity"), HeaderCellWidget != nullptr);
 	if (!RootWidget || !HeaderCellWidget)
 	{
 		return false;
@@ -610,9 +610,9 @@ bool FFillWidthSingleLineTextDoesNotInflateFitHeightTest::RunTest(const FString&
 	const float ExportedHeight = bHasHeightOverride
 		? FCString::Atof(*HeightOverride)
 		: (bHasMinDesiredHeight ? FCString::Atof(*MinDesiredHeight) : 0.0f);
-	TestTrue(TEXT("Single-line fill-width text should keep the 44px fit-content minimum"),
+	TestTrue(TEXT("Single-line fill-width text plus padding should measure 44px"),
 		FMath::IsNearlyEqual(ExportedHeight, 44.0f, 0.5f));
-	TestTrue(TEXT("Root fit height should remain at the 44px minimum"),
+	TestTrue(TEXT("Root fit height should match the 44px content"),
 		FMath::IsNearlyEqual(RootWidget->Bounds.H, 44.0f, 0.5f));
 	return true;
 }

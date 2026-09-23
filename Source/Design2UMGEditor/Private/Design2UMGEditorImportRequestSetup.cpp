@@ -73,20 +73,20 @@ namespace Design2UMGEditorImportRequestSetup
 		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
 	}
 
-	TSharedPtr<FJsonObject> MakePencilBatchGetArgs()
+	TSharedPtr<FJsonObject> MakePencilBulkGetArgs()
 	{
-		TSharedPtr<FJsonObject> BatchArgs = MakeShared<FJsonObject>();
-		BatchArgs->SetStringField(TEXT("filePath"), TEXT(""));
+		TSharedPtr<FJsonObject> BulkArgs = MakeShared<FJsonObject>();
+		BulkArgs->SetStringField(TEXT("filePath"), TEXT(""));
 
 		TArray<TSharedPtr<FJsonValue>> Patterns;
 		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
 		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
 		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
-		BatchArgs->SetArrayField(TEXT("patterns"), Patterns);
-		BatchArgs->SetBoolField(TEXT("includePathGeometry"), true);
-		BatchArgs->SetNumberField(TEXT("searchDepth"), 1);
-		BatchArgs->SetNumberField(TEXT("readDepth"), 99);
-		return BatchArgs;
+		BulkArgs->SetArrayField(TEXT("patterns"), Patterns);
+		BulkArgs->SetBoolField(TEXT("includePathGeometry"), true);
+		BulkArgs->SetNumberField(TEXT("searchDepth"), 1);
+		BulkArgs->SetNumberField(TEXT("readDepth"), 99);
+		return BulkArgs;
 	}
 
 	TSharedPtr<FJsonObject> MakePencilVariablesArgs()

@@ -17,12 +17,8 @@ namespace SizeEstimator
 	FVector2D EstimateContentSize(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth = 0.0f, const FDesign2UMGFontMappings* FontMappings = nullptr);
 
 	/**
-	 * Mutating promotion pass: resolves fit-content sizes (expanding Refs through the
-	 * resolver) and WRITES the results back into node transform fields (Width/Height
-	 * values plus the bHasWidth/bHasHeight/bSourceHasWidth/bSourceHasHeight flags;
-	 * see FDesignTransformNodeData). Conversion output depends on this pass running
-	 * before child conversion, so conversion call sites invoke it as a pre-pass on the
-	 * working-copy IR.
+	 * Resolve fit-content sizes, including expanded references, on the working-copy IR.
+	 * Update dimensions and presence flags before child conversion.
 	 */
 	FVector2D PromoteFitContentSizes(
 		const TSharedPtr<FDesignNode>& Node,

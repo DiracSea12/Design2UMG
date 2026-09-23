@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 from design2umg_verify_lib.diagnostics import EvidenceReadError
@@ -281,7 +282,10 @@ def evaluate_report_pipeline_determinism_rule(report_path: Path) -> dict:
         for result_key, metric_key in metric_fields:
             metric_value = generation_vs_asset.get(metric_key)
             result[result_key] = metric_value
-            if metric_value is None or metric_value > RENDER_CHAIN_MATCH_EPSILON:
+            if type(metric_value) not in (int, float) or not math.isfinite(metric_value) or metric_value < 0:
+                result["reason"] = f"{metric_key}_invalid"
+                return result
+            if metric_value > RENDER_CHAIN_MATCH_EPSILON:
                 result["reason"] = f"{metric_key}_mismatch"
                 return result
 

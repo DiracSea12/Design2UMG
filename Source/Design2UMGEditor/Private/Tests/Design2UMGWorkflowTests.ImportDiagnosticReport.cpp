@@ -1,10 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGFileFailureFixture.h"
 #include "Design2UMGSettings.h"
 #include "DesignImageBakeUtils.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportDiagnosticReport.h"
-#include "Tests/Design2UMGReimportQATestFixtures.h"
+#include "Tests/Design2UMGReimportTestFixtures.h"
 #include "Misc/ScopeExit.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -213,7 +214,7 @@ bool FImportDiagnosticReportOutcomeContractTest::RunTest(const FString&)
 	{
 		Artifacts.Commit = Case.Commit;
 		Artifacts.Commit->AssetPath = TEXT("/Game/OutcomeContract.Target");
-		DesignImportDiagnosticReport::Write(Document, Data, Artifacts);
+		TestTrue(TEXT("Report write succeeds"), DesignImportDiagnosticReport::Write(Document, Data, Artifacts));
 		const FString Path = FindNewImportReport(ReportDir, ExistingReports);
 		ExistingReports.Add(Path);
 		TSharedPtr<FJsonObject> Report;
@@ -235,16 +236,67 @@ bool FImportDiagnosticReportOutcomeContractTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportWriteFailureTest,
+	"Design2UMG.Import.ImportDiagnosticReportWriteFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticReportWriteFailureTest::RunTest(const FString&)
+{
+	using namespace Design2UMGReimportFixtures;
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/ReportFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Parse source"), FFigmaParser::ParseDocument(
+		MakeFixtureDoc(MakeFixtureText(TEXT("label"), TEXT("Label"), 8, 8, TEXT("Report"))), Document))) return false;
+	const FDesign2UMGImportSettingsSnapshot Settings = MakeFixtureSnapshot(nullptr);
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings);
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = Folder;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	const FArtifactGenerationResult Imported = DesignImportPipeline::GenerateArtifacts(Data, Request, Settings.GenerationSettings);
+	if (!TestTrue(TEXT("Real asset and manifest committed"), Imported.Commit.IsSuccess())) return false;
+	const FDesign2UMGCommitResult Commit = Imported.Commit;
+	const FString PackageName = FPackageName::ObjectPathToPackageName(Commit.AssetPath);
+	TMap<FString, TArray<uint8>> OriginalFiles;
+	for (const FString& Path : {
+		FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension()),
+		Design2UMGGenerationManifest::BuildSidecarPathForAsset(PackageName)})
+	{
+		if (!TestTrue(TEXT("Read committed file"), FFileHelper::LoadFileToArray(OriginalFiles.Add(Path), *Path))) return false;
+	}
+
+	// A real filesystem refusal without changing shared directories or permissions.
+	Document.MutableSourceDocument().SourceFilePath = FString::ChrN(512, TCHAR('x')) + TEXT(".pen");
+	DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
+	Artifacts.Commit = Commit;
+	AddExpectedMessagePlain(TEXT("could not write import diagnostic report"), ELogVerbosity::Warning,
+		EAutomationExpectedMessageFlags::Contains, 2);
+	TestFalse(TEXT("Import report write failure reaches the caller"),
+		DesignImportDiagnosticReport::Write(Document, Data, Artifacts));
+	TestFalse(TEXT("Reimport forwards report write failure"),
+		DesignImportDiagnosticReport::WriteReimport(Document, Data, Commit.AssetPath, {}, nullptr, &Commit));
+	TestEqual(TEXT("Report failure does not change asset commit status"), Artifacts.Commit->Status, Commit.Status);
+	TestEqual(TEXT("Saved asset state is preserved"), Artifacts.Commit->Asset, Commit.Asset);
+	TestEqual(TEXT("Saved manifest state is preserved"), Artifacts.Commit->Manifest, Commit.Manifest);
+	TestEqual(TEXT("Memory state is preserved"), Artifacts.Commit->Memory, Commit.Memory);
+	for (const auto& File : OriginalFiles)
+	{
+		TArray<uint8> After;
+		TestTrue(TEXT("Committed file remains readable"), FFileHelper::LoadFileToArray(After, *File.Key));
+		TestTrue(TEXT("Report failure preserves committed bytes"), File.Value == After);
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportMappingOutcomeTest,
 	"Design2UMG.Import.ImportDiagnosticReportMappingOutcome",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 {
-	using namespace Design2UMGReimportQA;
+	using namespace Design2UMGReimportFixtures;
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/MappingOutcome");
-	QAWipeOutput(Folder);
-	ON_SCOPE_EXIT { QAWipeOutput(Folder); };
-	FDesign2UMGImportSettingsSnapshot Settings = MakeQASnapshot(QAMappedClassPath);
+	FixtureWipeOutput(Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
+	FDesign2UMGImportSettingsSnapshot Settings = MakeFixtureSnapshot(FixtureMappedClassPath);
 	auto& Inputs = Settings.GenerationSettings.ComponentMapping.Table.Entries[0].Inputs;
 	auto BoolInput = Inputs[0];
 	BoolInput.Target = TEXT("BoolValue");
@@ -252,7 +304,7 @@ bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 	Inputs.Insert(BoolInput, 0); // The valid text input must still run after the invalid bool input.
 	const auto MakeDocument = [](const TCHAR* Label)
 	{
-		return MakeQADoc(MakeQAButton(TEXT("mapped"), TEXT("Mapped"), 24, 24, Label));
+		return MakeFixtureDoc(MakeFixtureButton(TEXT("mapped"), TEXT("Mapped"), 24, 24, Label));
 	};
 	FDesignDocument Document;
 	if (!TestTrue(TEXT("Parse source"), FFigmaParser::ParseDocument(MakeDocument(TEXT("not-a-bool")), Document))) return false;
@@ -285,7 +337,7 @@ bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 	if (!CheckReport(Imported.Commit, TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
 	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, *Imported.GeneratedAssetPath);
 	if (!TestNotNull(TEXT("Degraded import remains usable"), Blueprint)) return false;
-	UDesign2UMGMappingQAWidget* Instance = QAFindMappedInstance(Blueprint);
+	UDesign2UMGComponentInputTestWidget* Instance = FixtureFindMappedInstance(Blueprint);
 	if (!TestNotNull(TEXT("Mapped instance built"), Instance)) return false;
 	TestTrue(TEXT("Invalid bool preserves its default"), Instance->BoolValue);
 	TestEqual(TEXT("Later valid input still applied"), Instance->TextValue.ToString(), FString(TEXT("not-a-bool")));
@@ -299,12 +351,13 @@ bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 			MakeDocument(bValid ? TEXT("false") : TEXT("invalid-again")), UpdatedDocument))) return false;
 		const FDesignReimportResult Result = DesignImportPipeline::Reimport(UpdatedDocument, ReimportRequest);
 		TestEqual(TEXT("Reimport exposes only current input degradation"), Result.bHasDegradation, !bValid);
-		TestEqual(TEXT("Reimport preserves instance identity"), QAFindMappedInstance(Blueprint), Instance);
+		TestEqual(TEXT("Reimport preserves instance identity"), FixtureFindMappedInstance(Blueprint), Instance);
 		TestFalse(TEXT("Invalid input retains the previously applied bool"), Instance->BoolValue);
 		if (!CheckReport(Result.Commit, bValid ? TEXT("succeeded") : TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
 	}
-	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
-	AddExpectedError(TEXT("automation-injected sidecar write failure"), EAutomationExpectedErrorFlags::Contains, 1);
+	Design2UMGEditorTests::FScopedFileFailures FileFailures;
+	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
+	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FDesignReimportResult Failed = DesignImportPipeline::Reimport(Document, ReimportRequest);
 	TestEqual(TEXT("Metadata failure outranks input degradation"), Failed.Commit.Status, EDesign2UMGCommitStatus::CommittedWithMetadataFailure);
 	TestTrue(TEXT("Metadata failure retains input loss information"), Failed.bHasDegradation);
@@ -1006,12 +1059,12 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	Settings->ExplicitFontMappings.Empty();
 
 	UFont* ExactFont = CreateUsableTestFont(
-		TEXT("/Game/Design2UMG/Fonts/D2U_Phase315ExactReportFont"),
-		TEXT("D2U_Phase315ExactReportFont"),
+		TEXT("/Game/Design2UMG/Fonts/D2U_FontIdentityExactReportFont"),
+		TEXT("D2U_FontIdentityExactReportFont"),
 		{TEXT("Regular"), TEXT("Bold")});
 	UFont* DefaultFont = CreateUsableTestFont(
-		TEXT("/Game/Design2UMG/Fonts/D2U_Phase315DefaultReportFont"),
-		TEXT("D2U_Phase315DefaultReportFont"),
+		TEXT("/Game/Design2UMG/Fonts/D2U_FontIdentityDefaultReportFont"),
+		TEXT("D2U_FontIdentityDefaultReportFont"),
 		{TEXT("Regular")});
 	UFont* DefaultFaceFont = CreateUsableTestFont(
 		TEXT("/Game/Design2UMG/Fonts/D2U_EmptyWeightDefaultFace"),
@@ -1029,10 +1082,10 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	}
 
 	Settings->ExplicitFontMappings.Add(
-		TEXT("D2UPhase315PS"),
+		TEXT("D2UFontIdentityPS"),
 		TSoftObjectPtr<UFont>(FSoftObjectPath(ExactFont)));
 	Settings->ExplicitFontMappings.Add(
-		TEXT("D2UPhase315"),
+		TEXT("D2UFontIdentity"),
 		TSoftObjectPtr<UFont>(FSoftObjectPath(ExactFont)));
 	Settings->DefaultFontAsset = TSoftObjectPtr<UFont>(FSoftObjectPath(DefaultFont));
 	FFontResolver::ClearCache();
@@ -1041,8 +1094,8 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	Document.Version = TEXT("font-identity-evidence-v1");
 
 	FDesignFont UrlClue;
-	UrlClue.Name = TEXT("D2UPhase315");
-	UrlClue.Url = TEXT("https://example.com/fonts/D2UPhase315.woff2");
+	UrlClue.Name = TEXT("D2UFontIdentity");
+	UrlClue.Url = TEXT("https://example.com/fonts/D2UFontIdentity.woff2");
 	Document.Fonts.Add(UrlClue);
 
 	FDesignFont UnsupportedFileClue;
@@ -1058,24 +1111,24 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	NodeOnly->Id = TEXT("font_identity_node_only");
 	NodeOnly->Name = TEXT("Font Identity Node Only");
 	NodeOnly->Type = EDesignNodeType::Text;
-	NodeOnly->Text.FontFamily = TEXT("D2UPhase315");
-	NodeOnly->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	NodeOnly->Text.FontFamily = TEXT("D2UFontIdentity");
+	NodeOnly->Text.FontPostScriptName = TEXT("D2UFontIdentityPS");
 	NodeOnly->Text.FontWeight = TEXT("700");
 	Document.Children.Add(NodeOnly);
 
 	TSharedPtr<FDesignNode> DuplicateA = MakeShared<FDesignNode>();
 	DuplicateA->Id = TEXT("duplicate_a");
 	DuplicateA->Type = EDesignNodeType::Text;
-	DuplicateA->Text.FontFamily = TEXT("D2UPhase315");
-	DuplicateA->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	DuplicateA->Text.FontFamily = TEXT("D2UFontIdentity");
+	DuplicateA->Text.FontPostScriptName = TEXT("D2UFontIdentityPS");
 	DuplicateA->Text.FontWeight = TEXT("700");
 	Document.Children.Add(DuplicateA);
 
 	TSharedPtr<FDesignNode> DuplicateB = MakeShared<FDesignNode>();
 	DuplicateB->Id = TEXT("duplicate_b");
 	DuplicateB->Type = EDesignNodeType::Text;
-	DuplicateB->Text.FontFamily = TEXT("D2UPhase315");
-	DuplicateB->Text.FontPostScriptName = TEXT("D2UPhase315PS");
+	DuplicateB->Text.FontFamily = TEXT("D2UFontIdentity");
+	DuplicateB->Text.FontPostScriptName = TEXT("D2UFontIdentityPS");
 	DuplicateB->Text.FontWeight = TEXT("700");
 	Document.Children.Add(DuplicateB);
 
@@ -1085,13 +1138,13 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	RunNode->Type = EDesignNodeType::Text;
 	FDesignTextRun& Run0 = RunNode->Text.TextRuns.AddDefaulted_GetRef();
 	Run0.Content = TEXT("A");
-	Run0.FontFamily = TEXT("D2UPhase315");
-	Run0.FontPostScriptName = TEXT("D2UPhase315PS");
+	Run0.FontFamily = TEXT("D2UFontIdentity");
+	Run0.FontPostScriptName = TEXT("D2UFontIdentityPS");
 	Run0.FontWeight = TEXT("400");
 	FDesignTextRun& Run1 = RunNode->Text.TextRuns.AddDefaulted_GetRef();
 	Run1.Content = TEXT("B");
-	Run1.FontFamily = TEXT("D2UPhase315");
-	Run1.FontPostScriptName = TEXT("D2UPhase315PS");
+	Run1.FontFamily = TEXT("D2UFontIdentity");
+	Run1.FontPostScriptName = TEXT("D2UFontIdentityPS");
 	Run1.FontWeight = TEXT("700");
 	Document.Children.Add(RunNode);
 
@@ -1278,12 +1331,12 @@ bool FImportDiagnosticReportAmbiguousFontIdentityEvidenceTest::RunTest(const FSt
 	Settings->DefaultFontAsset.Reset();
 
 	UFont* AmbiguousA = CreateUsableTestFont(
-		TEXT("/Game/Design2UMG/Fonts/Phase315AmbiguousA/D2U_Phase315Ambiguous"),
-		TEXT("D2U_Phase315Ambiguous"),
+		TEXT("/Game/Design2UMG/Fonts/FontIdentityAmbiguousA/D2U_FontIdentityAmbiguous"),
+		TEXT("D2U_FontIdentityAmbiguous"),
 		{TEXT("Regular")});
 	UFont* AmbiguousB = CreateUsableTestFont(
-		TEXT("/Game/Design2UMG/Fonts/Phase315AmbiguousB/D2U_Phase315Ambiguous"),
-		TEXT("D2U_Phase315Ambiguous"),
+		TEXT("/Game/Design2UMG/Fonts/FontIdentityAmbiguousB/D2U_FontIdentityAmbiguous"),
+		TEXT("D2U_FontIdentityAmbiguous"),
 		{TEXT("Regular")});
 	TestTrue(TEXT("Ambiguous fixture font A created"), AmbiguousA != nullptr);
 	TestTrue(TEXT("Ambiguous fixture font B created"), AmbiguousB != nullptr);
@@ -1302,7 +1355,7 @@ bool FImportDiagnosticReportAmbiguousFontIdentityEvidenceTest::RunTest(const FSt
 	TSharedPtr<FDesignNode> TextNode = MakeShared<FDesignNode>();
 	TextNode->Id = TEXT("ambiguous_font_text");
 	TextNode->Type = EDesignNodeType::Text;
-	TextNode->Text.FontFamily = TEXT("D2U_Phase315Ambiguous");
+	TextNode->Text.FontFamily = TEXT("D2U_FontIdentityAmbiguous");
 	Document.Children.Add(TextNode);
 
 	FUMGWidgetData Data;

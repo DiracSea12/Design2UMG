@@ -9,11 +9,9 @@
 #include "UMGValueParsing.h"
 #include "UMGWidgetUtils.h"
 #include "WidgetLayoutAdapter.h"
-#include "WidgetResourceBinder.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
-#include "Components/Image.h"
 #include "Components/PanelWidget.h"
 
 namespace DesignImportPipeline
@@ -46,11 +44,8 @@ namespace DesignImportPipeline
 		}
 	}
 
-	/**
-	 * Mapped Class change conflict check (shared by the 9e plan stage and the RefreshMappedInstance walk):
-	 * the instance's actual class != the manifest-recorded class, or the class the mapping currently points at !=
-	 *the recorded class - either is a conflict (the project replaced the instance / the ini changed the target). A currently unfindable mapping entry compares as an empty string.
-	 */
+	/** A mapped instance conflicts when its live class or configured target differs from the manifest class.
+ * A missing mapping compares as an empty class path. */
 	bool IsMappedClassConflict(
 		const UWidget* Instance,
 		const FDesign2UMGGenerationManifestSidecar::FInstanceRecord* Record,
@@ -135,10 +130,8 @@ namespace DesignImportPipeline
 				}
 			}
 
-			// Within one round, the same instance may be refreshed twice - once by the 9e update plan, once by the parent
-			//instance's nested diff (both routes reach mapped instances under a switcher host). The dedup check runs
-			// before side effects: the second arrival skips outright, avoiding duplicate slot/inputs application and
-			// duplicate mapping_input_applied diagnostics (the manifest records one entry, one refresh diagnostic).
+			// Both the update plan and parent refresh can reach a mapped instance. Deduplicate before
+			// applying slots or inputs so each instance produces one refresh and one set of diagnostics.
 			const FString ProspectiveDesignNodeId = GetDesignNodeId(Node);
 			const FString ProspectiveWidgetName = Instance->GetFName().ToString();
 			if (Shared.UpdatedMappedRecords->ContainsByPredicate(
@@ -196,11 +189,8 @@ namespace DesignImportPipeline
 	}
 
 	/**
-	 * Move source-side ownership check (spec R3 "both endpoints are D2U-owned"; the top-level reparent
-	 * and nested moves share one rule):
-	 * 1) the source parent container must be D2U-owned (the host root or an owned container) - a developer hanging a node
-	 *    under a project container has taken it over; moving it away would break the project-side structure;
-	 * 2) the source subtree must be purely D2U-owned (list check + binding check, the same rule as the top-level safe delete).
+	 * A move requires both the source parent and the entire moved subtree to be D2U-owned.
+	 * Project-owned structure or bindings keep the subtree in place.
 	 */
 	bool IsMoveSourceOwned(const FReimportApplySharedState& Shared, UWidget* MoveSource, FString& OutReason)
 	{
@@ -236,13 +226,8 @@ namespace DesignImportPipeline
 		};
 
 		/**
-		 * Whether a design child is a "synthetic wrapper layer": an intermediate layer the converter inserted to carry
-		 * layout/visuals, not a real node of the design. Two shapes:
-		 * 1) layers without a source identity (a canvas container's <name>_inner, the content layer of a prototype trigger-button wrapper, ...);
-		 * 2) pass-through wrappers (SizeBox etc.): the wrapper copies its only child's source identity (same design id);
-		 *    semantically the wrapper and its content are one design node.
-		 * Wrapper layers do not become their own matching tier: on pairing failure, matching continues by piercing to the
-		 * content, so nested same-name matching never breaks on synthetic layers (lost moves, duplicate copies, missing conflict diagnostics).
+		 * Synthetic wrappers have no design identity or share their only child's identity.
+		 * Match through these layout/visual carriers rather than treating them as design nodes.
 		 */
 		bool IsSyntheticWrapperNode(const FUMGWidgetNode& Node)
 		{
@@ -266,13 +251,9 @@ namespace DesignImportPipeline
 		};
 
 		/**
-		 * Manifest instances pair directly by record first (a single-child attempt within one MatchNestedChildren round):
-		 * the mapped instance's widget name comes from the import-time design name, but the same-named node on the
-		 * reimport-time IR side may be a wrapper form whose name the converter rewrote (e.g. trigger nodes named by id
-		 * under a switcher document) - same-name matching fails. Identity must be decided by the manifest record, or
-		 * an existing instance gets mistaken for an addition and rebuilt. Returns the three-state outcome: Matched =
-		 * paired; HandledElsewhere = the recorded widget hangs under another parent and the reparent stage takes over;
-		 * Unhandled = no usable record, fall to same-base-name matching.
+		 * Match manifest instances by recorded identity before matching names.
+		 * Matched pairs belong here; HandledElsewhere pairs belong to the reparent pass;
+		 * Unhandled children continue with same-base-name matching.
 		 */
 		EManifestMatchOutcome TryMatchChildByManifestRecord(
 			const FUMGWidgetNode& Child,
@@ -306,12 +287,8 @@ namespace DesignImportPipeline
 		}
 
 		/**
-		 * Same-base-name matching (a single-child attempt within one MatchNestedChildren round): the k-th same-named
-		 * (base name) design child pairs with the k-th suffixed existing widget, consistent with the import-time
-		 * SanitizeWidgetName + _N dedup generation order. Candidates sort by the generator-tail rank, which is a
-		 * total order over both generated shapes (see FUMGWidgetUtils::GetWidgetNameSuffixRank), so the pairing
-		 * order stays deterministic. Returns whether pairing succeeded;
-		 * exhausted candidates are classified as unmatched by the caller.
+		 * Pair same-base-name children by generated suffix rank, matching import order.
+		 * Unmatched candidates are handled by the caller.
 		 */
 		bool TryMatchChildByBaseName(
 			const FUMGWidgetNode& Child,
@@ -364,9 +341,9 @@ namespace DesignImportPipeline
 				}
 			}
 
-			// Design children start from the direct children; after each round, still-unpaired synthetic wrapper layers are
-			// flattened by content into the next round (wrapper chains are finite, so it converges). Paired widgets leave
-			// the candidate pool immediately; no cross-round double pairing.
+			// Pair direct design children first, then flatten still-unpaired synthetic wrapper layers into their content.
+			// Finite wrapper chains guarantee termination. Paired widgets leave the candidate pool immediately and cannot
+			// be paired again at a deeper wrapper level.
 			TArray<const FUMGWidgetNode*> PendingChildren;
 			for (const FUMGWidgetNode& Child : Node.Children)
 			{
@@ -375,21 +352,21 @@ namespace DesignImportPipeline
 
 			while (true)
 			{
-				TArray<const FUMGWidgetNode*> RoundUnmatched;
+				TArray<const FUMGWidgetNode*> UnmatchedCandidates;
 				for (const FUMGWidgetNode* Child : PendingChildren)
 				{
 					if (TryMatchChildByManifestRecord(*Child, Panel, Shared, OwnedChildren, Out) == EManifestMatchOutcome::Unhandled
 						&& !TryMatchChildByBaseName(*Child, OwnedChildren, Out))
 					{
-						RoundUnmatched.Add(Child);
+						UnmatchedCandidates.Add(Child);
 					}
 				}
 
-				// Flatten round: still-unpaired synthetic wrapper layers are replaced by their content children for pairing.
+				// Replace still-unpaired synthetic wrapper layers with their content children for the next pairing pass.
 				// Content-less synthetic layers (justify spacers etc.) stay unmatched and take the regular rebuild path.
 				TArray<const FUMGWidgetNode*> NextPending;
 				bool bFlattened = false;
-				for (const FUMGWidgetNode* Child : RoundUnmatched)
+				for (const FUMGWidgetNode* Child : UnmatchedCandidates)
 				{
 					if (IsSyntheticWrapperNode(*Child) && Child->Children.Num() > 0)
 					{
@@ -416,11 +393,8 @@ namespace DesignImportPipeline
 		}
 	}
 
-	/**
-	 * Pre-scan: simulates 9e's nested recursive refresh and collects the owned widget names "still expected by the
-	 * new design to stay in their original container". Owned non-instance widgets outside this set = not expected
-	 * by the design (delete leftovers or nested move sources); they enter the move-candidate pool.
-	 */
+	/** Collect owned non-instance widgets no longer expected in their original container.
+ * Nested refresh can reuse them as move sources; remaining candidates identify removals. */
 	void CollectExpectedNestedNames(
 		const FUMGWidgetNode& Node,
 		UPanelWidget* Panel,
@@ -445,11 +419,9 @@ namespace DesignImportPipeline
 	namespace
 	{
 		/**
-		 * Nested move decision and execution (the unmatched-child path of RefreshChildWidgets): when the candidate
-		 * pool holds a same-named owned subtree no longer expected by the design elsewhere, move it over wholesale
-		 * (identity preserved). mapped candidates never move (instantiation semantics; rebuilt directly).
-		 * Unset = no candidate; true = moved or conflict-kept; false = structural failure.
-		 * A failed move never falls through to creation of a duplicate.
+		 * Move an available D2U-owned subtree while preserving widget identity.
+		 * Mapped instances are rebuilt instead. Unset means no candidate; true means moved
+		 * or conflict-kept; false means structural failure and must not create a duplicate.
 		 */
 		TOptional<bool> TryNestedMoveChild(
 			const FUMGWidgetNode& Child,
@@ -529,12 +501,9 @@ namespace DesignImportPipeline
 		}
 
 		/**
-		 * Property refresh of matched generated subtrees: pair new IR nodes with existing widgets by "deterministic naming".
-		 * Only widgets inside the owned list are touched (project-side additions/renames are left alone);
-		 * nested subtrees the design dropped keep their current state (diagnostics handled by the main flow 9g:
-		 * project content reports a remove conflict; pure D2U is silently kept);
-		 * design-added nested nodes first consult the nested move candidates (spec R3: move the widget and preserve
-		 * identity when both endpoints are D2U-owned; conflict and no copy when the source side holds project content); only then does the generation chain rebuild.
+		 * Refresh owned subtrees by deterministic widget names; preserve project additions.
+		 * Retain removed nested children. For additions, try an owned move before rebuilding;
+		 * project-owned source content produces a conflict rather than a duplicate.
 		 */
 		bool RefreshChildWidgets(
 			const FUMGWidgetNode& Node,
@@ -609,10 +578,6 @@ namespace DesignImportPipeline
 		Widget->Modify();
 		ApplySlotForNode(Widget, Node, Shared);
 		if (AutomaticKey.IsEmpty()) FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
-		if (UImage* ImageWidget = Cast<UImage>(Widget))
-		{
-			FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
-		}
 		if (AutomaticKey.IsEmpty()
 			&& !RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 

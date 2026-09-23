@@ -11,7 +11,7 @@ namespace DesignRemoteImageImporterInternal
 	{
 		int32 ImportedCount = 0;
 		int32 ReusedCount = 0;
-		int32 RepairedCount = 0;
+		int32 RefreshedCount = 0;
 		int32 FailedCount = 0;
 		TArray<FString> Messages;
 
@@ -24,6 +24,12 @@ namespace DesignRemoteImageImporterInternal
 		bool bSuccess = false;
 		TArray<uint8> Data;
 		FString Error;
+
+		/** Transfers the body to its consumer so this cached result stops retaining it. */
+		TArray<uint8> TakePayload()
+		{
+			return MoveTemp(Data);
+		}
 	};
 
 	struct FResolveContext
@@ -40,6 +46,10 @@ namespace DesignRemoteImageImporterInternal
 		TMap<FString, FString> UrlToAssetPath;
 		TMap<FString, FString> ContentHashToAsset;
 		TMap<FString, FUrlDownloadResult> UrlDownloads;
+		// Processing failures are cached separately from transport results. This lets a
+		// repeated node report the same failure without retaining or re-decoding the
+		// compressed payload after the first attempt has consumed it.
+		TMap<FString, FString> UrlProcessingErrors;
 	};
 
 	class FImagePayloadIO
@@ -54,20 +64,33 @@ namespace DesignRemoteImageImporterInternal
 			const DesignImageResources::FImageResourceLimits& Limits,
 			TArray<uint8>& OutData,
 			FString& OutError);
-		// Downloads all URLs concurrently: every request is started first, then a
-		// single wait loop ticks the HttpManager until all requests complete.
-		// TimeoutSeconds is a per-request budget: each request gets the full
-		// window measured from its own start, and the wait loop cancels a request
-		// once its own deadline elapses (so a large batch no longer starves its
-		// tail requests). Batch duration stays bounded because requests run
-		// concurrently and the interactive slow task remains cancellable.
-		// Synchronous; fills one result per URL.
+		// Shared synchronization for one download batch. The operation budget itself is
+		// borrowed from the synchronous DownloadUrls caller, while each receive callback
+		// keeps this wrapper alive by value. DownloadUrls cancels/stops receive callbacks
+		// before returning, so the caller-owned budget outlives every use of this pointer.
+		struct FBulkDownloadBudget
+		{
+			FCriticalSection Mutex;
+			DesignImageResources::FImageOperationBudget* Budget = nullptr;
+
+			explicit FBulkDownloadBudget(DesignImageResources::FImageOperationBudget& InBudget)
+				: Budget(&InBudget)
+			{
+			}
+		};
+
+		// Start all URLs, then synchronously tick HTTP until each has a result.
+		// Streaming callbacks enforce shared and per-image limits; each request has its own deadline.
+		// Callbacks share the budget mutex, while the budget itself is borrowed for this call.
+		// Poll IsCancellationRequested alongside the interactive cancel button.
 		static void DownloadUrls(
 			const TArray<FString>& Urls,
 			float TimeoutSeconds,
 			bool bAllowUnsafeRemoteUrls,
 			const DesignImageResources::FImageResourceLimits& Limits,
-			TMap<FString, FUrlDownloadResult>& OutResults);
+			const TSharedRef<FBulkDownloadBudget, ESPMode::ThreadSafe>& BulkBudget,
+			TMap<FString, FUrlDownloadResult>& OutResults,
+			const TFunction<bool()>& IsCancellationRequested = TFunction<bool()>());
 		static bool DecodeToBGRA8(
 			const TArray<uint8>& CompressedData,
 			const DesignImageResources::FImageResourceLimits& Limits,

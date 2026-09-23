@@ -1,8 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#if defined(WITH_AUTOMATION_WORKER) && WITH_AUTOMATION_WORKER
+#include "Misc/Build.h"
+
+#if WITH_AUTOMATION_WORKER
 
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
 #include "ProceduralShapeGenerator.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"

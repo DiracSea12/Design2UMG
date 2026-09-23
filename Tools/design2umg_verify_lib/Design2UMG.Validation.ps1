@@ -84,12 +84,12 @@ function Resolve-D2URequiredEditorPath {
     return $resolved
 }
 
-function Stop-D2UEditorsUnlessKeeping {
+function Assert-D2UEditorIsolation {
     param([switch]$KeepExistingEditor)
     Enter-D2UEditorRunLock
-    if (-not $KeepExistingEditor) {
-        Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue | Stop-Process -Force
-        Start-Sleep -Milliseconds 800
+    if (-not $KeepExistingEditor -and (Get-Process UnrealEditor, UnrealEditor-Cmd -ErrorAction SilentlyContinue)) {
+        Exit-D2UEditorRunLock
+        throw "An UnrealEditor session is already running. Save and close it before validation, or explicitly use -KeepExistingEditor for debugging. No editor was terminated."
     }
 }
 

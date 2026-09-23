@@ -229,6 +229,11 @@ namespace
 		const FDesignSize& CrossSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveHeight : ChildSnapshot.EffectiveWidth;
 		if (CrossSize.IsFill())
 		{
+			// Raw refs may still have the default Fit mode. Resolve the inherited
+			// mode together with the pixels, or later expansion loses Fill.
+			FDesignSize& ResolvedSize = SizingContext.bHorizontal
+				? ChildSnapshot.Child->Transform.Height : ChildSnapshot.Child->Transform.Width;
+			ResolvedSize.Mode = CrossSize.Mode;
 			const bool bKeepSourceDimension = SizingContext.bHorizontal
 				? ChildSnapshot.Child->Transform.bSourceHasHeight
 				: ChildSnapshot.Child->Transform.bSourceHasWidth;
@@ -265,6 +270,9 @@ namespace
 			const FDesignSize& MainSize = SizingContext.bHorizontal ? ChildSnapshot.EffectiveWidth : ChildSnapshot.EffectiveHeight;
 			if (MainSize.IsFill())
 			{
+				FDesignSize& ResolvedSize = SizingContext.bHorizontal
+					? ChildSnapshot.Child->Transform.Width : ChildSnapshot.Child->Transform.Height;
+				ResolvedSize.Mode = MainSize.Mode;
 				const bool bKeepSourceDimension = SizingContext.bHorizontal
 					? ChildSnapshot.Child->Transform.bSourceHasWidth
 					: ChildSnapshot.Child->Transform.bSourceHasHeight;

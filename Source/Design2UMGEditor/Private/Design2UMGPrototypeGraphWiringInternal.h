@@ -31,7 +31,9 @@ struct FResolvedBinding
 	 *  button inside the open overlay gets its own bound-event chain; NAME_None when the page
 	 *  has no mirror or the twin is not authorable. */
 	FName MirrorTriggerWidgetName;
-	/** Source-page context for keyboard gating: empty for legacy/manual data (no gate). */
+	/**
+	 * Source page used for keyboard gating; empty means no page gate.
+	 */
 	FString SourcePageId;
 	/** Index of the source page among the switcher children when it is a switcher child. */
 	int32 SourceSwitcherPageIndex = INDEX_NONE;

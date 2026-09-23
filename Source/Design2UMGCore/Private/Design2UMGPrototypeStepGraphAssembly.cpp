@@ -124,7 +124,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return Transition;
 	}
 
-	EUMGPrototypeNavigationAction MapPrototypeStepKindToLegacyAction(
+	EUMGPrototypeNavigationAction MapPrototypeStepKindToBindingAction(
 		const EUMGPrototypeNavigationStepKind Kind)
 	{
 		switch (Kind)
@@ -440,7 +440,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		}
 
 		const FUMGPrototypeNavigationStep& FirstStep = Steps[0];
-		OutSummary.Kind = MapPrototypeStepKindToLegacyAction(FirstStep.Kind);
+		OutSummary.Kind = MapPrototypeStepKindToBindingAction(FirstStep.Kind);
 		OutSummary.Transition = FirstStep.Transition;
 		OutSummary.bResolved = true;
 		return true;

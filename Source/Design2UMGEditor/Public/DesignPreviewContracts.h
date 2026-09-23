@@ -42,6 +42,8 @@ struct FPreviewRefreshInput
 {
 	uint64 RequestId = 0;
 	FString EditedJson;
+	/** Immutable import context; JSON edits never own source identity or interactions. */
+	TSharedPtr<const FUMGWidgetData> OriginalData;
 	bool bResolveImages = true;
 };
 
@@ -93,6 +95,7 @@ struct FDesignPreviewMaterializationResult
 	uint64 RequestId = 0;
 	FVector2D PreviewDesignSize = FVector2D::ZeroVector;
 	FString MaterializedWidgetName;
+	FString ErrorMessage;
 };
 
 class IDesignPreviewRefreshAnalyzer

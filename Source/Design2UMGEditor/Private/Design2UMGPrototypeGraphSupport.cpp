@@ -79,11 +79,8 @@ UK2Node_VariableGet* CreateVariableGet(UEdGraph* Graph, UWidgetBlueprint* WBP, c
 }
 
 /**
- * Array library calls are authored with the engine's dedicated UK2Node_CallArrayFunction and
- * connected through the schema: the TargetArray pins are wildcards (schema-level ArrayParam
- * meta, independent of node class), and only TryCreateConnection ->
- * PinConnectionListChanged -> PropagateArrayTypeInfo resolves them. A raw MakeLinkTo would
- * leave the pin untyped ("Target Array type is undetermined") and break compilation.
+ * Use UK2Node_CallArrayFunction and schema connections to resolve wildcard array pins.
+ * Raw MakeLinkTo leaves their types unresolved and breaks Blueprint compilation.
  */
 UK2Node_CallArrayFunction* CreateArrayCallNode(UEdGraph* Graph, UFunction* Function)
 {
@@ -100,12 +97,8 @@ bool LinkArrayPin(UEdGraph* Graph, UEdGraphPin* SourcePin, UEdGraphPin* TargetPi
 }
 
 /**
- * Appends the shared Navigate tail: pure GetActiveWidgetIndex(switcher) feeding
- * Array_Add(history, index) -> SetActiveWidgetIndex(target). The push reads the switcher
- * immediately before the switch, so the pushed value is always the page actually being left.
- * GetActiveWidgetIndex is a BlueprintGetter and therefore compiled BlueprintPure (no exec pins);
- * the array calls use the engine's UK2Node_CallArrayFunction with schema-side connection (see
- * CreateArrayCallNode).
+ * Push the active page index to history immediately before switching pages.
+ * Array calls use schema connections so their wildcard types resolve.
  */
 bool AppendNavigateTail(
 	UEdGraph* Graph,

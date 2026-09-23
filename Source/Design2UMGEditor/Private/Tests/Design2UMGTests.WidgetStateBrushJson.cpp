@@ -46,13 +46,13 @@ bool FWidgetSwitcherUsesTypedStateTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStateJsonRoundTripTest,
-	"Design2UMG.UMGJson.WidgetStateRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStateJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.WidgetStateSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FWidgetStateJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_WidgetStateRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_WidgetStateSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("WidgetSwitcher");
 	SourceData.RootWidget.Id = TEXT("switcher_root");
 	SourceData.RootWidget.Name = TEXT("SwitcherRoot");
@@ -89,13 +89,13 @@ bool FWidgetStateJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FScrollBoxJsonRoundTripTest,
-	"Design2UMG.UMGJson.ScrollBoxRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FScrollBoxJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.ScrollBoxSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FScrollBoxJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FScrollBoxJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_ScrollBoxRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_ScrollBoxSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("ScrollBox");
 	SourceData.RootWidget.Id = TEXT("scroll_root");
 	SourceData.RootWidget.Name = TEXT("ScrollRoot");
@@ -129,17 +129,17 @@ bool FScrollBoxJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushLegacyTexturePathNormalizationTest,
-	"Design2UMG.WidgetNodeAccess.BrushLegacyTexturePathNormalization",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushFlatTexturePathNormalizationTest,
+	"Design2UMG.WidgetNodeAccess.BrushFlatTexturePathNormalization",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushLegacyTexturePathNormalizationTest::RunTest(const FString& Parameters)
+bool FBrushFlatTexturePathNormalizationTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData Data;
 	TestTrue(TEXT("Existing root texture input parses"), FUMGJsonParser::ParseJson(
-		TEXT(R"({"RootWidget":{"Type":"Image","Name":"RootTexture","Brush":{"TexturePath":"/Game/UI/T_LegacyBrush.T_LegacyBrush"}}})"), Data));
+		TEXT(R"({"RootWidget":{"Type":"Image","Name":"RootTexture","Brush":{"TexturePath":"/Game/UI/T_JsonBrush.T_JsonBrush"}}})"), Data));
 	TestTrue(TEXT("Root input is normalized into the only image owner"),
 		Data.RootWidget.Brush.Image.TexturePath.IsSet()
-		&& Data.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_LegacyBrush.T_LegacyBrush"));
+		&& Data.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_JsonBrush.T_JsonBrush"));
 	const auto SerializedBrush = FUMGJsonSerializer::SerializeWidgetNode(Data.RootWidget)->GetObjectField(TEXT("Brush"));
 	TestFalse(TEXT("Serialization never emits the root alias"), SerializedBrush->HasField(TEXT("TexturePath")));
 	return true;
@@ -158,7 +158,7 @@ bool FBrushTexturePathConflictNormalizationJsonTest::RunTest(const FString& Para
 			"Id": "root",
 			"Name": "ConflictImage",
 			"Brush": {
-				"TexturePath": "/Game/UI/T_LegacyBrush.T_LegacyBrush",
+				"TexturePath": "/Game/UI/T_JsonBrush.T_JsonBrush",
 				"Image": {
 					"TexturePath": "/Game/UI/T_CanonicalBrush.T_CanonicalBrush",
 					"Mode": "Crop",
@@ -224,13 +224,13 @@ bool FBrushNegativeRadiiStayUnsetJsonTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedBrushImageGradientJsonRoundTripTest,
-	"Design2UMG.UMGJson.TypedBrushImageGradientRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedBrushImageGradientJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.TypedBrushImageGradientSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedBrushImageGradientJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FTypedBrushImageGradientJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_TypedBrushRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_TypedBrushSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("CanvasPanel");
 	SourceData.RootWidget.Id = TEXT("root");
 	SourceData.RootWidget.Name = TEXT("Root");
@@ -276,12 +276,12 @@ bool FTypedBrushImageGradientJsonRoundTripTest::RunTest(const FString& Parameter
 	SourceData.RootWidget.Children.Add(MoveTemp(GradientNode));
 
 	const FString Json = FUMGJsonSerializer::Serialize(SourceData);
-	TestTrue(TEXT("Typed brush round-trip emits nested image payload"), Json.Contains(TEXT("\"Image\"")));
-	TestTrue(TEXT("Typed brush round-trip emits nested gradient payload"), Json.Contains(TEXT("\"Gradient\"")));
+	TestTrue(TEXT("Typed brush serialization emits nested image payload"), Json.Contains(TEXT("\"Image\"")));
+	TestTrue(TEXT("Typed brush serialization emits nested gradient payload"), Json.Contains(TEXT("\"Gradient\"")));
 
 	FUMGWidgetData ParsedData;
 	FString ParseError;
-	TestTrue(TEXT("Typed brush round-trip parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	TestTrue(TEXT("Typed brush serialization parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
 	if (!ParseError.IsEmpty())
 	{
 		AddInfo(ParseError);

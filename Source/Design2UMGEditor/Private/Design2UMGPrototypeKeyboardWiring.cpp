@@ -68,11 +68,8 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 	// engine-standard encoding is an override function graph (the editor's own path for such
 	// functions), with one key-equality Branch per (binding, key code) guarding the step chain.
 	/**
-	 * Pure boolean used as a keyboard branch guard: whether the binding source page is
-	 * currently the active switcher page and/or a visible overlay-hosted page. Switcher pages
-	 * use the active index (visibility alone cannot distinguish hidden switcher children);
-	 * overlay-only pages and dual-target page mirrors use the hosted page's own visibility.
-	 * OutConditionPin stays null for a legitimately page-less (single-page/legacy) binding.
+	 * Build the keyboard guard for the active switcher page or visible overlay page.
+	 * Page-less bindings leave OutConditionPin null.
 	 */
 	const auto BuildPageContextCondition = [&](UEdGraph* Graph, const FResolvedBinding& Resolved,
 		FChainLayout& Layout, UEdGraphPin*& OutConditionPin) -> bool
@@ -86,8 +83,7 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 		const bool bNeedsOverlayGate = Resolved.SourceHostedPageWidgetName != NAME_None;
 		if (!bNeedsSwitcherGate && !bNeedsOverlayGate)
 		{
-			// Legacy/manual data with a source page but neither tree home: only a true
-			// single-page blueprint (no switcher, no overlay host) may run ungated.
+			// A binding without a resolved tree home is ungated only in a single-page Blueprint.
 			return Switcher == nullptr && OverlayHost == nullptr;
 		}
 		if (!Functions.BooleanAND)

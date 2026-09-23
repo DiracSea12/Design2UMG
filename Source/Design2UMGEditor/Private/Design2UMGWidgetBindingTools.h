@@ -7,12 +7,7 @@
 class UWidgetBlueprint;
 
 /**
- * Automated construction channel for WBP event bindings (C4).
- *
- * FDelegateEditorBinding (WBP->Bindings) can only be created by hand via the UMG details panel in the editor;
- * there is no public entry from the command line / Python, so black-box binding scenarios could not run for real.
- * This adds a minimal channel in the style of the Design2UMG.* command family: enumerate + add (including
- * function-graph creation), directly usable via the Design2UMG.WidgetBindings console command.
+ * Inspect and author WBP event bindings through Design2UMG.WidgetBindings.
  */
 namespace Design2UMGWidgetBindingTools
 {
@@ -20,14 +15,9 @@ namespace Design2UMGWidgetBindingTools
 	TArray<FString> GetEventBindingSummaries(const UWidgetBlueprint* WBP);
 
 	/**
-	 * Add an event binding to the given widget (FDelegateEditorBinding, Kind=Function).
-	 * - Validates that the widget exists and PropertyName is a delegate property on the widget class (unicast or multicast);
-	 * - Creates a same-named empty function graph when the FunctionName does not exist yet (so compile-time
-	 *   FDelegateEditorBinding::IsBindingValid resolves the function and the binding is not compiled away);
-	 * - Only one function may be bound per widget+property (engine semantics): an existing binding is replaced
-	 *   with the new function; adding an identical binding succeeds directly (idempotent).
-	 * Memory-only: no compile, no save; persistence is up to the caller (the console path uses
-	 * FUMGGenerator::SaveWidgetBlueprint to compile + save). Returns false and fills OutError on failure.
+	 * Bind a widget delegate to a function, creating an empty function graph if needed.
+	 * Replace a different binding for the same widget/property; identical bindings are a no-op.
+	 * Changes are memory-only. The caller compiles and saves. Failure fills OutError.
 	 */
 	bool AddEventBinding(
 		UWidgetBlueprint* WBP,

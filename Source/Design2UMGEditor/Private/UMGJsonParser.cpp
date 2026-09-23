@@ -3,6 +3,7 @@
 #include "UMGJsonParser.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
+#include "DesignTreeBudget.h"
 #include "UMGJsonKeys.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchema.h"
@@ -11,6 +12,10 @@
 #include "UMGValueParsing.h"
 #include "Dom/JsonObject.h"
 #include "Misc/Guid.h"
+
+// Limits for this parser's tree budget. See DesignTreeBudget.h for the shared
+// semantics and the parsed-design-tree vs generated-UMG-tree scope note.
+using namespace DesignTreeLimits;
 
 // ============================================================================
 // Helper functions.
@@ -72,6 +77,46 @@ namespace
 		return false;
 	}
 
+	// Finite-checked float read that narrows to float ONLY after the value is
+	// confirmed finite and within float range. Used for coordinate/geometry
+	// fields so a value such as 1e100 (finite as double but past MAX_flt) is
+	// rejected instead of silently becoming Inf/garbage. Negative coordinates are
+	// explicitly allowed -- only finiteness/range is enforced here.
+	bool TryGetFiniteFloatFieldF(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, float& OutValue)
+	{
+		double D;
+		if (TryGetFiniteFloatField(Object, Field, D))
+		{
+			OutValue = static_cast<float>(D);
+			return true;
+		}
+		return false;
+	}
+
+	// Read a finite number as int32 with truncation toward zero.
+	// Out-of-range optional fields remain unset and emit a warning.
+	bool TryGetFiniteInt32Field(const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, int32& OutValue)
+	{
+		const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(Object, Field);
+		if (!Value.IsValid() || Value->Type != EJson::Number)
+		{
+			return false;
+		}
+		double D;
+		if (Value->TryGetNumber(D) && FMath::IsFinite(D))
+		{
+			// Truncation is representable inside (MIN_int32 - 1, MAX_int32 + 1).
+			// Check that interval before casting, including fractional values near either boundary.
+			if (D > static_cast<double>(MIN_int32) - 1.0 && D < static_cast<double>(MAX_int32) + 1.0)
+			{
+				OutValue = static_cast<int32>(D);
+				return true;
+			}
+		}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid %s; expected a finite int32-range number."), Field);
+		return false;
+	}
+
 	TOptional<FUMGVisualBrushData::FShapeData> ParseShapeValue(const TSharedPtr<FJsonValue>& Value)
 	{
 		const TSharedPtr<FJsonObject>* Object = nullptr;
@@ -86,7 +131,7 @@ namespace
 		{
 			const auto FieldValue = DesignJsonUtils::TryGetField(*Object, Field);
 			if (!FieldValue) return;
-			double Number;
+			double Number = 0.0;
 			if (FieldValue->Type == EJson::Number && TryReadFiniteFloat(*FieldValue, Number)) Out = static_cast<float>(Number);
 			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.%s; expected a finite float-range number."), Field);
 		};
@@ -94,7 +139,7 @@ namespace
 		{
 			const auto FieldValue = DesignJsonUtils::TryGetField(*Object, Field);
 			if (!FieldValue) return;
-			int32 Number;
+			int32 Number = 0;
 			if (FieldValue->Type == EJson::Number && FieldValue->TryGetNumber(Number)) Out = Number;
 			else UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Shape.%s; expected an int32-range number."), Field);
 		};
@@ -120,7 +165,7 @@ namespace
 			FVector4 Radii;
 			for (int32 Index = 0; bValid && Index < 4; ++Index)
 			{
-				double Number;
+				double Number = 0.0;
 				bValid = (*Values)[Index]->Type == EJson::Number && TryReadFiniteFloat(*(*Values)[Index], Number);
 				if (bValid) Radii[Index] = Number;
 			}
@@ -158,6 +203,11 @@ namespace
 
 bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWidgetData, FString* OutError)
 {
+	// Reuse-output cleanliness: always start from a clean slate so a previous
+	// call's data or error never leaks into this result (success OR failure).
+	OutWidgetData = FUMGWidgetData();
+	if (OutError) *OutError = TEXT("");
+
 	TSharedPtr<FJsonObject> Root;
 	if (!DesignJsonUtils::TryParseObject(JsonString, Root))
 	{
@@ -165,40 +215,68 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 		return false;
 	}
 
-	// Parse RootWidget.
+	// Parse into a LOCAL candidate and publish to the caller only if the ENTIRE
+	// tree parses. Any structural failure discards the candidate, so a failed call
+	// never leaks a partial tree into the output (all-or-nothing).
+	FUMGWidgetData Candidate;
+	FDesignParserBudget Budget;
+
 	const TSharedPtr<FJsonObject>* RootWidget;
-	if (!DesignJsonUtils::TryGetObject(Root, TEXT("RootWidget"), RootWidget) || !ParseWidgetNode(*RootWidget, OutWidgetData.RootWidget))
+	if (!DesignJsonUtils::TryGetObject(Root, TEXT("RootWidget"), RootWidget))
 	{
-		if (OutError) *OutError = TEXT("Invalid UI structure");
+		if (OutError) *OutError = TEXT("Invalid UI structure: missing RootWidget object");
+		return false;
+	}
+
+	if (!ParseWidgetNode(*RootWidget, Candidate.RootWidget, TEXT("RootWidget"), OutError, Budget, 0))
+	{
+		// Candidate is discarded; OutWidgetData stays cleared (empty output).
 		return false;
 	}
 
 	// Treat an empty pure-layout container as an invalid result.
 	// Interactive widgets such as CheckBox can also derive from panel types, so keep this allowlist narrow.
-	if (OutWidgetData.RootWidget.Children.Num() == 0 &&
-		UMGWidgetTypes::IsPureLayoutContainer(OutWidgetData.RootWidget.Type))
+	if (Candidate.RootWidget.Children.Num() == 0 &&
+		UMGWidgetTypes::IsPureLayoutContainer(Candidate.RootWidget.Type))
 	{
 		if (OutError) *OutError = TEXT("Empty UI result");
 		return false;
 	}
 
-	DesignJsonUtils::TryGetString(Root, TEXT("WidgetName"), OutWidgetData.WidgetName);
-	if (OutWidgetData.WidgetName.IsEmpty()) OutWidgetData.WidgetName = TEXT("WBP_Generated");
+	DesignJsonUtils::TryGetString(Root, TEXT("WidgetName"), Candidate.WidgetName);
+	if (Candidate.WidgetName.IsEmpty()) Candidate.WidgetName = TEXT("WBP_Generated");
 
+	// Full success: publish the fully-parsed candidate.
+	OutWidgetData = MoveTemp(Candidate);
 	return true;
 }
 
-bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, FUMGWidgetNode& OutNode)
+bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, FUMGWidgetNode& OutNode, const FString& NodePath, FString* OutError, FDesignParserBudget& Budget, int32 Depth)
 {
 	if (!JsonObject.IsValid())
 	{
+		if (OutError) *OutError = FString::Printf(TEXT("Widget node at '%s' is not a valid object."), *NodePath);
+		return false;
+	}
+
+	// Whole-tree budget: one shared counting context across the entire document
+	// tree (both depth and node count). Bounding here -- not per-parent/sibling --
+	// so a wide-but-shallow tree is limited just like a deep one. A budget breach
+	// fails the WHOLE parse; it must never yield a truncated "success" tree.
+	if (!Budget.TryEnterNode(Depth))
+	{
+		if (OutError) *OutError = FString::Printf(
+			TEXT("Design tree exceeds the supported budget near node '%s' (limit: %d nodes / %d depth)."),
+			*NodePath, MaxParsedNodeCount, MaxNodeDepth);
+		UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Design tree budget exceeded near node '%s'."), *NodePath);
 		return false;
 	}
 
 	// Parse required fields without crashing on missing keys.
 	if (!DesignJsonUtils::TryGetString(JsonObject, UMGJsonKeys::Type, OutNode.Type) || OutNode.Type.IsEmpty())
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Widget node missing Type field"));
+		if (OutError) *OutError = FString::Printf(TEXT("Widget node at '%s' is missing required Type field."), *NodePath);
+		UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Widget node at '%s' missing Type field"), *NodePath);
 		return false;
 	}
 
@@ -214,15 +292,17 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	// Parse the LayoutMapper justify-spacer marker (absent in older JSON means false).
 	DesignJsonUtils::TryGetBool(JsonObject, TEXT("SyntheticJustifySpacer"), OutNode.bSyntheticJustifySpacer);
 
-	// Parse Bounds, added in v2.2 for normalized coordinates.
+	// Parse Bounds, added in v2.2 for normalized coordinates. Coordinates are
+	// allowed to be negative; only finiteness/float-range is enforced here so a
+	// large-exponent value (e.g. 1e100) is rejected rather than narrowed to Inf.
 	const TSharedPtr<FJsonObject>* BoundsObject;
 	if (DesignJsonUtils::TryGetObject(JsonObject, TEXT("Bounds"), BoundsObject))
 	{
 		float Val;
-		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("X"), Val)) OutNode.Bounds.X = Val;
-		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("Y"), Val)) OutNode.Bounds.Y = Val;
-		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("W"), Val)) OutNode.Bounds.W = Val;
-		if (DesignJsonUtils::TryGetFloat(*BoundsObject, TEXT("H"), Val)) OutNode.Bounds.H = Val;
+		if (TryGetFiniteFloatFieldF(*BoundsObject, TEXT("X"), Val)) OutNode.Bounds.X = Val;
+		if (TryGetFiniteFloatFieldF(*BoundsObject, TEXT("Y"), Val)) OutNode.Bounds.Y = Val;
+		if (TryGetFiniteFloatFieldF(*BoundsObject, TEXT("W"), Val)) OutNode.Bounds.W = Val;
+		if (TryGetFiniteFloatFieldF(*BoundsObject, TEXT("H"), Val)) OutNode.Bounds.H = Val;
 	}
 
 	// Parse Slot data.
@@ -244,20 +324,38 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	ParseWidgetStatePayload(JsonObject, OutNode.WidgetState);
 	ParseScrollBoxPayload(JsonObject, OutNode.ScrollBox);
 
-	// Parse Children in the standard format.
-	if (const TArray<TSharedPtr<FJsonValue>>* ChildrenArray = DesignJsonUtils::GetArray(JsonObject, TEXT("Children")))
+	// Parse Children. A present-but-non-array Children field, a non-object child,
+	// or any failing child must fail the WHOLE parse (all-or-nothing): the failed
+	// input must never enter resource creation / save.
+	TSharedPtr<FJsonValue> ChildrenField = DesignJsonUtils::TryGetField(JsonObject, TEXT("Children"));
+	if (ChildrenField.IsValid())
 	{
-		for (const TSharedPtr<FJsonValue>& ChildValue : *ChildrenArray)
+		const TArray<TSharedPtr<FJsonValue>>* ChildrenArray = nullptr;
+		if (!ChildrenField->TryGetArray(ChildrenArray) || ChildrenArray == nullptr)
 		{
-			const TSharedPtr<FJsonObject>* ChildObject;
-			if (ChildValue->TryGetObject(ChildObject))
+			if (OutError) *OutError = FString::Printf(TEXT("Field 'Children' at '%s' must be an array of objects."), *NodePath);
+			UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Field 'Children' at '%s' must be an array of objects."), *NodePath);
+			return false;
+		}
+		for (int32 Index = 0; Index < ChildrenArray->Num(); ++Index)
+		{
+			const TSharedPtr<FJsonValue>& ChildValue = (*ChildrenArray)[Index];
+			const TSharedPtr<FJsonObject>* ChildObject = nullptr;
+			if (!ChildValue->TryGetObject(ChildObject) || !ChildObject || !ChildObject->IsValid())
 			{
-				FUMGWidgetNode ChildNode;
-				if (ParseWidgetNode(*ChildObject, ChildNode))
-				{
-					OutNode.Children.Add(ChildNode);
-				}
+				if (OutError) *OutError = FString::Printf(TEXT("Child at '%s.Children[%d]' is not a valid object."), *NodePath, Index);
+				UE_LOG(LogDesign2UMG, Error, TEXT("FUMGJsonParser: Child at '%s.Children[%d]' is not a valid object."), *NodePath, Index);
+				return false;
 			}
+			FUMGWidgetNode ChildNode;
+			const FString ChildPath = FString::Printf(TEXT("%s.Children[%d]"), *NodePath, Index);
+			if (!ParseWidgetNode(*ChildObject, ChildNode, ChildPath, OutError, Budget, Depth + 1))
+			{
+				// The failing child already recorded its own specific error; abort
+				// the whole parse so no partial branch leaks into the output.
+				return false;
+			}
+			OutNode.Children.Add(MoveTemp(ChildNode));
 		}
 	}
 
@@ -271,11 +369,11 @@ void FUMGJsonParser::ParseTextStylePayload(const TSharedPtr<FJsonObject>& NodeOb
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("TextStyle"), TSObject))
 	{
 		float Val;
-		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGPropertyKeys::FontSize, Val))
+		if (TryGetFiniteFloatFieldF(*TSObject, UMGPropertyKeys::FontSize, Val))
 			OutTextStyle.FontSize = Val;
-		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGJsonKeys::SourceFontSize, Val))
+		if (TryGetFiniteFloatFieldF(*TSObject, UMGJsonKeys::SourceFontSize, Val))
 			OutTextStyle.SourceFontSize = Val;
-		if (DesignJsonUtils::TryGetFloat(*TSObject, UMGPropertyKeys::LetterSpacing, Val))
+		if (TryGetFiniteFloatFieldF(*TSObject, UMGPropertyKeys::LetterSpacing, Val))
 		{
 			OutTextStyle.LetterSpacing = Val;
 		}
@@ -290,19 +388,19 @@ void FUMGJsonParser::ParseWidgetStylePayload(const TSharedPtr<FJsonObject>& Node
 	{
 		float Val = 0.0f;
 		FString Str;
-		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::WidthOverride, Val))
+		if (TryGetFiniteFloatFieldF(*WidgetStyleObject, UMGPropertyKeys::WidthOverride, Val))
 		{
 			OutWidgetStyle.WidthOverride = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::HeightOverride, Val))
+		if (TryGetFiniteFloatFieldF(*WidgetStyleObject, UMGPropertyKeys::HeightOverride, Val))
 		{
 			OutWidgetStyle.HeightOverride = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::MinDesiredWidth, Val))
+		if (TryGetFiniteFloatFieldF(*WidgetStyleObject, UMGPropertyKeys::MinDesiredWidth, Val))
 		{
 			OutWidgetStyle.MinDesiredWidth = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*WidgetStyleObject, UMGPropertyKeys::MinDesiredHeight, Val))
+		if (TryGetFiniteFloatFieldF(*WidgetStyleObject, UMGPropertyKeys::MinDesiredHeight, Val))
 		{
 			OutWidgetStyle.MinDesiredHeight = Val;
 		}
@@ -399,13 +497,13 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 					FString Color;
 					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::FontFamily, Row.FontFamily);
 					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::TypefaceFontName, Row.TypefaceFontName);
-					if (DesignJsonUtils::TryGetFloat(*RowObject, UMGPropertyKeys::FontSize, Number)) Row.FontSize = Number;
-					if (DesignJsonUtils::TryGetFloat(*RowObject, UMGPropertyKeys::LetterSpacing, Number)) Row.LetterSpacing = Number;
+					if (TryGetFiniteFloatFieldF(*RowObject, UMGPropertyKeys::FontSize, Number)) Row.FontSize = Number;
+					if (TryGetFiniteFloatFieldF(*RowObject, UMGPropertyKeys::LetterSpacing, Number)) Row.LetterSpacing = Number;
 					if (DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::Color, Color) && !Color.IsEmpty()) Row.Color = FUMGValueParser::ParseColor(Color);
 					DesignJsonUtils::TryGetBool(*RowObject, UMGPropertyKeys::Underline, Row.bUnderline);
 					DesignJsonUtils::TryGetBool(*RowObject, UMGPropertyKeys::Strikethrough, Row.bStrikethrough);
 					DesignJsonUtils::TryGetString(*RowObject, UMGPropertyKeys::Href, Row.Href);
-					Rows.Add(Pair.Key, MoveTemp(Row));
+					Rows.Add(FString(Pair.Key), MoveTemp(Row));
 				}
 				OutText.RichTextStyleRows = MoveTemp(Rows);
 			}
@@ -434,15 +532,15 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutText.bAutoWrapText = BoolValue;
 		}
-		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::WrapTextAt, Val))
+		if (TryGetFiniteFloatFieldF(*TextDataObject, UMGPropertyKeys::WrapTextAt, Val))
 		{
 			OutText.WrapTextAt = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::LineHeightPercentage, Val))
+		if (TryGetFiniteFloatFieldF(*TextDataObject, UMGPropertyKeys::LineHeightPercentage, Val))
 		{
 			OutText.LineHeightPercentage = Val;
 		}
-		if (DesignJsonUtils::TryGetFloat(*TextDataObject, UMGPropertyKeys::LineHeightBaselineShift, Val))
+		if (TryGetFiniteFloatFieldF(*TextDataObject, UMGPropertyKeys::LineHeightBaselineShift, Val))
 		{
 			OutText.LineHeightBaselineShift = Val;
 		}
@@ -479,16 +577,14 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 	const TSharedPtr<FJsonObject>* BrushObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Brush"), BrushObject))
 	{
-		// OutlineCornerRadius keeps the double read: the legacy >= 0 "unset" check
-		// must run before any float narrowing.
+		// Check for a negative unset value before narrowing OutlineCornerRadius to float.
 		double Val;
 		float FloatVal;
 		FString Str;
-		// Negative radius is the legacy "unset" encoding; keep it out of the
-		// optional so IsSet() preserves the old >= 0 consumer contract.
+		// Negative radius means unset.
 		if (TryGetFiniteFloatField(*BrushObject, UMGPropertyKeys::OutlineCornerRadius, Val) && Val >= 0.0)
 			OutBrush.OutlineCornerRadius = (float)Val;
-		if (DesignJsonUtils::TryGetFloat(*BrushObject, UMGPropertyKeys::OutlineThickness, FloatVal))
+		if (TryGetFiniteFloatFieldF(*BrushObject, UMGPropertyKeys::OutlineThickness, FloatVal))
 		{
 			OutBrush.OutlineThickness = FloatVal;
 		}
@@ -520,8 +616,8 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		{
 			OutBrush.MaterialParams = Str;
 		}
-		FString LegacyTexturePath;
-		DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::TexturePath, LegacyTexturePath);
+		FString FlatTexturePath;
+		DesignJsonUtils::TryGetString(*BrushObject, UMGPropertyKeys::TexturePath, FlatTexturePath);
 		if (const TSharedPtr<FJsonValue> RadiiValue = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::CornerRadii); RadiiValue.IsValid())
 		{
 			FVector4 Radii;
@@ -565,13 +661,13 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		// Existing root alias is accepted only here. The IR has one texture owner.
 		if (!OutBrush.Image.TexturePath.IsSet())
 		{
-			if (!LegacyTexturePath.IsEmpty()) OutBrush.Image.TexturePath = LegacyTexturePath;
+			if (!FlatTexturePath.IsEmpty()) OutBrush.Image.TexturePath = FlatTexturePath;
 		}
-		else if (!LegacyTexturePath.IsEmpty() && LegacyTexturePath != OutBrush.Image.TexturePath.GetValue())
+		else if (!FlatTexturePath.IsEmpty() && FlatTexturePath != OutBrush.Image.TexturePath.GetValue())
 		{
 			UE_LOG(LogDesign2UMG, Warning,
 				TEXT("FUMGJsonParser: Brush.TexturePath conflicts with Brush.Image.TexturePath; using Brush.Image.TexturePath ('%s') instead of legacy/root '%s'."),
-				*OutBrush.Image.TexturePath.GetValue(), *LegacyTexturePath);
+				*OutBrush.Image.TexturePath.GetValue(), *FlatTexturePath);
 		}
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
@@ -580,7 +676,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.Gradient.Type = Str;
 			}
-			if (DesignJsonUtils::TryGetFloat(*GradientObject, UMGJsonKeys::Rotation, FloatVal))
+			if (TryGetFiniteFloatFieldF(*GradientObject, UMGJsonKeys::Rotation, FloatVal))
 			{
 				OutBrush.Gradient.Rotation = FloatVal;
 			}
@@ -615,7 +711,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 					{
 						Stop.Color = FUMGValueParser::ParseColor(Str);
 					}
-					if (DesignJsonUtils::TryGetFloat(*StopObject, UMGJsonKeys::Position, FloatVal))
+					if (TryGetFiniteFloatFieldF(*StopObject, UMGJsonKeys::Position, FloatVal))
 					{
 						Stop.Position = FloatVal;
 					}
@@ -654,14 +750,11 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	const TSharedPtr<FJsonObject>* EffectObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Effect"), EffectObject))
 	{
-		// Phase/PhaseCount keep the double read: their historical (int32) casts
-		// truncate, which differs from the engine int32 field overload's
-		// range-check + round-half-from-zero conversion.
-		double Val;
+		// Range-check rendering phase values before truncating to int32; PhaseCount is at least one.
 		float FloatVal;
 		FString Str;
 		bool BoolValue = false;
-		if (DesignJsonUtils::TryGetFloat(*EffectObject, UMGPropertyKeys::BlurStrength, FloatVal))
+		if (TryGetFiniteFloatFieldF(*EffectObject, UMGPropertyKeys::BlurStrength, FloatVal))
 		{
 			OutEffect.BlurStrength = FloatVal;
 		}
@@ -718,14 +811,17 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		}
 		FUMGEffectData::FRenderingPhaseData RenderingPhase = OutEffect.RenderingPhase.Get(FUMGEffectData::FRenderingPhaseData());
 		bool bRenderingPhaseSet = false;
-		if (DesignJsonUtils::TryGetNumber(*EffectObject, UMGPropertyKeys::Phase, Val))
+		// Reject unrepresentable int32 values before casting; truncate valid values toward zero.
+		int32 PhaseVal = 0;
+		if (TryGetFiniteInt32Field(*EffectObject, UMGPropertyKeys::Phase, PhaseVal))
 		{
-			RenderingPhase.Phase = (int32)Val;
+			RenderingPhase.Phase = PhaseVal;
 			bRenderingPhaseSet = true;
 		}
-		if (DesignJsonUtils::TryGetNumber(*EffectObject, UMGPropertyKeys::PhaseCount, Val))
+		int32 PhaseCountVal = 0;
+		if (TryGetFiniteInt32Field(*EffectObject, UMGPropertyKeys::PhaseCount, PhaseCountVal))
 		{
-			RenderingPhase.PhaseCount = FMath::Max(1, (int32)Val);
+			RenderingPhase.PhaseCount = FMath::Max(1, PhaseCountVal);
 			bRenderingPhaseSet = true;
 		}
 		if (bRenderingPhaseSet)
@@ -760,7 +856,7 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutPath.StrokeColor = FUMGValueParser::ParseColor(Str);
 		}
-		if (DesignJsonUtils::TryGetFloat(*PathDataObject, UMGPropertyKeys::PathStrokeThickness, Val))
+		if (TryGetFiniteFloatFieldF(*PathDataObject, UMGPropertyKeys::PathStrokeThickness, Val))
 		{
 			OutPath.StrokeThickness = Val;
 		}
@@ -792,7 +888,7 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		{
 			OutShadow.ShadowColorAndOpacity = FUMGValueParser::ParseColor(Str);
 		}
-		if (DesignJsonUtils::TryGetFloat(*ShadowDataObject, UMGPropertyKeys::ShadowBlur, Val))
+		if (TryGetFiniteFloatFieldF(*ShadowDataObject, UMGPropertyKeys::ShadowBlur, Val))
 		{
 			OutShadow.ShadowBlur = Val;
 		}
@@ -811,11 +907,11 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				{
 					Layer.Offset = ParseVector2DValue(JsonValue, UMGJsonKeys::Offset).Get(Layer.Offset);
 				}
-				if (DesignJsonUtils::TryGetFloat(*LayerObject, UMGJsonKeys::Blur, Val))
+				if (TryGetFiniteFloatFieldF(*LayerObject, UMGJsonKeys::Blur, Val))
 				{
 					Layer.Blur = Val;
 				}
-				if (DesignJsonUtils::TryGetFloat(*LayerObject, UMGJsonKeys::Spread, Val))
+				if (TryGetFiniteFloatFieldF(*LayerObject, UMGJsonKeys::Spread, Val))
 				{
 					Layer.Spread = Val;
 				}
@@ -841,7 +937,7 @@ void FUMGJsonParser::ParseRenderPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		{
 			OutRender.Clipping = Str;
 		}
-		if (DesignJsonUtils::TryGetFloat(*RenderObject, UMGPropertyKeys::RenderOpacity, Val))
+		if (TryGetFiniteFloatFieldF(*RenderObject, UMGPropertyKeys::RenderOpacity, Val))
 		{
 			OutRender.RenderOpacity = Val;
 		}
@@ -871,13 +967,11 @@ void FUMGJsonParser::ParseWidgetStatePayload(const TSharedPtr<FJsonObject>& Node
 	const TSharedPtr<FJsonObject>* WidgetStateObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("WidgetState"), WidgetStateObject))
 	{
-		// ActiveWidgetIndex keeps the double read: the historical static_cast<int32>
-		// truncates, which differs from the engine int32 field overload's
-		// range-check + round-half-from-zero conversion.
-		double Val;
-		if (DesignJsonUtils::TryGetNumber(*WidgetStateObject, UMGPropertyKeys::ActiveWidgetIndex, Val))
+		// Range-check ActiveWidgetIndex before casting; invalid values leave the field unset.
+		int32 ActiveWidgetIndexVal = 0;
+		if (TryGetFiniteInt32Field(*WidgetStateObject, UMGPropertyKeys::ActiveWidgetIndex, ActiveWidgetIndexVal))
 		{
-			OutWidgetState.ActiveWidgetIndex = static_cast<int32>(Val);
+			OutWidgetState.ActiveWidgetIndex = ActiveWidgetIndexVal;
 		}
 	}
 }
@@ -960,7 +1054,7 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 
 	// Parse FillWeight.
 	float FillWeight;
-	if (DesignJsonUtils::TryGetFloat(JsonObject, TEXT("FillWeight"), FillWeight))
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("FillWeight"), FillWeight))
 	{
 		OutSlot.FillWeight = FillWeight;
 	}
@@ -1007,8 +1101,12 @@ void FUMGJsonParser::ParseAnchorData(const TSharedPtr<FJsonObject>& JsonObject, 
 		return;
 	}
 
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("X"), OutAnchor.X);
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Y"), OutAnchor.Y);
+	// Anchor coordinates may legitimately be negative; only finiteness/float-range
+	// is enforced before narrowing so a large-exponent value is rejected rather
+	// than stored as Inf.
+	float Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("X"), Val)) OutAnchor.X = Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("Y"), Val)) OutAnchor.Y = Val;
 }
 
 void FUMGJsonParser::ParseOffsetsData(const TSharedPtr<FJsonObject>& JsonObject, FUMGOffsetsData& OutOffsets)
@@ -1018,8 +1116,11 @@ void FUMGJsonParser::ParseOffsetsData(const TSharedPtr<FJsonObject>& JsonObject,
 		return;
 	}
 
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Left"), OutOffsets.Left);
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Top"), OutOffsets.Top);
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Right"), OutOffsets.Right);
-	DesignJsonUtils::TryGetFloat(JsonObject, TEXT("Bottom"), OutOffsets.Bottom);
+	// Canvas offsets are coordinates and may legitimately be negative (e.g. a
+	// negative Left/Top). Only finiteness/float-range is enforced before narrowing.
+	float Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("Left"), Val)) OutOffsets.Left = Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("Top"), Val)) OutOffsets.Top = Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("Right"), Val)) OutOffsets.Right = Val;
+	if (TryGetFiniteFloatFieldF(JsonObject, TEXT("Bottom"), Val)) OutOffsets.Bottom = Val;
 }

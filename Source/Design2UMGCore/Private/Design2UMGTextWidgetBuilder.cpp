@@ -13,7 +13,7 @@
 #include "UMGWidgetTypes.h"
 #include "Engine/Font.h"
 #include "Misc/PackageName.h"
-#include "Framework/Text/TextRange.h"
+#include "Containers/UnrealString.h"
 
 namespace
 {

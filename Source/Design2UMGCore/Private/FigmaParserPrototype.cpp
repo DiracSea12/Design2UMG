@@ -198,8 +198,7 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 		if (!VariableId.IsEmpty())
 			Action.VariableId = VariableId;
 
-		// Variable payload is condensed once here so the step graph never
-		// re-parses the raw action JSON; "value" is the legacy field name.
+		// Store condensed variable JSON once for the step graph; accept variableValue or value.
 		TSharedPtr<FJsonValue> VariableValueField = DesignJsonUtils::TryGetField(AObj, TEXT("variableValue"));
 		if (!VariableValueField.IsValid())
 			VariableValueField = DesignJsonUtils::TryGetField(AObj, TEXT("value"));

@@ -30,8 +30,8 @@ namespace
 		return Node;
 	}
 
-	// Mirror the current private converter branch so explicit-empty presence stays executable in tests
-	// without opening a production-only seam just for automation coverage.
+// Mirrors the converter wrapping predicate to check explicit-empty property presence.
+
 
 	bool ShouldWrapChildWithSizeBoxCurrentTruth(
 		const TSharedPtr<FDesignNode>& ParentNode,
@@ -213,7 +213,7 @@ bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
 	FDesignVariableResolver Resolver;
 	Resolver.SetVariables(Variables);
 	TestFalse(TEXT("$45.00 should not be treated as variable ref"), Resolver.IsVariableRef(TEXT("$45.00")));
-	TestEqual(TEXT("Literal dollar text should round-trip unchanged"),
+	TestEqual(TEXT("Literal dollar text should remain unchanged"),
 		Resolver.ResolveString(TEXT("$45.00")),
 		FString(TEXT("$45.00")));
 	TestTrue(TEXT("$--font-primary remains a variable ref"), Resolver.IsVariableRef(TEXT("$--font-primary")));
@@ -428,7 +428,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperTypedDirectReadEquivalenceTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperTypedDirectReadEquivalenceTest::RunTest(const FString& Parameters)
 {
-	// Locks the typed-direct-read migration of the border/wrapper transfer helpers:
+	// Border and wrapper transfers preserve exact property values and presence.
 	// values must arrive at the destination bit-identically (including sub-1e-6
 	// precision that a serialize->parse roundtrip would quantize) and presence
 	// rules must match the descriptor contract (absent stays absent).
@@ -471,8 +471,7 @@ bool FVisualMapperTypedDirectReadEquivalenceTest::RunTest(const FString& Paramet
 	TestFalse(TEXT("Inner widget does not keep BrushColor"), Inner.Brush.BrushColor.IsSet());
 	TestFalse(TEXT("Inner widget does not keep RenderOpacity"), Inner.Render.RenderOpacity.IsSet());
 
-	// Descriptor serialization of the transferred value still matches the
-	// historical string form so downstream JSON/diagnostic seams stay stable.
+	// Descriptor serialization must retain its declared string representation.
 	TestEqual(
 		TEXT("Descriptor color output unchanged after direct read migration"),
 		GetWidgetProperty(Wrapped, TEXT("BrushColor")),
@@ -485,9 +484,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProceduralResourceAccessExplicitRefEquivalence
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FProceduralResourceAccessExplicitRefEquivalenceTest::RunTest(const FString& Parameters)
 {
-	// Explicit MaterialRef path: the migrated direct reads must reproduce the
-	// descriptor precedence (gradient > explicit ref) and reject nodes with no
-	// material source exactly like the previous descriptor lookup did.
+	// Explicit material reads preserve gradient precedence and reject absent material sources.
 	FUMGWidgetNode ExplicitRefNode;
 	ExplicitRefNode.Type = TEXT("Image");
 	ExplicitRefNode.WidgetStyle.WidthOverride = 320.5f;
@@ -594,4 +591,3 @@ bool FillTransferPathRasterTintGuardTest::RunTest(const FString& Parameters)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

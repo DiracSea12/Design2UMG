@@ -1,4 +1,4 @@
-﻿# Normalize Windows-facing text files in the repository.
+# Normalize Windows-facing text files in the repository.
 * text=auto
 *.h text eol=crlf
 *.hpp text eol=crlf
@@ -26,3 +26,8 @@ CLAUDE.md export-ignore
 .codex/ export-ignore
 openspec/ export-ignore
 openspec/** export-ignore
+
+# Private validation data and the maintainer progress ledger are not source-release assets.
+/PenDesigns/ export-ignore
+/FigmaExports/ export-ignore
+/CODE_QUALITY_OPTIMIZATION_PLAN.md export-ignore

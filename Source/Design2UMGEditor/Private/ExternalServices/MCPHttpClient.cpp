@@ -14,9 +14,7 @@
 
 namespace
 {
-	// Per JSON-RPC request timeout. No derivation on record; fixed when the MCP
-	// transport was introduced. FigmaHttpClient intentionally raises its
-	// document fetch above this baseline (see FigmaHttpRequestTimeoutSeconds).
+	// Per-request MCP timeout; Figma document fetches use a longer timeout.
 	constexpr float McpHttpRequestTimeoutSeconds = 30.0f;
 
 	TSharedPtr<FJsonObject> BuildInitializeParams()
@@ -54,11 +52,12 @@ namespace
 	}
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreatePostRequest(
+		const TSharedRef<FDesignHttpClientSlot, ESPMode::ThreadSafe>& State,
 		const FString& Endpoint,
 		const FString& SessionId,
 		const FString& RequestBody)
 	{
-		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = State->CreateRequest();
 		HttpRequest->SetURL(Endpoint);
 		HttpRequest->SetVerb(TEXT("POST"));
 		HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
@@ -74,8 +73,8 @@ namespace
 
 }
 
-FMCPHttpClient::FMCPHttpClient()
-	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>())
+FMCPHttpClient::FMCPHttpClient(FHttpModule& HttpModule)
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>(HttpModule))
 {
 }
 
@@ -130,18 +129,8 @@ void FMCPHttpClient::ConnectAsync(const FString& Endpoint, TFunction<void(bool b
 void FMCPHttpClient::Disconnect()
 {
 	CancelRequests();
-	// Disconnect stays silent about the in-flight request: the client object
-	// is being torn down or reconnected, so no failure is owed here.
-	// Clear the session-owned callback BEFORE dropping the member reference:
-	// ConnectAsync handshake callbacks capture Conn, and storing that callback
-	// inside the session it captures would otherwise keep the session alive as a
-	// self-referencing cycle after this reset. JSON-RPC ids only need to be
-	// unique within one connection, so each session restarts its id space from 1.
-	// This is separate from the slot's tracking ids (FDesignHttpClientSlot),
-	// which do stay monotonic across sessions: a late-arriving callback from an
-	// old session can then never collide with a new session's tracking id, and
-	// the slot's cancellation watermark keeps recognizing it as cancelled, so
-	// stale responses are never applied to the new session.
+	// Disconnect silently and clear session-owned callbacks to break capture cycles.
+	// RPC IDs restart per session; slot IDs stay monotonic so stale completions stay cancelled.
 	if (Session.IsValid())
 	{
 		Session->InFlightCancelState.Reset();
@@ -185,14 +174,8 @@ void FMCPHttpClient::SendRequestAsync(
 	const FString& InLogLabel,
 	bool bLogTransportErrors)
 {
-	// A superseded in-flight request would otherwise never fire its callback;
-	// deliver the same failure shape the HTTP failure paths use (false with
-	// empty strings) exactly once before starting the new request.
-	// Delivery invariant: the slot's cancellation watermark swallows late
-	// engine completions for cancelled requests, while the delivered-flag plus
-	// this stored failure ensure a superseded request whose completion never
-	// arrives still gets exactly one failure delivery; each guard covers a
-	// scenario the other cannot, so both stay.
+	// Complete a superseded request once with failure, even if HTTP never calls back.
+	// The slot watermark suppresses late responses; the delivered flag prevents double delivery.
 	if (Session->InFlightCancelState.IsValid() && !Session->InFlightCancelState->bDelivered && Session->InFlightCancelFailure)
 	{
 		TFunction<void()> CancelFailure = MoveTemp(Session->InFlightCancelFailure);
@@ -223,7 +206,7 @@ void FMCPHttpClient::SendRequestAsync(
 		}
 	};
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(Session->ServerEndpoint, Session->SessionId, RequestBody);
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = CreatePostRequest(State, Session->ServerEndpoint, Session->SessionId, RequestBody);
 	HttpRequest->OnProcessRequestComplete().BindLambda(
 		[State = State, RequestId, OnComplete, LogLabel, bExpectResponse, bLogTransportErrors, CancelState, WeakSession](FHttpRequestPtr, FHttpResponsePtr Response, bool bConnectedSuccessfully)
 	{

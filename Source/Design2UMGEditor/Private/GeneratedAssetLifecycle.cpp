@@ -3,7 +3,6 @@
 #include "GeneratedAssetLifecycle.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
-#include <atomic>
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 
@@ -11,13 +10,6 @@
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
-
-namespace
-{
-#if WITH_DEV_AUTOMATION_TESTS
-	std::atomic<bool> bAutomationUndoFailureArmed{false};
-#endif
-}
 
 namespace GeneratedAssetLifecycle
 {
@@ -27,18 +19,9 @@ namespace GeneratedAssetLifecycle
 		const int32 Last = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount() - 1;
 		const FTransaction* Transaction = Last >= 0 ? GEditor->Trans->GetTransaction(Last) : nullptr;
 		if (!Transaction || Transaction->GetId() != TransactionId) return false;
-#if WITH_DEV_AUTOMATION_TESTS
-		if (bAutomationUndoFailureArmed.exchange(false)) return false;
-#endif
 		return GEditor->UndoTransaction(false);
 	}
 
-#if WITH_DEV_AUTOMATION_TESTS
-	void ArmAutomationUndoFailureOnce()
-	{
-		bAutomationUndoFailureArmed.store(true);
-	}
-#endif
 
 	bool IsFileWritableForSave(const FString& InPath, bool bAllowWriteProbe, FString& OutReason)
 	{
@@ -80,7 +63,7 @@ namespace GeneratedAssetLifecycle
 		const bool bMovedToTransientPackage = Asset->Rename(
 			*TransientName.ToString(),
 			GetTransientPackage(),
-			REN_DontCreateRedirectors | REN_NonTransactional | REN_ForceNoResetLoaders);
+			REN_DontCreateRedirectors | REN_NonTransactional);
 
 		if (bMovedToTransientPackage && OriginalPackage && OriginalPackage != GetTransientPackage())
 		{

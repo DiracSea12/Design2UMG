@@ -23,7 +23,7 @@ public:
 
 	static UClass* ResolveWidgetClass(const FString& TypeName);
 	static void ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& SlotData);
-	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
+	static void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap = nullptr);
 
 	/**
 	 * Single shared reader for a widget blueprint's UUserWidget CDO DesignTimeSize:
@@ -46,9 +46,8 @@ public:
 	static FName SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix);
 
 	/**
-	 * Shared TextBlock font-state dump for generation (template stages) and compiled-instance
-	 * diagnostics. Callers keep their own gating and pass their owner label pair so each
-	 * log line stays byte-identical to its historical form.
+	 * Dump TextBlock font state for generated templates and compiled instances.
+	 * Callers supply the owner and stage labels and decide when to log.
 	 */
 	static void DumpTextBlockFontStates(
 		ELogVerbosity::Type Verbosity,
@@ -58,17 +57,9 @@ public:
 		const FString& OwnerValue);
 
 	/**
-	 * Widget name dedup contract (same source as BuildWidgetTree's name generation):
-	 * generation-side SanitizeWidgetName+Suffix probing produces base / base_<number>, and the
-	 * UWidget-property-collision uniquifier produces base_w<number>; reimport-side same-name
-	 * reconciliation parses both shapes with these two predicates. Anchored in one class: changing
-	 * either generation tail must update this in sync.
-	 *
-	 * GetWidgetNameSuffixRank returns a total, collision-free rank for the same-name pairing sort:
-	 * base -> 0, base_<N> -> 2N-1, base_w<N> -> 2N, and MAX_int32 when the name is not a generated
-	 * shape (so non-matches sort last). The two tail shapes deliberately interleave rather than
-	 * share a raw number: base_1 and base_w1 would otherwise both rank 1 and the comparison would
-	 * stop being a strict weak order.
+	 * Parse generated widget names for reimport matching.
+	 * Ranks: base -> 0, base_<N> -> 2N-1, base_w<N> -> 2N; non-matches -> MAX_int32.
+	 * Keep these predicates aligned with BuildWidgetTree name generation.
 	 */
 	static bool MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName);
 	static int32 GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName);

@@ -241,6 +241,7 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
 	FSavePackageArgs Args;
 	Args.TopLevelFlags = RF_Public | RF_Standalone;
+	Args.SaveFlags = SAVE_NoError;
 	if (!UPackage::SavePackage(Package, Font, *Filename, Args))
 	{
 		Composite = Previous;
@@ -289,17 +290,11 @@ const TArray<FFace>& FSourceIndex::GetFaces()
 				&& Cached->Stat.FileSize == Stat.FileSize)
 			{
 				Faces.Add(Cached->Face);
-#if WITH_DEV_AUTOMATION_TESTS
-				++MetadataCacheHits;
-#endif
 				continue;
 			}
 			MetadataCache.Remove(File);
 			FFace Face;
 			FString Error;
-#if WITH_DEV_AUTOMATION_TESTS
-			++MetadataReadCount;
-#endif
 			if (ReadFace(File, Face, Error))
 			{
 				if (Stat.bIsValid) MetadataCache.Add(File, {Stat, Face});

@@ -4,6 +4,10 @@ This document covers the JSON written by `DesignImportDiagnosticReport::Write()`
 
 It does **not** cover helper stderr lines such as `[DIAGNOSTIC] ...` from the Python validation scripts. Those are a separate tooling contract.
 
+## Report write outcome
+
+`Write()` and `WriteReimport()` return whether the report was serialized and saved successfully. A failed write returns `false` and logs a warning with the target path; it must not log that the report was written. Reporting is best-effort and does not alter or roll back the supplied asset/manifest commit result. A missing report is not evidence that no import or commit occurred.
+
 ## Machine-stable fields
 
 The current machine-facing contract is built around these grouped sections:
@@ -52,7 +56,7 @@ These grouped objects are the fields new tooling should read first.
 
 The writer serializes the supplied typed result; it does not infer success from diagnostic kinds or message text. An absent `outcome` means no commit result was supplied, not success. `manifestState=unchanged` also covers an asset-only save that did not request a manifest. File and memory states describe the state at return; `indeterminate` means the final file contents are not guaranteed.
 
-`succeeded` means the requested asset/manifest commit completed without reported degradation. `succeeded_with_degradation` is still a successful commit, but some design behavior or content was skipped or preserved. Examples include unsupported Prototype wiring, skipped declared mapping inputs, and nested subtrees preserved outside the safe-delete scope. Component batches propagate both page and dependency degradation. Informational mapping hits and successful input writes do not imply degradation.
+`succeeded` means the requested asset/manifest commit completed without reported degradation. `succeeded_with_degradation` is still a successful commit, but some design behavior or content was skipped or preserved. Examples include unsupported Prototype wiring, skipped declared mapping inputs, and nested subtrees preserved outside the safe-delete scope. A component import propagates both page and dependency degradation. Informational mapping hits and successful input writes do not imply degradation.
 
 `committed_with_metadata_failure` means the asset was saved but its manifest failed. `not_committed` means there is no successful commit; inspect file and memory states to distinguish untouched state from a completed rollback or remaining memory edits. `rollback_incomplete` reports uncertain files or incomplete recovery. `conflict` reports an operation blocked by an ownership or identity conflict. These failure states take precedence over degradation; a warning cannot turn a failed operation into success.
 

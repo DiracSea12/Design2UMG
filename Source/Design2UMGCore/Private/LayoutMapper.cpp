@@ -56,15 +56,8 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Text)
 		{
-			// Deliberately omits the Auto + fill-width growth term that
-			// TextMeasurement::IsWrappingTextMode uses. This predicate feeds
-			// only ShouldUseFitOverride, i.e. the SizeBox WidthOverride-vs-
-			// MinDesired switch for fit-sized children in WrapWithSizeBox.
-			// A fill-width auto text wraps at the width its parent's layout
-			// grants it (slot fill plus ShouldPreserveMeasuredFillSize and
-			// TextMeasurement's parent width hint already carry that), so
-			// counting it here would double-process the same signal. Unifying
-			// the terms would still need a full visual-regression gate.
+			// Exclude fill-width Auto text from fit overrides: parent slot sizing and the text
+			// measurement width hint already determine its wrapping width.
 			return ParserSharedSemantics::HasFixedWidthTextGrowth(*Node)
 				|| ParserSharedSemantics::HasHardNewlineText(*Node);
 		}
@@ -227,6 +220,21 @@ void LayoutMapper::ApplyGap(TArray<FUMGWidgetNode>& Children, float Gap, EDesign
 
 void LayoutMapper::ApplyPadding(FUMGWidgetNode& Widget, const FDesignPadding& Padding)
 {
+	const bool bVertical = Widget.Type == UMGWidgetTypes::VerticalBox;
+	if (bVertical || Widget.Type == UMGWidgetTypes::HorizontalBox)
+	{
+		// Box panels have slot padding, not a panel Padding property. Flow conversion
+		// discards source child coordinates, so carry their inset once through slots.
+		for (int32 Index = 0; Index < Widget.Children.Num(); ++Index)
+		{
+			FMargin& SlotPadding = Widget.Children[Index].Slot.Padding;
+			SlotPadding.Left += (bVertical || Index == 0) ? Padding.Left : 0.0f;
+			SlotPadding.Top += (!bVertical || Index == 0) ? Padding.Top : 0.0f;
+			SlotPadding.Right += (bVertical || Index == Widget.Children.Num() - 1) ? Padding.Right : 0.0f;
+			SlotPadding.Bottom += (!bVertical || Index == Widget.Children.Num() - 1) ? Padding.Bottom : 0.0f;
+		}
+		return;
+	}
 	Widget.WidgetStyle.Padding = FMargin(Padding.Left, Padding.Top, Padding.Right, Padding.Bottom);
 }
 

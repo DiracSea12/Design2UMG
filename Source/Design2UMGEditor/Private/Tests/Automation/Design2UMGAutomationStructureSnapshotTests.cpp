@@ -221,10 +221,10 @@ namespace
 	{
 		FDesignDocument Document;
 		Document.Version = TEXT("1.0");
-		Document.Metadata.Add(TEXT("qa.case_name"), Variant.CaseName);
-		Document.Metadata.Add(TEXT("qa.export_directory"), Variant.ExportDirectory);
-		Document.Metadata.Add(TEXT("qa.historical_score"), Variant.HistoricalScore);
-		Document.Metadata.Add(TEXT("qa.reference_identity"), Variant.ReferenceIdentity);
+		Document.Metadata.Add(TEXT("test.case_name"), Variant.CaseName);
+		Document.Metadata.Add(TEXT("test.export_directory"), Variant.ExportDirectory);
+	Document.Metadata.Add(TEXT("test.historical_score"), Variant.HistoricalScore);
+	Document.Metadata.Add(TEXT("test.reference_identity"), Variant.ReferenceIdentity);
 		Document.MutableSourceDocument().SourceFilePath = Variant.SourceFilePath;
 
 		FDesignFont& SourceFont = Document.Fonts.AddDefaulted_GetRef();
@@ -235,7 +235,7 @@ namespace
 			Variant.RootId, Variant.RootName, EDesignNodeType::Frame, 320.0f, 160.0f);
 		Root->LayoutData.Layout = EDesignLayout::Vertical;
 		Root->LayoutData.SetGap(8.0f);
-		Root->Metadata.Add(TEXT("qa.node_identity"), Variant.RootId);
+	Root->Metadata.Add(TEXT("test.node_identity"), Variant.RootId);
 
 		TSharedPtr<FDesignNode> Label = Design2UMGEditorTests::MakeNode(
 			Variant.ChildId, Variant.ChildName, EDesignNodeType::Text, 320.0f, 32.0f);
@@ -429,37 +429,37 @@ bool FDesignIdentityVariantConversionParityTest::RunTest(const FString& Paramete
 	const TArray<FIdentityVariant> Variants =
 	{
 		{
-			TEXT("qa005_baseline"),
+			TEXT("identity_baseline"),
 			TEXT("root_baseline"),
 			TEXT("Step2Frame"),
 			TEXT("label_baseline"),
 			TEXT("BodyLabel"),
 			TEXT("Designs/pencil-welcome.pen"),
-			TEXT("Automation/qa005/baseline"),
+			TEXT("Automation/identity-parity/baseline"),
 			TEXT("71/71"),
 			TEXT("reference-baseline"),
 			TEXT("lucide")
 		},
 		{
-			TEXT("qa005_renamed_case"),
+			TEXT("identity_source_variant"),
 			TEXT("root_variant_a"),
 			TEXT("RenamedStepFrame"),
 			TEXT("label_variant_a"),
 			TEXT("RenamedBodyLabel"),
-			TEXT("Temp/qa005/renamed-source.pen"),
-			TEXT("Automation/qa005/variant-a"),
+			TEXT("Temp/identity-parity/renamed-source.pen"),
+			TEXT("Automation/identity-parity/source-variant"),
 			TEXT("70/71"),
 			TEXT("reference-variant-a"),
 			TEXT("Lucide Icons")
 		},
 		{
-			TEXT("qa005_renamed_reference"),
+			TEXT("identity_reference_variant"),
 			TEXT("root_variant_b"),
 			TEXT("ReferenceRenamedFrame"),
 			TEXT("label_variant_b"),
 			TEXT("ReferenceBodyLabel"),
-			TEXT("Fixtures/qa005/reference-renamed.pen"),
-			TEXT("Automation/qa005/variant-b"),
+			TEXT("Fixtures/identity-parity/reference-renamed.pen"),
+			TEXT("Automation/identity-parity/reference-variant"),
 			TEXT("69/71"),
 			TEXT("reference-variant-b"),
 			TEXT("LUCIDE")

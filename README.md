@@ -1,5 +1,7 @@
 # Design2UMG
 
+Validation tools accept your own case directory and discover its actual size. The maintainer's private visual corpus is not distributed or required; an empty directory means zero tests, not a passed visual gate. See [the tooling guide](Tools/README.md).
+
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
 [![Repository Hygiene](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml)
@@ -105,7 +107,7 @@ Design2UMG.LocalFigmaImport <design.json> [--out=/Game/Path] [--no-preview]
 Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]
 ```
 
-This MCP JSON path is a bridge/debug utility. The release candidate does not treat live sync itself as a formal support promise.
+This MCP JSON path is a bridge/debug utility. The current release contract does not treat live sync itself as a formal support promise.
 
 ## Automation
 
@@ -152,6 +154,7 @@ Coverage boundaries for unit tests, smoke checks, focused automation render, and
 Key options:
 - Design Width / Height
 - Remote Image Import
+- Generated Texture Budget (MiB): cumulative newly generated raster data per generation or preview; defaults to 512, minimum 1. Changes apply to the next operation. This does not change remote-download, decoded-input or single-image limits, and is not a cap on total editor memory.
 - Icon Font mapping
 - Widget Class override rules
 - MCP Server Path override
@@ -180,7 +183,7 @@ Key options:
   - `Inputs` copy declared design values into instance properties on every import/reimport. `Type` is one of `Text/Bool/Name/Float`; `ValueKind` is `ComponentProperty` (value from the instance's `componentProperties`, the default) or `ComponentText` (value from the component's text content). Invalid entries are dropped with a `mapping_` diagnostic instead of blocking the import.
   - Mapping takes precedence over name-based Widget Class overrides; unmatched components keep the normal conversion path.
   - Prototype interactions attached to a mapped component are project-owned by definition: the plugin reports them as inert (`mapping_prototype_inert`) and does not generate runtime bindings for them.
-  - Pencil sources stay out of the mapping main path in this round (candidate identity only).
+  - Pencil sources stay out of the mapping main path; they provide candidate identity only.
 
 ## Verification Boundary
 

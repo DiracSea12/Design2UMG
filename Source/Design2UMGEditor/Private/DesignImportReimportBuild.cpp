@@ -11,6 +11,8 @@
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UObjectHash.h"
 #include "WidgetBlueprint.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace DesignImportPipeline
 {
@@ -25,7 +27,7 @@ namespace DesignImportPipeline
 				: State(*InShared.MappingBuildState), Shared(InShared)
 			{
 				TArray<UObject*> Objects;
-				GetObjectsWithOuter(Shared.WidgetTree, Objects, false);
+				GetObjectsWithOuter(Shared.WidgetTree, Objects, EGetObjectsFlags::None);
 				ExistingObjects.Append(Objects);
 			}
 
@@ -82,7 +84,7 @@ namespace DesignImportPipeline
 		TSet<UWidget*> Attached;
 		WidgetTree->ForEachWidget([&](UWidget* Widget) { Attached.Add(Widget); });
 		TArray<UObject*> Objects;
-		GetObjectsWithOuter(WidgetTree, Objects, false);
+		GetObjectsWithOuter(WidgetTree, Objects, EGetObjectsFlags::None);
 		for (UObject* Object : Objects)
 		{
 			UWidget* Widget = Cast<UWidget>(Object);

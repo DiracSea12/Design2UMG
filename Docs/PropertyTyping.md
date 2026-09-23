@@ -81,7 +81,7 @@ Prototype key codes are extracted once from the source trigger object in `FigmaP
 
 Rich-text builders produce typed rows directly. The JSON parser and serializer retain the existing `TextData.RichTextStyleRows` encoded-string interchange format at the boundary only. Absent or invalid row input does not replace a style set; a present empty map clears it. Optional size, spacing, and color retain their existing application and inheritance semantics.
 
-Byte-color and established raster-parameter precision are preserved without string conversion. This cleanup does not change font measurement, shadow layout, or source unit conventions.
+Byte-color and established raster-parameter precision are preserved without string conversion. The typed path does not change font measurement, shadow layout, or source unit conventions.
 
 ## Input Aliases And Open Parameters
 

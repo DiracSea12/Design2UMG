@@ -70,11 +70,11 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// IR-layer assertions (BatchC mode): Convert candidate markers + ApplyMapping hit markers
+// IR-layer assertions : Convert candidate markers + ApplyMapping hit markers
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingIRMarkingTest,
-	"Design2UMG.BatchC.ComponentMapping.IRMarking",
+	"Design2UMG.ComponentMapping.IRMarking",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 {
@@ -134,7 +134,7 @@ bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentMappingIRSetLevelMarkingTest,
-	"Design2UMG.BatchC.ComponentMapping.SetLevelMarking",
+	"Design2UMG.ComponentMapping.SetLevelMarking",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FComponentMappingIRSetLevelMarkingTest::RunTest(const FString&)
 {
@@ -447,7 +447,7 @@ bool FComponentMappingPrototypeSubtreeInertTest::RunTest(const FString&)
 		{
 			continue;
 		}
-		InstanceBodyInert += Diagnostic.Message.Contains(TEXT("attached to mapped component")) ? 1 : 0;
+		InstanceBodyInert += Diagnostic.Message.Contains(TEXT("attached to a mapped component")) ? 1 : 0;
 		SubtreeInert += Diagnostic.Message.Contains(TEXT("inside a mapped component's unexpanded subtree")) ? 1 : 0;
 		if (Diagnostic.Message.Contains(TEXT("'PlainCard'")))
 		{

@@ -600,7 +600,7 @@ namespace DesignImportDiagnosticReport
 		}
 	}
 
-	void Write(
+	bool Write(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
 		const FImportReportArtifacts& Artifacts,
@@ -803,12 +803,17 @@ namespace DesignImportDiagnosticReport
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ReportPath), true);
 		FString Payload;
 		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);
-		FJsonSerializer::Serialize(Root, Writer);
-		FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		if (!FJsonSerializer::Serialize(Root, Writer)
+			|| !FFileHelper::SaveStringToFile(Payload, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: could not write import diagnostic report %s"), *ReportPath);
+			return false;
+		}
 		UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: wrote import diagnostic report %s"), *ReportPath);
+		return true;
 	}
 
-	void WriteReimport(
+	bool WriteReimport(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
 		const FString& TargetAssetPath,
@@ -820,6 +825,6 @@ namespace DesignImportDiagnosticReport
 		FImportReportArtifacts Artifacts;
 		Artifacts.RequestedOutputPath = TargetAssetPath;
 		if (Commit) Artifacts.Commit = *Commit;
-		Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);
+		return Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);
 	}
 }

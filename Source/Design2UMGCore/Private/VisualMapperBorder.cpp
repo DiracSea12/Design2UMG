@@ -236,6 +236,7 @@ namespace
 	bool CanPromoteSingleChildFlowContent(
 		const FUMGWidgetNode& Widget,
 		const TSharedPtr<FDesignNode>& Node,
+		const FUMGWidgetNode& Border,
 		int32& OutContentIndex)
 	{
 		OutContentIndex = INDEX_NONE;
@@ -264,9 +265,6 @@ namespace
 			|| !IsPromotableFlowPanelType(Widget.Type)
 			|| !VisibleChildren[0].IsValid()
 			|| VisibleChildren[0]->LayoutData.bAbsoluteLayoutPositioning
-			|| (VisibleChildren[0]->Transform.HasExplicitPosition()
-				&& (Widget.Children.Num() != 1 || Widget.Children[0].Slot.SizeRule != EUMGSlotSizeRule::Fill
-					|| Widget.Children[0].Slot.FillWeight <= 0.f))
 			|| HasEnabledInnerShadow(*Node)
 			|| Widget.WidgetStyle.HasAny()
 			|| Widget.HasSourceData())
@@ -274,9 +272,23 @@ namespace
 			return false;
 		}
 
-		// A fill slot ignores authored x/y and retains its allocation when promoted.
-		// Auto slots with explicit positions stay in the flow panel: Border and
-		// box-panel main-axis overflow differ when runtime space is reduced.
+		// Elide only redundant positioned-child panels. Overflowing Auto children need
+		// the panel allocation because Border alignment would clamp them.
+		const bool bHorizontal = Node->LayoutData.Layout == EDesignLayout::Horizontal;
+		const FDesignSize& ChildMainSize = bHorizontal
+			? VisibleChildren[0]->Transform.Width : VisibleChildren[0]->Transform.Height;
+		const FDesignSize& MainSize = bHorizontal ? Node->Transform.Width : Node->Transform.Height;
+		const FMargin ContentPadding = Border.WidgetStyle.Padding.Get(FMargin(0.f))
+			+ Border.WidgetStyle.StrokePadding.Get(FMargin(0.f));
+		const float AvailableMainSize = MainSize.Value - (bHorizontal
+			? ContentPadding.Left + ContentPadding.Right : ContentPadding.Top + ContentPadding.Bottom);
+		// FitContent grows; an unresolved Fill size is not a zero-sized bound.
+		const bool bHasMainAxisLimit = MainSize.IsFixed() || (MainSize.IsFill() && MainSize.Value > 0.f);
+		if (VisibleChildren[0]->Transform.HasExplicitPosition()
+			&& bHasMainAxisLimit && !ChildMainSize.IsFill() && ChildMainSize.Value > AvailableMainSize)
+		{
+			return false;
+		}
 		if (Node->LayoutData.JustifyContent == EDesignJustifyContent::Start)
 		{
 			if (Widget.Children.Num() != 1)
@@ -443,7 +455,7 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 	TransferBorderBoxShadowProperties(Border, Widget);
 	int32 PromotedContentIndex = INDEX_NONE;
 	const bool bPromoteSingleChildFlowContent =
-		CanPromoteSingleChildFlowContent(Widget, Node, PromotedContentIndex);
+		CanPromoteSingleChildFlowContent(Widget, Node, Border, PromotedContentIndex);
 	if (bPromoteSingleChildFlowContent)
 	{
 		UE_LOG(LogDesign2UMG, Verbose, TEXT("VisualMapper: '%s' → promote single flow child into border"), *Widget.Name);

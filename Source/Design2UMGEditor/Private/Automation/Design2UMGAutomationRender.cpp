@@ -812,14 +812,8 @@ namespace
 		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
 		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
 		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
-		// Second-stage calibration check: the blueprint's design-time extent is now
-		// known. When it is already aspect-compatible with the calibrated (reference)
-		// extent and the calibration is not union-padded, the legacy pipeline compares
-		// fine on its own; skip the override to keep passing cases byte-identical to
-		// the non-calibrated path. A calibration canvas significantly larger than the
-		// design-time extent on any axis carries content-union padding (outer shadows,
-		// overflowing children) that the design-time canvas cannot host, so it applies
-		// even when the aspects match.
+		// Keep the design canvas when its aspect matches and calibration adds no union padding.
+		// Apply a larger calibrated canvas to contain outer shadows or overflowing children.
 		TOptional<FVector2D> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
 		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
 		{

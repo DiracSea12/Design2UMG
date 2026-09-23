@@ -13,17 +13,11 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-#include <atomic>
 
 namespace
 {
 	constexpr int32 ManifestSchemaVersion = 1;
 
-#if WITH_DEV_AUTOMATION_TESTS
-	// Test injection: see Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce.
-	std::atomic<bool> bAutomationSidecarWriteFailureArmed{ false };
-	std::atomic<bool> bAutomationSidecarFinalizeFailureArmed{ false };
-#endif
 
 	TSharedRef<FJsonObject> BuildMappedInstanceObject(const FDesign2UMGMappedInstanceRecord& Record)
 	{
@@ -73,18 +67,9 @@ namespace Design2UMGGenerationManifest
 		const FString& AssetPackageName,
 		const FDesign2UMGGenerationManifestPayload& Payload)
 	{
-#if WITH_DEV_AUTOMATION_TESTS
-		if (bAutomationSidecarWriteFailureArmed.exchange(false))
-		{
-			UE_LOG(LogDesign2UMG, Error,
-				TEXT("GenerationManifest: failed to write manifest %s (automation-injected sidecar write failure)"),
-				*BuildSidecarPathForAsset(AssetPackageName));
-			return EDesign2UMGFileState::Unchanged;
-		}
-#endif
 		TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 		Root->SetNumberField(TEXT("schemaVersion"), ManifestSchemaVersion);
-		Root->SetBoolField(TEXT("componentBatchRoot"), Payload.bComponentBatchRoot);
+		Root->SetBoolField(TEXT("componentBatchRoot"), Payload.bComponentBulkRoot);
 		if (Payload.bWholeAssetOwned)
 		{
 			const FString Hash = ComputeSavedAssetHash(AssetPackageName);
@@ -140,9 +125,6 @@ namespace Design2UMGGenerationManifest
 			return EDesign2UMGFileState::Unchanged;
 		}
 
-#if WITH_DEV_AUTOMATION_TESTS
-		if (bAutomationSidecarFinalizeFailureArmed.exchange(false)) IFileManager::Get().Delete(*TempPath, false, true);
-#endif
 		// Move may delete the destination before it fails; never promise the previous sidecar survived.
 		if (!IFileManager::Get().Move(*SidecarPath, *TempPath, true))
 		{
@@ -155,17 +137,6 @@ namespace Design2UMGGenerationManifest
 		return EDesign2UMGFileState::Saved;
 	}
 
-#if WITH_DEV_AUTOMATION_TESTS
-	void ArmAutomationSidecarWriteFailureOnce()
-	{
-		bAutomationSidecarWriteFailureArmed.store(true);
-	}
-
-	void ArmAutomationSidecarFinalizeFailureOnce()
-	{
-		bAutomationSidecarFinalizeFailureArmed.store(true);
-	}
-#endif
 
 	bool TryLoadSidecarForAsset(
 		const FString& AssetPackageName,
@@ -196,7 +167,7 @@ namespace Design2UMGGenerationManifest
 
 		OutSidecar.SchemaVersion = static_cast<int32>(Root->GetNumberField(TEXT("schemaVersion")));
 		Root->TryGetStringField(TEXT("generatedAssetHash"), OutSidecar.GeneratedAssetHash);
-		Root->TryGetBoolField(TEXT("componentBatchRoot"), OutSidecar.bComponentBatchRoot);
+		Root->TryGetBoolField(TEXT("componentBatchRoot"), OutSidecar.bComponentBulkRoot);
 		if (OutSidecar.SchemaVersion != ManifestSchemaVersion)
 		{
 			OutError = FString::Printf(
@@ -254,7 +225,7 @@ namespace Design2UMGGenerationManifest
 				DesignIds.Add(Record.DesignNodeId);
 				WidgetNames.Add(Record.WidgetName);
 
-				// inputs are read back as declarations only; a value field from historical versions is ignored per the schema consolidation rule.
+				// Read input declarations only; ignore stored design values.
 				const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr;
 				if (Instance->TryGetArrayField(TEXT("inputs"), Inputs) && Inputs)
 				{

@@ -11,9 +11,23 @@
 #include "FontResolver.h"
 #include "DesignLocalFontImport.h"
 #include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "DesignPreviewContext.h"
 
 namespace
 {
+	// Mark retryable resource warnings so a successful resolution can remove them
+	// without depending on each diagnostic message.
+	const TCHAR* GResourceResolutionWarningMarker = TEXT("Remote image import:");
+
+	void RemoveResourceResolutionWarnings(FUMGWidgetData& Data)
+	{
+		Data.Warnings.RemoveAll([](const FString& Warning)
+		{
+			return Warning.StartsWith(GResourceResolutionWarningMarker);
+		});
+	}
+
 	FDesign2UMGConversionSettings BuildFallbackConversionSettings()
 	{
 		return FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get());
@@ -50,6 +64,15 @@ namespace
 
 namespace DesignImportPlanning
 {
+	FString MakeResourceResolutionWarning(const FString& Message)
+	{
+		// The resolve report already opens with the marker (DesignImportDiagnosticReport
+		// parses it); other producers reach here without it and get it attached.
+		return Message.StartsWith(GResourceResolutionWarningMarker)
+			? Message
+			: FString::Printf(TEXT("%s %s"), GResourceResolutionWarningMarker, *Message);
+	}
+
 	void ResolveImages(FUMGWidgetData& Data, FString* OutReport)
 	{
 		FString Report;
@@ -64,9 +87,25 @@ namespace DesignImportPlanning
 		}
 		if (!bOk)
 		{
+			// Record partial image resolution in Data.Warnings so the commit reports degradation.
+			// The shared marker lets a successful retry remove this transient warning.
+			const FString Warning = MakeResourceResolutionWarning(
+				Report.IsEmpty() ? TEXT("Some remote images failed to resolve or download") : Report);
+			Data.Warnings.AddUnique(Warning);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: Unresolved remote images; generation will continue"));
 			FDesign2UMGNotification::Warning(NSLOCTEXT("DesignImportPipeline", "ImageWarning", "Design2UMG: Some images failed to download"));
+			return;
 		}
+
+		// Remove retryable resource warnings after successful resolution.
+		RemoveResourceResolutionWarnings(Data);
+	}
+
+	void RecordImageResolutionFailure(FUMGWidgetData& Data)
+	{
+		// Record unresolved Figma references separately from retryable URL downloads.
+		// Downloading known URLs does not resolve references with no exported URL.
+		Data.Warnings.AddUnique(TEXT("Figma image refs: some image refs could not be resolved; images may be missing"));
 	}
 
 	FImportAnalysisResult AnalyzeWidgetData(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
@@ -130,8 +169,17 @@ namespace DesignImportPlanning
 		FPreviewRefreshResult Result;
 		Result.RequestId = Input.RequestId;
 		Result.EditedJson = Input.EditedJson;
-		if (!ParseWidgetJson(Input.EditedJson, Result.Data, &Result.ParseError))
+		if (Input.OriginalData && Input.EditedJson == FUMGJsonSerializer::Serialize(*Input.OriginalData))
 		{
+			Result.Data = *Input.OriginalData;
+		}
+		else if (!ParseWidgetJson(Input.EditedJson, Result.Data, &Result.ParseError))
+		{
+			return Result;
+		}
+		else if (Input.OriginalData && !RestoreDesignPreviewContext(*Input.OriginalData, Result.Data, Result.ParseError))
+		{
+			Result.Data = FUMGWidgetData();
 			return Result;
 		}
 

@@ -39,9 +39,8 @@ namespace DesignImportPipeline
 		bool bNewKindMapped = false;
 	};
 
-	/** Non-owning lookups over the prepared IR; the IR stays unchanged until apply finishes.
-	 * Widget names are a stage snapshot, rebuilt after 9a-9c and used only through read/move stage 9d.
-	 */
+	/** Non-owning lookups over immutable prepared IR. Widget-name lookups are rebuilt after structural
+ * updates and used only while reparenting leaves widget identities unchanged. */
 	struct FReimportTreeIndex
 	{
 		TMap<FString, const FUMGWidgetNode*> DesignNodesById;
@@ -54,7 +53,7 @@ namespace DesignImportPipeline
 	 * Reimport session state shared across stages: the common parameter carrier of the early-exit functions and
 	 * HandleFullConflict (so the Document/Request/Data/GenerationSettings quartet is not repeated verbatim in every
 	 * early-exit signature and every HandleFullConflict call site). GenerationSettings is available after
-	 * settings-snapshot resolution (step 1).
+	 * settings-snapshot resolution.
 	 */
 	struct FReimportSession
 	{
@@ -97,15 +96,8 @@ namespace DesignImportPipeline
 	}
 
 	/**
-	 * Apply-stage shared session state, constructed complete before the 9a) plan stages run:
-	 * - read-only bindings: the asset/tree snapshot (WBP/WidgetTree/HostPanel/DesignSize) and the manifest lookup
-	 *   tables (OwnedNames/InstancesById/AliveInstanceWidgetNames);
-	 * - append-only sinks bound once at construction (diagnostics, the updated manifest record accumulators, the
-	 *   mapping BuildState) - pointers never get rebound mid-flow.
-	 * Mutable cross-stage channels deliberately do NOT live here: UpdatedD2UOwned / KeepAsIsWidgetNames /
-	 * NewlyCreatedWidgets / NestedMoveCandidates travel as explicit stage parameters, so each stage signature
-	 * states what it consumes and what it produces (the previous late-bound FReimportApplyContext pointers made the
-	 * stage ordering an implicit comment-only contract).
+	 * Apply-stage bindings: asset/tree snapshot, manifest indexes and append-only output sinks.
+	 * Mutable move, ownership and newly-created-widget sets remain explicit stage parameters.
 	 */
 	struct FReimportApplySharedState
 	{
@@ -125,7 +117,7 @@ namespace DesignImportPipeline
 		bool* bHasDegradation = nullptr;
 		TArray<FDesign2UMGMappedInstanceRecord>* UpdatedMappedRecords = nullptr;
 		TArray<FDesign2UMGGeneratedInstanceRecord>* UpdatedGeneratedRecords = nullptr;
-		/** Manifest instance widget names still alive in this round's update plan (the second gate of the 9a/9b whole delete). */
+		/** Manifest instance names still present in the update plan, protected from subtree deletion. */
 		const TSet<FString>* AliveInstanceWidgetNames = nullptr;
 	};
 

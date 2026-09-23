@@ -115,14 +115,14 @@ void FDesign2UMGEditorModule::StartupModule()
 	// an editor module reload can subscribe immediately.
 	if (!TrySubscribeFontReimportHook())
 	{
-		FCoreDelegates::OnPostEngineInit.AddRaw(this, &FDesign2UMGEditorModule::HandlePostEngineInit);
+		FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FDesign2UMGEditorModule::HandlePostEngineInit);
 	}
 	Design2UMGEditorMenuOwner::MaybeShowWelcomeDialog();
 }
 
 void FDesign2UMGEditorModule::ShutdownModule()
 {
-	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
+	FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
 	if (UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
 	{
 		ImportSubsystem->OnAssetReimport.RemoveAll(this);

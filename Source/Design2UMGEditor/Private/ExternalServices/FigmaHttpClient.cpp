@@ -15,8 +15,8 @@ static const FString FigmaApiBase = TEXT("https://api.figma.com");
 // request more headroom than the MCP transport's 30s timeout.
 constexpr float FigmaHttpRequestTimeoutSeconds = 60.0f;
 
-FFigmaHttpClient::FFigmaHttpClient()
-	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>())
+FFigmaHttpClient::FFigmaHttpClient(FHttpModule& HttpModule)
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>(HttpModule))
 {
 }
 
@@ -66,7 +66,7 @@ void FFigmaHttpClient::SendGet(const FString& Url, FOnComplete OnComplete)
 	const int32 RequestId = State->BeginRequest();
 	TSharedRef<FOnComplete> SharedOnComplete = MakeShared<FOnComplete>(MoveTemp(OnComplete));
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = State->CreateRequest();
 	Request->SetURL(Url);
 	Request->SetVerb(TEXT("GET"));
 	Request->SetHeader(TEXT("X-Figma-Token"), Token);

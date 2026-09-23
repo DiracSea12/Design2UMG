@@ -84,8 +84,7 @@ struct FDesignPrototypeAction
 	UPROPERTY() FString TransitionJson;
 	UPROPERTY() FDesignPrototypeTransitionData Transition;
 
-	// SET_VARIABLE payload: variableId plus the condensed JSON of variableValue
-	// (falling back to the legacy "value" field at parse time).
+	// SET_VARIABLE payload: variableId and condensed JSON from variableValue or value.
 	UPROPERTY() FString VariableId;
 	UPROPERTY() FString VariableValueJson;
 

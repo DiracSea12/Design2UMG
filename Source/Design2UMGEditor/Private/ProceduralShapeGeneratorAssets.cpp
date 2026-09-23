@@ -258,12 +258,40 @@ namespace ProceduralShapeGeneratorAssets
 		GbHasPendingTextureUpdates = false;
 	}
 
+	TArray<UTexture2D*> GetRootedTextureSnapshot()
+	{
+		TArray<UTexture2D*> Snapshot;
+		Snapshot.Reserve(GRootedTextures.Num());
+		for (const TWeakObjectPtr<UTexture2D>& WeakTexture : GRootedTextures)
+		{
+			if (UTexture2D* Texture = WeakTexture.Get())
+			{
+				Snapshot.Add(Texture);
+			}
+		}
+		return Snapshot;
+	}
+
 	UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
 	{
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height))
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive generated raster dimensions: %dx%d"), Width, Height);
 			return nullptr;
+		}
+		if (DesignImageResources::FImageOperationBudget* Budget =
+			DesignImageResources::FScopedOperationBudget::GetCurrent())
+		{
+			FString BudgetError;
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{
+				if (FString* RefusalError =
+					DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError())
+				{
+					*RefusalError = BudgetError;
+				}
+				return nullptr;
+			}
 		}
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 		if (Texture)
@@ -695,6 +723,8 @@ namespace ProceduralShapeGeneratorAssets
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive CPU shadow blur workload: %dx%d blur=%g"), Width, Height, BlurRadius);
 			return nullptr;
 		}
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		if (!Texture) return nullptr;
 		TArray<float> Alpha;
 		const bool bHasExplicitBlurPadding = BlurPadding >= 0.0f;
 		if (!bHasExplicitBlurPadding)
@@ -750,14 +780,21 @@ namespace ProceduralShapeGeneratorAssets
 		GaussianBlurAlpha(Alpha, Width, Height, BlurRadius * 0.5f, KernelRadius);
 
 		const FColor Shadow = ShadowColor.ToFColor(true);
-		return GenerateShapeTexture(Width, Height, Outer, [&Alpha, Width, Shadow](int32 X, int32 Y)
+		TArray<FColor> Pixels;
+		Pixels.SetNumUninitialized(Width * Height);
+		for (int32 Y = 0; Y < Height; ++Y)
 		{
-			return FColor(
-				Shadow.R,
-				Shadow.G,
-				Shadow.B,
-				FMath::RoundToInt(Shadow.A * FMath::Clamp(Alpha[Y * Width + X], 0.0f, 1.0f)));
-		});
+			for (int32 X = 0; X < Width; ++X)
+			{
+				Pixels[Y * Width + X] = FColor(
+					Shadow.R,
+					Shadow.G,
+					Shadow.B,
+					FMath::RoundToInt(Shadow.A * FMath::Clamp(Alpha[Y * Width + X], 0.0f, 1.0f)));
+			}
+		}
+		FillTextureData(Texture, Pixels);
+		return Texture;
 	}
 
 	UTexture2D* GeneratePlaceholderHatch(

@@ -15,11 +15,8 @@ class UWidgetBlueprint;
 class UDesign2UMGSettings;
 
 /**
- * Immutable point-in-time capture of the import/generation settings for one import run.
- * Module-internal pipeline contract (Editor module only; not part of the Public API).
- * Naming convention for this contract family: "Snapshot" types capture immutable
- * settings copies, while "State" types (BuildState, ImportStateSubsystem) track
- * mutable progress during a run.
+ * Immutable import/generation settings captured for one import.
+ * Internal to the Editor module.
  */
 struct FDesign2UMGImportSettingsSnapshot
 {
@@ -48,6 +45,8 @@ struct FImportAnalysisResult
 struct FArtifactGenerationResult
 {
 	FDesign2UMGCommitResult Commit;
+	/** Warnings from the actual generation attempt, including resource resolution. */
+	TArray<FString> Warnings;
 	/** True only when commit and requested artifacts succeeded; render can fail after commit. */
 	bool bSucceeded = false;
 	/** Structured failure reason (e.g. render target size above the RHI texture limit); empty on success or unspecified failures. */
@@ -157,12 +156,9 @@ namespace DesignImportPipeline
 		const FString& RenderPngPath = FString());
 	bool LoadPenDocument(const FString& FilePath, const FString& TargetNodeId, FDesignDocument& OutDocument, FString* OutError = nullptr);
 	/**
-	 * Anchors relative image-fill urls of a parsed Pen document to the .pen source directory
-	 * (Pencil's own relative-path semantics: sibling files of the .pen document). Only urls whose
-	 * anchored file exists are rewritten; broken links keep the original value so downstream skip
-	 * behavior matches Pencil opening the same document (missing image). Remote urls, asset paths,
-	 * and absolute paths pass through untouched. Shared by every LoadPenDocument entry point that
-	 * knows the .pen file location; MCP-sourced documents have no local directory and skip this.
+	 * Resolve existing relative image files against the .pen source directory.
+	 * Missing files, remote URLs, asset paths and absolute paths remain unchanged.
+	 * MCP documents without a local source directory skip this step.
 	 */
 	void AnchorRelativeImageFillUrls(FDesignDocument& Document, const FString& PenFilePath);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);

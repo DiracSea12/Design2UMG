@@ -20,6 +20,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "TextureResource.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 #if WITH_AUTOMATION_WORKER
 namespace
@@ -51,10 +53,10 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedShapeRequestAndRoundTripTest,
-	"Design2UMG.TypedPayload.ShapeRequestAndRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedShapeRequestAndSerializationCycleTest,
+	"Design2UMG.TypedPayload.ShapeRequestAndSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTypedShapeRequestAndRoundTripTest::RunTest(const FString&)
+bool FTypedShapeRequestAndSerializationCycleTest::RunTest(const FString&)
 {
 	FUMGWidgetData Source;
 	Source.WidgetName = TEXT("WBP_TypedShape");
@@ -206,9 +208,9 @@ bool FCanonicalImageInputBoundaryTest::RunTest(const FString&)
 	const auto Style = Serialized->GetObjectField(TEXT("WidgetStyle"));
 	TestFalse(TEXT("Output style has no duplicate image mode"), Style->HasField(TEXT("ImageMode")));
 	TestFalse(TEXT("Output style has no string transform owner"), Style->HasField(TEXT("ImageTransform")));
-	FUMGWidgetData RoundTrip;
-	TestTrue(TEXT("Canonical output parses again without aliases or diagnostics"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), RoundTrip));
-	TestTrue(TEXT("Transform remains typed across the boundary"), RoundTrip.RootWidget.Children[0].Brush.Image.Transform.IsSet() && RoundTrip.RootWidget.Children[0].Brush.Image.Transform->A == Image.Transform->A);
+	FUMGWidgetData SerializationCycle;
+	TestTrue(TEXT("Canonical output parses again without aliases or diagnostics"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), SerializationCycle));
+	TestTrue(TEXT("Transform remains typed across the boundary"), SerializationCycle.RootWidget.Children[0].Brush.Image.Transform.IsSet() && SerializationCycle.RootWidget.Children[0].Brush.Image.Transform->A == Image.Transform->A);
 	return true;
 }
 
@@ -277,9 +279,9 @@ namespace
 		FUMGProceduralResourceRequest Request;
 		Test.TestTrue(TEXT("Sanitized resource request builds"), Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Data.RootWidget, Request));
 		Test.TestTrue(TEXT("Resource request contains only sanitized data"), Request.Shape == Expected);
-		FUMGWidgetData RoundTrip;
-		Test.TestTrue(TEXT("Sanitized output is readable JSON"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), RoundTrip));
-		Test.TestTrue(TEXT("Sanitized shape and presence survive the round trip"), RoundTrip.RootWidget.Brush.Shape == Expected);
+		FUMGWidgetData SerializationCycle;
+		Test.TestTrue(TEXT("Sanitized output is readable JSON"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), SerializationCycle));
+		Test.TestTrue(TEXT("Sanitized shape and presence survive the round trip"), SerializationCycle.RootWidget.Brush.Shape == Expected);
 	}
 }
 

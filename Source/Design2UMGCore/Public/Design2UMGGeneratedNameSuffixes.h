@@ -5,12 +5,8 @@
 #include "CoreMinimal.h"
 
 /**
- * Single source for generated-widget name suffixes. The Core conversion chain
- * appends these suffixes when it synthesizes wrapper/layer widgets, and the
- * Editor structure snapshot classifies carrier widgets by matching the same
- * literals - keeping them here turns producer/validator drift into a compile
- * error. Conversion-internal suffixes that no validator matches (_root, _sz,
- * _inner, _blur) stay local to their producers.
+ * Shared suffixes for generated widgets consumed by conversion and structure inspection.
+ * Suffixes used only within one producer stay local.
  */
 namespace Design2UMGGeneratedNameSuffixes
 {

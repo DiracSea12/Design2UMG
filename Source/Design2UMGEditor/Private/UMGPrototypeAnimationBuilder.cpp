@@ -366,8 +366,7 @@ void GenerateNavigationAnimations(
 		return;
 	}
 
-	// Regenerate contract: animation names are always re-derived (never carried from a previous
-	// run), and previously generated assets must not accumulate.
+	// Regeneration replaces generated animations and recomputes their names.
 	for (FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
 	{
 		Binding.Transition.OutgoingAnimationName.Reset();

@@ -193,7 +193,7 @@ namespace Design2UMGConverterPrivate
 			{
 				VisualSupport::ApplyBaseVisualProperties(Widget, Node);
 				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver);
-				ApplyLayoutFixup(Widget, Node, ActiveContext, ParentLayout);
+				ApplyLayoutAdjustments(Widget, Node, ActiveContext, ParentLayout);
 				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
 			}
 			else
@@ -278,6 +278,7 @@ namespace Design2UMGConverterPrivate
 				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
 			// SizeBox carries source-side measured constraints that panel slots cannot express on their own.
 			const bool bCanvasMixedAxis = Node->LayoutData.Layout == EDesignLayout::None
+				&& ChildWidget.Slot.bAutoSize
 				&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
 					|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
 			const bool bWrapOrGridMeasuredFill =
@@ -381,7 +382,7 @@ namespace Design2UMGConverterPrivate
 			VisualSupport::ApplyRenderFallbackVisuals(Widget, Node);
 		}
 
-		void ApplyLayoutFixup(
+		void ApplyLayoutAdjustments(
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
@@ -390,14 +391,25 @@ namespace Design2UMGConverterPrivate
 			const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
 				&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
 					|| Design2UMGGridLayout::ResolveGridRowGap(Node) > KINDA_SMALL_NUMBER);
-			if (Node->LayoutData.ExplicitGap.Get(0.0f) > 0 || bHasResolvedGridGap)
+			// Wrap writes dual-axis InnerSlotPadding once; it does not add per-child linear gaps.
+			// A negative main-axis gap suppresses spacing. Zero allows a positive cross-axis gap.
+			if (Node->LayoutData.Layout == EDesignLayout::Wrap)
 			{
-				if (Node->LayoutData.Layout == EDesignLayout::Wrap)
+				const float MainAxisGap = Node->LayoutData.ExplicitGap.Get(0.0f);
+				// The cross axis keeps its existing "fall back to the main axis" default
+				// when counterAxisSpacing is absent.
+				const float CrossAxisGap = Node->LayoutData.WrapCrossAxisGap.Get(MainAxisGap);
+				// Use exact zero: even a small negative main-axis gap must suppress spacing.
+				const bool bHasPositiveSpacing = MainAxisGap > 0.0f
+					|| (MainAxisGap == 0.0f && CrossAxisGap > 0.0f);
+				if (bHasPositiveSpacing)
 				{
-					const float CrossAxisGap = Node->LayoutData.WrapCrossAxisGap.Get(Node->LayoutData.ExplicitGap.Get(0.0f));
-					Widget.WidgetStyle.InnerSlotPadding = FVector2D(Node->LayoutData.ExplicitGap.Get(0.0f), CrossAxisGap);
+					Widget.WidgetStyle.InnerSlotPadding = FVector2D(MainAxisGap, CrossAxisGap);
 				}
-				else if (Node->LayoutData.Layout == EDesignLayout::Grid)
+			}
+			else if (Node->LayoutData.ExplicitGap.Get(0.0f) > 0 || bHasResolvedGridGap)
+			{
+				if (Node->LayoutData.Layout == EDesignLayout::Grid)
 				{
 					if (Widget.Type == UMGWidgetTypes::UniformGridPanel)
 					{

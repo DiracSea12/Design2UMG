@@ -198,7 +198,7 @@ bool FFigmaParserStrokeDashMetadataTest::RunTest(const FString&)
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
-	TestEqual(TEXT("Stroke cap is normalized for shared conversion"), Node->Visual.Stroke.Cap, EDesignStrokeCap::Round);
+	TestEqual(TEXT("Stroke cap is normalized for shared conversion"), Node->Visual.Stroke.Cap, EDesignStrokeCap::Circular);
 	TestEqual(TEXT("Stroke join is normalized for shared conversion"), Node->Visual.Stroke.Join, EDesignStrokeJoin::Bevel);
 	TestEqual(TEXT("Stroke dash count is normalized for shared conversion"), Node->Visual.Stroke.DashPattern.Num(), 2);
 	if (Node->Visual.Stroke.DashPattern.Num() == 2)

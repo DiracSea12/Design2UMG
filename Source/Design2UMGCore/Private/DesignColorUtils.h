@@ -6,9 +6,7 @@
 
 namespace DesignColorUtils
 {
-	// Shadow color used when a design shadow carries no explicit color
-	// (black at ~25% opacity, 0x40/0xFF). No derivation on record; fixed
-	// when the shadow parsing/mapping paths were introduced.
+	// Default shadow color when the design omits one: black at 0x40/0xFF opacity.
 	constexpr TCHAR DefaultShadowColorHex[] = TEXT("#00000040");
 
 	FString FormatLiteral(const FColor& Color);
@@ -25,9 +23,7 @@ namespace DesignColorUtils
 	// Expands the '#RGB' short form to '#RRGGBB'; returns any other input unchanged.
 	FString ExpandShortHexLiteral(const FString& Value);
 
-	// Parses a hex literal via the engine's tolerant FColor::FromHex, expanding the
-	// '#RGB' short form first. Other lengths or non-hex characters keep the
-	// engine's historical fallback behavior.
+	// Expand #RGB before FColor::FromHex; other formats use the engine parser.
 	FColor ParseHexColor(const FString& Value);
 
 	// The named-color table the render pipeline resolves on its own (single

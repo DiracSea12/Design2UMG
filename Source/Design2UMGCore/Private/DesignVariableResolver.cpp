@@ -69,14 +69,8 @@ const FDesignVariable* FDesignVariableResolver::GetVariable(const FString& VarNa
 
 FString FDesignVariableResolver::ResolveThemedValue(const FDesignVariable& Var) const
 {
-	// Pencil resolves a variable's value list as an ordered cascade: unconditional
-	// entries always apply, themed entries apply only when every axis matches the
-	// active context, and the last applied entry wins. Var.Value holds the first
-	// entry's value as the initial state.
-	//
-	// For imported variables the active axis value comes from the alias-qualified
-	// override ("Y:Accent") when present, otherwise from the unprefixed axis that
-	// applies to every library.
+	// Apply variable entries in order: unconditional entries always match; themed entries
+	// match the active axis. Last match wins. Alias-qualified axes override unprefixed axes.
 	FString Current = Var.Value;
 	for (const FDesignThemeValue& TV : Var.ThemedValues)
 	{

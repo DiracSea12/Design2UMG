@@ -25,17 +25,9 @@ namespace DesignLocalFontImport
 	public:
 		/** Lazy index for one import; discard between imports so newly added fonts are seen. */
 		const TArray<FFace>& GetFaces();
-#if WITH_DEV_AUTOMATION_TESTS
-		int32 GetMetadataReadCount() const { return MetadataReadCount; }
-		int32 GetMetadataCacheHits() const { return MetadataCacheHits; }
-#endif
 	private:
 		TArray<FFace> Faces;
 		bool bLoaded = false;
-#if WITH_DEV_AUTOMATION_TESTS
-		int32 MetadataReadCount = 0;
-		int32 MetadataCacheHits = 0;
-#endif
 	};
 	/** Prepares only fonts used by this document. Explicit user mappings are never modified. */
 	bool Prepare(const FDesignDocument& Document, TArray<FString>& OutWarnings, FString& OutError,

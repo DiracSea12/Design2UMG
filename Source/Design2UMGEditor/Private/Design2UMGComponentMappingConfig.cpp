@@ -6,6 +6,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
+#include "Misc/FileHelper.h"
 
 namespace
 {
@@ -101,7 +102,7 @@ namespace Design2UMGComponentMappingConfig
 					Result.ValidationDiagnostics,
 					TEXT("mapping_config_invalid"),
 					FString::Printf(
-						TEXT("Mapping '%s' dropped: provider must be 'figma' in v1 (Pencil mapping is not enabled)"),
+						TEXT("Mapping '%s' dropped: provider must be 'figma' (Pencil mapping is not enabled)"),
 						*EntryLine.Key));
 				continue;
 			}

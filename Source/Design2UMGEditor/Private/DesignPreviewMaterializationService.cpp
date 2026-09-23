@@ -5,12 +5,16 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGWidgetUtils.h"
 #include "DesignRemoteImageImporter.h"
+#include "DesignImageResourceLimits.h"
+#include "PreBuildResourceNormalizer.h"
 #include "Design2UMGLog.h"
 #include "PreviewUserWidget.h"
 #include "ProceduralShapeGenerator.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 namespace
 {
@@ -48,24 +52,38 @@ bool FDesignPreviewMaterializationService::MaterializePreview(const FDesignPrevi
 
 	CleanupMaterializedPreview();
 
-	UUserWidget* NewPreviewWidget = CreatePreviewWidget(Request.ApprovedSnapshot, PreviewDesignSize);
-	if (!NewPreviewWidget)
+	TStrongObjectPtr<UUserWidget> NewPreviewWidget = CreatePreviewWidget(Request.ApprovedSnapshot, PreviewDesignSize, OutResult.ErrorMessage);
+	if (!NewPreviewWidget.IsValid())
 	{
+		// Release this failed attempt's procedural and remote transient textures immediately.
+		ReleaseAttemptProceduralTextures();
+		CleanupMaterializedPreview();
 		return false;
 	}
 
-	MaterializedPreviewWidget.Reset(NewPreviewWidget);
+	// Transfer widget ownership before the builder's strong reference expires.
+	MaterializedPreviewWidget = NewPreviewWidget;
 	OutResult.bSucceeded = true;
 	OutResult.PreviewDesignSize = PreviewDesignSize;
 	OutResult.MaterializedWidgetName = Request.ApprovedSnapshot.Data.WidgetName;
 
 	// Preview materialization completion point: the preview widget owns its procedural
-	// textures through its brush UPROPERTYs (FSlateBrush::ResourceObject), so the
-	// per-import root ledger can be dropped here - textures from previous refreshes
-	// lost their last strong reference with the destroyed preview widget and become
-	// GC-eligible. Failure paths above return early and keep the roots (old behavior).
-	FProceduralShapeGenerator::ReleaseTransientTextures();
+	// textures through its brush UPROPERTYs (FSlateBrush::ResourceObject), so we drop
+	// only this attempt's transient roots here. Textures from previous refreshes lost
+	// their last strong reference with the destroyed preview widget and become
+	// GC-eligible. We release by identity (not the global flush) so other active
+	// previews' transient textures are never touched.
+	ReleaseAttemptProceduralTextures();
 	return true;
+}
+
+void FDesignPreviewMaterializationService::ReleaseAttemptProceduralTextures()
+{
+	for (UTexture2D* Texture : ThisAttemptProceduralTextures)
+	{
+		FProceduralShapeGenerator::ReleaseTransientTexture(Texture);
+	}
+	ThisAttemptProceduralTextures.Reset();
 }
 
 UUserWidget* FDesignPreviewMaterializationService::GetMaterializedPreviewWidget() const
@@ -80,6 +98,14 @@ void FDesignPreviewMaterializationService::Reset()
 
 void FDesignPreviewMaterializationService::CleanupMaterializedPreview()
 {
+	if (ThisAttemptProceduralTextures.Num() > 0)
+	{
+		// Defensive: release any procedural textures still scoped to an attempt. On
+		// the normal success/failure paths these are already released by identity,
+		// so this only fires if cleanup is reached without a prior release.
+		ReleaseAttemptProceduralTextures();
+	}
+
 	if (TransientTextureMap.Num() > 0)
 	{
 		FDesignRemoteImageImporter::ReleaseTransientTextures(TransientTextureMap);
@@ -96,9 +122,9 @@ void FDesignPreviewMaterializationService::CleanupMaterializedPreview()
 	}
 }
 
-UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
+TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePreviewWidget(
 	const FPreviewApprovedSnapshot& ApprovedSnapshot,
-	const FVector2D& PreviewDesignSize)
+	const FVector2D& PreviewDesignSize, FString& OutError)
 {
 	TransientTextureMap.Empty();
 	FDesignRemoteImageImporter::ResolveTransientTextures(ApprovedSnapshot.Data.RootWidget, TransientTextureMap);
@@ -108,14 +134,16 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 		FMath::Max(1, FMath::CeilToInt(PreviewDesignSize.X)),
 		FMath::Max(1, FMath::CeilToInt(PreviewDesignSize.Y)));
 
-	UUserWidget* TempWidget = NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient);
-	if (!TempWidget)
+	// Keep the widget strongly referenced throughout construction and ownership transfer.
+	TStrongObjectPtr<UUserWidget> TempWidget(
+		NewObject<UPreviewUserWidget>(GetTransientPackage(), UPreviewUserWidget::StaticClass(), NAME_None, RF_Transient));
+	if (!TempWidget.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create UUserWidget"));
 		return nullptr;
 	}
 
-	TempWidget->WidgetTree = NewObject<UWidgetTree>(TempWidget, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
+	TempWidget->WidgetTree = NewObject<UWidgetTree>(TempWidget.Get(), UWidgetTree::StaticClass(), NAME_None, RF_Transient);
 	if (!TempWidget->WidgetTree)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create WidgetTree"));
@@ -128,6 +156,28 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 				ApprovedSnapshot.MaterializationSettingsSnapshot.GetValue())
 			: FDesign2UMGGenerationSettingsSnapshot();
 
+	// Track rooted textures by identity to isolate this preview's resource lifetime.
+	const TArray<UTexture2D*> RootedBefore = FProceduralShapeGenerator::GetRootedTextureSnapshot();
+
+	// Share one generated-texture budget across the preview.
+	// Generators charge actual allocations; cached path rasters are charged only on a miss.
+	FString PreviewBudgetError;
+	if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
+			FixedRoot, PreviewBudgetError))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Preview materialization rejected: %s"), *PreviewBudgetError);
+		OutError = PreviewBudgetError;
+		return nullptr;
+	}
+
+	// Publish the pass budget (and a sink for a refused path raster) for the duration of
+	// the widget build: the path rasterizer is reached from the widget builder, several
+	// layers below this scope, and the builder itself has no way to report an allocation
+	// refusal, so the refusal is collected here and rejects the whole pass below.
+	DesignImageResources::FImageOperationBudget PreviewBudget(DesignImageResources::GetGeneratedTextureLimits());
+	FString RasterRefusal;
+	DesignImageResources::FScopedOperationBudget ScopedPreviewBudget(PreviewBudget, &RasterRefusal);
+
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 		TempWidget->WidgetTree,
 		FixedRoot,
@@ -137,6 +187,27 @@ UUserWidget* FDesignPreviewMaterializationService::CreatePreviewWidget(
 		nullptr,
 		nullptr,
 		&GenerationSettings);
+
+	// Collect this attempt's rooted textures before any failure return, including partial builds.
+	const TArray<UTexture2D*> RootedAfter = FProceduralShapeGenerator::GetRootedTextureSnapshot();
+	ThisAttemptProceduralTextures.Reset();
+	for (UTexture2D* Texture : RootedAfter)
+	{
+		if (Texture && RootedBefore.Find(Texture) == INDEX_NONE)
+		{
+			ThisAttemptProceduralTextures.Add(Texture);
+		}
+	}
+
+	// Reject incomplete widget trees when a raster allocation exceeds the budget.
+	// MaterializePreview then releases this attempt's resources.
+	if (!RasterRefusal.IsEmpty())
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Preview materialization rejected: %s"), *RasterRefusal);
+		OutError = RasterRefusal;
+		return nullptr;
+	}
+
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *ApprovedSnapshot.Data.RootWidget.Type);

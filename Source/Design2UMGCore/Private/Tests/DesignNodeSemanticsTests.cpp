@@ -448,9 +448,10 @@ namespace
 		bAllPassed &= Test.TestNotNull(TEXT("Ref snapshot expands successfully"), FirstExpansion.Get());
 		bAllPassed &= Test.TestTrue(TEXT("Fit and append receive independent working copies"),
 			FirstExpansion.Get() != FitExpansion.Get() && FitExpansion.Get() != AppendExpansion.Get());
-		bAllPassed &= Test.TestTrue(TEXT("Working copies preserve the expanded geometry"),
-			FMath::IsNearlyEqual(FitExpansion->Transform.Width.Value, AppendExpansion->Transform.Width.Value)
-			&& FMath::IsNearlyEqual(FitExpansion->Transform.Height.Value, AppendExpansion->Transform.Height.Value));
+		bAllPassed &= Test.TestEqual(TEXT("Fit working copy measures the nested content"), FitExpansion->Transform.Width.Value, 12.f);
+		bAllPassed &= Test.TestEqual(TEXT("Measuring a working copy leaves the cached fallback untouched"), FirstExpansion->Transform.Width.Value, 24.f);
+		bAllPassed &= Test.TestEqual(TEXT("A new unmeasured working copy keeps the cached fallback"), AppendExpansion->Transform.Width.Value, 24.f);
+		bAllPassed &= Test.TestEqual(TEXT("Fixed height is preserved during measurement"), FitExpansion->Transform.Height.Value, AppendExpansion->Transform.Height.Value);
 		return bAllPassed;
 	}
 
@@ -936,7 +937,7 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	DashedVectorNode->Visual.Stroke.Thickness.Uniform = 5.11084f;
 	DashedVectorNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#CDE7FFFF"));
 	DashedVectorNode->Visual.Stroke.DashPattern = {21.173479f, 21.173479f};
-	DashedVectorNode->Visual.Stroke.Cap = EDesignStrokeCap::Round;
+	DashedVectorNode->Visual.Stroke.Cap = EDesignStrokeCap::Circular;
 	DashedVectorNode->Transform.LayoutBoundsSize = FVector2D(0.000027f, 306.0f);
 
 	const Design2UMGNodeWidgetFactory::FBuildResult DashedVectorResult =
@@ -957,10 +958,10 @@ bool FDesignNodeSemanticsExecutableGuardReplacementTest::RunTest(const FString& 
 	return RunDesignNodeSemanticsExecutableReplacementChecks(*this);
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicSurfacePostReviewFixesGuardTest,
-	"Design2UMG.PublicSurface.PostReviewFixesGuard",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPublicGridOptionalStorageTest,
+	"Design2UMG.PublicSurface.GridOptionalStorage",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPublicSurfacePostReviewFixesGuardTest::RunTest(const FString& Parameters)
+bool FPublicGridOptionalStorageTest::RunTest(const FString& Parameters)
 {
 	FDesignLayoutNodeData LayoutData;
 	LayoutData.LayoutRow = 3;
@@ -1087,7 +1088,7 @@ bool FTextWidgetBuilderSharedPathSettingsBoundaryTest::RunTest(const FString& Pa
 	Snapshot.MissingIconFontPlaceholder = TEXT("[snapshot-placeholder]");
 
 	TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(TEXT("icon_font_boundary"), EDesignNodeType::IconFont, FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
-	Node->Text.IconFontFamily = TEXT("MissingFamily_BatchA");
+	Node->Text.IconFontFamily = TEXT("MissingFamily_FontResolution");
 	Node->Text.IconFontName = TEXT("dashboard");
 	Node->Text.FontSize = 32.0f;
 

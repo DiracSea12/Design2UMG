@@ -1,9 +1,6 @@
-"""No-regression scoring for Design2UMG batch verification.
+"""No-regression scoring for Design2UMG suite verification.
 
-Behavior-equivalent extraction from design2umg_auto_verify_batch.py (OpenSpec
-change add-layered-validation, Phase 1). Pixel-level metric computation
-(compare_image_paths / extract_compare_metrics) stays in design2umg_auto_verify.py;
-this module only calls it.
+Uses design2umg_auto_verify for pixel comparison and metric extraction.
 """
 
 import math

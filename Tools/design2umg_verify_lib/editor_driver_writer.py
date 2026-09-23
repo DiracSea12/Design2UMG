@@ -60,8 +60,7 @@ def _run():
                     _write_line(driver_log_path, f\"driver:run:{{spec_path}}\")
             unreal.SystemLibrary.execute_console_command(world, f\"Design2UMG.AutomationRender {{spec_path}} --no-quit\")
         if driver_log_path:
-            _write_line(driver_log_path, \"driver:quit\")
-        unreal.SystemLibrary.execute_console_command(world, \"QUIT_EDITOR\")
+            _write_line(driver_log_path, \"driver:complete\")
     except Exception:
         if driver_log_path:
             _write_line(driver_log_path, traceback.format_exc())

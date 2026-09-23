@@ -2,7 +2,6 @@
 
 #include "DesignRemoteImageImporterInternal.h"
 
-#include "CoreGlobals.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/CriticalSection.h"
 #include "HAL/FileManager.h"
@@ -25,8 +24,7 @@ namespace DesignRemoteImageImporterInternal
 	{
 		constexpr int64 Bgra8BytesPerPixel = 4;
 		constexpr float HttpWaitTickSeconds = 0.01f;
-		// Resolve-report message cap. No derivation on record; fixed when the
-		// report was introduced to keep failure summaries bounded.
+		// Cap individual diagnostic lines to bound resource-resolution reports.
 		constexpr int32 MaxResolveReportMessages = 32;
 
 		bool IsIpv4Literal(const FString& Host)
@@ -98,7 +96,7 @@ namespace DesignRemoteImageImporterInternal
 
 	void FResolveReport::AddMessage(const FString& Message)
 	{
-			if (Messages.Num() < MaxResolveReportMessages)
+		if (Messages.Num() < MaxResolveReportMessages)
 		{
 			Messages.Add(Message);
 		}
@@ -107,10 +105,10 @@ namespace DesignRemoteImageImporterInternal
 	FString FResolveReport::BuildSummary(const FString& ImportPath) const
 	{
 		FString Summary = FString::Printf(
-			TEXT("Remote image import: imported=%d reused=%d repaired=%d failed=%d path=%s"),
+			TEXT("Remote image import: imported=%d reused=%d refreshed=%d failed=%d path=%s"),
 			ImportedCount,
 			ReusedCount,
-			RepairedCount,
+			RefreshedCount,
 			FailedCount,
 			*ImportPath);
 		if (Messages.Num() > 0)
@@ -257,7 +255,7 @@ namespace DesignRemoteImageImporterInternal
 
 	namespace
 	{
-		/** Shared per-download outcome state: written by the HTTP completion callback, polled by the wait loop. */
+		/** Shared per-download outcome state: written by the HTTP callbacks, polled by the wait loop. */
 		struct FDownloadState
 		{
 			FCriticalSection Mutex;
@@ -267,30 +265,51 @@ namespace DesignRemoteImageImporterInternal
 			bool bCancelledByUser = false;
 			/** Guarded by Mutex: set when the wait loop cancels this request after its own per-request deadline; the late HTTP callback keeps the timeout error. */
 			bool bTimedOut = false;
+			/** Guarded by Mutex: cumulative operation budget exceeded during receive; ErrorString already holds the reason. */
+			bool bBudgetRejected = false;
 			bool bSuccess = false;
 			int32 ResponseCode = 0;
+			/** Running count of bytes received for this single request (single-image budget guard). */
+			int64 ReceivedBytes = 0;
 			TArray<uint8> Downloaded;
 			FString ErrorString;
 		};
 
 		/**
-		 * Records the outcome of a finished HTTP response on the state. Callers hold
-		 * the state mutex; the early-return chain replaces the previous else-if nesting.
+		 * Finalize the HTTP outcome while holding the state mutex.
+		 * The streaming receiver owns the body. Preserve any terminal reason already recorded
+		 * by the receiver or wait loop, including when a completion arrives late.
 		 */
 		void ResolveDownloadOutcome(
 			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const FHttpRequestPtr& Request,
 			const FHttpResponsePtr& Response,
-			const bool bWasSuccessful,
-			const DesignImageResources::FImageResourceLimits& Limits)
+			const bool bWasSuccessful)
 		{
 			if (State->bPayloadLimitExceeded)
 			{
-				State->ErrorString = TEXT("Image payload exceeded the byte limit during download");
+				State->ErrorString = TEXT("Image payload exceeded the single-image byte limit during download");
+				return;
+			}
+			if (State->bBudgetRejected)
+			{
+				// ErrorString already holds the accurate cumulative budget reason.
+				return;
+			}
+			if (State->bCancelledByUser)
+			{
+				State->ErrorString = TEXT("cancelled by user");
+				return;
+			}
+			if (State->bTimedOut)
+			{
+				State->ErrorString = TEXT("Network request timed out");
 				return;
 			}
 			if (!bWasSuccessful || !Response.IsValid())
 			{
-				State->ErrorString = TEXT("Network request failed");
+				State->ErrorString = Request.IsValid() && Request->GetFailureReason() == EHttpFailureReason::TimedOut
+					? TEXT("Network request timed out") : TEXT("Network request failed");
 				return;
 			}
 
@@ -300,18 +319,7 @@ namespace DesignRemoteImageImporterInternal
 				State->ErrorString = FString::Printf(TEXT("Server returned an error (HTTP %d)"), State->ResponseCode);
 				return;
 			}
-			if (!FImagePayloadIO::ValidateCompressedByteCount(Response->GetContentLength(), Limits, State->ErrorString))
-			{
-				return;
-			}
 
-			const TArray<uint8>& ResponseContent = Response->GetContent();
-			if (!FImagePayloadIO::ValidateCompressedByteCount(static_cast<uint64>(ResponseContent.Num()), Limits, State->ErrorString))
-			{
-				return;
-			}
-
-			State->Downloaded = ResponseContent;
 			if (State->Downloaded.Num() == 0)
 			{
 				State->ErrorString = TEXT("Server returned an empty response");
@@ -319,15 +327,8 @@ namespace DesignRemoteImageImporterInternal
 			}
 			State->bSuccess = true;
 		}
-	}
 
-	void FImagePayloadIO::DownloadUrls(
-		const TArray<FString>& Urls,
-		const float TimeoutSeconds,
-		const bool bAllowUnsafeRemoteUrls,
-		const DesignImageResources::FImageResourceLimits& Limits,
-		TMap<FString, FUrlDownloadResult>& OutResults)
-	{
+		/** A started request together with the state its callbacks write into. */
 		struct FPendingRequest
 		{
 			FString Url;
@@ -337,28 +338,26 @@ namespace DesignRemoteImageImporterInternal
 			double DeadlineSeconds = 0.0;
 		};
 
-		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
-		TArray<FPendingRequest> Pending;
-
-		for (const FString& Url : Urls)
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateGetRequest(
+			const FString& Url,
+			const float TimeoutSeconds)
 		{
-			FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
-			Result.bSuccess = false;
-			Result.Data.Reset();
-			Result.Error.Reset();
-			if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, Result.Error))
-			{
-				continue;
-			}
-
-			const TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
 			Request->SetURL(Url);
 			Request->SetVerb(TEXT("GET"));
 			Request->SetHeader(TEXT("User-Agent"), TEXT("Design2UMG/RemoteImageImporter"));
-			Request->SetTimeout(EffectiveTimeoutSeconds);
+			Request->SetTimeout(TimeoutSeconds);
+			return Request;
+		}
+
+		/** Aborts the transfer as soon as progress reports more bytes than one image may hold. */
+		void BindPayloadLimitGuard(
+			const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& Request,
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const uint64 MaxCompressedBytes)
+		{
 			Request->OnRequestProgress64().BindLambda(
-				[State, MaxCompressedBytes = Limits.MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
+				[State, MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
 				{
 					if (BytesReceived > MaxCompressedBytes)
 					{
@@ -366,8 +365,15 @@ namespace DesignRemoteImageImporterInternal
 						ProgressRequest->CancelRequest();
 					}
 				});
+		}
+
+		/** Resolves the response on completion, or keeps the reason an earlier stage recorded. */
+		void BindCompletionHandler(
+			const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& Request,
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State)
+		{
 			Request->OnProcessRequestComplete().BindLambda(
-				[State, Limits](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+				[State](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 				{
 					FScopeLock Lock(&State->Mutex);
 					if (State->bCancelledByUser || State->bTimedOut)
@@ -377,21 +383,106 @@ namespace DesignRemoteImageImporterInternal
 						State->bDone = true;
 						return;
 					}
-					ResolveDownloadOutcome(State, Response, bWasSuccessful, Limits);
+					ResolveDownloadOutcome(State, Request, Response, bWasSuccessful);
 					State->bDone = true;
 				});
-
-			if (!Request->ProcessRequest())
-			{
-				Result.Error = TEXT("Unable to start network request");
-				continue;
-			}
-			Pending.Add({ Url, Request, State, FPlatformTime::Seconds() + EffectiveTimeoutSeconds });
 		}
 
-		FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
-		// Both flags are read under the entry Mutex (bTimedOut is Mutex-guarded).
-		const auto CountPending = [&Pending]()
+		/** True while this request may still receive; a terminated one stops without billing. */
+		bool IsStillReceiving(const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State)
+		{
+			FScopeLock Lock(&State->Mutex);
+			return !State->bCancelledByUser
+				&& !State->bTimedOut
+				&& !State->bPayloadLimitExceeded
+				&& !State->bBudgetRejected;
+		}
+
+		/**
+		 * Single-image guard: refuses a chunk that would push this one request past its
+		 * own ceiling, and records the reason before the transfer is aborted.
+		 */
+		bool AcceptChunkForSingleImageLimit(
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const int64 ChunkLen,
+			const uint64 MaxCompressedBytes)
+		{
+			FScopeLock Lock(&State->Mutex);
+			if (State->ReceivedBytes + ChunkLen <= static_cast<int64>(MaxCompressedBytes))
+			{
+				return true;
+			}
+			State->bPayloadLimitExceeded = true;
+			State->ErrorString = TEXT("Image payload exceeded the single-image byte limit during download");
+			return false;
+		}
+
+		/**
+		 * Shared cumulative guard: charges the chunk to the operation budget under the
+		 * batch mutex, so concurrent receives check and count in one critical section.
+		 */
+		bool ChargeChunkToOperationBudget(
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& BulkBudget,
+			const int64 ChunkLen)
+		{
+			FString BudgetError;
+			{
+				FScopeLock Lock(&BulkBudget->Mutex);
+				if (BulkBudget->Budget->ConsumeCompressedBytes(static_cast<uint64>(ChunkLen), BudgetError))
+				{
+					return true;
+				}
+			}
+			FScopeLock StateLock(&State->Mutex);
+			State->bBudgetRejected = true;
+			State->ErrorString = BudgetError;
+			return false;
+		}
+
+		/** Takes ownership of an accepted chunk: the only place bytes are kept and counted. */
+		void AppendAcceptedChunk(
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const uint8* Data,
+			const int64 ChunkLen)
+		{
+			FScopeLock Lock(&State->Mutex);
+			State->Downloaded.Append(Data, ChunkLen);
+			State->ReceivedBytes += ChunkLen;
+		}
+
+		/**
+		 * Receive into the owned payload while enforcing per-image and shared byte limits.
+		 * Reject excess chunks before buffering or billing; accepted bytes are not refunded.
+		 * Return false when the HTTP backend does not support streaming.
+		 */
+		bool InstallBudgetedStreamReceive(
+			const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& Request,
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
+			const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& BulkBudget,
+			const DesignImageResources::FImageResourceLimits& Limits)
+		{
+			return Request->SetResponseBodyReceiveStreamDelegateV2(
+				FHttpRequestStreamDelegateV2::CreateLambda(
+					// HTTP callbacks share request state and the budget mutex. DownloadUrls owns the
+					// borrowed budget and stops receive callbacks before returning.
+					[State, BulkBudget, MaxCompressedBytes = Limits.MaxCompressedBytes](void* Ptr, int64& InOutLength)
+					{
+						const int64 ChunkLen = InOutLength;
+						if (!IsStillReceiving(State)
+							|| !AcceptChunkForSingleImageLimit(State, ChunkLen, MaxCompressedBytes)
+							|| !ChargeChunkToOperationBudget(State, BulkBudget, ChunkLen))
+						{
+							InOutLength = 0;
+							return;
+						}
+						AppendAcceptedChunk(State, static_cast<const uint8*>(Ptr), ChunkLen);
+						InOutLength = ChunkLen;
+					}));
+		}
+
+		/** Requests that have neither finished nor been given a terminal reason by the wait loop. */
+		int32 CountUnfinishedRequests(const TArray<FPendingRequest>& Pending)
 		{
 			int32 StillPending = 0;
 			for (const FPendingRequest& Entry : Pending)
@@ -403,11 +494,14 @@ namespace DesignRemoteImageImporterInternal
 				}
 			}
 			return StillPending;
-		};
-		// Per-request budget: cancel any request whose own deadline elapsed. Once
-		// marked, CountPending stops waiting for it, so the wait loop always
-		// terminates even if a cancelled request's late callback never arrives.
-		const auto CancelExpiredRequests = [&Pending]()
+		}
+
+		/**
+		 * Per-request deadline: cancels any request whose own window elapsed. Once marked,
+		 * CountUnfinishedRequests stops waiting for it, so the wait loop always terminates
+		 * even if a cancelled request's late callback never arrives.
+		 */
+		void CancelExpiredRequests(TArray<FPendingRequest>& Pending)
 		{
 			const double Now = FPlatformTime::Seconds();
 			for (FPendingRequest& Entry : Pending)
@@ -431,108 +525,158 @@ namespace DesignRemoteImageImporterInternal
 					Entry.Request->CancelRequest();
 				}
 			}
-		};
-
-		// Interactive sessions keep the editor responsive through a cancellable
-		// slow task; unattended/automation runs keep the legacy tick+sleep pump
-		// so batch and regression behavior stays identical.
-		const bool bInteractiveWait = !FApp::IsUnattended()
-			&& !GIsAutomationTesting
-			&& FSlateApplication::IsInitialized();
-		bool bUserCancelled = false;
-		int32 Remaining = Pending.Num();
-		if (bInteractiveWait && Remaining > 0)
-		{
-			FScopedSlowTask SlowTask(static_cast<float>(Pending.Num()), NSLOCTEXT("Design2UMG", "DownloadingRemoteImages", "Downloading remote images..."), true);
-			SlowTask.MakeDialog(/*bShowCancelButton=*/true);
-			// Baseline requests that finished before the dialog existed so the
-			// first EnterProgressFrame reports only this round's completions
-			// instead of jumping the progress bar forward.
-			Remaining = CountPending();
-			if (const int32 CompletedBeforeWait = Pending.Num() - Remaining; CompletedBeforeWait > 0)
-			{
-				SlowTask.EnterProgressFrame(static_cast<float>(CompletedBeforeWait));
-			}
-			while (Remaining > 0)
-			{
-				HttpManager.Tick(HttpWaitTickSeconds);
-				if (SlowTask.ShouldCancel())
-				{
-					bUserCancelled = true;
-					for (FPendingRequest& Entry : Pending)
-					{
-						// Check bDone under the lock: a download completing in this
-						// window must keep its result instead of being overwritten
-						// with the cancel marker.
-						bool bNeedsCancel = false;
-						{
-							FScopeLock Lock(&Entry.State->Mutex);
-							if (Entry.State->bDone)
-							{
-								continue;
-							}
-							Entry.State->bCancelledByUser = true;
-							Entry.State->ErrorString = TEXT("cancelled by user");
-							bNeedsCancel = true;
-						}
-						if (bNeedsCancel)
-						{
-							Entry.Request->CancelRequest();
-						}
-					}
-					break;
-				}
-				CancelExpiredRequests();
-				const int32 CompletedThisRound = Remaining - CountPending();
-				Remaining -= CompletedThisRound;
-				SlowTask.EnterProgressFrame(static_cast<float>(CompletedThisRound));
-			}
-		}
-		else
-		{
-			while (Remaining > 0)
-			{
-				HttpManager.Tick(HttpWaitTickSeconds);
-				FPlatformProcess::Sleep(HttpWaitTickSeconds);
-				CancelExpiredRequests();
-				Remaining = CountPending();
-			}
 		}
 
-		for (FPendingRequest& Entry : Pending)
+		/**
+		 * User abort: every unfinished request is marked cancelled by the user and its late
+		 * HTTP callback keeps that reason. A download that completes in this window keeps
+		 * its result instead of being overwritten with the cancel marker.
+		 */
+		void CancelRequestsByUser(TArray<FPendingRequest>& Pending)
 		{
-			FUrlDownloadResult& Result = OutResults.FindOrAdd(Entry.Url);
-			if (!Entry.State->bDone)
+			for (FPendingRequest& Entry : Pending)
 			{
-				if (bUserCancelled)
+				bool bNeedsCancel = false;
 				{
-					// Every unfinished request was marked and given the cancel
-					// error above; its late HTTP callback keeps that error.
 					FScopeLock Lock(&Entry.State->Mutex);
-					Result.Error = Entry.State->ErrorString;
+					if (Entry.State->bDone)
+					{
+						continue;
+					}
+					Entry.State->bCancelledByUser = true;
+					Entry.State->ErrorString = TEXT("cancelled by user");
+					bNeedsCancel = true;
+				}
+				if (bNeedsCancel)
+				{
+					Entry.Request->CancelRequest();
+				}
+			}
+		}
+
+		/** One wait/cancellation path; only the progress UI is optional. */
+		bool WaitForRequests(
+			TArray<FPendingRequest>& Pending,
+			const TFunction<bool()>& IsCancellationRequested)
+		{
+			FHttpManager& HttpManager = FHttpModule::Get().GetHttpManager();
+			const bool bShowProgress = !FApp::IsUnattended() && FSlateApplication::IsInitialized();
+			FScopedSlowTask SlowTask(static_cast<float>(Pending.Num()),
+				NSLOCTEXT("Design2UMG", "DownloadingRemoteImages", "Downloading remote images..."), bShowProgress);
+			if (bShowProgress && Pending.Num() > 0) SlowTask.MakeDialog(true);
+			int32 Remaining = CountUnfinishedRequests(Pending);
+			SlowTask.EnterProgressFrame(static_cast<float>(Pending.Num() - Remaining));
+			while (Remaining > 0)
+			{
+				HttpManager.Tick(HttpWaitTickSeconds);
+				if ((IsCancellationRequested && IsCancellationRequested()) || SlowTask.ShouldCancel())
+				{
+					CancelRequestsByUser(Pending);
+					return true;
+				}
+				CancelExpiredRequests(Pending);
+				const int32 StillRemaining = CountUnfinishedRequests(Pending);
+				SlowTask.EnterProgressFrame(static_cast<float>(Remaining - StillRemaining));
+				Remaining = StillRemaining;
+				if (Remaining > 0) FPlatformProcess::Sleep(HttpWaitTickSeconds);
+			}
+			return false;
+		}
+
+		/** Copies each finished download into its result entry; unfinished ones keep their terminal reason. */
+		void CollectResults(
+			TArray<FPendingRequest>& Pending,
+			const bool bUserCancelled,
+			TMap<FString, FUrlDownloadResult>& OutResults)
+		{
+			for (FPendingRequest& Entry : Pending)
+			{
+				FUrlDownloadResult& Result = OutResults.FindOrAdd(Entry.Url);
+				if (!Entry.State->bDone)
+				{
+					if (bUserCancelled)
+					{
+						// Every unfinished request was marked and given the cancel
+						// error above; its late HTTP callback keeps that error.
+						FScopeLock Lock(&Entry.State->Mutex);
+						Result.Error = Entry.State->ErrorString;
+						continue;
+					}
+
+					// Late callbacks for cancelled requests are dropped by the
+					// State mutex/bDone guard, so no delegate unbinding is needed.
+					Entry.Request->CancelRequest();
+					Result.Error = TEXT("Network request timed out");
 					continue;
 				}
 
-				// Late callbacks for cancelled requests are dropped by the
-				// State mutex/bDone guard, so no delegate unbinding is needed.
-				Entry.Request->CancelRequest();
-				Result.Error = TEXT("Network request timed out");
+				FScopeLock Lock(&Entry.State->Mutex);
+				if (Entry.State->bSuccess)
+				{
+					Result.bSuccess = true;
+					Result.Data = MoveTemp(Entry.State->Downloaded);
+				}
+				else
+				{
+					Result.Error = Entry.State->ErrorString.IsEmpty()
+						? FString::Printf(TEXT("Network request failed (HTTP %d)"), Entry.State->ResponseCode)
+						: Entry.State->ErrorString;
+				}
+			}
+		}
+	}
+
+	void FImagePayloadIO::DownloadUrls(
+		const TArray<FString>& Urls,
+		const float TimeoutSeconds,
+		const bool bAllowUnsafeRemoteUrls,
+		const DesignImageResources::FImageResourceLimits& Limits,
+		const TSharedRef<FBulkDownloadBudget, ESPMode::ThreadSafe>& BulkBudget,
+		TMap<FString, FUrlDownloadResult>& OutResults,
+		const TFunction<bool()>& IsCancellationRequested)
+	{
+		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
+		TArray<FPendingRequest> Pending;
+
+		// Stage 1 - start every request. A URL that cannot be started at all is reported
+		// as a failure right here; the rest are collected for the shared wait loop.
+		for (const FString& Url : Urls)
+		{
+			FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
+			Result.bSuccess = false;
+			Result.Data.Reset();
+			Result.Error.Reset();
+			if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, Result.Error))
+			{
 				continue;
 			}
 
-			FScopeLock Lock(&Entry.State->Mutex);
-			if (Entry.State->bSuccess)
+			const TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
+			const TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = CreateGetRequest(Url, EffectiveTimeoutSeconds);
+			BindPayloadLimitGuard(Request, State, Limits.MaxCompressedBytes);
+			BindCompletionHandler(Request, State);
+			if (!InstallBudgetedStreamReceive(Request, State, BulkBudget, Limits))
 			{
-				Result.bSuccess = true;
-				Result.Data = MoveTemp(Entry.State->Downloaded);
+				// The active HTTP backend cannot pipe the body through the receive
+				// stream; fail the URL explicitly rather than silently falling back
+				// to the unlimited default response cache.
+				Result.Error = TEXT("Remote image import cannot enforce the receive-byte budget: the active HTTP backend does not support response-body streaming");
+				continue;
 			}
-			else
+
+			if (!Request->ProcessRequest())
 			{
-				Result.Error = Entry.State->ErrorString.IsEmpty()
-					? FString::Printf(TEXT("Network request failed (HTTP %d)"), Entry.State->ResponseCode)
-					: Entry.State->ErrorString;
+				Result.Error = TEXT("Unable to start network request");
+				continue;
 			}
+			Pending.Add({ Url, Request, State, FPlatformTime::Seconds() + EffectiveTimeoutSeconds });
 		}
+
+		// Stage 2 - pump the HTTP manager until every request is finished, expired or cancelled.
+		const bool bUserCancelled = WaitForRequests(Pending, IsCancellationRequested);
+
+		// Stage 3 - hand each outcome to its result entry.
+		CollectResults(Pending, bUserCancelled, OutResults);
 	}
 
 	bool FImagePayloadIO::DecodeToBGRA8(

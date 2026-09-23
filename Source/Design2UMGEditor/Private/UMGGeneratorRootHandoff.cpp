@@ -19,7 +19,8 @@ namespace UMGGeneratorRootHandoff
 	{
 		FPreparedRoot Prepared;
 		Prepared.Root = WidgetData.RootWidget;
-		if (!FPreBuildResourceNormalizer::ValidatePathTextureBudget(Prepared.Root, Prepared.ErrorMessage)
+		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
+				Prepared.Root, Prepared.ErrorMessage)
 			|| !Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage))
 		{
@@ -38,14 +39,14 @@ namespace UMGGeneratorRootHandoff
 		}
 
 		Prepared.DesignSize = FIntPoint(RootWidth, RootHeight);
+		if (!FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
+			Prepared.Root, PackagePath, AssetName, Prepared.ErrorMessage)) return Prepared;
+
 		UE_LOG(LogDesign2UMG, Log,
 			TEXT("Using source root design size %dx%d (root bounds %.2fx%.2f)"),
 			Prepared.DesignSize.X, Prepared.DesignSize.Y,
 			Prepared.Root.Bounds.W, Prepared.Root.Bounds.H);
 
-		if (!FPreBuildResourceNormalizer::NormalizePathTextures(Prepared.Root, PackagePath / TEXT("D2U_PathTextures"), AssetName, &Prepared.ErrorMessage)) return Prepared;
-		if (!FPreBuildResourceNormalizer::NormalizeProceduralTextures(Prepared.Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetName, &Prepared.ErrorMessage)) return Prepared;
-		if (!FPreBuildResourceNormalizer::NormalizeImageTransformTextures(Prepared.Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetName, &Prepared.ErrorMessage)) return Prepared;
 		return Prepared;
 	}
 

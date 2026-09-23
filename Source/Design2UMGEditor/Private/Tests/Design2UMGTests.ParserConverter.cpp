@@ -147,7 +147,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 {
 	FLayoutContext Ctx;
 	Ctx.DesignSize = FIntPoint(1920, 1080);
-	// Case 1: top-left element -> anchor (0,0)
+	// top-left element -> anchor (0,0)
 	{
 		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 30.0f / 1080.0f;
@@ -156,7 +156,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("TopLeft anchor MinX"), Slot.Anchors.Min.X, 0.0f);
 		TestEqual(TEXT("TopLeft anchor MinY"), Slot.Anchors.Min.Y, 0.0f);
 	}
-	// Case 2: centered element -> anchor (0.5, 0.5)
+	// centered element -> anchor (0.5, 0.5)
 	{
 		FDesignPixelBounds B;
 		B.W = 300.0f / 1920.0f; B.H = 200.0f / 1080.0f;
@@ -166,7 +166,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Center anchor MinX"), Slot.Anchors.Min.X, 0.5f);
 		TestEqual(TEXT("Center anchor MinY"), Slot.Anchors.Min.Y, 0.5f);
 	}
-	// Case 3: bottom-right element -> anchor (1,1)
+	// bottom-right element -> anchor (1,1)
 	{
 		FDesignPixelBounds B;
 		B.W = 200.0f / 1920.0f; B.H = 100.0f / 1080.0f;
@@ -176,7 +176,7 @@ bool FLayoutCalculatorTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("BottomRight anchor MinX"), Slot.Anchors.Min.X, 1.0f);
 		TestEqual(TEXT("BottomRight anchor MinY"), Slot.Anchors.Min.Y, 1.0f);
 	}
-	// Case 4: width exceeds 60% of the canvas -> stretch anchor (0,0)-(1,0)
+	// width exceeds 60% of the canvas -> stretch anchor (0,0)-(1,0)
 	{
 		FDesignPixelBounds B;
 		B.X = 50.0f / 1920.0f; B.Y = 50.0f / 1080.0f;

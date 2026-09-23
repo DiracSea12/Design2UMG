@@ -47,6 +47,7 @@ namespace DesignImportDialogs
 		Window->SetContent(
 			SNew(SDesign2UMGPreviewWindow)
 			.OriginalJson(FUMGJsonSerializer::Serialize(Data))
+			.OriginalData(MakeShared<FUMGWidgetData>(Data))
 			.OutputPath(ResolveDialogOutputPath(OutputPath))
 			.Warnings(Data.Warnings)
 			.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)

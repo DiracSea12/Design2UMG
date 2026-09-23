@@ -82,7 +82,7 @@ bool FPenEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 	const FString Json = TEXT(R"({
 		"children": [
 			{ "id":"n1", "type":"frame", "name":"Card Header", "slot":[], "width":100, "height":32 },
-			{ "id":"n2", "type":"frame", "name":"Page Numbers", "slot":["s1"], "width":100, "height":32 },
+			{ "id":"n2", "type":"frame", "name":"Page Numbers", "slot":["content_slot"], "width":100, "height":32 },
 			{ "id":"n3", "type":"frame", "name":"Any Node", "placeholder":true, "width":100, "height":32 }
 		]
 	})");
@@ -115,7 +115,7 @@ bool FFigmaEmptySlotSemanticHintTest::RunTest(const FString& Parameters)
 				*MakeLeafNode(TEXT("e1"), TEXT("Card Header"), TEXT("FRAME"), 10, 10, 80, 20,
 					TEXT(",\"slot\":[]")),
 				*MakeLeafNode(TEXT("e2"), TEXT("Page Numbers"), TEXT("FRAME"), 10, 40, 80, 20,
-					TEXT(",\"slot\":[\"s1\"]")),
+					TEXT(",\"slot\":[\"content_slot\"]")),
 				*MakeLeafNode(TEXT("e3"), TEXT("Any"), TEXT("FRAME"), 10, 70, 80, 20,
 					TEXT(",\"placeholder\":true")))));
 	FDesignDocument Doc;
@@ -157,7 +157,7 @@ bool FPlaceholderSurfaceConversionTest::RunTest(const FString& Parameters)
 	const FString Json = TEXT(R"({
 		"children": [
 			{ "id":"slotCell", "type":"frame", "name":"Table Cell", "slot":[], "width":100, "height":40 },
-			{ "id":"pageSlot", "type":"frame", "name":"Page Numbers Slot", "width":40, "height":40, "x":0, "y":48 }
+			{ "id":"pageSlot", "type":"frame", "name":"Page Numbers Slot", "slot":[], "width":40, "height":40, "x":0, "y":48 }
 		]
 	})");
 	FDesignDocument Doc;

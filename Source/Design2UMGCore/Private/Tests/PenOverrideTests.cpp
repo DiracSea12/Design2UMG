@@ -308,8 +308,8 @@ bool FPenOverrideStrokePartsTest::RunTest(const FString&)
 			const FString Patch = bCap ? TEXT("\"strokeLinecap\":\"round\"") : TEXT("\"strokeLinejoin\":\"round\"");
 			const TSharedPtr<FDesignNode> Node = ExpandPatchedNode(*this, Base, Patch, bDescendant);
 			if (!Node.IsValid()) return false;
-			TestEqual(TEXT("Only the authored cap changes"), Node->Visual.Stroke.Cap, bCap ? EDesignStrokeCap::Round : EDesignStrokeCap::Square);
-			TestEqual(TEXT("Only the authored join changes"), Node->Visual.Stroke.Join, bCap ? EDesignStrokeJoin::Bevel : EDesignStrokeJoin::Round);
+			TestEqual(TEXT("Only the authored cap changes"), Node->Visual.Stroke.Cap, bCap ? EDesignStrokeCap::Circular : EDesignStrokeCap::Square);
+			TestEqual(TEXT("Only the authored join changes"), Node->Visual.Stroke.Join, bCap ? EDesignStrokeJoin::Bevel : EDesignStrokeJoin::Circular);
 			TestEqual(TEXT("Unspecified stroke width is inherited"), Node->Visual.Stroke.Thickness.Uniform, 3.0f);
 			TestTrue(TEXT("Unspecified stroke paint is inherited"), Node->Visual.Stroke.Fill.IsSet());
 		}

@@ -83,19 +83,9 @@ namespace
 	}
 
 	/**
-	 * Generation-side widget-name tails: SanitizeWidgetName + the duplicate-name probe produce
-	 * Base / Base_<N>, and the UWidget-property-collision uniquifier adds Base_w<N>. Both are
-	 * generator-produced determinism shapes and must round-trip through reimport's same-name
-	 * reconciliation. The overlay mirror suffix (__d2u_ov) is deliberately non-numeric and
-	 * non-wN, so mirror copies never match a base name.
-	 * Returns false for every other name (including the mirror suffix).
-	 *
-	 * OutRank is a total, collision-free encoding of the two tail shapes, not the raw numeric
-	 * tail: Base -> 0, Base_<N> -> 2N-1, Base_w<N> -> 2N. Keep the shapes disjoint this way.
-	 * GetWidgetNameSuffixRank feeds this value into a candidate sort, and two distinct widgets
-	 * sharing one rank would make that comparison non-transitive (TArray::Sort is introsort,
-	 * not stable), leaving their pairing order unspecified. A raw numeric tail would collide
-	 * exactly there: Base_1 and Base_w1 both parse to 1.
+	 * Rank generated names for deterministic reimport pairing:
+	 * Base -> 0, Base_<N> -> 2N-1, Base_w<N> -> 2N.
+	 * Reject other tails, including overlay mirrors; the two numeric forms remain distinct.
 	 */
 	bool TryParseGeneratedWidgetSuffix(const FString& WidgetName, const FString& BaseName, int32& OutRank)
 	{
@@ -281,13 +271,8 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		}
 	}
 
-	// FName property lookup is case-insensitive: a widget named e.g. TooltipText collides
-	// with UWidget::ToolTipText and aborts blueprint compilation when member variables are
-	// created. Uniquify against the UWidget base properties (the only collisions ever
-	// observed) and against existing tree names before construction. The "_wN" tail never
-	// collides with the tree's own numeric "_N" uniquifier chain above: an identical form
-	// would shift every later same-named sibling by one slot and visibly perturb text
-	// rasterization through the renamed members (observed on the design-system cases).
+	// Avoid case-insensitive UWidget property collisions before creating Blueprint variables.
+	// Use _wN for property collisions and _N for sibling duplicates so reimport can rank both.
 	const FName CollidingName = WidgetName;
 	const auto IsNameFree = [&WidgetTree](const FName& Candidate)
 	{
@@ -392,7 +377,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		&& !GenerationSettings->ComponentBlueprints->ResolveKey(Node).IsEmpty();
 	// The child blueprint root (or its instance override) owns source visuals. Applying them
 	// again to the UserWidget wrapper would multiply opacity and repeat render transforms.
-	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node);
+	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node, TextureMap);
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).
 	if (ComponentMappingState
@@ -410,14 +395,6 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	if (ComponentMappingState)
 	{
 		ComponentMappingState->RecordCreatedWidget(Node, NewWidget, ParentWidget);
-	}
-
-	if (UImage* ImageWidget = Cast<UImage>(NewWidget))
-	{
-		if (!FWidgetResourceBinder::BindImageResource(ImageWidget, Node, TextureMap))
-		{
-			UE_LOG(LogDesign2UMG, Verbose, TEXT("No image resource bound for widget '%s' (Id: %s)"), *Node.Name, *Node.Id);
-		}
 	}
 
 	return NewWidget;
@@ -468,7 +445,7 @@ TOptional<FVector2D> FUMGWidgetUtils::GetBlueprintDesignTimeSize(UWidgetBlueprin
 	return TOptional<FVector2D>();
 }
 
-void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
+void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
 {
 	if (!Widget)
 	{
@@ -476,6 +453,10 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 	}
 
 	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node);
+	if (UImage* Image = Cast<UImage>(Widget))
+	{
+		FWidgetResourceBinder::BindImageResource(Image, Node, TextureMap);
+	}
 }
 
 FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)

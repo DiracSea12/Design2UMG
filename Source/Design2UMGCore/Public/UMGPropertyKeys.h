@@ -125,11 +125,8 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* WidthOverride = TEXT("WidthOverride");
 	inline constexpr const TCHAR* WrapTextAt = TEXT("WrapTextAt");
 
-	// Cross-module generation/matching contract constants: the Core visual
-	// mapper writes them and the Editor import/apply side matches them.
-	// Export-chain sentinel: a serialized uniform radius at or above this
-	// value means "pill" and maps to HalfHeightRadius on both sides. No
-	// derivation on record; fixed when the pill export path was introduced.
+	// Shared pill-radius sentinel: values above this threshold map to HalfHeightRadius
+	// in both Core conversion and Editor property application.
 	inline constexpr float CapsuleRadiusSentinel = 999.0f;
 	// Internal effect-material reference identifiers for the retainer
 	// pipeline (not asset paths), matched case-sensitively on the Editor side.

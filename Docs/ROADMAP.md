@@ -6,7 +6,7 @@ Chinese companion: [ROADMAP.zh-CN.md](ROADMAP.zh-CN.md)
 **Current public baseline**: 2026-05-14
 **Status legend**: `[ ]` not started | `[~]` in progress | `[x]` complete
 
-Internal review plans and OpenSpec phases are not public release promises. This roadmap describes the public direction and the current release boundary only.
+Private planning records are not public release promises. This roadmap describes the public direction and the current release boundary only.
 
 ## Strategy
 
@@ -84,7 +84,7 @@ The repository does not currently publish a public hosted UE matrix, public host
 
 The intended public API is the retained `Design2UMGCore/Public` and `Design2UMGEditor/Public` header surface documented in [Architecture](Architecture.md). Headers are retained when they are parser, converter, schema, settings, import, preview, image, or test-facing contracts needed by downstream modules or contributors.
 
-If a future phase narrows a header, it must be supported by current include evidence and validation.
+Any future header narrowing must be supported by current include evidence and validation.
 
 ## Open-Source Readiness Milestones
 

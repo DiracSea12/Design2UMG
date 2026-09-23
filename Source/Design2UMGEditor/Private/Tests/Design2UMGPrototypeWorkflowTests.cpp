@@ -7,6 +7,9 @@
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
 #include "UMGGenerator.h"
+#include "DesignImportPipeline.h"
+#include "UMGJsonSerializer.h"
+#include "Misc/ScopeExit.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
@@ -163,6 +166,50 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextPrototypeGenerationTest,
+    "Design2UMG.PreviewContext.PrototypeGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewContextPrototypeGenerationTest::RunTest(const FString& Parameters)
+{
+    FDesignDocument Document;
+    if (!TestTrue(TEXT("Parse interactive input"), FFigmaParser::ParseDocument(BasicPrototypeNavigationJson(), Document))) return false;
+    const FUMGWidgetData Original = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+    for (int32 Mode = 0; Mode < 3; ++Mode)
+    {
+        FUMGWidgetData Data = Original;
+        if (Mode == 2) Data.RootWidget.Render.RenderOpacity = 0.8f;
+        if (Mode != 0)
+        {
+            FPreviewRefreshInput Input;
+            Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
+            Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
+            Input.bResolveImages = false;
+            auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+            if (!TestTrue(*Refreshed.ParseError, Refreshed.bSucceeded)) continue;
+            Data = MoveTemp(Refreshed.Data);
+        }
+        const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/PreviewNavigation_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+        ON_SCOPE_EXIT { DeleteGeneratedAssetsAtPath(Folder); };
+        FUMGPrototypeNavigationData Navigation;
+        UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, Folder, nullptr, nullptr, &Navigation);
+        if (!TestNotNull(TEXT("Direct and preview paths build prototype"), Blueprint)) continue;
+        FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &Navigation);
+        UWorld* World = GEditor->GetEditorWorldContext().World();
+        UUserWidget* Instance = CreateWidget<UUserWidget>(World, Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass));
+        if (!TestNotNull(TEXT("Prototype instantiates"), Instance)) continue;
+        Instance->TakeWidget();
+        ON_SCOPE_EXIT { Instance->RemoveFromParent(); };
+        UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(Instance, Data);
+        UButton* Trigger = Cast<UButton>(Instance->WidgetTree->FindWidget(TEXT("cta_button")));
+        if (!TestNotNull(TEXT("Switcher survives preview"), Switcher) || !TestNotNull(TEXT("Trigger survives preview"), Trigger)) continue;
+        TestEqual(TEXT("Initial page retained"), Switcher->GetActiveWidgetIndex(), 0);
+        Trigger->OnClicked.Broadcast();
+        World->GetLatentActionManager().ProcessLatentActions(Instance, 1.0f);
+        TestEqual(TEXT("Real click reaches target after preview"), Switcher->GetActiveWidgetIndex(), 1);
+    }
+    return true;
 }
 
 #endif

@@ -532,14 +532,8 @@ namespace
 		return bCompiledRendered;
 	}
 
-	// Shared skeleton of the two blueprint+PNG generation pipelines: the
-	// interactive generation scope and slow task, the common build stage
-	// (progress step -> pending icon font mapping changes -> unsaved blueprint
-	// build) and the cancel-after-mutation tail. The save/render ordering
-	// lives in the named pipeline stage. Only the build-failure diagnostics
-	// differ between the pipelines (the transient-preview path logs, the
-	// compiled path leaves error reporting to its caller), so that policy is
-	// the one explicit flag.
+	// Shared blueprint/PNG build and cancellation lifecycle.
+	// The supplied stage owns save/render ordering; bLogBuildFailure selects error reporting.
 	bool RunBlueprintAndPngPipeline(
 		const TCHAR* Label,
 		const FUMGWidgetData& Data,

@@ -23,7 +23,7 @@ namespace
 		ECVF_Default);
 
 	// ---------------------------------------------------------------------------
-	// Primitive rendering. Every float uses %.9g (float32 round-trip lossless);
+	// Primitive rendering. Every float uses %.9g (float32 serialization lossless);
 	// hex strings and %.1f/%.6f are forbidden by the IR golden layer contract.
 	// ---------------------------------------------------------------------------
 

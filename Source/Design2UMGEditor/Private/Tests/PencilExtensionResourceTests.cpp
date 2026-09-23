@@ -176,11 +176,11 @@ bool FPencilExtensionIconIndexParserTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPencilExtensionIconGlyphLookupRoundTripTest,
-	"Design2UMG.Unit.PencilExtensionResources.IconGlyphLookupRoundTrip",
+	FPencilExtensionIconGlyphLookupSerializationCycleTest,
+	"Design2UMG.Unit.PencilExtensionResources.IconGlyphLookupSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FPencilExtensionIconGlyphLookupRoundTripTest::RunTest(const FString&)
+bool FPencilExtensionIconGlyphLookupSerializationCycleTest::RunTest(const FString&)
 {
 	const FString Json = LoadIconIndexFixtureJson(*this);
 	if (Json.IsEmpty())
@@ -351,11 +351,11 @@ bool FPencilExtensionLibPenVariablesParserTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FPencilExtensionLibrariesRegistryRoundTripTest,
-	"Design2UMG.Unit.PencilExtensionResources.LibrariesRegistryRoundTrip",
+	FPencilExtensionLibrariesRegistrySerializationCycleTest,
+	"Design2UMG.Unit.PencilExtensionResources.LibrariesRegistrySerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FPencilExtensionLibrariesRegistryRoundTripTest::RunTest(const FString&)
+bool FPencilExtensionLibrariesRegistrySerializationCycleTest::RunTest(const FString&)
 {
 	const FString LibPenJson = LoadSampleLibPenFixtureJson(*this);
 	if (LibPenJson.IsEmpty())

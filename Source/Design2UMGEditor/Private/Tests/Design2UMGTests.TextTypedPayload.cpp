@@ -39,7 +39,7 @@ namespace
 		return Widget;
 	}
 
-	// UTextLayoutWidget reflected layout properties shared by the parity/round-trip tests.
+	// UTextLayoutWidget reflected layout properties shared by the parity/serialization tests.
 	// UEditableText/UEditableTextBox shadow the base-class Justification with their own property,
 	// so only the multi-line family reads justification through this reflection set; the
 	// single-line family keeps its getter-based reads (see the state readers below).
@@ -176,25 +176,23 @@ namespace
 		return State;
 	}
 
-	// Shared typed/legacy parity assertions for the editable-text family. Profile flags select the
-	// assertion groups each family carries: bTextBoxStyle adds the editable-text-box foreground
-	// color pair; bWrapLayout adds the multi-line auto-wrap/wrap-width/line-height/margin group.
-	// Labels and assertion order match the original per-widget blocks.
+	// Compare typed and serialized properties for the editable-text family.
+	// Profile flags select text-box colors and multiline layout assertions.
 	void AssertTextFamilyParity(
 		FAutomationTestBase& Test,
 		const TCHAR* WidgetLabel,
 		bool bTextBoxStyle,
 		bool bWrapLayout,
 		const FTextFamilyWidgetState& Typed,
-		const FTextFamilyWidgetState& Legacy,
+		const FTextFamilyWidgetState& Serialized,
 		const FLinearColor& ExpectedTextColor)
 	{
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy text match"), WidgetLabel), Typed.Text, Legacy.Text);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy hint match"), WidgetLabel), Typed.Hint, Legacy.Hint);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy font size match"), WidgetLabel), Typed.FontSize, Legacy.FontSize);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy typeface match"), WidgetLabel), Typed.TypefaceFontName, Legacy.TypefaceFontName);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy letter spacing match"), WidgetLabel), Typed.LetterSpacing, Legacy.LetterSpacing);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy font object path match"), WidgetLabel), Typed.FontObjectPath, Legacy.FontObjectPath);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized text match"), WidgetLabel), Typed.Text, Serialized.Text);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized hint match"), WidgetLabel), Typed.Hint, Serialized.Hint);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized font size match"), WidgetLabel), Typed.FontSize, Serialized.FontSize);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized typeface match"), WidgetLabel), Typed.TypefaceFontName, Serialized.TypefaceFontName);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized letter spacing match"), WidgetLabel), Typed.LetterSpacing, Serialized.LetterSpacing);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized font object path match"), WidgetLabel), Typed.FontObjectPath, Serialized.FontObjectPath);
 		if (bTextBoxStyle)
 		{
 			Test.TestTrue(FString::Printf(TEXT("%s typed text color follows normalized typed node color"), WidgetLabel),
@@ -202,38 +200,38 @@ namespace
 			Test.TestTrue(FString::Printf(TEXT("%s typed foreground color follows normalized typed node color"), WidgetLabel),
 				Typed.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
 			Test.TestTrue(FString::Printf(TEXT("Second %s text color follows normalized typed node color"), WidgetLabel),
-				Legacy.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+				Serialized.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 			Test.TestTrue(FString::Printf(TEXT("Second %s foreground color follows normalized typed node color"), WidgetLabel),
-				Legacy.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
+				Serialized.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
 		}
 		else
 		{
 			Test.TestTrue(FString::Printf(TEXT("%s typed color follows normalized typed node color"), WidgetLabel),
 				Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 			Test.TestTrue(FString::Printf(TEXT("Second %s color follows normalized typed node color"), WidgetLabel),
-				Legacy.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
+				Serialized.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 		}
 		if (bWrapLayout)
 		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy auto-wrap match"), WidgetLabel),
-				Typed.bAutoWrap == Legacy.bAutoWrap);
-			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy wrap width match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.WrapTextAt, Legacy.WrapTextAt, 0.001f));
-			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy line height match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.LineHeight, Legacy.LineHeight, 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized auto-wrap match"), WidgetLabel),
+				Typed.bAutoWrap == Serialized.bAutoWrap);
+			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized wrap width match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.WrapTextAt, Serialized.WrapTextAt, 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized line height match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.LineHeight, Serialized.LineHeight, 0.001f));
 		}
-		Test.TestEqual(FString::Printf(TEXT("%s typed and legacy justification match"), WidgetLabel),
-			Typed.Justification, Legacy.Justification);
+		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized justification match"), WidgetLabel),
+			Typed.Justification, Serialized.Justification);
 		if (bWrapLayout)
 		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed and legacy margin match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.Margin.Left, Legacy.Margin.Left, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Top, Legacy.Margin.Top, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Right, Legacy.Margin.Right, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Legacy.Margin.Bottom, 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized margin match"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.Margin.Left, Serialized.Margin.Left, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Top, Serialized.Margin.Top, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Right, Serialized.Margin.Right, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Serialized.Margin.Bottom, 0.001f));
 		}
-		Test.TestTrue(FString::Printf(TEXT("%s typed and legacy icon shaping match"), WidgetLabel),
-			Typed.Shaping == Legacy.Shaping);
+		Test.TestTrue(FString::Printf(TEXT("%s typed and serialized icon shaping match"), WidgetLabel),
+			Typed.Shaping == Serialized.Shaping);
 	}
 }
 
@@ -264,10 +262,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadParityTest,
 bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
 {
 	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	UTextBlock* LegacyWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	UTextBlock* SerializedWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
 	TestTrue(TEXT("Typed TextBlock created"), TypedWidget != nullptr);
-	TestTrue(TEXT("Legacy TextBlock created"), LegacyWidget != nullptr);
-	if (!TypedWidget || !LegacyWidget)
+	TestTrue(TEXT("Serialized TextBlock created"), SerializedWidget != nullptr);
+	if (!TypedWidget || !SerializedWidget)
 	{
 		return false;
 	}
@@ -292,7 +290,7 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.9f, 0.1f, 0.2f, 0.5f);
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyWidget, Node);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedWidget, Node);
 
 	FTextLayoutProperties LayoutProperties;
 	if (!FindTextLayoutProperties(*this, LayoutProperties))
@@ -305,48 +303,48 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	const FStructProperty* ShapedTextOptionsProperty = LayoutProperties.ShapedTextOptions;
 
 	const FMargin* TypedMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(TypedWidget);
-	const FMargin* LegacyMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(LegacyWidget);
+	const FMargin* SerializedMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(SerializedWidget);
 	const float TypedLineHeight = LineHeightProperty->GetPropertyValue_InContainer(TypedWidget);
-	const float LegacyLineHeight = LineHeightProperty->GetPropertyValue_InContainer(LegacyWidget);
+	const float SerializedLineHeight = LineHeightProperty->GetPropertyValue_InContainer(SerializedWidget);
 	const ETextJustify::Type TypedJustification = static_cast<ETextJustify::Type>(
 		JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(TypedWidget)));
-	const ETextJustify::Type LegacyJustification = static_cast<ETextJustify::Type>(
-		JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(LegacyWidget)));
+	const ETextJustify::Type SerializedJustification = static_cast<ETextJustify::Type>(
+		JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(SerializedWidget)));
 	const FShapedTextOptions* TypedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(TypedWidget);
-	const FShapedTextOptions* LegacyShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(LegacyWidget);
+	const FShapedTextOptions* SerializedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(SerializedWidget);
 
 	TestEqual(TEXT("Typed node path keeps tooltip"), TypedWidget->GetToolTipText().ToString(), TEXT("Typed tooltip"));
-	TestEqual(TEXT("Typed and legacy text match"), TypedWidget->GetText().ToString(), LegacyWidget->GetText().ToString());
+	TestEqual(TEXT("Typed and serialized text match"), TypedWidget->GetText().ToString(), SerializedWidget->GetText().ToString());
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	TestTrue(TEXT("Typed text block color follows normalized typed node color"),
 		TypedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
 	TestTrue(TEXT("Second text block color follows normalized typed node color"),
-		LegacyWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestEqual(TEXT("Typed and legacy font size match"), TypedWidget->GetFont().Size, LegacyWidget->GetFont().Size);
-	TestEqual(TEXT("Typed and legacy typeface match"), TypedWidget->GetFont().TypefaceFontName, LegacyWidget->GetFont().TypefaceFontName);
-	TestEqual(TEXT("Typed and legacy letter spacing match"), TypedWidget->GetFont().LetterSpacing, LegacyWidget->GetFont().LetterSpacing);
-	TestEqual(TEXT("Typed and legacy font object path match"),
+		SerializedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
+	TestEqual(TEXT("Typed and serialized font size match"), TypedWidget->GetFont().Size, SerializedWidget->GetFont().Size);
+	TestEqual(TEXT("Typed and serialized typeface match"), TypedWidget->GetFont().TypefaceFontName, SerializedWidget->GetFont().TypefaceFontName);
+	TestEqual(TEXT("Typed and serialized letter spacing match"), TypedWidget->GetFont().LetterSpacing, SerializedWidget->GetFont().LetterSpacing);
+	TestEqual(TEXT("Typed and serialized font object path match"),
 		TypedWidget->GetFont().FontObject ? TypedWidget->GetFont().FontObject->GetPathName() : FString(),
-		LegacyWidget->GetFont().FontObject ? LegacyWidget->GetFont().FontObject->GetPathName() : FString());
-	TestEqual(TEXT("Typed and legacy justification match"), TypedJustification, LegacyJustification);
-	TestTrue(TEXT("Typed and legacy auto-wrap match"), TypedWidget->GetAutoWrapText() == LegacyWidget->GetAutoWrapText());
-	TestTrue(TEXT("Typed and legacy wrap width match"), FMath::IsNearlyEqual(TypedWidget->GetWrapTextAt(), LegacyWidget->GetWrapTextAt(), 0.001f));
-	TestTrue(TEXT("Typed and legacy line height match"), FMath::IsNearlyEqual(TypedLineHeight, LegacyLineHeight, 0.001f));
-	TestTrue(TEXT("Typed and legacy margin match"),
+		SerializedWidget->GetFont().FontObject ? SerializedWidget->GetFont().FontObject->GetPathName() : FString());
+	TestEqual(TEXT("Typed and serialized justification match"), TypedJustification, SerializedJustification);
+	TestTrue(TEXT("Typed and serialized auto-wrap match"), TypedWidget->GetAutoWrapText() == SerializedWidget->GetAutoWrapText());
+	TestTrue(TEXT("Typed and serialized wrap width match"), FMath::IsNearlyEqual(TypedWidget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
+	TestTrue(TEXT("Typed and serialized line height match"), FMath::IsNearlyEqual(TypedLineHeight, SerializedLineHeight, 0.001f));
+	TestTrue(TEXT("Typed and serialized margin match"),
 		TypedMargin
-		&& LegacyMargin
-		&& FMath::IsNearlyEqual(TypedMargin->Left, LegacyMargin->Left, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Top, LegacyMargin->Top, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Right, LegacyMargin->Right, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Bottom, LegacyMargin->Bottom, 0.001f));
-	TestTrue(TEXT("Typed and legacy shadow offset match"), TypedWidget->GetShadowOffset().Equals(LegacyWidget->GetShadowOffset(), 0.001f));
-	TestTrue(TEXT("Typed and legacy shadow color match"),
-		TypedWidget->GetShadowColorAndOpacity().Equals(LegacyWidget->GetShadowColorAndOpacity(), 0.0001f));
-	TestTrue(TEXT("Typed and legacy icon shaping match"),
+		&& SerializedMargin
+		&& FMath::IsNearlyEqual(TypedMargin->Left, SerializedMargin->Left, 0.001f)
+		&& FMath::IsNearlyEqual(TypedMargin->Top, SerializedMargin->Top, 0.001f)
+		&& FMath::IsNearlyEqual(TypedMargin->Right, SerializedMargin->Right, 0.001f)
+		&& FMath::IsNearlyEqual(TypedMargin->Bottom, SerializedMargin->Bottom, 0.001f));
+	TestTrue(TEXT("Typed and serialized shadow offset match"), TypedWidget->GetShadowOffset().Equals(SerializedWidget->GetShadowOffset(), 0.001f));
+	TestTrue(TEXT("Typed and serialized shadow color match"),
+		TypedWidget->GetShadowColorAndOpacity().Equals(SerializedWidget->GetShadowColorAndOpacity(), 0.0001f));
+	TestTrue(TEXT("Typed and serialized icon shaping match"),
 		TypedShaping
-		&& LegacyShaping
-		&& TypedShaping->bOverride_TextShapingMethod == LegacyShaping->bOverride_TextShapingMethod
-		&& TypedShaping->TextShapingMethod == LegacyShaping->TextShapingMethod);
+		&& SerializedShaping
+		&& TypedShaping->bOverride_TextShapingMethod == SerializedShaping->bOverride_TextShapingMethod
+		&& TypedShaping->TextShapingMethod == SerializedShaping->TextShapingMethod);
 	return true;
 }
 
@@ -378,29 +376,29 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	Node.WidgetStyle.MinDesiredWidth = 123.5f;
 
 	UEditableTextBox* TypedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed editable text box created"));
-	UEditableTextBox* LegacyTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Legacy editable text box created"));
-	if (!TypedTextBox || !LegacyTextBox)
+	UEditableTextBox* SerializedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Serialized editable text box created"));
+	if (!TypedTextBox || !SerializedTextBox)
 	{
 		return false;
 	}
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyTextBox, Node);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedTextBox, Node);
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	AssertTextFamilyParity(*this, TEXT("EditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/false,
-		ReadEditableTextBoxState(TypedTextBox), ReadEditableTextBoxState(LegacyTextBox), ExpectedTextColor);
+		ReadEditableTextBoxState(TypedTextBox), ReadEditableTextBoxState(SerializedTextBox), ExpectedTextColor);
 
 	UEditableText* TypedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed editable text created"));
-	UEditableText* LegacyEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Legacy editable text created"));
-	if (!TypedEditableText || !LegacyEditableText)
+	UEditableText* SerializedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Serialized editable text created"));
+	if (!TypedEditableText || !SerializedEditableText)
 	{
 		return false;
 	}
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyEditableText, Node);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedEditableText, Node);
 	AssertTextFamilyParity(*this, TEXT("EditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/false,
-		ReadEditableTextState(TypedEditableText), ReadEditableTextState(LegacyEditableText), ExpectedTextColor);
+		ReadEditableTextState(TypedEditableText), ReadEditableTextState(SerializedEditableText), ExpectedTextColor);
 
 	UEditableTextBox* TypedBehaviorTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed behavior editable text box created"));
 	UEditableText* TypedBehaviorEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed behavior editable text created"));
@@ -520,28 +518,28 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 
 	UMultiLineEditableTextBox* TypedTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Typed multi-line editable text box created"));
-	UMultiLineEditableTextBox* LegacyTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Legacy multi-line editable text box created"));
-	if (!TypedTextBox || !LegacyTextBox)
+	UMultiLineEditableTextBox* SerializedTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Serialized multi-line editable text box created"));
+	if (!TypedTextBox || !SerializedTextBox)
 	{
 		return false;
 	}
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyTextBox, Node);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedTextBox, Node);
 	AssertTextFamilyParity(*this, TEXT("MultiLineEditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/true,
-		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), ReadMultiLineTextBoxState(LayoutProperties, LegacyTextBox), ExpectedTextColor);
+		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), ReadMultiLineTextBoxState(LayoutProperties, SerializedTextBox), ExpectedTextColor);
 
 	UMultiLineEditableText* TypedEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Typed multi-line editable text created"));
-	UMultiLineEditableText* LegacyEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Legacy multi-line editable text created"));
-	if (!TypedEditableText || !LegacyEditableText)
+	UMultiLineEditableText* SerializedEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Serialized multi-line editable text created"));
+	if (!TypedEditableText || !SerializedEditableText)
 	{
 		return false;
 	}
 
 	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyEditableText, Node);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedEditableText, Node);
 	AssertTextFamilyParity(*this, TEXT("MultiLineEditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/true,
-		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), ReadMultiLineEditableTextState(LayoutProperties, LegacyEditableText), ExpectedTextColor);
+		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), ReadMultiLineEditableTextState(LayoutProperties, SerializedEditableText), ExpectedTextColor);
 	return true;
 }
 
@@ -664,68 +662,68 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rich text application preserves 0.375 point row sizes"),
 		FMath::IsNearlyEqual(SubpointRow->TextStyle.Font.Size, 0.375f, 0.001f));
 
-	URichTextBlock* LegacyWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
-	TestTrue(TEXT("Legacy RichTextBlock created"), LegacyWidget != nullptr);
-	if (!LegacyWidget)
+	URichTextBlock* SerializedWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
+	TestTrue(TEXT("Serialized RichTextBlock created"), SerializedWidget != nullptr);
+	if (!SerializedWidget)
 	{
 		return false;
 	}
-	LegacyWidget->SetDefaultTextStyle(PreconfiguredStyle);
-	FUMGWidgetUtils::ApplyWidgetProperties(LegacyWidget, Node);
+	SerializedWidget->SetDefaultTextStyle(PreconfiguredStyle);
+	FUMGWidgetUtils::ApplyWidgetProperties(SerializedWidget, Node);
 
-	TestEqual(TEXT("Typed and legacy rich text markup match"),
+	TestEqual(TEXT("Typed and serialized rich text markup match"),
 		Widget->GetText().ToString(),
-		LegacyWidget->GetText().ToString());
-	TestEqual(TEXT("Typed and legacy rich text tooltip match"),
+		SerializedWidget->GetText().ToString());
+	TestEqual(TEXT("Typed and serialized rich text tooltip match"),
 		Widget->GetToolTipText().ToString(),
-		LegacyWidget->GetToolTipText().ToString());
-	TestTrue(TEXT("Typed and legacy rich text wrap width match"),
-		FMath::IsNearlyEqual(Widget->GetWrapTextAt(), LegacyWidget->GetWrapTextAt(), 0.001f));
+		SerializedWidget->GetToolTipText().ToString());
+	TestTrue(TEXT("Typed and serialized rich text wrap width match"),
+		FMath::IsNearlyEqual(Widget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
 
-	const FTextBlockStyle& LegacyDefaultStyle = LegacyWidget->GetCurrentDefaultTextStyle();
-	TestEqual(TEXT("Typed and legacy rich text default font size match"),
+	const FTextBlockStyle& SerializedDefaultStyle = SerializedWidget->GetCurrentDefaultTextStyle();
+	TestEqual(TEXT("Typed and serialized rich text default font size match"),
 		DefaultStyle.Font.Size,
-		LegacyDefaultStyle.Font.Size);
+		SerializedDefaultStyle.Font.Size);
 	TestTrue(TEXT("Typed rich text default color follows normalized typed node color"),
 		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
 	TestTrue(TEXT("Second rich text default color follows normalized typed node color"),
-		LegacyDefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
-	TestTrue(TEXT("Typed and legacy rich text default shadow color match"),
-		DefaultStyle.ShadowColorAndOpacity.Equals(LegacyDefaultStyle.ShadowColorAndOpacity, 0.0001f));
-	TestTrue(TEXT("Typed and legacy rich text default shadow offset match"),
-		DefaultStyle.ShadowOffset == LegacyDefaultStyle.ShadowOffset);
+		SerializedDefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
+	TestTrue(TEXT("Typed and serialized rich text default shadow color match"),
+		DefaultStyle.ShadowColorAndOpacity.Equals(SerializedDefaultStyle.ShadowColorAndOpacity, 0.0001f));
+	TestTrue(TEXT("Typed and serialized rich text default shadow offset match"),
+		DefaultStyle.ShadowOffset == SerializedDefaultStyle.ShadowOffset);
 
-	UDataTable* LegacyStyleSet = LegacyWidget->GetTextStyleSet();
-	TestNotNull(TEXT("Legacy rich text style set exists"), LegacyStyleSet);
-	if (!LegacyStyleSet)
+	UDataTable* SerializedStyleSet = SerializedWidget->GetTextStyleSet();
+	TestNotNull(TEXT("Serialized rich text style set exists"), SerializedStyleSet);
+	if (!SerializedStyleSet)
 	{
 		return false;
 	}
 
-	const FRichTextStyleRow* LegacyLinkRow = LegacyStyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), TEXT("RichTextBlockStyleRowsParity"));
-	TestNotNull(TEXT("Legacy link row exists"), LegacyLinkRow);
-	if (!LegacyLinkRow)
+	const FRichTextStyleRow* SerializedLinkRow = SerializedStyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), TEXT("RichTextBlockStyleRowsParity"));
+	TestNotNull(TEXT("Serialized link row exists"), SerializedLinkRow);
+	if (!SerializedLinkRow)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("Typed and legacy rich text row font size match"),
+	TestEqual(TEXT("Typed and serialized rich text row font size match"),
 		LinkRow->TextStyle.Font.Size,
-		LegacyLinkRow->TextStyle.Font.Size);
-	TestTrue(TEXT("Typed and legacy rich text row color match"),
+		SerializedLinkRow->TextStyle.Font.Size);
+	TestTrue(TEXT("Typed and serialized rich text row color match"),
 		LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			LegacyLinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor(),
+			SerializedLinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor(),
 			0.0001f));
-	TestEqual(TEXT("Typed and legacy rich text row underline draw-as match"),
+	TestEqual(TEXT("Typed and serialized rich text row underline draw-as match"),
 		LinkRow->TextStyle.UnderlineBrush.DrawAs,
-		LegacyLinkRow->TextStyle.UnderlineBrush.DrawAs);
+		SerializedLinkRow->TextStyle.UnderlineBrush.DrawAs);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextFamilyTypedJsonRoundTripTest,
-	"Design2UMG.UMGJson.TextFamilyTypedPayloadRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextFamilyTypedJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.TextFamilyTypedPayloadSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FTextFamilyTypedJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FTextLayoutProperties LayoutProperties;
 	if (!FindTextLayoutProperties(*this, LayoutProperties))
@@ -734,7 +732,7 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	}
 
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_TextFamilyJsonRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_TextFamilyJsonSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("CanvasPanel");
 	SourceData.RootWidget.Id = TEXT("root");
 	SourceData.RootWidget.Name = TEXT("Root");
@@ -743,8 +741,8 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.Type = TEXT("MultiLineEditableTextBox");
 	SourceNode.Id = TEXT("typed_text_family");
 	SourceNode.Name = TEXT("TypedTextFamily");
-	SourceNode.Text.Text = TEXT("Round-trip text payload");
-	SourceNode.Text.HintText = TEXT("Round-trip hint");
+	SourceNode.Text.Text = TEXT("Serialization text payload");
+	SourceNode.Text.HintText = TEXT("Serialization hint");
 	SourceNode.Text.FontFamily = TEXT("/Game/Design2UMG/Fonts/Geist.Geist");
 	SourceNode.Text.TypefaceFontName = TEXT("Regular");
 	SourceNode.Text.Justification = TEXT("Center");
@@ -752,7 +750,7 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	SourceNode.Text.WrapTextAt = 240.0f;
 	SourceNode.Text.LineHeightPercentage = 1.3f;
 	SourceNode.Text.Color = FLinearColor(0.25f, 0.45f, 0.65f, 1.0f);
-	SourceNode.Text.IconName = TEXT("glyph_roundtrip");
+	SourceNode.Text.IconName = TEXT("glyph_serialization_cycle");
 	SourceNode.TextStyle.FontSize = 18.0f;
 	SourceNode.TextStyle.SourceFontSize = 18.0f;
 	SourceNode.TextStyle.LetterSpacing = 1.25f;
@@ -821,12 +819,12 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	ReadTextLayoutState(LayoutProperties, SourceWidget, SourceMargin, SourceLineHeight, SourceJustification, SourceShaping);
 	ReadTextLayoutState(LayoutProperties, ParsedWidget, ParsedMargin, ParsedLineHeight, ParsedJustification, ParsedShaping);
 
-	TestEqual(TEXT("Round-trip widget text matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
-	TestEqual(TEXT("Round-trip widget hint matches"), ParsedWidget->GetHintText().ToString(), SourceWidget->GetHintText().ToString());
-	TestEqual(TEXT("Round-trip widget font size matches"), ParsedWidget->WidgetStyle.TextStyle.Font.Size, SourceWidget->WidgetStyle.TextStyle.Font.Size);
-	TestEqual(TEXT("Round-trip widget typeface matches"), ParsedWidget->WidgetStyle.TextStyle.Font.TypefaceFontName, SourceWidget->WidgetStyle.TextStyle.Font.TypefaceFontName);
-	TestEqual(TEXT("Round-trip widget letter spacing matches"), ParsedWidget->WidgetStyle.TextStyle.Font.LetterSpacing, SourceWidget->WidgetStyle.TextStyle.Font.LetterSpacing);
-	TestEqual(TEXT("Round-trip widget font object path matches"),
+	TestEqual(TEXT("Serialization widget text matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
+	TestEqual(TEXT("Serialization widget hint matches"), ParsedWidget->GetHintText().ToString(), SourceWidget->GetHintText().ToString());
+	TestEqual(TEXT("Serialization widget font size matches"), ParsedWidget->WidgetStyle.TextStyle.Font.Size, SourceWidget->WidgetStyle.TextStyle.Font.Size);
+	TestEqual(TEXT("Serialization widget typeface matches"), ParsedWidget->WidgetStyle.TextStyle.Font.TypefaceFontName, SourceWidget->WidgetStyle.TextStyle.Font.TypefaceFontName);
+	TestEqual(TEXT("Serialization widget letter spacing matches"), ParsedWidget->WidgetStyle.TextStyle.Font.LetterSpacing, SourceWidget->WidgetStyle.TextStyle.Font.LetterSpacing);
+	TestEqual(TEXT("Serialization widget font object path matches"),
 		ParsedWidget->WidgetStyle.TextStyle.Font.FontObject ? ParsedWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
 		SourceWidget->WidgetStyle.TextStyle.Font.FontObject ? SourceWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString());
 	const FLinearColor ExpectedSourceTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(SourceNode.Text.Color.GetValue());
@@ -839,16 +837,16 @@ bool FTextFamilyTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 		SourceWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedSourceTextColor, 0.0001f));
 	TestTrue(TEXT("Parsed widget foreground color follows normalized parsed node color"),
 		ParsedWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedParsedTextColor, 0.0001f));
-	TestTrue(TEXT("Round-trip widget auto wrap matches"), ParsedWidget->GetAutoWrapText() == SourceWidget->GetAutoWrapText());
-	TestTrue(TEXT("Round-trip widget wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
-	TestTrue(TEXT("Round-trip widget line height matches"), FMath::IsNearlyEqual(ParsedLineHeight, SourceLineHeight, 0.001f));
-	TestEqual(TEXT("Round-trip widget justification matches"), ParsedJustification, SourceJustification);
-	TestTrue(TEXT("Round-trip widget margin matches"),
+	TestTrue(TEXT("Serialization widget auto wrap matches"), ParsedWidget->GetAutoWrapText() == SourceWidget->GetAutoWrapText());
+	TestTrue(TEXT("Serialization widget wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
+	TestTrue(TEXT("Serialization widget line height matches"), FMath::IsNearlyEqual(ParsedLineHeight, SourceLineHeight, 0.001f));
+	TestEqual(TEXT("Serialization widget justification matches"), ParsedJustification, SourceJustification);
+	TestTrue(TEXT("Serialization widget margin matches"),
 		FMath::IsNearlyEqual(ParsedMargin.Left, SourceMargin.Left, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedMargin.Top, SourceMargin.Top, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedMargin.Right, SourceMargin.Right, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedMargin.Bottom, SourceMargin.Bottom, 0.001f));
-	TestTrue(TEXT("Round-trip widget shaping matches"), ParsedShaping == SourceShaping);
+	TestTrue(TEXT("Serialization widget shaping matches"), ParsedShaping == SourceShaping);
 	return true;
 }
 
@@ -1045,13 +1043,13 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextTypedJsonRoundTripTest,
-	"Design2UMG.UMGJson.RichTextTypedPayloadRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextTypedJsonSerializationCycleTest,
+	"Design2UMG.UMGJson.RichTextTypedPayloadSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
+bool FRichTextTypedJsonSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData SourceData;
-	SourceData.WidgetName = TEXT("WBP_RichTextJsonRoundTrip");
+	SourceData.WidgetName = TEXT("WBP_RichTextJsonSerializationCycle");
 	SourceData.RootWidget.Type = TEXT("CanvasPanel");
 	SourceData.RootWidget.Id = TEXT("root");
 	SourceData.RootWidget.Name = TEXT("Root");
@@ -1159,13 +1157,12 @@ bool FRichTextTypedJsonRoundTripTest::RunTest(const FString& Parameters)
 	FUMGWidgetUtils::ApplyWidgetProperties(SourceWidget, SourceNode);
 	FUMGWidgetUtils::ApplyWidgetProperties(ParsedWidget, *ParsedNode);
 
-	TestEqual(TEXT("Round-trip rich text markup matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
-	TestTrue(TEXT("Round-trip rich text wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
-	TestEqual(TEXT("Round-trip rich text style snapshot matches"),
-		BuildStyleSnapshot(ParsedWidget, TEXT("ParsedRichTextRoundTrip")),
-		BuildStyleSnapshot(SourceWidget, TEXT("SourceRichTextRoundTrip")));
+	TestEqual(TEXT("Serialization rich text markup matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
+	TestTrue(TEXT("Serialization rich text wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
+	TestEqual(TEXT("Serialization rich text style snapshot matches"),
+		BuildStyleSnapshot(ParsedWidget, TEXT("ParsedRichTextSerializationCycle")),
+		BuildStyleSnapshot(SourceWidget, TEXT("SourceRichTextSerializationCycle")));
 	return true;
 }
 
 #endif
-

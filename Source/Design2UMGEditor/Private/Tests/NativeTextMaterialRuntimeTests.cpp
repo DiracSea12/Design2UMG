@@ -36,6 +36,7 @@
 #include "UObject/SavePackage.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
+#include "TextureResource.h"
 
 // Capability probe only: an ordinary engine text widget with a native font
 // material. A successful render does not establish Figma gradient fidelity.

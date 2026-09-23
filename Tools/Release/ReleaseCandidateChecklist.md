@@ -39,7 +39,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Public smoke checks are described as contribution confidence checks, not as the formal admissible gate
 - [ ] Self-hosted BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
 - [ ] Focused automation tests passed (`Automation RunTests Design2UMG`)
-- [ ] Maintainer formal full admissible validation passed and wrapped in the current `Docs/ValidationGovernance/AdmissibleBaselineManifest_<date>.json`
+- [ ] The complete discovered user/maintainer corpus was validated against its own frozen baseline; private sources, references and raw reports remain private
 - [ ] Any coverage visibility is limited to the actually collected public/self-hosted scope; no percentage badge is published without a real collection job
 - [ ] BuildPlugin package artifact is uploaded and downloadable
 - [ ] BuildPlugin package boundary check passed before upload: `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot <PackageRoot> -Mode Package`
@@ -64,4 +64,4 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Uploaded artifact is the packaged plugin output from the validated candidate commit, not a raw engine workspace copy
 - [ ] Uploaded artifact excludes root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, local paths, and transient debug output
 - [ ] Public export workspace boundary check passed: `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode ExportWorkspace`
-- [ ] Release entry links to the relevant public docs and the current validation governance manifest
+- [ ] Release entry links to public tooling docs and states the actual validation scope without distributing private cases or raw reports

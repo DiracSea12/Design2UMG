@@ -88,11 +88,17 @@ $commonForbiddenRootNames = @(
 )
 
 $packageForbiddenRootNames = @(
+    'PenDesigns',
+    'FigmaExports',
+    'CODE_QUALITY_OPTIMIZATION_PLAN.md',
     'Intermediate',
     'Saved'
 )
 
 $exportForbiddenRootNames = @(
+    'PenDesigns',
+    'FigmaExports',
+    'CODE_QUALITY_OPTIMIZATION_PLAN.md',
     'Binaries',
     'Intermediate',
     'Saved'
@@ -151,7 +157,7 @@ $publicSurfaceGlobs = @(
     'Tools/Release/*.ps1',
     'Tools/Run-*.ps1',
     'Tools/design2umg_auto_verify.py',
-    'Tools/design2umg_auto_verify_batch.py',
+    'Tools/design2umg_auto_verify_suite.py',
     'Tools/*.json',
     'Tools/FigmaExporter/README.md',
     '.github/workflows/*.yml',

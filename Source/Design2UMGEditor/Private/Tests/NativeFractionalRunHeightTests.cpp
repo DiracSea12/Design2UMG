@@ -14,6 +14,9 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Text/SRichTextBlock.h"
 #include "Widgets/Text/STextBlock.h"
+#include "UObject/UObjectGlobals.h"
+#include "TextureResource.h"
+#include "UObject/Package.h"
 
 // Capability probe only. Inflated native descent plus a shared line-height
 // factor might represent fractional advances without changing glyph geometry.

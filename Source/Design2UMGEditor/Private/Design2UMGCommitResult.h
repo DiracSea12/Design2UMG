@@ -32,7 +32,7 @@ enum class EDesign2UMGMemoryState : uint8
 };
 
 /** State at return, not a history of attempted writes.
- * Batch file states cover all assets/sidecars in that batch; Indeterminate includes
+ * Bulk file states cover all assets/sidecars in that batch; Indeterminate includes
  * mixed recovery. Modified means changes remain without a successful rollback.
  * An unchanged manifest can also mean no manifest was requested (asset-only save).
  */

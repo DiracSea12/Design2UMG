@@ -11,6 +11,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/Widget.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 #if WITH_AUTOMATION_WORKER
 

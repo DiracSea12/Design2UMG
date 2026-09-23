@@ -161,8 +161,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		}
 	}
 	{
-		// Without calibration the render surface equals the design-time extent and
-		// the root fill covers the whole canvas (legacy behavior is unchanged).
+		// Without calibration, the root fills its design-time canvas.
 		TArray<FColor> Pixels;
 		int32 W = 0;
 		int32 H = 0;

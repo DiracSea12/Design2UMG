@@ -49,10 +49,10 @@ bool FVisualMapperBoxShadowTextureExtentClampTest::RunTest(const FString& Parame
 	FUMGBoxShadowLayerData HugeShadow;
 	HugeShadow.Color = FLinearColor::Black;
 	HugeShadow.Blur = 1.0e20f;
-	constexpr float SafeRoundToIntMax = static_cast<float>(TNumericLimits<int32>::Max() - 64);
+	constexpr float MaxQuantizableInt = static_cast<float>(TNumericLimits<int32>::Max() - 64);
 	FUMGWidgetNode HugeWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(HugeWidget), Node, TArray<FUMGBoxShadowLayerData>{ HugeShadow });
-	TestEqual(TEXT("Overflowing shadow clamps width to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), SafeRoundToIntMax);
-	TestEqual(TEXT("Overflowing shadow clamps height to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), SafeRoundToIntMax);
+	TestEqual(TEXT("Overflowing shadow clamps width to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), MaxQuantizableInt);
+	TestEqual(TEXT("Overflowing shadow clamps height to safe RoundToInt max"), HugeWrapped.Children[0].WidgetStyle.HeightOverride.Get(0), MaxQuantizableInt);
 
 	FUMGWidgetNode InvalidWidget;
 	InvalidWidget.Type = TEXT("Image");
@@ -239,11 +239,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowAutoSizeStretchContractTe
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVisualMapperBoxShadowAutoSizeStretchContractTest::RunTest(const FString& Parameters)
 {
-	// Fill/Fit sizing declares no extent: the wrapper is stretched at runtime,
-	// so an exact shadow texture cannot be pre-baked (the declared value is 0
-	// and the shape would collapse to a pixel, stretching into a smear). Those
-	// nodes keep the stretch-to-wrapper layer: no BlurPadding inset (the shape
-	// fills the texture), no negative margins, and the legacy translation.
+	// Unresolved dimensions use a wrapper-sized shadow without BlurPadding or negative margins.
 	TSharedPtr<FDesignNode> Node = Design2UMGCoreTests::MakeNode(
 		FString(), EDesignNodeType::Frame, FDesignSize::Fill(), FDesignSize::Fit());
 	Node->Visual.CornerRadius.bUniform = true;
@@ -269,8 +265,7 @@ bool FVisualMapperBoxShadowAutoSizeStretchContractTest::RunTest(const FString& P
 	const FUMGWidgetNode& Shadow = Wrapped.Children[0];
 	if (!TestTrue(TEXT("Typed shape payload is present"), Shadow.Brush.Shape.IsSet())) return false;
 	const auto& Shape = Shadow.Brush.Shape.GetValue();
-	// Collapsed declared shape (1x1) plus the legacy blur extent (12 * 2):
-	// the texture is a placeholder that stretches to the wrapper rect.
+	// A 1x1 shape plus blur padding stretches with the wrapper.
 	TestEqual(TEXT("Auto-size shadow texture uses the legacy extent width"),
 		Shadow.WidgetStyle.WidthOverride.Get(0), 25.0f);
 	TestEqual(TEXT("Auto-size shadow texture uses the legacy extent height"),

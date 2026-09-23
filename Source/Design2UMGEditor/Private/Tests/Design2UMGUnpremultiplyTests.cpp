@@ -29,7 +29,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("opaque white B unchanged"), Pixels[1].B, 255);
 	}
 
-	// #fffffff2 round-trip: a fully saturated source color at A=242 premultiplies
+	// #fffffff2 serialization: a fully saturated source color at A=242 premultiplies
 	// to (242,242,242,242); un-premultiply must restore RGB=255.
 	{
 		TArray<FColor> Pixels;

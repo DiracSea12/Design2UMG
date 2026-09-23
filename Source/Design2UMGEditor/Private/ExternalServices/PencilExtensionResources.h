@@ -7,16 +7,8 @@
 struct FDesignDocument;
 
 /**
- * Runtime resources shipped inside the Pencil VS Code extension.
- *
- * The icon codepoint index (icon-index.json) maps icon names of every font family the
- * Pencil editor supports (lucide, Material Symbols variants, phosphor, feather, ...) onto
- * concrete font codepoints. Loading it once per process lets the converter render real
- * icon glyphs instead of ligature name text.
- *
- * The bundled library documents (data/*.lib.pen) carry the theme variables of the
- * built-in design libraries (shadcn, lunaris, ...); their "variables" blocks are
- * registered into PenBundledLibraries before pen documents parse their imports.
+ * Load icon codepoints and bundled design-library variables from the Pencil extension.
+ * Register these resources before converting icons or resolving library imports.
  */
 namespace PencilExtensionResources
 {

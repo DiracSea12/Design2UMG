@@ -16,6 +16,9 @@
 #include "Components/Border.h"
 #include "Blueprint/WidgetTree.h"
 #include "Engine/Texture2D.h"
+#include "UObject/UObjectGlobals.h"
+#include "TextureResource.h"
+#include "UObject/Package.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanvasStrokeContainerTest,
@@ -142,6 +145,161 @@ bool FSingleFlowPositionElisionTest::RunTest(const FString&)
 			if (!TestTrue(TEXT("Decode single flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 		}
 		TestTrue(TEXT("Ignored coordinates preserve every pixel after flow promotion"), Images[0].RawData == Images[1].RawData);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSingleAutoFlowPositionElisionTest,
+	"Design2UMG.Converter.SingleAutoFlowPositionElision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FSingleAutoFlowPositionElisionTest::RunTest(const FString&)
+{
+	for (const bool bHorizontal : {false, true})
+	for (const TCHAR* Justify : {TEXT("start"), TEXT("center"), TEXT("end"), TEXT("space_around")})
+	for (const bool bOverflow : {false, true})
+	{
+		// Compare panel elision at zero and nonzero coordinates, including fixed overflow.
+		const FString Positioned = FString::Printf(TEXT(R"JSON({"children":[{"id":"root","type":"frame","width":120,"height":100,"layout":"none","fill":"#182030","children":[{"id":"panel","type":"frame","x":20,"y":20,"width":60,"height":40,"layout":"%s","justifyContent":"%s","alignItems":"center","fill":"#506070","children":[{"id":"leaf","type":"rectangle","x":9,"y":7,"width":%d,"height":%d,"fill":"#FF8050"}]}]}]})JSON"),
+			bHorizontal ? TEXT("horizontal") : TEXT("vertical"), Justify,
+			bHorizontal && bOverflow ? 80 : 20, !bHorizontal && bOverflow ? 60 : 12);
+		FString ZeroPositioned = Positioned;
+		ZeroPositioned.ReplaceInline(TEXT("\"x\":9,\"y\":7,"), TEXT("\"x\":0,\"y\":0,"));
+		TArray<FImage> Images;
+		for (const FString& Json : {Positioned, ZeroPositioned})
+		{
+			FDesignDocument Document;
+			if (!TestTrue(TEXT("Parse fixed-child flow fixture"), FPenParser::ParseDocument(Json, Document))) return false;
+			FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+			int32 RedundantPanels = 0;
+			TFunction<void(const FUMGWidgetNode&)> Count = [&](const FUMGWidgetNode& Node)
+			{
+				if (Node.Id == TEXT("panel_inner") && (Node.Type == TEXT("HorizontalBox") || Node.Type == TEXT("VerticalBox"))) ++RedundantPanels;
+				for (const FUMGWidgetNode& Child : Node.Children) Count(Child);
+			};
+			Count(Data.RootWidget);
+			TestEqual(TEXT("Retain flow only when its overflow allocation is needed"), RedundantPanels, bOverflow ? 1 : 0);
+			if (Images.Num() == 1)
+			{
+				// Independent pre-elision oracle: one Auto child in a box panel,
+				// with the original weighted spacers, rather than Border alignment.
+				TFunction<void(FUMGWidgetNode&)> RestoreFlow = [&](FUMGWidgetNode& Node)
+				{
+					if (Node.Id == TEXT("panel") && Node.Type == TEXT("Border") && Node.Children.Num() == 1
+						&& Node.Children[0].Type != TEXT("HorizontalBox") && Node.Children[0].Type != TEXT("VerticalBox"))
+					{
+						FUMGWidgetNode Flow;
+						Flow.Type = bHorizontal ? TEXT("HorizontalBox") : TEXT("VerticalBox");
+						Flow.Name = TEXT("oracle_flow");
+						Flow.Id = TEXT("panel_inner");
+						Flow.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+						Flow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+						FUMGWidgetNode Spacer;
+						Spacer.Type = TEXT("Spacer");
+						Spacer.Slot.SizeRule = EUMGSlotSizeRule::Fill;
+						if (FCString::Strcmp(Justify, TEXT("start")) != 0) Flow.Children.Add(Spacer);
+						Flow.Children.Add(MoveTemp(Node.Children[0]));
+						if (FCString::Strcmp(Justify, TEXT("center")) == 0 || FCString::Strcmp(Justify, TEXT("space_around")) == 0) Flow.Children.Add(Spacer);
+						Node.Children.Reset();
+						Node.Children.Add(MoveTemp(Flow));
+						return;
+					}
+					for (FUMGWidgetNode& Child : Node.Children) RestoreFlow(Child);
+				};
+				RestoreFlow(Data.RootWidget);
+				RedundantPanels = 0;
+				Count(Data.RootWidget);
+				TestEqual(TEXT("Oracle retains exactly one original flow panel"), RedundantPanels, 1);
+			}
+			UWidgetBlueprint* BP = FUMGGenerator::BuildWidgetBlueprint(Data,
+				TEXT("/Game/Design2UMG/Automation/SingleAutoFlow/WBP_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+			if (!TestNotNull(TEXT("Build fixed-child flow blueprint"), BP)) return false;
+			FKismetEditorUtilities::CompileBlueprint(BP);
+			TArray<uint8> Png;
+			FIntPoint Size;
+			FString Error;
+			if (!TestTrue(TEXT("Render fixed-child flow blueprint"), FUMGWidgetUtils::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
+			FImage& Image = Images.AddDefaulted_GetRef();
+			if (!TestTrue(TEXT("Decode fixed-child flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+		}
+		TestTrue(TEXT("Elision preserves normal and overflowing pixels against the original flow"), Images[0].RawData == Images[1].RawData);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanvasResolvedSizeElisionTest,
+	"Design2UMG.Converter.CanvasResolvedSizeElision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasResolvedSizeElisionTest::RunTest(const FString&)
+{
+	for (const bool bFitWidth : {false, true})
+	for (const bool bWrappingText : {false, true})
+	{
+		const TCHAR* Content = bWrappingText
+			? TEXT(R"JSON({"id":"leaf","type":"text","width":40,"textGrowth":"fixed-width","fontSize":12,"content":"Wrapping content on several lines","fill":"#FF8050"})JSON")
+			: TEXT(R"JSON({"id":"leaf","type":"rectangle","width":20,"height":12,"fill":"#FF8050"})JSON");
+		const FString Json = FString::Printf(TEXT(R"JSON({"children":[{"id":"root","type":"frame","width":200,"height":200,"layout":"none","fill":"#182030","children":[{"id":"panel","type":"frame","x":12,"y":15,"width":%s,"height":%s,"layout":"vertical","opacity":0.6,"clip":true,"fill":"#506070","children":[%s]}]}]})JSON"),
+			bFitWidth ? TEXT("\"fit_content\"") : TEXT("64"), bFitWidth ? TEXT("80") : TEXT("\"fit_content\""), Content);
+		FDesignDocument Document;
+		if (!TestTrue(TEXT("Parse resolved canvas fixture"), FPenParser::ParseDocument(Json, Document))) return false;
+		const FUMGWidgetData Compact = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+		int32 OuterSizeBoxes = 0;
+		TFunction<void(const FUMGWidgetNode&)> Count = [&](const FUMGWidgetNode& Node)
+		{
+			if (Node.Id == TEXT("panel_sz") && Node.Type == TEXT("SizeBox")) ++OuterSizeBoxes;
+			for (const FUMGWidgetNode& Child : Node.Children) Count(Child);
+		};
+		Count(Compact.RootWidget);
+		TestEqual(TEXT("A fixed canvas allocation does not need another desired-size wrapper"), OuterSizeBoxes, 0);
+		FUMGWidgetData Oracle = Compact;
+		bool bRestored = false;
+		TFunction<void(FUMGWidgetNode&)> RestoreSizeBox = [&](FUMGWidgetNode& Node)
+		{
+			if (Node.Id != TEXT("panel"))
+			{
+				for (FUMGWidgetNode& Child : Node.Children) RestoreSizeBox(Child);
+				return;
+			}
+			TestFalse(TEXT("Canvas slot owns the resolved size"), Node.Slot.bAutoSize);
+			FUMGWidgetNode Wrapper;
+			Wrapper.Type = TEXT("SizeBox");
+			Wrapper.Name = Wrapper.Id = TEXT("oracle_size");
+			Wrapper.Bounds = Node.Bounds;
+			Wrapper.Slot = Node.Slot;
+			if (bFitWidth && bWrappingText) Wrapper.WidgetStyle.MinDesiredWidth = Node.Slot.Offsets.Right;
+			else Wrapper.WidgetStyle.WidthOverride = Node.Slot.Offsets.Right;
+			if (!bFitWidth && bWrappingText) Wrapper.WidgetStyle.MinDesiredHeight = Node.Slot.Offsets.Bottom;
+			else Wrapper.WidgetStyle.HeightOverride = Node.Slot.Offsets.Bottom;
+			Node.Slot = FUMGSlotData();
+			Wrapper.Children.Add(MoveTemp(Node));
+			Node = MoveTemp(Wrapper);
+			bRestored = true;
+		};
+		RestoreSizeBox(Oracle.RootWidget);
+		if (!TestTrue(TEXT("Restore an independent desired-size wrapper"), bRestored)) return false;
+		TArray<TArray<FColor>> Images;
+		const FUMGWidgetData* Variants[] = {&Compact, &Oracle};
+		for (const FUMGWidgetData* Data : Variants)
+		{
+			UWidgetBlueprint* BP = FUMGGenerator::BuildWidgetBlueprint(*Data,
+				TEXT("/Game/Design2UMG/Automation/CanvasResolvedSize/WBP_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
+			if (!TestNotNull(TEXT("Build resolved-size fixture"), BP)) return false;
+			FKismetEditorUtilities::CompileBlueprint(BP);
+			TStrongObjectPtr<UUserWidget> Instance(NewObject<UUserWidget>(GetTransientPackage(), BP->GeneratedClass));
+			if (!TestTrue(TEXT("Initialize resolved-size fixture"), Instance->Initialize())) return false;
+			for (const FVector2D Size : {FVector2D(200, 200), FVector2D(50, 30)})
+			{
+				TStrongObjectPtr<UTextureRenderTarget2D> Target(FWidgetRenderer::CreateTargetFor(Size, TF_Nearest, true));
+				FWidgetRenderer Renderer(true);
+				Renderer.DrawWidget(Target.Get(), Instance->TakeWidget(), Size, 0.f);
+				FlushRenderingCommands();
+				if (!TestTrue(TEXT("Read resolved-size pixels"), Target->GameThread_GetRenderTargetResource()->ReadPixels(Images.AddDefaulted_GetRef()))) return false;
+			}
+			Instance->ReleaseSlateResources(true);
+		}
+		TestTrue(TEXT("Resolved-size elision preserves all normal pixels"), Images[0] == Images[2]);
+		TestTrue(TEXT("Resolved-size elision preserves all undersized pixels"), Images[1] == Images[3]);
 	}
 	return true;
 }

@@ -120,8 +120,8 @@ Screenshot → AI猜测 → 不精确的坐标/类型 → 需要修复 → UMG
   "name": "Button",         // 显示名称
   "x": 100,                 // X坐标（像素）*
   "y": 200,                 // Y坐标（像素）*
-  "width": 150,             // 宽度：数值 | "fill_container(min)" | "fit_content(min)"
-  "height": 50,             // 高度：数值 | "fill_container(min)" | "fit_content(min)"
+  "width": 150,             // 宽度：数值 | "fill_container(min)" | "fit_content(fallback)"
+  "height": 50,             // 高度：数值 | "fill_container(min)" | "fit_content(fallback)"
   "rotation": 0,            // 旋转角度（度，逆时针）
   "enabled": true,          // 可见性控制
   "opacity": 1.0,           // 不透明度 0-1
@@ -151,7 +151,7 @@ Screenshot → AI猜测 → 不精确的坐标/类型 → 需要修复 → UMG
 | `"fill_container"` | `"fill_container"` | `{FillContainer, 0}` | 填充父容器 |
 | `"fill_container(min)"` | `"fill_container(500)"` | `{FillContainer, 500}` | 填充父容器，fallback 最小值 500 |
 | `"fit_content"` | `"fit_content"` | `{FitContent, 0}` | 适应内容 |
-| `"fit_content(min)"` | `"fit_content(900)"` | `{FitContent, 900}` | 适应内容，最小值 900 |
+| `"fit_content(fallback)"` | `"fit_content(900)"` | `{FitContent, 900}` | 适应内容；没有子项时使用备用尺寸 900 |
 | 缺省/null | 无该字段 | `{FitContent, 0}` | **默认为 fit_content** |
 
 **解析优先级**：
@@ -914,7 +914,7 @@ UMG 的 TextBlock 不支持独立的垂直对齐属性。当前实现采用“�
 
 ```cpp
 // 水平对齐映射
-// Review 修复: FDesignNode::TextAlign 是 ETextJustify::Type 枚举，直接比较
+// FDesignNode::TextAlign 是 ETextJustify::Type 枚举，直接比较
 if (Node.TextAlign == ETextJustify::Center)
     TextBlock->SetJustification(ETextJustify::Center);
 else if (Node.TextAlign == ETextJustify::Right)
@@ -1400,10 +1400,10 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 
 当前产品口径：`Prototype Basic` 已作为插件正式支持能力收口，但正式承诺范围只覆盖“页面切换 + typed trigger/action runtime contract + 基础过渡近似”。
 
-同时，本轮 release candidate 的导入与验证边界也已经锁定：
+当前导入与验证边界如下：
 
 - 正式承诺只覆盖 `Pencil .pen` 与 `Figma Design` 导入到 `UE5 UMG Widget Blueprint`
-- MCP / live sync 仍可作为本地桥接与调试工具存在，但不是本轮 release promise
+- MCP / live sync 仍可作为本地桥接与调试工具存在，但不属于当前 release promise
 - reimport 当前只承诺“生成新资产”，不承诺 patch 现有 Blueprint
 - 封版验证以 maintainer-owned canonical runtime boundary 为准，不允许 HostProject fallback
 
@@ -1446,9 +1446,9 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 - 当前定位：这是生成阶段的类替换能力，不是通用规则引擎，也不扩展为新的 widget mapping DSL
 - 验证方式：生成 Blueprint 后，在 Widget Tree 中检查目标节点的构造类是否被替换为配置类
 
-### 3.16 Typed Property Migration Status
+### 3.16 Typed Property Ownership
 
-The typed-property migration has reached the direct typed-consumption stage:
+Typed properties are consumed directly:
 
 - `WidgetStyle / TextData / Brush / Effect / PathData / Render / WidgetState` are current typed schema owners.
 - `UMGJsonParser` keeps only the current typed schema after parsing; old UMG JSON compatibility is not a continuing expansion target.

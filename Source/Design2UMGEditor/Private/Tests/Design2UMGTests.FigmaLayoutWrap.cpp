@@ -83,27 +83,77 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWrapGapUsesInnerSlotPaddingOnlyTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWrapGapUsesInnerSlotPaddingOnlyTest::RunTest(const FString& Parameters)
 {
-	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
-		MakeContainerNode(TEXT("wrap1"), TEXT("Wrap"), TEXT("FRAME"), 0, 0, 300, 200, FString::Printf(
-			TEXT("%s,%s"),
-			*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 0, 0, 100, 50, FString()),
-			*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 100, 0, 100, 50, FString())),
-		TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":24,\"counterAxisSpacing\":16"))));
-
-	FDesignDocument Doc;
-	TestTrue(TEXT("Wrap gap parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
-	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
-	const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
-	TestTrue(TEXT("Wrap widget exists"), WrapWidget != nullptr);
-	if (!WrapWidget || WrapWidget->Children.Num() < 2)
+	// Zero main-axis spacing allows positive cross-axis spacing; negative main-axis spacing
+	// suppresses both. Compare numeric padding: unset and explicit zero have the same behavior.
+	struct FWrapGapCase
 	{
-		return false;
-	}
+		const TCHAR* Label;
+		float MainGap;
+		float CrossGap;
+		bool bCrossSet;    // false => counterAxisSpacing omitted (falls back to the main axis)
+		float ExpectedX;
+		float ExpectedY;
+	};
+	const TArray<FWrapGapCase> Cases = {
+		{TEXT("(0,16)"),      0.0f, 16.0f, true,   0.0f, 16.0f},  // zero main axis + positive cross axis: the reopened boundary
+		{TEXT("(16,0)"),     16.0f,  0.0f, true,  16.0f,  0.0f},  // non-zero main axis, zero cross axis
+		{TEXT("(0,0)"),       0.0f,  0.0f, true,   0.0f,  0.0f},  // both zero -> numerically zero, presence not forced
+		{TEXT("(24,16)"),    24.0f, 16.0f, true,  24.0f, 16.0f},  // original retained case
+		{TEXT("(16,unset)"), 16.0f,  0.0f, false, 16.0f, 16.0f},  // cross axis unset -> falls back to the main axis
+		{TEXT("(-8,0)"),     -8.0f,  0.0f, true,   0.0f,  0.0f},  // Negative main-axis spacing suppresses padding.
+		{TEXT("(-8,16)"),    -8.0f, 16.0f, true,   0.0f,  0.0f},  // negative main axis + positive cross axis: still no write
+		{TEXT("(-5e-9,16)"), -5.0e-9f, 16.0f, true, 0.0f, 0.0f},  // TINY negative main axis: still no write. Guards against a toleranced near-zero test silently reclassifying negative gaps as zero; only an EXACT 0 reopens the case.
+	};
 
-	TestEqual(TEXT("Wrap uses dual-axis inner slot padding"), GetWidgetProperty(*WrapWidget, TEXT("InnerSlotPadding")), TEXT("24.0,16.0"));
-	TestTrue(TEXT("Second child has no duplicated left gap"), FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Left));
-	TestTrue(TEXT("Second child has no duplicated top gap"), FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Top));
-	return true;
+	bool bAllCasesPass = true;
+	for (const FWrapGapCase& C : Cases)
+	{
+		// %.9g, not %.0f: the matrix includes a tiny negative main-axis gap (-5e-9) that
+		// %.0f would round to "0" and thereby turn into the very case under test.
+		const FString GapJson = C.bCrossSet
+			? FString::Printf(TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":%.9g,\"counterAxisSpacing\":%.9g"), C.MainGap, C.CrossGap)
+			: FString::Printf(TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"WRAP\",\"itemSpacing\":%.9g"), C.MainGap);
+
+		const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 300,
+			MakeContainerNode(TEXT("wrap1"), TEXT("Wrap"), TEXT("FRAME"), 0, 0, 300, 200, FString::Printf(
+				TEXT("%s,%s"),
+				*MakeContainerNode(TEXT("c1"), TEXT("Card1"), TEXT("FRAME"), 0, 0, 100, 50, FString()),
+				*MakeContainerNode(TEXT("c2"), TEXT("Card2"), TEXT("FRAME"), 100, 0, 100, 50, FString())),
+				*GapJson)));
+
+		FDesignDocument Doc;
+		if (!TestTrue(FString::Printf(TEXT("Wrap gap parse succeeds %s"), C.Label), FFigmaParser::ParseDocument(Json, Doc)))
+		{
+			bAllCasesPass = false;
+			continue;
+		}
+		FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+		const FUMGWidgetNode* WrapWidget = FindWidgetById(Data.RootWidget, TEXT("wrap1"));
+		if (!TestTrue(FString::Printf(TEXT("Wrap widget exists %s"), C.Label), WrapWidget != nullptr) || (WrapWidget && WrapWidget->Children.Num() < 2))
+		{
+			bAllCasesPass = false;
+			continue;
+		}
+
+		const FVector2D Actual = WrapWidget->WidgetStyle.InnerSlotPadding.Get(FVector2D::ZeroVector);
+		if (!TestTrue(FString::Printf(TEXT("Wrap inner slot padding %s expected (%.9g,%.9g) actual (%.9g,%.9g)"),
+				C.Label, C.ExpectedX, C.ExpectedY, Actual.X, Actual.Y),
+				FMath::IsNearlyEqual(Actual.X, C.ExpectedX, 0.001f) && FMath::IsNearlyEqual(Actual.Y, C.ExpectedY, 0.001f)))
+		{
+			bAllCasesPass = false;
+		}
+		if (!TestTrue(FString::Printf(TEXT("Second child has no duplicated left gap %s"), C.Label),
+				FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Left)))
+		{
+			bAllCasesPass = false;
+		}
+		if (!TestTrue(FString::Printf(TEXT("Second child has no duplicated top gap %s"), C.Label),
+				FMath::IsNearlyZero(WrapWidget->Children[1].Slot.Padding.Top)))
+		{
+			bAllCasesPass = false;
+		}
+	}
+	return bAllCasesPass;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaWrapFillChildPreservesMeasuredSizeTest,

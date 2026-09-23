@@ -63,10 +63,10 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataRoundTripTest,
-	"Design2UMG.FigmaParser.RenderFallbackMetadataRoundTrip",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataSerializationCycleTest,
+	"Design2UMG.FigmaParser.RenderFallbackMetadataSerializationCycle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaRenderFallbackMetadataRoundTripTest::RunTest(const FString& Parameters)
+bool FFigmaRenderFallbackMetadataSerializationCycleTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,

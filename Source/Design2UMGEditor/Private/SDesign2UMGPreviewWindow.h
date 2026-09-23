@@ -10,8 +10,9 @@
 #include "Widgets/Input/SEditableTextBox.h"
 
 class SBox;
+struct FArtifactGenerationResult;
 
-DECLARE_DELEGATE_OneParam(FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
+DECLARE_DELEGATE_RetVal_OneParam(FArtifactGenerationResult, FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
 
 /**
@@ -22,6 +23,7 @@ class DESIGN2UMGEDITOR_API SDesign2UMGPreviewWindow : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SDesign2UMGPreviewWindow) {}
 		SLATE_ARGUMENT(FString, OriginalJson)
+		SLATE_ARGUMENT(TSharedPtr<const FUMGWidgetData>, OriginalData)
 		SLATE_ARGUMENT(FString, OutputPath)
 		SLATE_ARGUMENT(TArray<FString>, Warnings)
 		SLATE_ARGUMENT(TOptional<FDesignPreviewMaterializationSettingsSnapshot>, InitialMaterializationSettingsSnapshot)
@@ -44,6 +46,8 @@ private:
 	TSharedPtr<IDesignPreviewMaterializationService> PreviewMaterializationService;
 
 	FString CurrentJson;
+	TSharedPtr<const FUMGWidgetData> OriginalData;
+	FText GenerationStatus;
 	FString CurrentOutputPath;
 	TArray<FString> ConversionWarnings;
 	uint64 NextRefreshRequestId = 1;

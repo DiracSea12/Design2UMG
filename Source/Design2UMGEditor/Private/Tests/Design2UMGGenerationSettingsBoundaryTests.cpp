@@ -23,6 +23,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "WidgetBlueprint.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -499,10 +501,10 @@ bool FPreviewMaterializationSnapshotCopyBoundaryTest::RunTest(const FString& Par
 
 	// Reverse boundary: approved materialization -> generation keeps overrides
 	// and resets fields preview does not own to their defaults.
-	const FDesign2UMGGenerationSettingsSnapshot RoundTripped =
+	const FDesign2UMGGenerationSettingsSnapshot Deserialized =
 		FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(MaterializationSnapshot);
-	TestEqual(TEXT("Round-tripped snapshot carries the override"),
-		RoundTripped.ClassOverrides.Num(), 1);
+	TestEqual(TEXT("Reconstructed snapshot carries the override"),
+		Deserialized.ClassOverrides.Num(), 1);
 
 	// Unset materialization snapshot -> default-constructed generation settings.
 	const FDesign2UMGGenerationSettingsSnapshot Defaulted =

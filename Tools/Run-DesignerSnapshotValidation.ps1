@@ -51,7 +51,7 @@ if ($ValidateOnly) {
     exit 0
 }
 
-Stop-D2UEditorsUnlessKeeping -KeepExistingEditor:$KeepExistingEditor
+Assert-D2UEditorIsolation -KeepExistingEditor:$KeepExistingEditor
 
 $startTime = Get-Date
 New-D2UDirectoryForPath $DesignerPngPath

@@ -19,6 +19,7 @@
 #include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "TextureResource.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeTextMetricsTest,
     "Design2UMG.Text.NativeFontFaceRunMetrics",

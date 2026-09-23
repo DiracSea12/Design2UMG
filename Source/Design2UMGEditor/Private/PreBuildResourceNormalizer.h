@@ -3,15 +3,21 @@
 
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
+#include "DesignImageResourceLimits.h"
 
 class FPreBuildResourceNormalizer
 {
 public:
-	static bool ValidatePathTextureBudget(const FUMGWidgetNode& Root, FString& OutError);
-	static bool NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
+	// Validate each request's dimensions; charge cumulative bytes only at real allocations.
+	static bool ValidateGeneratedTextureRequests(
+		const FUMGWidgetNode& Root,
+		FString& OutError);
+	// Persist path, procedural and transformed-image textures in dependency order.
+	static bool NormalizeGeneratedTextures(FUMGWidgetNode& Root, const FString& PackagePath,
+		const FString& AssetPrefix, FString& OutError);
+
+	static bool NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr,
+		DesignImageResources::FImageOperationBudget* Budget = nullptr);
 	static bool NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
 	static bool NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
-#if WITH_DEV_AUTOMATION_TESTS
-	static void ArmTextureSaveFailureOnce();
-#endif
 };

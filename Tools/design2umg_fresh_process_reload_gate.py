@@ -24,6 +24,9 @@ import time
 from pathlib import Path
 
 from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script
+from design2umg_verify_lib.json_io import load_json
+from design2umg_verify_lib.structure_comparison import compare_structure_snapshots, structure_comparison_counts_match
+from design2umg_auto_verify import compare_image_paths
 
 
 OUTER_LOAD_FAILURE_MARKERS = (
@@ -86,8 +89,10 @@ def read_result_summary(result_path: Path, started_at: float) -> tuple[dict | No
         )
     try:
         payload = json.loads(result_path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as exc:
+    except (OSError, UnicodeError, ValueError) as exc:
         return None, errors + [f"result json unreadable: {result_path} ({exc})"]
+    if not isinstance(payload, dict):
+        return None, errors + [f"result json is not an object: {result_path}"]
     return payload, errors
 
 
@@ -108,31 +113,71 @@ def parse_asset_floors(raw: str) -> dict[int, int]:
             asset_index = int(index)
         except ValueError as exc:
             raise SystemExit(f"Invalid --asset-floors entry {token!r}: index must be an integer") from exc
+        if asset_index < 0 or asset_index in floors:
+            raise SystemExit(f"Invalid --asset-floors index {asset_index}: indices must be non-negative and unique")
         floors[asset_index] = floor
     return floors
 
 
+def load_suite_assets(run_root: Path) -> dict[str, dict]:
+    """Use the recorded discovered set, not directory count or a built-in corpus."""
+    run_root = run_root.resolve()
+    scope = load_json(run_root / "run_scope.json")
+    names = scope.get("case_names") if isinstance(scope, dict) else None
+    if (not isinstance(names, list) or not names or any(not isinstance(name, str) or not name for name in names)
+            or len(names) != len(set(names))):
+        raise RuntimeError("Bulk scope must contain a nonempty, unique case set")
+    assets = {}
+    for name in names:
+        case_dir = (run_root / name).resolve()
+        if case_dir.parent != run_root:
+            raise RuntimeError(f"Invalid case directory in suite scope: {name}")
+        result, errors = read_result_summary(case_dir / "ue_render_result.json", 0)
+        if errors or result.get("success") is not True:
+            raise RuntimeError(f"Bulk asset result unavailable for {name}: {errors}")
+        asset = result.get("generated_asset_path")
+        structure = result.get("asset_structure")
+        if (not isinstance(asset, str) or not asset or not isinstance(structure, dict)
+                or type(structure.get("total_nodes")) is not int or structure["total_nodes"] < 1):
+            raise RuntimeError(f"Invalid or duplicate suite asset for {name}")
+        result["render_png_path"] = str(case_dir / "candidate.png")
+        if not Path(result["render_png_path"]).is_file():
+            raise RuntimeError(f"Bulk candidate PNG missing for {name}")
+        asset = normalize_object_path(asset)
+        if asset in assets:
+            raise RuntimeError(f"Duplicate suite asset: {asset}")
+        assets[asset] = result
+    return assets
+
+
 def evaluate_results(
-    result_paths: list[Path],
+    result_paths: dict[Path, str],
     min_total_nodes: int,
     started_at: float,
     asset_floors: dict[int, int] | None = None,
+    baselines: dict[str, dict] | None = None,
 ) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     summaries: list[str] = []
-    for asset_index, result_path in enumerate(result_paths):
+    for asset_index, (result_path, expected_asset) in enumerate(result_paths.items()):
         payload, errors = read_result_summary(result_path, started_at)
         if errors:
             failures.extend(errors)
             continue
         assert payload is not None
-        label = str(payload.get("generated_asset_path") or result_path)
-        if not payload.get("success"):
+        label = expected_asset
+        if payload.get("success") is not True:
             failures.append(f"{label}: AutomationRender reported failure: {payload.get('error_message') or '<no error message>'}")
             continue
-        structure = payload.get("asset_structure") or {}
-        total_nodes = structure.get("total_nodes")
-        if not isinstance(total_nodes, int):
+        if payload.get("generated_asset_path") != expected_asset:
+            failures.append(f"{label}: result belongs to a different asset: {payload.get('generated_asset_path')!r}")
+            continue
+        if payload.get("force_reload_package_requested") is not True:
+            failures.append(f"{label}: result does not confirm the requested package reload")
+            continue
+        structure = payload.get("asset_structure")
+        total_nodes = structure.get("total_nodes") if isinstance(structure, dict) else None
+        if type(total_nodes) is not int:
             failures.append(f"{label}: result json carries no asset_structure.total_nodes")
             continue
         floor = (asset_floors or {}).get(asset_index, min_total_nodes)
@@ -141,6 +186,24 @@ def evaluate_results(
                 f"{label}: widget tree collapsed below the guarded floor ({total_nodes} < {floor})"
             )
             continue
+        if baselines is not None:
+            baseline = baselines[expected_asset]
+            comparison = compare_structure_snapshots(baseline["asset_structure"], structure)
+            if not structure_comparison_counts_match(comparison):
+                failures.append(f"{label}: reloaded structure or text differs from the suite asset")
+                continue
+            png_path = result_path.with_suffix(".png")
+            if not png_path.is_file() or png_path.stat().st_mtime < started_at:
+                failures.append(f"{label}: fresh reload PNG missing or stale")
+                continue
+            try:
+                pixels = compare_image_paths(Path(baseline["render_png_path"]), png_path, 0)
+            except OSError as exc:
+                failures.append(f"{label}: reload PNG unreadable: {exc}")
+                continue
+            if not pixels or not pixels["size_match"] or pixels["changed_ratio"] != 0:
+                failures.append(f"{label}: reloaded pixels differ from the suite candidate")
+                continue
         summaries.append(f"{label}: total_nodes={total_nodes}")
     return failures, summaries
 
@@ -161,21 +224,26 @@ def run_gate(args: argparse.Namespace) -> int:
         print(f"[FAIL] {exc}")
         return 2
 
-    output_root = Path(args.output_root).resolve()
-    output_root.mkdir(parents=True, exist_ok=True)
-
     try:
-        object_paths = [normalize_object_path(raw) for raw in args.assets.split(",") if raw.strip()]
-    except SystemExit as exc:
+        baselines = load_suite_assets(Path(args.run_root)) if args.run_root else None
+        object_paths = list(baselines) if baselines is not None else [
+            normalize_object_path(raw) for raw in args.assets.split(",") if raw.strip()]
+    except (SystemExit, RuntimeError) as exc:
         print(f"[FAIL] {exc}")
         return 2
     if not object_paths:
         print("[FAIL] No asset paths supplied.")
         return 2
 
+    if args.min_total_nodes < 1 or any(index >= len(object_paths) for index in asset_floors):
+        print("[FAIL] Node floors must be positive and their indices must refer to supplied assets.")
+        return 2
+
+    output_root = Path(args.output_root).resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
     tag = args.tag
     spec_paths: list[Path] = []
-    result_paths: list[Path] = []
+    result_paths: dict[Path, str] = {}
     png_dir = output_root / "renders"
     png_dir.mkdir(parents=True, exist_ok=True)
     for index, object_path in enumerate(object_paths):
@@ -188,7 +256,7 @@ def run_gate(args: argparse.Namespace) -> int:
             encoding="utf-8",
         )
         spec_paths.append(spec_path)
-        result_paths.append(result_json_path)
+        result_paths[result_json_path] = object_path
 
     driver_script_path = write_editor_driver_script(
         output_root / f"{tag}_editor_driver.py",
@@ -226,12 +294,14 @@ def run_gate(args: argparse.Namespace) -> int:
     print(f"[GATE] Editor exited with code {exit_code} after {elapsed:.0f}s.")
 
     failures: list[str] = []
+    if exit_code != 0:
+        failures.append(f"Editor exited with non-zero code {exit_code}; reload completion is not verified.")
     log_hits = audit_log_for_corruption(gate_log_path)
     if log_hits:
         failures.append(f"fresh-log corruption signatures ({len(log_hits)} hit(s)):")
         failures.extend(f"  {hit}" for hit in log_hits[:20])
 
-    result_failures, summaries = evaluate_results(result_paths, args.min_total_nodes, started_at, asset_floors)
+    result_failures, summaries = evaluate_results(result_paths, args.min_total_nodes, started_at, asset_floors, baselines)
     failures.extend(result_failures)
 
     for summary in summaries:
@@ -253,7 +323,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--project", required=True, help="Runtime .uproject path. No env fallback, fails closed.")
     parser.add_argument("--editor", required=True, help="UnrealEditor.exe path. No env fallback, fails closed.")
-    parser.add_argument("--assets", required=True, help="Comma-separated /Game/... WidgetBlueprint object paths.")
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--assets", default="", help="Comma-separated /Game/... WidgetBlueprint object paths.")
+    inputs.add_argument("--run-root", default="", help="Completed suite run; reload every recorded asset and verify structure, text and pixels.")
     parser.add_argument("--output-root", required=True, help="Directory for specs, driver scripts, logs, and renders.")
     parser.add_argument("--tag", default="freshreload", help="Filename tag for generated gate artifacts.")
     parser.add_argument(

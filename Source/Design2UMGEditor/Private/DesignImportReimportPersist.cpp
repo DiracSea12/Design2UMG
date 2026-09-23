@@ -121,14 +121,14 @@ namespace DesignImportPipeline
 		UWidgetBlueprint*& WBP,
 		FDesign2UMGGenerationManifestSidecar& Manifest)
 	{
-		// 1) Resolve the settings snapshot (same origin as the import path: ini validation diagnostics enter the generation chain with the snapshot).
+		// Resolve the settings snapshot from the same origin as the import path so ini validation diagnostics travel with it.
 		SettingsSnapshot =
 			Request.SettingsSnapshot.IsSet()
 				? Request.SettingsSnapshot.GetValue()
 				: FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		const FReimportSession Session{ &Document, Request, Data, SettingsSnapshot.GenerationSettings };
 
-		// 2) Re-parse the source (image parsing + Convert into the new IR).
+		// Re-parse images and convert the source into the current intermediate representation.
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
@@ -143,7 +143,7 @@ namespace DesignImportPipeline
 		}
 		Data = AnalysisResult.Data;
 
-		// 3) Locate the target asset + read the manifest.
+		// Locate the target asset and read its manifest.
 		TargetPackage = FPackageName::ObjectPathToPackageName(Request.TargetAssetPath);
 		WBP = LoadObject<UWidgetBlueprint>(
 			nullptr, *(TargetPackage + TEXT(".") + FPaths::GetBaseFilename(TargetPackage)));
@@ -173,7 +173,7 @@ namespace DesignImportPipeline
 		bool& bPrototypeHostContinued)
 	{
 		const FUMGWidgetData& Data = Session.Data;
-		// 4) DocumentScope matching: a mismatch of provider or scope = unclear relationship, full conflict.
+		// A provider or document-scope mismatch makes the asset relationship ambiguous and produces a full conflict.
 		const FString NewProvider = Data.HasSourceDocumentData() ? Data.SourceDocument().Provider : FString();
 		const FString NewScope = Data.HasSourceDocumentData() ? Data.SourceDocument().DocumentScope : FString();
 		if (!NewProvider.Equals(Manifest.Provider, ESearchCase::IgnoreCase)
@@ -191,10 +191,8 @@ namespace DesignImportPipeline
 		Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
 			PreparedRoot, Session.GenerationSettings.ComponentMapping, Data, MappingBuildState);
 
-		// 5) Locate the manifest-recorded sourceRoot in the active IR (the page/root-node relation).
-		// An empty sourceRoot identity = the synthesized switcher host root of a single-page interactive document (only
-		// multi-page documents get a fingerprint token id; see the PrototypePages.Num() > 1 branch of BuildAnalysis) -
-		// this is the current identity rule, not legacy-sidecar compatibility: on empty, the new IR root simply is the scope.
+		// Locate the manifest source root. An empty identity selects the full IR root;
+		// only multi-page prototype hosts carry a page-set fingerprint.
 		FReimportTreeIndex SourceIndex;
 		BuildDesignTreeIndex(PreparedRoot, SourceIndex);
 		if (!Manifest.SourceRootNodeId.IsEmpty()
@@ -209,16 +207,9 @@ namespace DesignImportPipeline
 		ScopeRoot = Manifest.SourceRootNodeId.IsEmpty()
 			? &PreparedRoot
 			: SourceIndex.DesignNodesById.FindRef(Manifest.SourceRootNodeId);
-		// Host continuation: the synthesized host root id of a multi-page prototype is a content fingerprint of the page set (BuildPrototypeInternalTokenHash =
-		// CRC32 of each page's "id|name;" concatenation); adding/removing pages necessarily rewrites it, but a content fingerprint is not the document identity -
-		// provider + documentScope already matched in step 4, and when the new source is itself still a multi-page prototype, this is the same
-		// host's page-set evolution, not an "unclear relationship": do not reject on a differing fingerprint; continue the existing structure
-		// diff with the new source's actual host root as the scope (added pages go through added, removed pages through safe delete), and record the new fingerprint in the manifest on success.
-		// The decision is narrowed to "old and new hosts are both switcher bodies": a record id with the _root suffix = an overlay wrapper root;
-		// the new root's design id must be exactly the new source's SwitcherWidgetId (the switcher body's synthesized root). The
-		// overlay wrapper root's non-instance children are synthetic layers (switcher/overlay hosts), not pages - admitting them would
-		// hang them at the wrong level as top-level additions; a host-form flip (overlay appearing/disappearing) keeps the conservative
-		// full-conflict semantics just like the single-page downgrade (the latter is the settled behavior of slice C CASE-011).
+		// The switcher root ID fingerprints its page set, so page edits can change it without
+		// changing document identity. Continue only between switcher-body roots in the matched
+		// document scope; overlay-host changes and single-page downgrades remain conflicts.
 		bPrototypeHostContinued = !ScopeRoot
 			&& Manifest.SourceRootNodeId.StartsWith(Design2UMGPrototypeTokens::SwitcherRootPrefix())
 			&& !Manifest.SourceRootNodeId.EndsWith(Design2UMGPrototypeTokens::OverlayRootSuffix())
@@ -273,7 +264,7 @@ namespace DesignImportPipeline
 		TSet<FString>& AliveInstanceWidgetNames,
 		FString& OutFailureReason)
 	{
-		// 7) Update plan: one scoped identity index replaces the old manifest-record x root-DFS pairing.
+		// Build the update plan from one scoped identity index rather than repeated manifest-record tree searches.
 		BuildDesignTreeIndex(PreparedScopeRoot, TreeIndex);
 
 		TSet<FString> CheckedMappingKeys;
@@ -319,7 +310,7 @@ namespace DesignImportPipeline
 		}
 
 		// Expanded component descendants may legitimately repeat definition ids across distinct instances. New
-		// top-level roots, however, become reconciliation identities this round and must be unique before mutation.
+		// top-level roots, however, become reconciliation identities for this operation and must be unique before mutation.
 		if (!InstancesById.Contains(GetDesignNodeId(PreparedScopeRoot)))
 		{
 			for (const FUMGWidgetNode& Child : PreparedScopeRoot.Children)
@@ -345,8 +336,7 @@ namespace DesignImportPipeline
 				TEXT("Repeated nested stable identity '%s' excluded from document-wide lookup; descendants remain parent-local"), *Id));
 		}
 
-		// Instance widget names still alive in this round's update plan (Matched/KindChanged = still present in the design-side new source).
-		// Used as the second conservative gate before the 9a/9b subtree whole delete, preventing live instances from being deleted along the way (see the function comment).
+		// Matched and type-changed instances remain in the source design; preserve them during subtree deletion.
 		for (const FReimportPlanEntry& Entry : Plan)
 		{
 			if (Entry.Action != EReimportPlanAction::Removed)
@@ -357,7 +347,7 @@ namespace DesignImportPipeline
 		return true;
 	}
 
-	/** Step 8): structural sanity check; failure exits early as a full conflict. */
+	/** Validate target-tree structure before mutation; failure exits early as a full conflict. */
 	TOptional<FDesignReimportResult> CheckReimportStructureViability(
 		const FReimportSession& Session,
 		UWidgetBlueprint* WBP,
@@ -367,7 +357,7 @@ namespace DesignImportPipeline
 		FDesignReimportResult& Result,
 		FIntPoint& DesignSize)
 	{
-		// 8) Structural sanity: target tree missing / not even one manifest instance locatable = project-side restructure, full conflict.
+		// A missing target tree or absence of every manifest instance indicates a project-side restructure.
 		if (!WBP->WidgetTree || !WBP->WidgetTree->RootWidget)
 		{
 			return HandleFullConflict(
@@ -412,7 +402,7 @@ namespace DesignImportPipeline
 		});
 	}
 
-	/** Step 9) transaction prelude: open the editor transaction + add RF_Transactional to the existing tree; returns the transaction index (INDEX_NONE = no transaction). */
+	/** Open the editor transaction and mark the existing tree transactional; INDEX_NONE means no owned transaction. */
 	int32 BeginReimportApplyTransaction(UWidgetBlueprint* WBP)
 	{
 		// Note: FScopedTransaction::Cancel only discards the transaction record, it does not roll objects back; a real
@@ -442,7 +432,7 @@ namespace DesignImportPipeline
 		return TransactionIndex;
 	}
 
-	/** Step 10): assemble the post-reimport manifest payload (including preview-size refresh and GUID backfill). */
+	/** Assemble the post-reimport manifest payload, including preview-size refresh and GUID backfill. */
 	FDesign2UMGGenerationOutput BuildReimportManifestPayload(
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		bool bPrototypeHostContinued,
@@ -451,7 +441,7 @@ namespace DesignImportPipeline
 		TSet<FString>& UpdatedD2UOwned,
 		const TArray<FString>& KeepAsIsWidgetNames)
 	{
-		// 10) Assemble the post-reimport manifest payload.
+		// Assemble the post-reimport manifest payload.
 		FDesign2UMGGenerationOutput GenerationOutput;
 		GenerationOutput.Manifest.Provider = Manifest.Provider;
 		GenerationOutput.Manifest.DocumentScope = Manifest.DocumentScope;
@@ -486,7 +476,7 @@ namespace DesignImportPipeline
 			}
 		}
 
-		// Instances newly created by this round's generation chain (top-level added / kind-changed new forms / nested new mapped) enter the new manifest.
+		// Instances created by this generation run (top-level additions, kind changes, and nested mapped nodes) enter the new manifest.
 		for (const FDesign2UMGMappedInstanceRecord& NewMapped : Shared.MappingBuildState->GetMappedInstances())
 		{
 			if (!GenerationOutput.Manifest.MappedInstances.ContainsByPredicate(
@@ -504,7 +494,7 @@ namespace DesignImportPipeline
 			}
 		}
 
-		// New d2uOwned = (old set - deleted names) U names created this round; then drop names no longer present in the tree.
+		// New d2uOwned = (old set - deleted names) union names created by this run; then drop names absent from the tree.
 		for (const FString& CreatedName : Shared.MappingBuildState->GetCreatedWidgetNames())
 		{
 			UpdatedD2UOwned.Add(CreatedName);
@@ -531,13 +521,13 @@ namespace DesignImportPipeline
 	}
 
 	/**
-	 * Asset finalization at the tail of step 10) (asset-side side effects unrelated to manifest assembly):
+	 * Asset finalization covers side effects unrelated to manifest assembly:
 	 * refresh the CDO preview size when the design root size changed (written back by SaveWidgetBlueprint after compiling);
 	 * backfill missing variable GUIDs of generation-chain-created widgets with the compiler's own deterministic rule.
 	 */
 	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP)
 	{
-		// Widgets newly created by this round's generation chain (plus test injections via ConstructWidget) have no
+		// Widgets created by this generation run (plus test injections via ConstructWidget) have no
 		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
 		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
 		// save-failure rollback the map restores with the asset, or the post-rollback recompile would trip the compiler's ensure on a "deleted widget's leftover GUID".
@@ -586,7 +576,7 @@ namespace DesignImportPipeline
 		}
 	}
 
-	/** Step 11): writability pre-check + compile & save + failure rollback (FailSaveWithRollback moved with this block). */
+	/** Validate writability, compile and save, then roll back the transaction on failure. */
 	FDesignReimportResult SaveReimportedAsset(
 		const FReimportSession& Session,
 		const FString& TargetPackage,

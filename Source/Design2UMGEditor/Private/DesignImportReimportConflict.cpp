@@ -59,11 +59,8 @@ namespace DesignImportPipeline
 		}
 
 		/**
-		 * Whether any widget in the subtree is referenced as a variable by blueprint event graphs (Get/Set nodes).
-		 * UWidget defaults to bIsVariable=true, so users can reference D2U widgets in graphs without bindings;
-		 * the engine's DeleteWidgets(DeleteSilently) internally removes variable nodes per
-		 * FBlueprintEditorUtils::IsVariableUsed - the same query is used here as the up-front check so the signal
-		 * stays symmetric with what the deletion path actually removes.
+		 * Detect Blueprint variable references before deleting widgets.
+		 * Use the engine's IsVariableUsed query, matching the DeleteWidgets deletion path.
 		 */
 		bool HasGraphVariableReferenceInSubtree(const UWidgetBlueprint* WBP, UWidget* SubtreeRoot)
 		{
@@ -130,11 +127,7 @@ namespace DesignImportPipeline
 		return true;
 	}
 
-	/**
-	 * The safe whole-delete shared by 9a (removed) and 9b (kind-changed replacing the old form):
-	 * collect subtree widget names -> delete silently -> remove them from the owned list. Returns the subtree name
-	 *set (for diagnostics to name / later cleanup). Both sites must stay semantically identical - consolidated here to prevent parallel evolution.
-	 */
+	/** Delete an owned subtree, remove its names from ownership, and return those names for diagnostics. */
 	TSet<FString> DeleteD2UOwnedSubtreeSilently(
 		UWidgetBlueprint* WBP, UWidget* SubtreeRoot, TSet<FString>& InOutUpdatedD2UOwned)
 	{
@@ -154,12 +147,8 @@ namespace DesignImportPipeline
 	}
 
 	/**
-	 * Second conservative gate before the 9a/9b whole delete: does the subtree still hold manifest instance widgets
-	 * "alive in this round's update plan" (Matched/KindChanged - design nodes still present in the new source)?
-	 * Whole-deleting such a subtree destroys the live instances with it; reparent/refresh can never recover them
-	 * by widgetName afterwards (design nodes lost from the asset + manifest ghost records without widgets).
-	 * So, exactly like with project content, the subtree root is kept conservatively and instances take their own move/refresh plans.
-	 * ExcludeWidgetName excludes the subtree root being processed itself (replacing/deleting it is this round's very intent).
+	 * Keep a subtree that contains live manifest instances until their move/refresh plans run.
+	 * ExcludeWidgetName omits the root being replaced or removed.
 	 */
 	bool CollectLiveInstancesInSubtree(
 		UWidget* SubtreeRoot,
@@ -191,8 +180,8 @@ namespace DesignImportPipeline
 		FDesignReimportResult Result;
 		Result.Commit.AssetPath = Session.Request.TargetAssetPath;
 		Result.Diagnostics = MoveTemp(PriorDiagnostics);
-		// ini validation diagnostics were produced during snapshot resolution (step 1); the early-exit report must carry
-		// them, or they vanish from the report when a config error stacks onto an asset-level conflict.
+		// Include ini validation diagnostics in the early-exit report so a configuration error remains visible
+		// when it coincides with an asset-level conflict.
 		Result.ComponentMappingDiagnostics = Session.GenerationSettings.ComponentMapping.ValidationDiagnostics;
 		const FString TargetPackage = FPackageName::ObjectPathToPackageName(Session.Request.TargetAssetPath);
 		AddReimportDiagnostic(

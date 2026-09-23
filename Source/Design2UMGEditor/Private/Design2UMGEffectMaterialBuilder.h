@@ -30,8 +30,5 @@ namespace Design2UMGEffectMaterialBuilder
 	/** Resolve persisted mask dependencies before creating or replacing a WidgetTree. */
 	bool PrepareGeometryMaskMaterials(FUMGWidgetNode& Root,
 		TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError);
-#if WITH_DEV_AUTOMATION_TESTS
-	void ArmGeometryMaskSaveFailureOnce();
-#endif
 
 }

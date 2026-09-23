@@ -19,6 +19,11 @@ namespace
 struct FPenParserParseContext
 {
 	bool bDepthExceeded = false;
+	// Single shared node-count budget for the whole parsed document tree (shares the
+	// UMG JSON parser's DesignTreeLimits semantics). A wide-but-shallow document is
+	// bounded just like a deep one; when the budget is exceeded the whole parse is
+	// rejected rather than returning a truncated tree.
+	FDesignParserBudget Budget;
 };
 
 // TU-local pipeline functions defined below; cross-TU parse functions are declared in PenParserInternal.h.
@@ -134,9 +139,13 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 
 	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), Resolver, OutDocument.Children, ParseContext, 0);
 
-	if (ParseContext.bDepthExceeded)
+	if (ParseContext.bDepthExceeded || ParseContext.Budget.WasExceeded())
 	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("Design file parsing failed because node nesting exceeds the supported depth."));
+		UE_LOG(LogDesign2UMG, Error, TEXT("Design file parsing failed because the document exceeds supported size/depth limits."));
+		// All-or-nothing: a size/depth breach must not publish a truncated tree.
+		// AppendParsedChildrenAtDepth above may have already partially populated the
+		// document, so clear it before failing the whole parse.
+		OutDocument = FDesignDocument();
 		return false;
 	}
 
@@ -377,6 +386,13 @@ TSharedPtr<FDesignNode> ParseNodeAtDepth(
 		return nullptr;
 	}
 
+	// Whole-tree node-count budget: one shared counting context across the document.
+	if (!ParseContext.Budget.TryEnterNode(Depth))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Pen document exceeds the maximum parsed node count (%d); parsing aborted."), DesignTreeLimits::MaxParsedNodeCount);
+		return nullptr;
+	}
+
     TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
     Node->Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderPencil);
 
@@ -453,7 +469,19 @@ void AppendParsedChildrenAtDepth(
 	for (const TSharedPtr<FJsonValue>& ChildVal : ChildrenField->AsArray())
 	{
 		if (TSharedPtr<FDesignNode> Child = ParseNodeAtDepth(ChildVal->AsObject(), Resolver, ParseContext, Depth))
+		{
 			OutChildren.Add(Child);
+		}
+		else if (ParseContext.Budget.WasExceeded() || ParseContext.bDepthExceeded)
+		{
+			// Both latches stay set once tripped, so every remaining sibling would fail
+			// and log the identical error again. The whole parse is already rejected at
+			// this point (ParseDocumentInternal clears the document), so stop walking
+			// instead of amplifying CPU and log cost across a potentially huge sibling
+			// list. Note this is reached only when the failure was a limit breach -- a
+			// node rejected for any other reason does not stop its siblings.
+			return;
+		}
 	}
 }
 }

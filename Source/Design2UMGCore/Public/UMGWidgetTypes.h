@@ -5,15 +5,8 @@
 #include "CoreMinimal.h"
 
 /**
- * Central vocabulary for UMG widget type names carried by FUMGWidgetNode::Type.
- *
- * Type stays a string on purpose: it is the wire format of the IR JSON bridge
- * (dump/reimport/automation) and of the editor widget-class map, and it is what
- * the verbose tree dumps print. The cost is that no compiler catches a typo, so
- * every producer and consumer must take the spelling from this header instead
- * of writing a literal - a rename then has exactly one place to change.
- *
- * Same role for widget types that UMGPropertyKeys.h plays for property keys.
+ * Shared spellings for FUMGWidgetNode::Type in conversion, JSON and widget lookup.
+ * Keep the string representation for serialization; use these constants at call sites.
  */
 namespace UMGWidgetTypes
 {

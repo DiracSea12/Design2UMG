@@ -6,7 +6,7 @@ English canonical: [ROADMAP.md](ROADMAP.md)
 **当前公开基线**：2026-05-14
 **状态说明**：`[ ]` 未开始 | `[~]` 进行中 | `[x]` 已完成
 
-内部 review 计划和 OpenSpec phase 不是公开发布承诺。本 roadmap 只描述公开方向和当前 release 边界。
+内部计划记录不是公开发布承诺。本 roadmap 只描述公开方向和当前 release 边界。
 
 ## 策略
 
@@ -84,7 +84,7 @@ Design2UMG 的目标是让 Unreal Engine 项目的 design-to-UMG 流程更容易
 
 有意保留的 public API 是 [Architecture](Architecture.md) 中记录的 `Design2UMGCore/Public` 和 `Design2UMGEditor/Public` header surface。保留理由包括 parser、converter、schema、settings、import、preview、image 或测试可见 contract 被下游模块或贡献者需要。
 
-未来如果要收窄 header，必须有当前 include 证据和验证支撑。Phase 21 Batch 1 只记录审计证据，不引入会改变行为的 public API break。
+未来如果要收窄 header，必须有当前 include 证据和验证支撑，不能只依据旧记录引入会改变行为的 public API break。
 
 ## 开源就绪里程碑
 

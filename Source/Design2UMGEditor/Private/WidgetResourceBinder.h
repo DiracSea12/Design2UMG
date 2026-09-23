@@ -16,9 +16,7 @@ public:
 	// Prefer material first, then fall back to texture; returns whether any resource was bound.
 	static bool BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
 
-	// Outcome of the shared procedural-texture resolution step. Both image-binding call sites
-	// (brush property application and this binder) resolve through TryResolveProceduralTexture
-	// so the request build and material-ref gate stay in one place.
+	// Shared procedural resolution for image resources and border brushes.
 	enum class EProceduralTextureResult : uint8
 	{
 		NoRequest,        // node carries no procedural material request

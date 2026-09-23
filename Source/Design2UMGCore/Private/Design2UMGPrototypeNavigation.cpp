@@ -27,13 +27,9 @@ namespace
 	}
 
 	/**
-	 * Deep-copies the page subtree as a build-time overlay mirror: every node clears its design
-	 * identity (SourceNodeId; the copy is synthesized chrome, not a second design instance) and gets
-	 * the non-numeric OverlayMirrorSuffix on id and name, so base-name resolution (which tolerates
-	 * only the generator's `_N`/`_wN` tails) never sees the mirror and the wiring can address it
-	 * deterministically by sanitize(pageId + suffix). The rest of the source sidecar
-	 * survives (component-mapping fields included): mirrors resolve mapped components exactly like
-	 * the originals.
+	 * Clone a page for the overlay host, clear design identity and append OverlayMirrorSuffix.
+	 * Keep source metadata, including component mapping. The non-numeric suffix excludes
+	 * mirrors from normal base-name matching while keeping them addressable by graph wiring.
 	 */
 	void MirrorWidgetSubtreeForOverlay(FUMGWidgetNode& Node)
 	{
@@ -46,12 +42,14 @@ namespace
 		}
 	}
 
-	/** TargetPageId set of one action kind across all bindings (steps are the executable shape; the binding-level fields cover the legacy no-steps export). */
+	/**
+	 * Collect targets for one action kind from executable steps and binding summaries.
+	 */
 	TSet<FString> CollectActionTargetPageIds(
 		const FUMGPrototypeNavigationData& NavigationData,
 		EUMGPrototypeNavigationStepKind Kind)
 	{
-		const EUMGPrototypeNavigationAction LegacyAction =
+		const EUMGPrototypeNavigationAction BindingAction =
 			Kind == EUMGPrototypeNavigationStepKind::Overlay
 				? EUMGPrototypeNavigationAction::Overlay
 				: EUMGPrototypeNavigationAction::Navigate;
@@ -69,7 +67,7 @@ namespace
 					}
 				}
 			}
-			else if (Binding.Action == LegacyAction)
+			else if (Binding.Action == BindingAction)
 			{
 				Targets.Add(Binding.TargetPageId);
 			}

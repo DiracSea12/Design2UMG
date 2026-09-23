@@ -2,13 +2,6 @@
 
 #include "DesignHttpClientSlot.h"
 
-#if WITH_DEV_AUTOMATION_TESTS
-namespace
-{
-	TSharedPtr<FDesignHttpClientSlotAutomationHooks> GDesignHttpClientSlotAutomationHooks;
-}
-#endif
-
 int32 FDesignHttpClientSlot::BeginRequest()
 {
 	ActiveRequestId = ++NextRequestId;
@@ -18,12 +11,6 @@ int32 FDesignHttpClientSlot::BeginRequest()
 bool FDesignHttpClientSlot::ProcessRequest(const FHttpRequestPtr& Request)
 {
 	ActiveRequest = Request;
-#if WITH_DEV_AUTOMATION_TESTS
-	if (GDesignHttpClientSlotAutomationHooks.IsValid())
-	{
-		return GDesignHttpClientSlotAutomationHooks->StartRequest(ActiveRequestId, Request);
-	}
-#endif
 	return Request->ProcessRequest();
 }
 
@@ -35,16 +22,6 @@ void FDesignHttpClientSlot::CancelActiveRequest()
 	}
 
 	CancelledRequestIdWatermark = FMath::Max(CancelledRequestIdWatermark, ActiveRequestId);
-#if WITH_DEV_AUTOMATION_TESTS
-	if (GDesignHttpClientSlotAutomationHooks.IsValid())
-	{
-		if (GDesignHttpClientSlotAutomationHooks->CancelRequest)
-		{
-			GDesignHttpClientSlotAutomationHooks->CancelRequest(ActiveRequestId);
-		}
-	}
-	else
-#endif
 	if (ActiveRequest.IsValid())
 	{
 		ActiveRequest->CancelRequest();
@@ -71,15 +48,3 @@ void FDesignHttpClientSlot::ClearActiveRequest(int32 RequestId)
 		ActiveRequestId = 0;
 	}
 }
-
-#if WITH_DEV_AUTOMATION_TESTS
-void SetDesignHttpClientSlotAutomationHooks(const TSharedPtr<FDesignHttpClientSlotAutomationHooks>& InHooks)
-{
-	GDesignHttpClientSlotAutomationHooks = InHooks;
-}
-
-void ResetDesignHttpClientSlotAutomationHooks()
-{
-	GDesignHttpClientSlotAutomationHooks.Reset();
-}
-#endif

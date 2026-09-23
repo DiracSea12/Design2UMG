@@ -11,6 +11,9 @@
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
+#include "DesignImportPipeline.h"
+#include "UMGJsonSerializer.h"
+#include "Misc/ScopeExit.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Tests/Design2UMGMappedComponentTestWidget.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
@@ -523,6 +526,53 @@ bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	DeleteOutputDirectory(OutputPath);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextMappedGenerationTest,
+	"Design2UMG.PreviewContext.MappedGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewContextMappedGenerationTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Parse mapped input"), FFigmaParser::ParseDocument(MakeWorkflowMappingFigmaJson(), Document))) return false;
+	const FUMGWidgetData Original = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const auto Settings = MakeMappingGenerationSettings();
+	for (int32 Mode = 0; Mode < 3; ++Mode)
+	{
+		FUMGWidgetData Data = Original;
+		if (Mode == 2) Data.RootWidget.Render.RenderOpacity = 0.8f;
+		if (Mode != 0)
+		{
+			FPreviewRefreshInput Input;
+			Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
+			Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
+			Input.bResolveImages = false;
+			auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+			if (!TestTrue(TEXT("Preview preserves mapped context"), Refreshed.bSucceeded)) continue;
+			Data = MoveTemp(Refreshed.Data);
+		}
+		const FString Folder = TEXT("/Game/Design2UMG/Automation/PreviewMapping_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		ON_SCOPE_EXIT { DeleteGeneratedAssetsAtPath(Folder); DeleteOutputDirectory(Folder); };
+		FDesign2UMGGenerationOutput Output;
+		UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+		if (!TestNotNull(TEXT("Direct and preview paths generate"), Blueprint)) continue;
+		auto* Instance = FindMappedInstanceByLabel(Blueprint->WidgetTree, FText::FromString(TEXT("Checkout")));
+		if (TestNotNull(TEXT("Mapped instance and text input retained"), Instance))
+		{
+			TestFalse(TEXT("Boolean input retained"), Instance->EnabledFlag);
+			TestEqual(TEXT("Name input retained"), Instance->VariantName, FName(TEXT("Primary")));
+			TestTrue(TEXT("Numeric input retained"), FMath::IsNearlyEqual(Instance->Value, 12.5));
+		}
+		TSharedPtr<FJsonObject> Manifest;
+		if (TestTrue(TEXT("Generation manifest exists"), ReadSidecarJson(Blueprint->GetOutermost()->GetName(), Manifest)) && Manifest)
+		{
+			TestEqual(TEXT("Manifest provider retained"), Manifest->GetStringField(TEXT("provider")), FString(TEXT("figma")));
+			TestEqual(TEXT("Manifest scope retained"), Manifest->GetStringField(TEXT("documentScope")), FString(TestScope));
+			TestEqual(TEXT("Manifest source root retained"), Manifest->GetObjectField(TEXT("sourceRoot"))->GetStringField(TEXT("nodeId")), FString(TEXT("page_root")));
+		}
+		if (Mode == 2) TestTrue(TEXT("Edited style reaches the generated root"), FMath::IsNearlyEqual(Blueprint->WidgetTree->RootWidget->GetRenderOpacity(), 0.8f));
+	}
 	return true;
 }
 

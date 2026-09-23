@@ -27,19 +27,9 @@ namespace
 	using DesignRemoteImageImporterInternal::FResolveContext;
 	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
 
-	// Texture asset naming-scheme version tags. These are two independent asset families,
-	// each carrying its own current version - not an old/new pair of the same family:
-	// - LegacyTextureImportVersion ("ui4") owns per-widget textures named
-	//   T_{frame}_{node}_{sourceHash}_ui4 under {ImportPath}/{Frame}/, keyed by the
-	//   versioned source key (source URL/local path + content hash). This family also
-	//   feeds the existing-asset reuse/repair lookup.
-	// - SharedTextureImportVersion ("ui5") owns content-deduplicated textures named
-	//   T_D2U_{contentHash}_ui5 under {ImportPath}/_Shared/, shared across widgets,
-	//   frames, and runs that reference identical image bytes.
-	// Bumping a tag changes every asset name its family produces: existing assets stay
-	// on disk untouched, but the next import writes fresh assets instead of reusing
-	// (and repairing) the previous generation.
-	constexpr TCHAR LegacyTextureImportVersion[] = TEXT("ui4");
+	// Per-widget textures use source identity; shared textures deduplicate image content.
+	// Each naming tag versions its own asset family. Changing a tag creates new asset names.
+	constexpr TCHAR PerWidgetTextureImportVersion[] = TEXT("ui4");
 	constexpr TCHAR SharedTextureImportVersion[] = TEXT("ui5");
 
 	bool IsAssetPath(const FString& Value)
@@ -99,24 +89,22 @@ namespace
 		return Safe.IsEmpty() ? TEXT("Image") : Safe;
 	}
 
-	// Texture asset-name truncation limits. No derivation on record; the values
-	// were fixed when each naming scheme was introduced to keep generated asset
-	// names bounded.
-	constexpr int32 MaxLegacyAssetNamePartChars = 24;
-	constexpr int32 MaxLegacySourceHashChars = 10;
+	// Limit frame/node parts and source hashes to keep texture asset names bounded.
+	constexpr int32 MaxPerWidgetAssetNamePartChars = 24;
+	constexpr int32 MaxPerWidgetSourceHashChars = 10;
 	constexpr int32 MaxSharedContentHashChars = 16;
 
-	FString BuildLegacyTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
+	FString BuildPerWidgetTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
 	{
-		const FString SafeFrame = SanitizeAssetName(FrameName).Left(MaxLegacyAssetNamePartChars);
+		const FString SafeFrame = SanitizeAssetName(FrameName).Left(MaxPerWidgetAssetNamePartChars);
 		FString NodeBase = WidgetName;
 		if (NodeBase.IsEmpty())
 		{
 			NodeBase = WidgetId;
 		}
-		const FString SafeNode = SanitizeAssetName(NodeBase).Left(MaxLegacyAssetNamePartChars);
-		const FString SourceHash = MakeUrlHash(SourceKey).Left(MaxLegacySourceHashChars);
-		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, LegacyTextureImportVersion);
+		const FString SafeNode = SanitizeAssetName(NodeBase).Left(MaxPerWidgetAssetNamePartChars);
+		const FString SourceHash = MakeUrlHash(SourceKey).Left(MaxPerWidgetSourceHashChars);
+		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, PerWidgetTextureImportVersion);
 	}
 
 	FString BuildSharedTextureAssetName(const FString& ContentHash)
@@ -339,6 +327,7 @@ namespace
 
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
 			if (!bPackageFileExisted)
@@ -386,6 +375,7 @@ namespace
 		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+		SaveArgs.SaveFlags = SAVE_NoError;
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
 		{
 			OutError = FString::Printf(TEXT("Failed to save texture package: %s"), *PackageFilename);
@@ -487,9 +477,8 @@ namespace
 		return true;
 	}
 
-	// Local-only repair path: when a legacy ui4 texture exists but its pixels no longer match
-	// the source image (dimension mismatch or 1x1 placeholder), rewrite it in place.
-	void RepairLegacyTextureFromSource(
+	// Repair a per-widget local texture when source dimensions differ or it holds a placeholder.
+	void RefreshWidgetTextureFromSource(
 		UTexture2D* Existing,
 		const TArray<uint8>& FileData,
 		const FString& ObjectPath,
@@ -517,13 +506,13 @@ namespace
 		FString RewriteError;
 		if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
 		{
-			++Context.Report.RepairedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Repaired local texture: %s (%dx%d -> %dx%d)"),
+			++Context.Report.RefreshedCount;
+			Context.Report.AddMessage(FString::Printf(TEXT("Refreshed local texture: %s (%dx%d -> %dx%d)"),
 				*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
 		}
 		else
 		{
-			Context.Report.AddMessage(FString::Printf(TEXT("Texture repair failed for '%s': %s"), *WidgetName, *RewriteError));
+			Context.Report.AddMessage(FString::Printf(TEXT("Texture refresh failed for '%s': %s"), *WidgetName, *RewriteError));
 		}
 	}
 
@@ -600,13 +589,13 @@ namespace
 
 			const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
 			const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
-			const FString LegacyAssetName = BuildLegacyTextureAssetName(
+			const FString PerWidgetAssetName = BuildPerWidgetTextureAssetName(
 				Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(LocalKey, ContentHash));
-			const FString LegacyObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
-			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *LegacyObjectPath))
+			const FString PerWidgetObjectPath = BuildObjectPathFromImport(SubDir, PerWidgetAssetName);
+			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *PerWidgetObjectPath))
 			{
-				RepairLegacyTextureFromSource(Existing, FileData, LegacyObjectPath, WidgetName, Context);
-				RegisterReusedTexture(LocalKey, ContentKey, LegacyObjectPath, Existing, nullptr, InOutTexturePath, Context);
+				RefreshWidgetTextureFromSource(Existing, FileData, PerWidgetObjectPath, WidgetName, Context);
+				RegisterReusedTexture(LocalKey, ContentKey, PerWidgetObjectPath, Existing, nullptr, InOutTexturePath, Context);
 				return true;
 			}
 
@@ -651,23 +640,33 @@ namespace
 			return true;
 		}
 
+		if (const FString* PreviousError = Context.UrlProcessingErrors.Find(NormalizedUrl))
+		{
+			++Context.Report.FailedCount;
+			Context.Report.AddMessage(FString::Printf(
+				TEXT("Image '%s' reused cached processing failure: %s (reason: %s)"),
+				*WidgetName,
+				*NormalizedUrl,
+				**PreviousError));
+			return false;
+		}
+
 		// UrlDownloads is pre-populated by ResolveRemoteImages for every URL that
 		// CollectRemoteUrls gathered (both sides normalize through TryNormalizeRemoteUrl).
-		const FUrlDownloadResult& Download = Context.UrlDownloads.FindChecked(NormalizedUrl);
+		FUrlDownloadResult& Download = Context.UrlDownloads.FindChecked(NormalizedUrl);
 		if (!Download.bSuccess)
 		{
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *Download.Error));
 			return false;
 		}
-		const TArray<uint8>& CompressedData = Download.Data;
-		FString DownloadError;
-		if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(CompressedData.Num()), DownloadError))
-		{
-			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' exceeds the operation budget: %s"), *WidgetName, *DownloadError));
-			return false;
-		}
+		// Keep the URL outcome for repeated nodes, but move its payload into this one
+		// processing attempt. The allocation is released on return instead of being
+		// retained by the batch result until the whole tree finishes.
+		TArray<uint8> CompressedData = Download.TakePayload();
+		// The cumulative compressed-byte budget was already consumed per chunk while
+		// the payload was received (see FImagePayloadIO::DownloadUrls). Do not bill it
+		// a second time here; only the decode-pixel budget below still applies.
 
 		const FString ContentHash = MakeContentHash(CompressedData);
 		const FString ContentKey = BuildSourceScopedContentKey(SourceKey, ContentHash);
@@ -682,12 +681,12 @@ namespace
 
 		const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
 		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
-		const FString LegacyAssetName = BuildLegacyTextureAssetName(
+		const FString PerWidgetAssetName = BuildPerWidgetTextureAssetName(
 			Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(SourceKey, ContentHash));
-		const FString LegacyObjectPath = BuildObjectPathFromImport(SubDir, LegacyAssetName);
-		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *LegacyObjectPath))
+		const FString PerWidgetObjectPath = BuildObjectPathFromImport(SubDir, PerWidgetAssetName);
+		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *PerWidgetObjectPath))
 		{
-			RegisterReusedTexture(SourceKey, ContentKey, LegacyObjectPath, ExistingTexture, TEXT("Reused existing texture: "), InOutTexturePath, Context);
+			RegisterReusedTexture(SourceKey, ContentKey, PerWidgetObjectPath, ExistingTexture, TEXT("Reused existing texture: "), InOutTexturePath, Context);
 			return true;
 		}
 
@@ -697,15 +696,18 @@ namespace
 		FString DecodeError;
 		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError, &Context.OperationBudget))
 		{
+			Context.UrlProcessingErrors.Add(NormalizedUrl, DecodeError);
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
 			return false;
 		}
+		CompressedData.Empty();
 
 		FString ImportedObjectPath;
 		FString ImportError;
 		if (!CreateTextureAsset(BuildSharedImportPath(Context.ImportPath), SharedAssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 		{
+			Context.UrlProcessingErrors.Add(NormalizedUrl, ImportError);
 			++Context.Report.FailedCount;
 			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' import failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
 			return false;
@@ -795,11 +797,14 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 
 	if (RemoteUrls.Num() > 0)
 	{
+		const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe> BulkBudget =
+			MakeShared<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>(Context.OperationBudget);
 		FImagePayloadIO::DownloadUrls(
 			RemoteUrls.Array(),
 			Context.TimeoutSeconds,
 			Context.bAllowUnsafeRemoteUrls,
 			Context.ImageLimits,
+			BulkBudget,
 			Context.UrlDownloads);
 	}
 
@@ -821,8 +826,8 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 		return false;
 	}
 
-	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d repaired=%d"),
-		Context.Report.ImportedCount, Context.Report.ReusedCount, Context.Report.RepairedCount);
+	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d refreshed=%d"),
+		Context.Report.ImportedCount, Context.Report.ReusedCount, Context.Report.RefreshedCount);
 	return true;
 }
 
@@ -883,33 +888,37 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 	TMap<FString, FUrlDownloadResult> Downloads;
 	if (PendingUrls.Num() > 0)
 	{
-		FImagePayloadIO::DownloadUrls(PendingUrls, Timeout, Settings->bAllowUnsafeRemoteImageUrls, ImageLimits, Downloads);
+		const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe> BulkBudget =
+			MakeShared<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>(OperationBudget);
+		FImagePayloadIO::DownloadUrls(PendingUrls, Timeout, Settings->bAllowUnsafeRemoteImageUrls, ImageLimits, BulkBudget, Downloads);
 	}
 
 	for (const FString& Url : PendingUrls)
 	{
-		const FUrlDownloadResult& Download = Downloads.FindChecked(Url);
+			FUrlDownloadResult& Download = Downloads.FindChecked(Url);
 		if (!Download.bSuccess)
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient download failed: %s (%s)"), *Url, *Download.Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image download failed: %s (reason: %s)"), *Url, *Download.Error);
 			continue;
 		}
-		FString Error;
-		if (!OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(Download.Data.Num()), Error))
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("Transient image operation budget exceeded: %s"), *Error);
-			break;
-		}
+		// The cumulative compressed-byte budget was already consumed per chunk while
+		// the payload was received; only the decode-pixel budget below still applies.
 
-		int32 Width = 0, Height = 0;
+			// Move the accepted body out of the batch result before decoding. Each loop
+			// iteration releases its payload on every success/failure exit, while the URL
+			// result still retains transport status and error text.
+			TArray<uint8> CompressedData = Download.TakePayload();
+			int32 Width = 0, Height = 0;
 		TArray64<uint8> RawBGRA;
-		if (!FImagePayloadIO::DecodeToBGRA8(Download.Data, ImageLimits, Width, Height, RawBGRA, Error, &OperationBudget))
+		FString Error;
+			if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, ImageLimits, Width, Height, RawBGRA, Error, &OperationBudget))
 		{
 			UE_LOG(LogDesign2UMG, Verbose, TEXT("Transient decode failed: %s (%s)"), *Url, *Error);
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Image decode failed: %s (reason: %s)"), *Url, *Error);
 			continue;
 		}
+		CompressedData.Empty();
 
 		UTexture2D* Texture = CreateTransientTexture(RawBGRA, Width, Height);
 		if (Texture)
@@ -934,4 +943,3 @@ void FDesignRemoteImageImporter::ReleaseTransientTextures(TMap<FString, UTexture
 	}
 	InOutTextureMap.Empty();
 }
-

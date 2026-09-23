@@ -141,7 +141,7 @@ namespace Design2UMGEditorImportServices
 						for (const auto& Image : (*Images)->Values)
 						{
 							FString Url;
-							if (Image.Value->TryGetString(Url)) Self->ComponentImageUrls.Add(Image.Key, Url);
+							if (Image.Value->TryGetString(Url)) Self->ComponentImageUrls.Add(FString(Image.Key), Url);
 						}
 					}
 					Self->ResolveMissingComponentDefinitions();

@@ -25,7 +25,7 @@ public:
 	static bool ParseJson(const FString& JsonString, FUMGWidgetData& OutWidgetData, FString* OutError = nullptr);
 
 private:
-	static bool ParseWidgetNode(const TSharedPtr<class FJsonObject>& JsonObject, FUMGWidgetNode& OutNode);
+	static bool ParseWidgetNode(const TSharedPtr<class FJsonObject>& JsonObject, FUMGWidgetNode& OutNode, const FString& NodePath, FString* OutError, class FDesignParserBudget& Budget, int32 Depth);
 	// Per-payload section parsers: each reads its own section key from the node object.
 	static void ParseTextStylePayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGTextStyleData& OutTextStyle);
 	static void ParseWidgetStylePayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGWidgetStyleData& OutWidgetStyle);

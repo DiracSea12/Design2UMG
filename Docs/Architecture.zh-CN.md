@@ -50,7 +50,7 @@ Pencil .pen / Figma JSON
 | --- | --- |
 | `Design2UMGCore` | parser、IR、conversion、layout logic 和 fidelity 相关 shared helper。它不是 runtime module；这里的 Core 表示共享 editor/importer ownership。 |
 | `Design2UMGEditor` | import pipeline、Blueprint generation、preview/editor UI、automation rendering、editor-only asset workflow。 |
-| `Tools/` | batch verification、historical-best validation、snapshot wrapper 和 release governance helper。 |
+| `Tools/` | suite verification、historical-best validation、snapshot wrapper 和 release governance helper。 |
 
 ## Release 边界
 
@@ -70,7 +70,7 @@ Pencil .pen / Figma JSON
 
 `Source/Design2UMGEditor/Public/` 中保留的 public headers 主要覆盖 editor module entrypoint、preview contracts、remote image importer、Figma/MCP/Pencil connector surfaces、preview widget/window，以及 JSON parser/serializer helper。
 
-Phase 21 Batch 1 的审计结论是：当前没有足够硬的证据支持在本批次移动或收窄 header。更安全的做法是记录保留理由、补清楚 API 注释和文档，后续如果要收窄，再以新的 include 证据和验证为准。
+当前没有足够证据支持移动或收窄这些 header。现有 public 边界保留上述职责说明；后续如果要收窄，必须以当前 include 证据和验证结果为准。
 
 ## 扩展新设计来源
 

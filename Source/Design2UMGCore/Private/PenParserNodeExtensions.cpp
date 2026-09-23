@@ -69,21 +69,11 @@ namespace
 	void ApplySemanticHints(FDesignNode& Node, const bool bPenPlaceholder, const FPenSlotMetadata& SlotMetadata)
 	{
 		const bool bTextLikeNode = IsTextLikeNode(Node);
-		const bool bNameLooksLikePlaceholder =
-			!bTextLikeNode && Node.Name.Contains(TEXT("placeholder"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeSlot =
-			!bTextLikeNode && Node.Name.Contains(TEXT("slot"), ESearchCase::IgnoreCase);
-		const bool bNameLooksLikeContentSlot =
-			!bTextLikeNode && SlotMetadata.bHasSlot && Node.Name.Contains(TEXT("content"), ESearchCase::IgnoreCase);
-		// Placeholder surface is the runtime contract; present/count remain preservation-only metadata.
+		// Names are labels, not rendering instructions. Only explicit semantic
+		// fields may replace authored artwork with a placeholder surface.
 		Node.LayoutData.bSemanticPlaceholderSurface =
 			!bTextLikeNode
-			&& (bPenPlaceholder
-				|| SlotMetadata.bHasSlot
-				|| SlotMetadata.SlotNodeCount > 0
-				|| bNameLooksLikePlaceholder
-				|| bNameLooksLikeContentSlot
-				|| bNameLooksLikeSlot);
+			&& (bPenPlaceholder || SlotMetadata.bHasSlot);
 	}
 
 	void ParseTextRunFromObject(

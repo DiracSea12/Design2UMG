@@ -19,12 +19,9 @@ namespace
 	// Material reference identifier used as an internal ProceduralShapeGenerator key, not an asset path.
 	const TCHAR* MatRef_RoundedRect = TEXT("roundedrect");
 
-	// UV step fallback for an invalid node, where no size can be resolved.
-	// No derivation on record; fixed when the foreground-blur UV mapping
-	// was introduced.
+	// UV step for foreground blur when node size is unresolved.
 	constexpr float InvalidNodeBlurUVStepComponent = 1.0f / 512.0f;
-	// Blur strength floor and strength-to-UV-step scale. No derivation on
-	// record; fixed when the foreground-blur UV mapping was introduced.
+	// Foreground-blur strength floor and strength-to-UV-step scale.
 	constexpr float MinBlurStrengthForUVStep = 0.5f;
 	constexpr float BlurStrengthToUVStepScale = 0.35f;
 
@@ -107,18 +104,18 @@ namespace
 		return FVector2D(OffsetX / Width, OffsetY / Height);
 	}
 
-	int32 RoundPositivePixelExtent(float Value)
+	int32 QuantizePositivePixelExtent(float Value)
 	{
 		if (!FMath::IsFinite(Value) || Value <= 0.0f)
 		{
 			return 1;
 		}
 
-		constexpr int32 SafeRoundToIntMax = TNumericLimits<int32>::Max() - 64;
-		constexpr float SafeRoundToIntMaxAsFloat = static_cast<float>(SafeRoundToIntMax);
-		if (Value >= SafeRoundToIntMaxAsFloat)
+		constexpr int32 MaxQuantizableInt = TNumericLimits<int32>::Max() - 64;
+		constexpr float MaxQuantizableIntAsFloat = static_cast<float>(MaxQuantizableInt);
+		if (Value >= MaxQuantizableIntAsFloat)
 		{
-			return SafeRoundToIntMax;
+			return MaxQuantizableInt;
 		}
 
 		return FMath::RoundToInt(Value);
@@ -152,15 +149,8 @@ namespace
 
 		const float PositiveSpread = FMath::Max(0.0f, Spread);
 		const float NegativeSpreadInset = FMath::Max(0.0f, -Spread);
-		// The precise layer geometry below is derived from the node's resolved
-		// size. Fixed sizes carry the authored extent and fit sizes carry the
-		// content estimate promoted by SizeEstimator — both usable. Fill sizes only
-		// carry their fallback/min hint (often 0), which is not the resolved
-		// wrapper extent: the wrapper is stretched at runtime, so an exact shadow
-		// texture cannot be pre-baked and the negative-padding rect would stretch a
-		// collapsed texture into a smeared ellipse. Fill-sized nodes keep the
-		// stretch-to-wrapper semantics instead: the shape fills the texture (no
-		// BlurPadding inset) and the layer simply tracks the wrapper rect.
+		// Fixed and fit sizes provide an extent for exact shadow geometry.
+		// Fill sizes resolve at runtime, so their shadow tracks the wrapper without BlurPadding.
 		auto HasUsableExtent = [](const FDesignSize& Size)
 		{
 			return !Size.IsFill() && Size.Value > 0.0f;
@@ -188,8 +178,8 @@ namespace
 			Shape.BlurPadding = QuantizeShadowParameter(BlurPaddingExtent);
 			const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
 			const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f + PositiveSpread * 2.0f);
-			Shadow.WidgetStyle.WidthOverride = RoundPositivePixelExtent(ShapeWidth + BlurPaddingExtent * 2.0f);
-			Shadow.WidgetStyle.HeightOverride = RoundPositivePixelExtent(ShapeHeight + BlurPaddingExtent * 2.0f);
+			Shadow.WidgetStyle.WidthOverride = QuantizePositivePixelExtent(ShapeWidth + BlurPaddingExtent * 2.0f);
+			Shadow.WidgetStyle.HeightOverride = QuantizePositivePixelExtent(ShapeHeight + BlurPaddingExtent * 2.0f);
 			RadiusHalfMin = FMath::Min(ShapeWidth, ShapeHeight) * 0.5f;
 			RadiusExpansion = PositiveSpread;
 			// Unlike centered children, fill children with negative padding can
@@ -204,8 +194,8 @@ namespace
 			const float ShadowTextureExtent = Blur + PositiveSpread;
 			const float ShapeWidth = FMath::Max(1.0f, Node->Transform.Width.Value - NegativeSpreadInset * 2.0f);
 			const float ShapeHeight = FMath::Max(1.0f, Node->Transform.Height.Value - NegativeSpreadInset * 2.0f);
-			const int32 TexW = RoundPositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
-			const int32 TexH = RoundPositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
+			const int32 TexW = QuantizePositivePixelExtent(ShapeWidth + ShadowTextureExtent * 2.0f);
+			const int32 TexH = QuantizePositivePixelExtent(ShapeHeight + ShadowTextureExtent * 2.0f);
 			Shadow.WidgetStyle.WidthOverride = TexW;
 			Shadow.WidgetStyle.HeightOverride = TexH;
 			RadiusHalfMin = FMath::Min(TexW, TexH) * 0.5f;

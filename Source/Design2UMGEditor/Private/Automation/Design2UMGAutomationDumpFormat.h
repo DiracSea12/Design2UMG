@@ -13,7 +13,7 @@ namespace Design2UMGAutomation
 	// NaN/Inf have no JSON literal; emit null so the dump stays parseable and
 	// the golden layer surfaces the anomaly as a plain field diff instead of a
 	// read_error that masks the whole case. Every float uses %.9g (float32
-	// round-trip lossless); hex strings and %.1f/%.6f are forbidden by the IR
+	// serialization lossless); hex strings and %.1f/%.6f are forbidden by the IR
 	// golden layer contract.
 	inline FString RenderFloat(const float Value)
 	{

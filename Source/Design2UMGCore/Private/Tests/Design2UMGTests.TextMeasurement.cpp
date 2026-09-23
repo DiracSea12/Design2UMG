@@ -73,18 +73,18 @@ namespace
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementPhase32CSourceUnitConversionTest,
-	"Design2UMG.TextMeasurement.Phase32C.SourceUnitConversion",
+	FTextMeasurementSourceUnitConversionTest,
+	"Design2UMG.TextMeasurement.SourceUnitConversion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FTextMeasurementPhase32CSourceUnitConversionTest::RunTest(const FString&)
+bool FTextMeasurementSourceUnitConversionTest::RunTest(const FString&)
 {
-	TSharedPtr<FDesignNode> Node = MakeTextNode(TEXT("phase32c_unit_conversion"), 32.0f);
+	TSharedPtr<FDesignNode> Node = MakeTextNode(TEXT("unit_conversion"), 32.0f);
 	const float ResolvedFontSize = TextMeasurement::ResolveTextFontSizeForUMG(Node);
 	TestTrue(TEXT("32 source pixels convert to Slate points"),
 		FMath::IsNearlyEqual(ResolvedFontSize, ExpectedExactPointSize(32.0f), 0.001f));
 
-	Node = MakeTextNode(TEXT("phase32c_fractional_unit_conversion"), 14.0f);
+	Node = MakeTextNode(TEXT("fractional_unit_conversion"), 14.0f);
 	TestTrue(
 		TEXT("14 source pixels preserve the exact 10.5 Slate point size"),
 		FMath::IsNearlyEqual(
@@ -92,7 +92,7 @@ bool FTextMeasurementPhase32CSourceUnitConversionTest::RunTest(const FString&)
 			ExpectedExactPointSize(14.0f),
 			0.001f));
 
-	const TSharedPtr<FDesignNode> SubpixelNode = MakeTextNode(TEXT("phase32c_subpixel_unit_conversion"), 0.5f);
+	const TSharedPtr<FDesignNode> SubpixelNode = MakeTextNode(TEXT("subpixel_unit_conversion"), 0.5f);
 	TestTrue(
 		TEXT("0.5 source pixels convert to 0.375 Slate points without a minimum clamp"),
 		FMath::IsNearlyEqual(
@@ -169,11 +169,11 @@ bool FTextMeasurementRuntimeProbeFractionalSizeConsistencyTest::RunTest(const FS
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FTextMeasurementPhase32CInvalidSourceSizeTest,
-	"Design2UMG.TextMeasurement.Phase32C.InvalidSourceSize",
+	FTextMeasurementInvalidSourceSizeTest,
+	"Design2UMG.TextMeasurement.InvalidSourceSize",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FTextMeasurementPhase32CInvalidSourceSizeTest::RunTest(const FString&)
+bool FTextMeasurementInvalidSourceSizeTest::RunTest(const FString&)
 {
 	const float InvalidSizes[] = {
 		0.0f,
@@ -184,7 +184,7 @@ bool FTextMeasurementPhase32CInvalidSourceSizeTest::RunTest(const FString&)
 
 	for (const float InvalidSize : InvalidSizes)
 	{
-		const TSharedPtr<FDesignNode> Node = MakeTextNode(TEXT("phase32c_invalid_source_size"), InvalidSize);
+		const TSharedPtr<FDesignNode> Node = MakeTextNode(TEXT("invalid_source_size"), InvalidSize);
 		TestTrue(TEXT("Invalid source size resolves to zero"), FMath::IsNearlyZero(TextMeasurement::ResolveTextFontSizeForUMG(Node)));
 	}
 
@@ -195,7 +195,7 @@ bool FTextMeasurementPhase32CInvalidSourceSizeTest::RunTest(const FString&)
 	TestTrue(
 		TEXT("Converted size above the renderer uint16 limit resolves to zero"),
 		FMath::IsNearlyZero(TextMeasurement::ResolveTextFontSizeForUMG(
-			MakeTextNode(TEXT("phase32c_renderer_limit"), AboveRendererLimitSourceSize))));
+			MakeTextNode(TEXT("renderer_limit"), AboveRendererLimitSourceSize))));
 	TestTrue(TEXT("Invalid node resolves to zero"), FMath::IsNearlyZero(TextMeasurement::ResolveTextFontSizeForUMG(nullptr)));
 	return true;
 }

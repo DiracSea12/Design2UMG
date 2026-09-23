@@ -22,7 +22,7 @@ def write_historical_best_validation(
     The three ``[HISTORICAL_BEST]`` print lines (source, manifest, validation) are
     **diagnostic output only**; they are routed to ``sys.stderr`` so they do not
     corrupt stdout which carries the formal contract lines (``[OK]``, ``[SUMMARY]``,
-    etc.) from the batch driver.
+    etc.) from the suite driver.
 
     Args:
         output_root: Directory to write output files.

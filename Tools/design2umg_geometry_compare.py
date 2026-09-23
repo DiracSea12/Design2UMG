@@ -616,8 +616,8 @@ def write_case_report(case_dir: Path, result: dict) -> Path:
     return report_path
 
 
-def annotate_batch_case_result(case_result: dict, golden_root: str, case_name: str, case_dir: Path) -> None:
-    """Batch integration hook: compare one case, write its report, attach summary fields."""
+def annotate_suite_case_result(case_result: dict, golden_root: str, case_name: str, case_dir: Path) -> None:
+    """Bulk integration hook: compare one case, write its report, attach summary fields."""
     result = compare_case(Path(golden_root), case_name, case_dir)
     write_case_report(case_dir, result)
     case_result["geometry_golden_available"] = result["available"]

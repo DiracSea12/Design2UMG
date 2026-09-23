@@ -2,17 +2,16 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
+// Genuinely-shared design-tree limits/budget live in the public header so the Editor
+// module's UMG JSON parser can use the same budget and depth semantics as the Core
+// parsers (Figma / Pen / SizeEstimator). This private header is retained so the
+// existing Core/Private includers keep compiling unchanged, and it additionally holds
+// the Core-only recursion guard -- the Editor has no use for converter /
+// size-estimation recursion, so that type stays out of the public surface.
+#include "DesignTreeBudget.h"
+// Only the Core-private recursion guard below logs; the public budget header does not,
+// so the log dependency stays on this side of the boundary.
 #include "Design2UMGLog.h"
-
-namespace DesignTreeLimits
-{
-	// Parsed design tree depth: bounds raw parse/convert/size-estimation recursion over one document tree.
-	// Distinct from RefExpander's ref-override recursion cap, which bounds override application within a
-	// single expansion and therefore uses a tighter independent limit.
-	constexpr int32 MaxNodeDepth = 512;
-	constexpr int32 MaxParsedNodeCount = 100000;
-}
 
 /** Shared depth guard for parse/convert/size-estimation recursion over design trees (DesignTreeLimits::MaxNodeDepth). */
 struct FDesignRecursionGuard
@@ -42,26 +41,4 @@ struct FDesignRecursionGuard
 
 	int32& Depth;
 	bool bValid = false;
-};
-
-class FDesignParserBudget
-{
-public:
-	bool TryEnterNode(const int32 Depth)
-	{
-		if (bExceeded || Depth > DesignTreeLimits::MaxNodeDepth || NodeCount >= DesignTreeLimits::MaxParsedNodeCount)
-		{
-			bExceeded = true;
-			return false;
-		}
-
-		++NodeCount;
-		return true;
-	}
-
-	bool WasExceeded() const { return bExceeded; }
-
-private:
-	int32 NodeCount = 0;
-	bool bExceeded = false;
 };

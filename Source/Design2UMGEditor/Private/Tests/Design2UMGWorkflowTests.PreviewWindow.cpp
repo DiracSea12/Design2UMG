@@ -6,6 +6,12 @@
 #include "PreviewUserWidget.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "UMGJsonSerializer.h"
+#include "Design2UMGNotifications.h"
+#include "Design2UMGGenerationManifest.h"
+#include "Tests/Design2UMGTestAssetCleanup.h"
+#include "HAL/FileManager.h"
+#include "Misc/ScopeExit.h"
+#include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Editor.h"
@@ -21,6 +27,9 @@
 #if WITH_AUTOMATION_WORKER
 struct FDesign2UMGPreviewWindowTestAccess
 {
+	static FString Status(const SDesign2UMGPreviewWindow& Window) { return Window.GenerationStatus.ToString(); }
+	static void UnbindConfirmation(SDesign2UMGPreviewWindow& Window) { Window.OnConfirmed.Unbind(); }
+	static void Confirm(SDesign2UMGPreviewWindow& Window) { Window.OnGenerateClicked(); }
 	static TSharedPtr<SMultiLineEditableTextBox> GetJsonEditor(const SDesign2UMGPreviewWindow& Window)
 	{
 		return Window.JsonEditor;
@@ -272,6 +281,8 @@ namespace
 	class FSpyPreviewMaterializationService final : public IDesignPreviewMaterializationService
 	{
 	public:
+		FString ForcedErrorMessage;
+
 		virtual bool MaterializePreview(const FDesignPreviewMaterializationRequest& Request, FDesignPreviewMaterializationResult& OutResult) override
 		{
 			++InvocationCount;
@@ -287,6 +298,14 @@ namespace
 				Request.ApprovedSnapshot.Data.WidgetName == PreviewHarnessAnalyzerWidgetName
 				&& Request.ApprovedSnapshot.Data.RootWidget.Name == PreviewHarnessAnalyzerRootName;
 			bInjectedSeamObserved = bSawInjectedAnalyzerPayload;
+			if (!ForcedErrorMessage.IsEmpty())
+			{
+				Reset();
+				OutResult = FDesignPreviewMaterializationResult();
+				OutResult.RequestId = Request.RequestId;
+				OutResult.ErrorMessage = ForcedErrorMessage;
+				return false;
+			}
 
 			UPreviewUserWidget* NewPreviewWidget = NewObject<UPreviewUserWidget>(
 				GetTransientPackage(),
@@ -410,6 +429,12 @@ namespace
 	class FPreviewConfirmDelegateSpy final
 	{
 	public:
+		FArtifactGenerationResult Result;
+		FPreviewConfirmDelegateSpy()
+		{
+			Result.bSucceeded = true;
+			Result.Commit.Status = EDesign2UMGCommitStatus::Succeeded;
+		}
 		void HandleConfirmed(const FPreviewGenerationRequest& GenerationRequest)
 		{
 			++InvocationCount;
@@ -550,6 +575,7 @@ namespace
 					[ConfirmDelegateSpy = ConfirmDelegateSpy](const FPreviewGenerationRequest& GenerationRequest)
 					{
 						ConfirmDelegateSpy->HandleConfirmed(GenerationRequest);
+						return ConfirmDelegateSpy->Result;
 					}))
 				.OnCancelled(FOnPreviewCancelled::CreateLambda(
 					[CancelDelegateSpy = CancelDelegateSpy]()
@@ -968,6 +994,41 @@ bool FPreviewWindowPipelineCarriesExplicitMaterializationSnapshotTest::RunTest(c
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowBudgetFailureMessageTest,
+	"Design2UMG.PreviewWindow.BudgetFailureMessage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowBudgetFailureMessageTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		AddError(TEXT("Slate is required to verify the preview failure message"));
+		return false;
+	}
+	FPreviewWindowHarness Harness;
+	if (!TestTrue(TEXT("Preview opens"), Harness.Open(MakePreviewHarnessJson(TEXT("Before limit")),
+		TEXT("/Game/Design2UMG/_TestOutput/PreviewBudgetMessage"))))
+	{
+		return false;
+	}
+	Harness.MaterializationSpy->ForcedErrorMessage = TEXT("Node 'LargePath': Total decoded image data exceeds the operation limit (536870912 bytes)");
+	Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Over limit")));
+	const FText ExpectedMessage = FText::Format(NSLOCTEXT("SDesign2UMGPreviewWindow", "PreviewResourceLimit",
+		"Preview stopped because image resources exceed the limit.\n{0}\n\nReduce image sizes or preview fewer nodes, then try again."),
+		FText::FromString(Harness.MaterializationSpy->ForcedErrorMessage));
+	TestTrue(TEXT("Failure details remain visible after the dialog closes"),
+		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage.ToString()));
+	TestFalse(TEXT("Failed preview cannot be confirmed"),
+		FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
+	TestNull(TEXT("Failed preview releases the old widget"), Harness.MaterializationSpy->GetMaterializedPreviewWidget());
+	Harness.MaterializationSpy->ForcedErrorMessage.Reset();
+	Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Within limit")));
+	TestTrue(TEXT("Corrected preview can be confirmed"),
+		FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
+	TestFalse(TEXT("Corrected preview removes the failure message"),
+		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage.ToString()));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowHarnessCancelTest,
 	"Design2UMG.PreviewWindow.HarnessCancel",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1003,6 +1064,148 @@ bool FPreviewWindowHarnessCancelTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Preview window close is observed after cancel"), Harness.Telemetry->bPreviewWindowClosed);
 	TestFalse(TEXT("Preview window detaches after cancel"), Harness.IsWindowAttached());
 	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewGenerationFailureKeepsWindowTest,
+	"Design2UMG.PreviewWindow.GenerationFailureKeepsWindow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewGenerationFailureKeepsWindowTest::RunTest(const FString& Parameters)
+{
+	for (const EDesign2UMGCommitStatus Status : {
+		EDesign2UMGCommitStatus::NotCommitted, EDesign2UMGCommitStatus::Conflict,
+		EDesign2UMGCommitStatus::CommittedWithMetadataFailure, EDesign2UMGCommitStatus::RollbackIncomplete,
+		EDesign2UMGCommitStatus::Succeeded })
+	{
+		FPreviewWindowHarness Harness;
+		const FString Json = MakePreviewHarnessJson(TEXT("Keep my edits"));
+		if (!TestTrue(TEXT("Open preview"), Harness.Open(Json, TEXT("/Game/D2U_PreviewRetry")))) return false;
+		Harness.ConfirmDelegateSpy->Result.bSucceeded = false;
+		Harness.ConfirmDelegateSpy->Result.Commit.Status = Status;
+		Harness.ConfirmDelegateSpy->Result.ErrorMessage = TEXT("Requested operation failed");
+		Harness.ConfirmDelegateSpy->Result.Commit.AssetPath = TEXT("/Game/D2U_PreviewRetry/WBP_Result");
+		TestTrue(TEXT("Confirmation executes"), Harness.Confirm());
+		TestTrue(TEXT("Failure keeps the window attached"), Harness.IsWindowAttached());
+		const FString StatusText = FDesign2UMGPreviewWindowTestAccess::Status(*Harness.PreviewWindow);
+		TestTrue(TEXT("Failure reason is visible"), StatusText.Contains(TEXT("Requested operation failed")));
+		TestTrue(TEXT("Known asset path is visible"), StatusText.Contains(TEXT("/Game/D2U_PreviewRetry/WBP_Result")));
+		if (Status == EDesign2UMGCommitStatus::RollbackIncomplete)
+			TestTrue(TEXT("Recovery exposes memory state"), StatusText.Contains(TEXT("memory state:")));
+		if (Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure)
+			TestTrue(TEXT("Partial commit is not reported as no asset"), StatusText.Contains(TEXT("asset was saved")));
+		TestTrue(TEXT("Failure preserves approved snapshot"), Harness.CanConfirm());
+		TestEqual(TEXT("Failure preserves edited JSON"), Harness.ConfirmDelegateSpy->GetLastConfirmedJson(), Json);
+		if (Harness.IsWindowAttached())
+		{
+			Harness.SetOutputPath(TEXT("/Game/D2U_PreviewRetryNewPath"));
+			Harness.ConfirmDelegateSpy->Result.bSucceeded = true;
+			Harness.ConfirmDelegateSpy->Result.Commit.Status = EDesign2UMGCommitStatus::Succeeded;
+			TestTrue(TEXT("Retry executes"), Harness.Confirm());
+			TestEqual(TEXT("Retry uses changed path"), Harness.ConfirmDelegateSpy->GetLastConfirmedOutputPath(), FString(TEXT("/Game/D2U_PreviewRetryNewPath")));
+			TestFalse(TEXT("Successful retry closes"), Harness.IsWindowAttached());
+		}
+	}
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewUnboundConfirmationTest,
+    "Design2UMG.PreviewWindow.UnboundConfirmation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewUnboundConfirmationTest::RunTest(const FString& Parameters)
+{
+    FPreviewWindowHarness Harness;
+    if (!Harness.Open(MakePreviewHarnessJson(TEXT("Unbound")), TEXT("/Game/D2U_Unbound"))) return false;
+    FDesign2UMGPreviewWindowTestAccess::UnbindConfirmation(*Harness.PreviewWindow);
+    FDesign2UMGPreviewWindowTestAccess::Confirm(*Harness.PreviewWindow);
+    Harness.PumpSlate();
+    TestTrue(TEXT("Unbound callback leaves window open"), Harness.IsWindowAttached());
+    TestTrue(TEXT("Unbound callback leaves snapshot ready"), Harness.CanConfirm());
+    TestTrue(TEXT("No operation is reported"), FDesign2UMGPreviewWindowTestAccess::Status(*Harness.PreviewWindow).Contains(TEXT("not started")));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewPipelineGenerationRetryTest,
+    "Design2UMG.PreviewWindow.PipelineGenerationRetry", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewPipelineGenerationRetryTest::RunTest(const FString& Parameters)
+{
+    FPreviewWindowHarness Pump;
+    FUMGWidgetData Data;
+    Data.WidgetName = TEXT("WBP_PreviewPipelineRetry");
+    Data.RootWidget.Type = TEXT("TextBlock");
+    Data.RootWidget.Id = TEXT("root");
+    Data.RootWidget.Name = TEXT("Content");
+    Data.RootWidget.Bounds = {0, 0, 180, 40};
+    Data.RootWidget.Text.Text = TEXT("Keep this text");
+    FDesignImportRequest Request;
+    Request.OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PreviewPipelineRetry_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    Request.bResolveImages = false;
+    Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+    Request.SettingsSnapshot = FDesign2UMGImportSettingsSnapshot();
+    const auto Opened = DesignImportPipeline::Execute(Data, Request);
+    if (!TestTrue(TEXT("Real pipeline opens preview"), Opened.bPreviewOpened)) return false;
+    Pump.PumpSlate(6);
+    TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+    if (!TestTrue(TEXT("Pipeline window exists"), Window.IsValid())) return false;
+    auto Preview = StaticCastSharedRef<SDesign2UMGPreviewWindow>(Window->GetContent());
+    bool bClosed = false;
+    Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda([&bClosed](const TSharedRef<SWindow>&) { bClosed = true; }));
+    const FString RetryPath = Request.OutputPath + TEXT("_Retry");
+    const FString PackageName = Request.OutputPath / Data.WidgetName;
+    const FString ManifestPath = Design2UMGGenerationManifest::BuildSidecarPathForAsset(PackageName);
+    ON_SCOPE_EXIT
+    {
+        // Only the unique test-created directory is removed, never an existing asset file.
+        IFileManager::Get().DeleteDirectory(*ManifestPath, false, false);
+        if (!bClosed) FSlateApplication::Get().DestroyWindowImmediately(Window.ToSharedRef());
+        Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Request.OutputPath);
+        Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(RetryPath);
+    };
+    if (!TestTrue(TEXT("Snapshot ready"), FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Preview))) return false;
+    // A directory where the manifest file must go provokes a real write failure.
+    if (!TestTrue(TEXT("Create metadata obstruction"), IFileManager::Get().MakeDirectory(*ManifestPath, true))) return false;
+    AddExpectedError(TEXT("GenerationManifest: failed to finalize manifest"), EAutomationExpectedErrorFlags::Contains, 1);
+    AddExpectedError(TEXT("LogFileManager: Error moving file"), EAutomationExpectedErrorFlags::Contains, 1);
+    AddExpectedError(TEXT("DesignImportUtils: Widget Blueprint compile or save failed"), EAutomationExpectedErrorFlags::Contains, 1);
+    FDesign2UMGPreviewWindowTestAccess::Confirm(*Preview);
+    Pump.PumpSlate(6);
+    TestFalse(TEXT("Actual metadata failure retains window"), bClosed);
+    TestTrue(TEXT("Actual partial commit is shown"), FDesign2UMGPreviewWindowTestAccess::Status(*Preview).Contains(TEXT("asset was saved")));
+    TestNotNull(TEXT("Asset really exists despite metadata failure"), LoadObject<UWidgetBlueprint>(nullptr, *(PackageName + TEXT(".") + Data.WidgetName)));
+    TestTrue(TEXT("Failure retains confirmed snapshot"), FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Preview));
+    IFileManager::Get().DeleteDirectory(*ManifestPath, false, false);
+    FDesign2UMGPreviewWindowTestAccess::GetOutputPathBox(*Preview)->SetText(FText::FromString(RetryPath));
+    FDesign2UMGPreviewWindowTestAccess::Confirm(*Preview);
+    Pump.PumpSlate(6);
+    const FString RetryManifest = Design2UMGGenerationManifest::BuildSidecarPathForAsset(RetryPath / Data.WidgetName);
+    TestTrue(TEXT("Retry writes metadata at changed output path"), IFileManager::Get().FileExists(*RetryManifest));
+    TestTrue(TEXT("Actual success closes window"), bClosed);
+    return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewDegradedSuccessTest,
+    "Design2UMG.PreviewWindow.DegradedSuccess", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewDegradedSuccessTest::RunTest(const FString& Parameters)
+{
+    FPreviewWindowHarness Harness;
+    if (!Harness.Open(MakePreviewHarnessJson(TEXT("Degraded")), TEXT("/Game/D2U_Degraded"))) return false;
+    FString ShownWarning;
+    bool bWarningBeforeClose = false;
+    auto PreviousHandler = FDesign2UMGNotification::RegisterWarningHandler(
+        FDesign2UMGMessageNotificationHandler::CreateLambda([&](const FText& Message)
+        {
+            ShownWarning = Message.ToString();
+            bWarningBeforeClose = Harness.IsWindowAttached();
+        }));
+    ON_SCOPE_EXIT { FDesign2UMGNotification::RegisterWarningHandler(MoveTemp(PreviousHandler)); };
+    Harness.ConfirmDelegateSpy->Result.bSucceeded = true;
+    Harness.ConfirmDelegateSpy->Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
+    Harness.ConfirmDelegateSpy->Result.Warnings.Add(TEXT("Some vector effects were approximated."));
+    TestTrue(TEXT("Degraded generation executes"), Harness.Confirm());
+    TestTrue(TEXT("Actual warning reaches notification"), ShownWarning.Contains(TEXT("vector effects were approximated")));
+    TestTrue(TEXT("Warning is emitted before closing"), bWarningBeforeClose);
+    TestFalse(TEXT("Degraded success closes after notification"), Harness.IsWindowAttached());
+    return true;
 }
 
 #endif // WITH_AUTOMATION_WORKER

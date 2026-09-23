@@ -18,6 +18,7 @@
 #include "Misc/Paths.h"
 #include "PenParser.h"
 #include "ProceduralShapeGenerator.h"
+#include "Misc/App.h"
 
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
 

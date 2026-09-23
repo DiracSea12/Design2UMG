@@ -54,7 +54,7 @@ The formal release gate is not just "does it render" but "does no admissible cas
 | --- | --- |
 | `Design2UMGCore` | Editor module for parsing, IR definitions, conversion, layout logic, and fidelity-related shared helpers. It is not a runtime module; the Core name means shared editor/importer ownership, not runtime availability. |
 | `Design2UMGEditor` | Import pipeline, Blueprint generation, preview/editor UI, automation rendering, editor-only asset workflows |
-| `Tools/` | Batch verification, historical-best validation, snapshot wrappers, release governance helpers |
+| `Tools/` | Suite verification, historical-best validation, snapshot wrappers, release governance helpers |
 
 ## Release Boundary
 
@@ -196,6 +196,6 @@ This is not a full architecture promise for parallel imports. If the product sco
 
 ### UMGPropertyApplierInternal module placement
 
-`UMGPropertyApplierInternal.cpp` stays in `Design2UMGEditor` for this release by design. The current supported product path is editor-side import and Widget Blueprint generation, so mutating `UWidget` instances belongs with the editor generation pipeline instead of becoming a Core public contract.
+`UMGPropertyApplierInternal.cpp` stays in `Design2UMGEditor` by design. The supported product path is editor-side import and Widget Blueprint generation, so mutating `UWidget` instances belongs with the editor generation pipeline instead of becoming a Core public contract.
 
 Re-evaluate this placement only if the supported product scope explicitly adds a runtime module, or if the `UWidget` mutation pipeline is split from editor-side generation into a separately supported runtime path. Until then, keep Core responsible for typed schema and narrow typed inspection/request helpers, and keep final `UWidget` mutation in the Editor module.

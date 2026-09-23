@@ -278,7 +278,7 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	FigmaParserMetadata::CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("itemReverseZIndex"));
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("isExposedInstance"));
-	// Keep the source-shaped Figma key as an explicit metadata alias this phase.
+	// Preserve the source-shaped Figma key as an explicit metadata alias.
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("strokesIncludedInLayout"));
 
 	const TSharedPtr<FJsonValue> BoundVarsField = NodeObj->TryGetField(TEXT("boundVariables"));

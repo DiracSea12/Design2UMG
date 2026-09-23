@@ -32,6 +32,7 @@
 #include "Styling/SlateBrush.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
 #include "Widgets/SVirtualWindow.h"
+#include "Modules/ModuleManager.h"
 
 // ============================================================================
 // Widget rendering
@@ -500,22 +501,10 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 		Widget->RemoveFromRoot();
 		return false;
 	}
-	// Canvas calibration placement: the reference canvas is Pencil's rendered
-	// content union (auto-sized roots, overflowing children, shadow padding),
-	// while the layout keeps the blueprint's own design-time extent. Pencil
-	// paints the root fill only inside the node bounds and leaves the rest of
-	// the canvas transparent, so an overflow axis must not stretch the root
-	// widget (and its background brush) across the whole canvas:
-	// - a source-derived root export offset (node box position inside Pencil's
-	//   node-export canvas: node box united with its outer shadows) pins the
-	//   root exactly there, including asymmetric shadow offsets;
-	// - both axes overflow without an offset (symmetric padding): pin the root
-	//   to its design-time extent and center it, mirroring how Pencil composes
-	//   the content union box;
-	// - one axis overflows: pin the extent, top-left anchored;
-	// - no axis overflows: legacy behavior (root fills the canvas).
-	// Slot offsets are absolute (point anchors), so the pinned extent does not
-	// depend on the root widget's desired size.
+	// Keep the root at its design extent when the export canvas includes overflow.
+	// Use the source export offset when present; otherwise center two-axis overflow and
+	// top-left-anchor one-axis overflow. Without overflow, let the root fill the canvas.
+	// Point anchors keep the extent independent of desired size.
 	TSharedRef<SWidget> WindowContent = SlateWidget;
 	const bool bCalibrationXOverflow = SlateRenderSize.X > LayoutPixelSize.X;
 	const bool bCalibrationYOverflow = SlateRenderSize.Y > LayoutPixelSize.Y;

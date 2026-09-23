@@ -15,6 +15,9 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateImageBrush.h"
 #include "Editor.h"
+#include "RHIGlobals.h"
+#include "RenderingThread.h"
+#include "TextureResource.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -122,9 +125,9 @@ bool FRenderGammaProbeSolidBorderTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	UE_LOG(LogTemp, Warning, TEXT("GammaProbe solid border #5741BE -> #%02X%02X%02X"), Pixel.R, Pixel.G, Pixel.B);
-	TestEqual(TEXT("Solid border red byte round-trips"), Pixel.R, Source.R);
-	TestEqual(TEXT("Solid border green byte round-trips"), Pixel.G, Source.G);
-	TestEqual(TEXT("Solid border blue byte round-trips"), Pixel.B, Source.B);
+	TestEqual(TEXT("Solid border preserves the red byte"), Pixel.R, Source.R);
+	TestEqual(TEXT("Solid border preserves the green byte"), Pixel.G, Source.G);
+	TestEqual(TEXT("Solid border preserves the blue byte"), Pixel.B, Source.B);
 	return true;
 }
 
@@ -139,8 +142,8 @@ bool FRenderGammaProbeTextureImageTest::RunTest(const FString& Parameters)
 		return true;
 	}
 	// A transient sRGB-flagged texture holding #5741BE bytes, drawn through an
-	// SImage on the same screenshot chain. Bytes must round-trip for the path
-	// raster pipeline (which writes sRGB bytes) to be faithful.
+	// SImage on the same screenshot chain. The texture-sampling and screenshot
+	// raster pipeline must preserve the expected sRGB bytes.
 	const FColor Source(0x57, 0x41, 0xBE, 0xFF);
 	UTexture2D* Texture = MakeSolidTexture(Source);
 	if (!Texture)
@@ -161,9 +164,9 @@ bool FRenderGammaProbeTextureImageTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	UE_LOG(LogTemp, Warning, TEXT("GammaProbe texture image #5741BE -> #%02X%02X%02X"), Pixel.R, Pixel.G, Pixel.B);
-	TestEqual(TEXT("Texture image red byte round-trips"), Pixel.R, Source.R);
-	TestEqual(TEXT("Texture image green byte round-trips"), Pixel.G, Source.G);
-	TestEqual(TEXT("Texture image blue byte round-trips"), Pixel.B, Source.B);
+	TestEqual(TEXT("Texture image preserves the red byte"), Pixel.R, Source.R);
+	TestEqual(TEXT("Texture image preserves the green byte"), Pixel.G, Source.G);
+	TestEqual(TEXT("Texture image preserves the blue byte"), Pixel.B, Source.B);
 	return true;
 }
 

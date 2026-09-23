@@ -5,6 +5,9 @@ param(
     [string]$OutputRoot = "",
     [string]$DesignRoot = "",
     [string]$LogCmds = "",
+    [string]$Include = "",
+    [string[]]$FigmaExportRoot = @(),
+    [switch]$NoPublishHistory,
     [switch]$ValidateOnly
 )
 
@@ -39,6 +42,9 @@ else {
         "--output-root", $OutputRoot,
         "--design-root", $DesignRoot
     )
+    if ($Include) { $arguments += @("--include", $Include) }
+    foreach ($root in $FigmaExportRoot) { $arguments += @("--figma-export-root", $root) }
+    if ($NoPublishHistory) { $arguments += "--no-publish-history" }
     if (-not [string]::IsNullOrWhiteSpace($LogCmds)) {
         $arguments += @("--log-cmds", $LogCmds)
     }

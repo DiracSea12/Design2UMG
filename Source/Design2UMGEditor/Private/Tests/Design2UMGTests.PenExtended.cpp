@@ -73,7 +73,7 @@ bool FPenExtendedFieldsTest::RunTest(const FString& Parameters)
 				}
 			},
 			{
-				"id": "legacyStroke",
+				"id": "unsupportedStroke",
 				"type": "frame",
 				"stroke": {
 					"align": "inside",
@@ -104,12 +104,12 @@ bool FPenExtendedFieldsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stroke explicit fill is color"), ComponentNode->Visual.Stroke.Fill.IsSet() && ComponentNode->Visual.Stroke.Fill.GetValue().Type == EDesignFillType::Color);
 	const FString* LayoutIncludeStroke = ComponentNode->Metadata.Find(TEXT("layoutIncludeStroke"));
 	TestTrue(TEXT("layoutIncludeStroke preserved"), LayoutIncludeStroke && *LayoutIncludeStroke == TEXT("true"));
-	const TSharedPtr<FDesignNode>& LegacyStrokeNode = Doc.Children[3];
-	TestFalse(TEXT("legacy nested stroke is rejected"), LegacyStrokeNode->Visual.Stroke.HasStroke());
-	TestFalse(TEXT("legacy stroke join is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.join")));
-	TestFalse(TEXT("legacy stroke cap is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.cap")));
-	TestFalse(TEXT("legacy stroke miter angle is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.miterAngle")));
-	TestFalse(TEXT("legacy stroke dash pattern is not preserved"), LegacyStrokeNode->Metadata.Contains(TEXT("stroke.dashPattern")));
+	const TSharedPtr<FDesignNode>& UnsupportedNestedStroke = Doc.Children[3];
+	TestFalse(TEXT("unsupported nested stroke is rejected"), UnsupportedNestedStroke->Visual.Stroke.HasStroke());
+	TestFalse(TEXT("unsupported stroke join is not preserved"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.join")));
+	TestFalse(TEXT("unsupported stroke cap is not preserved"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.cap")));
+	TestFalse(TEXT("unsupported stroke miter angle is not preserved"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.miterAngle")));
+	TestFalse(TEXT("unsupported stroke dash pattern is not preserved"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.dashPattern")));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* OverrideLabel = FindWidgetById(Data.RootWidget, TEXT("label"));
 	TestTrue(TEXT("Find override text widget"), OverrideLabel != nullptr);
@@ -257,6 +257,7 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Stroke-only path converts to image widget"), Widget->Type, TEXT("Image"));
+	TestFalse(TEXT("A stroke does not synthesize an interior fill"), Widget->Path.FillColor.IsSet());
 	TestTrue(
 		TEXT("Stroke color propagated"),
 		FUMGValueParser::ParseColor(GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeColor))
@@ -273,7 +274,7 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 		Geometry,
 		20,
 		20,
-		TOptional<FLinearColor>(),
+		Widget->Path.FillColor,
 		FillRule,
 		TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColorValue)),
 		StrokeThickness,

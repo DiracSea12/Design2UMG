@@ -28,14 +28,13 @@ namespace
 	}
 }
 
-// Existing identifiers stay stable while their fixtures and source ownership change.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDFigmaHttpCancellationBehaviorTest,
-	"Design2UMG.BatchD.FigmaHttpCancellationBehavior",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaHttpCancellationBehaviorTest,
+	"Design2UMG.Http.Figma.Cancellation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString&)
+bool FFigmaHttpCancellationBehaviorTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client;
+	FFigmaHttpClient Client(Transport);
 	int32 CallbackCount = 0;
 	Client.GetFile(TEXT("test-file"), [&](bool, const FString&) { ++CallbackCount; });
 	TestEqual(TEXT("One request started"), Transport.Pending.Num(), 1);
@@ -60,13 +59,13 @@ bool FBatchDFigmaHttpCancellationBehaviorTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPHttpCancellationBehaviorTest,
-	"Design2UMG.BatchD.MCPHttpCancellationBehavior",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpCancellationBehaviorTest,
+	"Design2UMG.Http.MCP.Cancellation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString&)
+bool FMCPHttpCancellationBehaviorTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
 	bool bConnected = false;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess) { bConnected = bSuccess; });
 	if (!CompleteHandshake(*this, Transport)) return false;
@@ -80,32 +79,54 @@ bool FBatchDMCPHttpCancellationBehaviorTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPHttpClientSessionCycleReleaseTest,
-	"Design2UMG.BatchD.MCPHttpClientSessionCycleRelease",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpClientSessionCycleReleaseTest,
+	"Design2UMG.Http.MCP.SessionLifetime",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDMCPHttpClientSessionCycleReleaseTest::RunTest(const FString&)
+bool FMCPHttpClientSessionCycleReleaseTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
+	TSharedPtr<int32> CallbackLifetime = MakeShared<int32>(0);
+	TWeakPtr<int32> WeakCallback = CallbackLifetime;
 	bool bConnected = false;
-	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess) { bConnected = bSuccess; });
-	const auto WeakSession = Client.GetSessionWeakForTests();
-	if (!TestTrue(TEXT("Connect creates a session"), WeakSession.IsValid()) || !CompleteHandshake(*this, Transport)) return false;
+	Client.ConnectAsync(TEXT("http://transport.test"), [CallbackLifetime, &bConnected](bool bSuccess) { bConnected = bSuccess; });
+	CallbackLifetime.Reset();
+	TestTrue(TEXT("Pending handshake owns its callback"), WeakCallback.IsValid());
+	if (!CompleteHandshake(*this, Transport)) return false;
 	TestTrue(TEXT("Both handshake steps complete"), bConnected);
 	TestTrue(TEXT("Completed requests no longer retain callbacks"), Transport.Pending.IsEmpty());
-	TestTrue(TEXT("Client owns the connected session"), WeakSession.IsValid());
+	TestFalse(TEXT("Completed handshake releases all callback captures"), WeakCallback.IsValid());
 	Client.Disconnect();
-	TestFalse(TEXT("Disconnect releases the session, without a callback ownership cycle"), WeakSession.IsValid());
+	TestFalse(TEXT("Disconnect clears connection state"), Client.IsConnected());
+
+	// A cancelled handshake must release its session-owned callback even when
+	// the transport drops the response instead of delivering a late completion.
+	for (bool bFinishInitialize : {false, true})
+	{
+		CallbackLifetime = MakeShared<int32>(0);
+		WeakCallback = CallbackLifetime;
+		Client.ConnectAsync(TEXT("http://transport.test"), [CallbackLifetime](bool) {});
+		CallbackLifetime.Reset();
+		if (bFinishInitialize)
+		{
+			Transport.Complete(Transport.LastStartedId, TEXT("{}"), 200, {{TEXT("Mcp-Session-Id"), TEXT("test-session")}});
+		}
+		TestTrue(TEXT("In-flight handshake retains callback"), WeakCallback.IsValid());
+		Client.Disconnect();
+		Transport.Pending.Reset();
+		TestFalse(TEXT("Disconnect breaks handshake callback ownership cycle"), WeakCallback.IsValid());
+	}
+
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPRequestIdSemanticsTest,
-	"Design2UMG.BatchD.MCPRequestIdSemantics",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPRequestIdSemanticsTest,
+	"Design2UMG.Http.MCP.RequestIdentity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString&)
+bool FMCPRequestIdSemanticsTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
 	Client.ConnectAsync(TEXT("http://transport.test"), [](bool) {});
 	if (!CompleteHandshake(*this, Transport)) return false;
 	TestTrue(TEXT("Handshake has no pending requests"), Transport.Pending.IsEmpty());
@@ -136,13 +157,13 @@ bool FBatchDMCPRequestIdSemanticsTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBatchDMCPDisconnectCollisionTest,
-	"Design2UMG.BatchD.MCPDisconnectCollision",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPDisconnectCollisionTest,
+	"Design2UMG.Http.MCP.Reconnection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBatchDMCPDisconnectCollisionTest::RunTest(const FString&)
+bool FMCPDisconnectCollisionTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
 	int32 OldConnectionCallbacks = 0;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool) { ++OldConnectionCallbacks; });
 	// Leave the old notification pending: a tool can supersede it after initialize.
@@ -188,7 +209,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaHttpResponseContractTest,
 bool FFigmaHttpResponseContractTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client;
+	FFigmaHttpClient Client(Transport);
 	Client.SetToken(TEXT("test-token"));
 	AddExpectedError(TEXT("FigmaHttpClient: HTTP "), EAutomationExpectedErrorFlags::Contains, 5);
 	AddExpectedError(TEXT("FigmaHttpClient: Connection failed"), EAutomationExpectedErrorFlags::Contains, 2);
@@ -232,7 +253,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpResponseContractTest,
 bool FMCPHttpResponseContractTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
 	Client.ConnectAsync(TEXT("http://transport.test"), [](bool) {});
 	if (!CompleteHandshake(*this, Transport)) return false;
 	AddExpectedError(TEXT("MCPHttpClient: Async parse failed"), EAutomationExpectedErrorFlags::Contains, 1);
@@ -288,7 +309,7 @@ bool FMCPHttpHandshakeFailureTest::RunTest(const FString&)
 	{
 		FScopedHttpTestTransport Transport;
 		Transport.bStartRequests = Case.bStarts;
-		FMCPHttpClient Client;
+		FMCPHttpClient Client(Transport);
 		int32 Callbacks = 0;
 		Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess)
 		{
@@ -308,7 +329,7 @@ bool FMCPHttpHandshakeFailureTest::RunTest(const FString&)
 
 	// Notification failure is a warning after a successful initialize, not a lost session.
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client;
+	FMCPHttpClient Client(Transport);
 	int32 Callbacks = 0;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess)
 	{

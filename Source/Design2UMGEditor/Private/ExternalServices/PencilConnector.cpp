@@ -212,13 +212,8 @@ void FPencilConnector::LaunchAsync(int32 Port, TFunction<void(bool bSuccess)> On
 	TryConnectAsync(Session, Endpoint, DeadlineSeconds, SharedComplete);
 }
 
-// Re-entry guard invariant, kept in full because each layer covers a case the
-// others cannot: (1) the shared session's cancelled flag rejects callbacks
-// from a superseded or shut-down launch, (2) CompleteLaunchOnce nulls the
-// shared callback so one launch completes at most once, (3) Shutdown removes
-// a queued retry ticker, and (4) the destructor calls Shutdown so nothing
-// queued outlives the connector. Callbacks also hold shared state only, so
-// even if a guard missed, nothing dereferences the connector.
+// Launch callbacks retain shared state, check cancellation and complete at most once.
+// Shutdown removes pending retry tickers; destruction uses the same shutdown path.
 void FPencilConnector::TryConnectAsync(
 	const TSharedPtr<FLaunchSession, ESPMode::ThreadSafe>& Session,
 	const FString& Endpoint,

@@ -363,18 +363,8 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 			return Result;
 		if (TryParseCssGradientString(Str, Resolver, Result))
 			return Result;
-		// Pencil drops a paint whose value it cannot resolve (e.g. an escaped
-		// literal like "\$token" that is plain text, not a variable ref) instead
-		// of painting it: the node renders with no fill and stays transparent.
-		// Hex-prefixed literals (well-formed or not) and unresolved variable
-		// refs keep the legacy pass-through so the renderer's fallback stays
-		// authoritative for them.
-		// Scope: this drop rule covers the string form only. The object form's
-		// "color" field keeps the legacy resolve pass-through; the live .pen
-		// corpus has no instance of an unresolvable object-form color (every
-		// occurrence is enabled:false with a legal value), so Pencil's actual
-		// behavior there is unverified — measure a real instance before
-		// extending the drop rule to it.
+		// Drop unresolvable plain-string paints, leaving the node transparent.
+		// Hex literals, variable references and object-form colors retain renderer-side resolution.
 		const FString Resolved = Resolver.ResolveColor(Str);
 		const bool bIsVariableRef = FDesignVariableResolver::IsVariableRef(Str);
 		if (!Resolved.StartsWith(TEXT("#"))
@@ -428,14 +418,8 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 			else if (GradType == TEXT("angular"))
 				Result.Gradient.GradientType = EDesignGradientType::Angular;
 		}
-		// Pencil stores the linear gradient rotation in its internal convention:
-		// the editor's own CSS-string parser maps a CSS angle A to rotation = -A
-		// (so rotation 0 == CSS 0deg, gradient grows toward screen-up). The shared
-		// IR plus GenerateGradientAngled instead read Rotation as a math angle in
-		// the y-down design space ((cos, sin) from +X). Convert with
-		// theta = -R - 90 so both conventions describe the same direction.
-		// Radial/angular rotations are left untouched: no calibration data on
-		// their Pencil semantics exists yet.
+		// Convert Pencil linear-gradient rotation R to the IR's y-down angle: theta = -R - 90.
+		// Radial and angular rotations pass through unchanged.
 		float PencilGradientRotation = 0.0f;
 		if (Result.Gradient.GradientType == EDesignGradientType::Linear
 			&& TryGetResolvedNumberField(Obj, TEXT("rotation"), Resolver, PencilGradientRotation))

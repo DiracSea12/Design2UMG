@@ -7,6 +7,9 @@ import design2umg_determinism_smoke as smoke
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 
 
+CASE_NAMES = ("sample-alpha", "sample-beta")
+
+
 def assert_equal(actual, expected) -> None:
     assert actual == expected, f"expected {expected!r}, got {actual!r}"
 
@@ -73,10 +76,10 @@ def make_report_payload() -> dict:
 
 def build_run_root(root: Path, *, mutate_report=None, missing_case: str = "", missing_report: str = "", stale_summary_report: str = "") -> Path:
     run_scope = {
-        "case_names": smoke.canonical_sentinel_cases(),
+        "case_names": list(CASE_NAMES),
     }
     summary_cases = []
-    for case_name in smoke.canonical_sentinel_cases():
+    for case_name in list(CASE_NAMES):
         case_dir = root / case_name
         case_dir.mkdir(parents=True, exist_ok=True)
         report_path = case_dir / "compare_report.json"
@@ -104,18 +107,44 @@ def build_run_root(root: Path, *, mutate_report=None, missing_case: str = "", mi
     return root
 
 
-def test_canonical_owner_and_regex() -> None:
-    assert_equal(
-        smoke.canonical_sentinel_cases(),
-        [
-            "pen_pencil-new_gamehud-1920x1080",
-            "pen_pencil-welcome_step-2-frame",
-        ],
-    )
-    assert_equal(
-        smoke.canonical_sentinel_regex(),
-        r"^(pen_pencil\-new_gamehud\-1920x1080|pen_pencil\-welcome_step\-2\-frame)$",
-    )
+def test_suite_command_uses_caller_scope() -> None:
+    args = smoke.build_parser().parse_args(["run", "--include", "^sample-", "--no-publish-history",
+        "--figma-export-root", "exports"])
+    command = smoke.build_suite_command(args, {"project": "project", "editor": "editor", "reference_root": "refs"},
+                                        Path("cases"), Path("output"))
+    assert command[command.index("--include") + 1] == "^sample-"
+    assert command[command.index("--figma-export-root") + 1] == "exports"
+    assert "--no-publish-history" in command
+    args.include = ""
+    assert "--include" not in smoke.build_suite_command(args,
+        {"project": "project", "editor": "editor", "reference_root": "refs"}, Path("cases"), Path("output"))
+
+
+def test_manifest_defines_case_set() -> None:
+    for count in (0, 1, 7, 100):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = [f"user-case-{index}" for index in range(count)]
+            write_json(root / "run_scope.json", {"case_names": names})
+            cases = []
+            for name in names:
+                path = root / name / "compare_report.json"
+                write_json(path, make_report_payload())
+                cases.append({"name": name, "report_path": str(path)})
+            write_json(root / "summary.json", {"cases": cases})
+            result = smoke.validate_run_root(root)
+            assert_equal(len(result["case_results"]), count)
+            assert_equal(result["passed"], count > 0)
+            if not count:
+                assert "no_cases" in result["blocked_reasons"]
+
+
+def test_duplicate_and_unexpected_cases_fail_closed() -> None:
+    for names in ([CASE_NAMES[0], CASE_NAMES[0]], [*CASE_NAMES, "unexpected"]):
+        with tempfile.TemporaryDirectory() as directory:
+            root = build_run_root(Path(directory) / "run")
+            write_json(root / "run_scope.json", {"case_names": names})
+            assert smoke.validate_run_root(root)["passed"] is False
 
 
 def test_missing_explicit_inputs_fail_closed() -> None:
@@ -170,7 +199,7 @@ def test_validate_run_root_passes_for_canonical_payload() -> None:
 
 def test_missing_case_fails_closed() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        run_root = build_run_root(Path(temp_dir) / "run", missing_case=smoke.CANONICAL_SENTINEL_CASES[0])
+        run_root = build_run_root(Path(temp_dir) / "run", missing_case=CASE_NAMES[0])
         summary = smoke.validate_run_root(run_root)
         assert_equal(summary["passed"], False)
         assert_contains(summary["blocked_reasons"], "summary_case_mismatch")
@@ -179,7 +208,7 @@ def test_missing_case_fails_closed() -> None:
 
 def test_missing_compare_report_fails_closed() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        run_root = build_run_root(Path(temp_dir) / "run", missing_report=smoke.CANONICAL_SENTINEL_CASES[1])
+        run_root = build_run_root(Path(temp_dir) / "run", missing_report=CASE_NAMES[1])
         summary = smoke.validate_run_root(run_root)
         assert_equal(summary["passed"], False)
         assert_contains(summary["blocked_reasons"], "missing_compare_report")
@@ -187,7 +216,7 @@ def test_missing_compare_report_fails_closed() -> None:
 
 def test_missing_generation_vs_asset_fails_closed() -> None:
     def mutate_report(case_name: str, payload: dict) -> dict:
-        if case_name == smoke.CANONICAL_SENTINEL_CASES[0]:
+        if case_name == CASE_NAMES[0]:
             payload["render_chain"].pop("generation_vs_asset")
         return payload
 
@@ -200,7 +229,7 @@ def test_missing_generation_vs_asset_fails_closed() -> None:
 
 def test_missing_generation_vs_asset_structure_fails_closed() -> None:
     def mutate_report(case_name: str, payload: dict) -> dict:
-        if case_name == smoke.CANONICAL_SENTINEL_CASES[0]:
+        if case_name == CASE_NAMES[0]:
             payload["render_chain"].pop("generation_vs_asset_structure")
         return payload
 
@@ -213,7 +242,7 @@ def test_missing_generation_vs_asset_structure_fails_closed() -> None:
 
 def test_structure_mismatch_fails_closed() -> None:
     def mutate_report(case_name: str, payload: dict) -> dict:
-        if case_name == smoke.CANONICAL_SENTINEL_CASES[1]:
+        if case_name == CASE_NAMES[1]:
             payload["render_chain"]["generation_vs_asset_structure"]["right_total_nodes"] = 999
         return payload
 
@@ -226,7 +255,7 @@ def test_structure_mismatch_fails_closed() -> None:
 
 def test_nonzero_drift_fails_closed() -> None:
     def mutate_report(case_name: str, payload: dict) -> dict:
-        if case_name == smoke.CANONICAL_SENTINEL_CASES[1]:
+        if case_name == CASE_NAMES[1]:
             payload["render_chain"]["generation_vs_asset"]["changed_ratio"] = 0.25
         return payload
 
@@ -239,7 +268,7 @@ def test_nonzero_drift_fails_closed() -> None:
 
 def test_nonzero_stable_or_error_drift_fails_closed() -> None:
     def mutate_report(case_name: str, payload: dict) -> dict:
-        if case_name == smoke.CANONICAL_SENTINEL_CASES[0]:
+        if case_name == CASE_NAMES[0]:
             payload["render_chain"]["generation_vs_asset"].update(
                 {
                     "stable_changed_ratio": 0.0001,
@@ -258,14 +287,32 @@ def test_nonzero_stable_or_error_drift_fails_closed() -> None:
 
 def test_stale_summary_report_fails_closed() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
-        run_root = build_run_root(Path(temp_dir) / "run", stale_summary_report=smoke.CANONICAL_SENTINEL_CASES[0])
+        run_root = build_run_root(Path(temp_dir) / "run", stale_summary_report=CASE_NAMES[0])
         summary = smoke.validate_run_root(run_root)
         assert_equal(summary["passed"], False)
         assert_contains(summary["blocked_reasons"], "stale_compare_report")
 
 
+def test_invalid_metrics_fail_closed() -> None:
+    import design2umg_render_rule as render_rule
+    for metric in smoke.GENERATION_VS_ASSET_METRICS:
+        for value in (float("nan"), float("inf"), -float("inf"), -0.01, True, False, "0", None):
+            def mutate_report(case_name, payload):
+                payload["render_chain"]["generation_vs_asset"][metric] = value
+                return payload
+            with tempfile.TemporaryDirectory() as directory:
+                run_root = build_run_root(Path(directory) / "run", mutate_report=mutate_report)
+                summary = smoke.validate_run_root(run_root)
+                assert summary["passed"] is False, (metric, value)
+                report = run_root / list(CASE_NAMES)[0] / "compare_report.json"
+                assert render_rule.evaluate_report_pipeline_determinism_rule(report)["compatible"] is False
+
+
 def main() -> None:
-    test_canonical_owner_and_regex()
+    test_invalid_metrics_fail_closed()
+    test_suite_command_uses_caller_scope()
+    test_manifest_defines_case_set()
+    test_duplicate_and_unexpected_cases_fail_closed()
     test_missing_explicit_inputs_fail_closed()
     test_missing_run_root_fails_closed()
     test_validate_run_root_passes_for_canonical_payload()

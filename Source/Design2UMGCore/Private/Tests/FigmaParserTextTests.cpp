@@ -13,6 +13,7 @@
 #include "Misc/Paths.h"
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 
 using namespace Design2UMGCoreTests;
 

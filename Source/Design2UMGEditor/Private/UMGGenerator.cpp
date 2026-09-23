@@ -16,6 +16,7 @@
 #include "UObject/SavePackage.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignImageResourceLimits.h"
 #include "GeneratedAssetLifecycle.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "ProceduralShapeGenerator.h"
@@ -136,7 +137,7 @@ namespace
 				}
 
 				return true;
-			}, true, RF_Transient, EInternalObjectFlags::Garbage);
+			}, EGetObjectsFlags::IncludeNestedObjects, RF_Transient, EInternalObjectFlags::Garbage);
 		}
 
 		if (ClearedWidgetCount > 0 || SanitizedNavigationObjects.Num() > 0)
@@ -237,6 +238,10 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	FUMGPrototypeNavigationData* OutNavigationData,
 	UWidgetBlueprint* ExistingGeneratedBlueprint)
 {
+	// This is the outer operation boundary for ordinary generation. Component builds
+	// recurse through this function and therefore reuse this same cumulative budget.
+	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+
 	if (WidgetData.HasSourceDocumentData()
 		&& WidgetData.SourceDocument().Provider == DesignComponentMapping::ProviderFigma
 		&& WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
@@ -482,9 +487,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 		return nullptr;
 	}
 	WBP->WidgetTree->RootWidget = Root;
-	// Phase 2 transition animations: author the standard UWidgetAnimation assets here (post-tree-build,
-	// pre-save) while the local navigation IR is still mutable. The save's skeleton regen then turns the
-	// animations into class properties, and SaveWidgetBlueprint's wiring plays them by name.
+	// Create transition animations after the widget tree and before saving.
+	// Skeleton refresh exposes them as class properties for navigation wiring.
 	UMGPrototypeAnimationBuilder::GenerateNavigationAnimations(WBP, PreparedRootRef, NavigationData);
 	// mapped nodes get no Prototype bindings: design interactions attached to a mapped identity produce an "inert" diagnostic.
 	Design2UMGComponentMappingGeneration::ReportInertPrototypeBindings(NavigationData, MappingBuildState);
@@ -533,13 +537,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	return WBP;
 }
 
-#if WITH_DEV_AUTOMATION_TESTS
-namespace
-{
-	// Test injection: see FUMGGenerator::ArmAutomationSaveFailureOnce.
-	std::atomic<bool> bAutomationSaveFailureArmed{ false };
-}
-#endif
 
 FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	UWidgetBlueprint* WBP,
@@ -556,15 +553,6 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	Result.AssetPath = WBP->GetPathName();
 	Result.Memory = EDesign2UMGMemoryState::Modified;
 
-#if WITH_DEV_AUTOMATION_TESTS
-	if (bAutomationSaveFailureArmed.exchange(false))
-	{
-		UE_LOG(LogDesign2UMG, Error,
-			TEXT("SaveWidgetBlueprint: failed to save %s (automation-injected save failure)"),
-			*WBP->GetPathName());
-		return Result;
-	}
-#endif
 
 	const bool bWasNewlyCreated = WBP->GetOutermost()->HasAnyPackageFlags(PKG_NewlyCreated);
 	const auto DiscardFailedAsset = [&]()
@@ -640,6 +628,7 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	FString FullPath = Package->GetName();
 	FSavePackageArgs SaveArgs;
 	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
 	FString FileName = FPackageName::LongPackageNameToFilename(FullPath, FPackageName::GetAssetPackageExtension());
 	const bool bPackageFileExisted = IFileManager::Get().FileExists(*FileName);
 	if (!UPackage::SavePackage(Package, WBP, *FileName, SaveArgs))
@@ -696,10 +685,3 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);
 	return Result;
 }
-
-#if WITH_DEV_AUTOMATION_TESTS
-void FUMGGenerator::ArmAutomationSaveFailureOnce()
-{
-	bAutomationSaveFailureArmed.store(true);
-}
-#endif

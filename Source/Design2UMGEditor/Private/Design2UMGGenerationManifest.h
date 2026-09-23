@@ -18,16 +18,14 @@ namespace Design2UMGManifestKinds
 
 
 /**
- * Minimal generation record (sidecar manifest) payload:
- * schemaVersion/provider/documentScope/sourceRoot/instances(kind=mapped|generated)/d2uOwned。
- * assembled by BuildWidgetBlueprint and written to <AssetName>.d2u.json after a successful import/reimport asset save.
- * Property values never enter the manifest: reimport updates properties by "re-convert by designNodeId, then diff";
- * the inputs record keeps declarations only (source/target/valueKind), not design values.
+ * Records source identity, generated instances, ownership and input declarations.
+ * Written to <AssetName>.d2u.json after a successful asset save.
+ * Design property values are read from the source during reimport, not stored here.
  */
 struct FDesign2UMGGenerationManifestPayload
 {
 	bool bWholeAssetOwned = false;
-	bool bComponentBatchRoot = false;
+	bool bComponentBulkRoot = false;
 	FString Provider;
 	FString DocumentScope;
 	FString SourceRootNodeId;
@@ -42,7 +40,7 @@ struct FDesign2UMGGenerationManifestPayload
 struct FDesign2UMGGenerationManifestSidecar
 {
 	FString GeneratedAssetHash;
-	bool bComponentBatchRoot = false;
+	bool bComponentBulkRoot = false;
 	int32 SchemaVersion = 0;
 	FString Provider;
 	FString DocumentScope;
@@ -83,16 +81,6 @@ namespace Design2UMGGenerationManifest
 	/** Manifest sidecar file name suffix (<AssetName>.d2u.json). */
 	FString BuildSidecarPathForAsset(const FString& AssetPackageName);
 
-#if WITH_DEV_AUTOMATION_TESTS
-	/**
-	 * Test injection: once armed, the next WriteSidecarForAsset fails exactly once and touches no file.
-	 * Used to verify deterministically the reimport propagation path "uasset saved but manifest not updated"
-	 * (a genuinely read-only sidecar is caught by reimport's pre-save check, so that branch is unreachable otherwise).
-	 */
-	void ArmAutomationSidecarWriteFailureOnce();
-	/** Remove the completed temp file before replacement to exercise the real finalization failure path. */
-	void ArmAutomationSidecarFinalizeFailureOnce();
-#endif
 
 	/**
 	 * Write via a temp file, then replace the sidecar. Failures before replacement leave it Unchanged;
@@ -103,8 +91,8 @@ namespace Design2UMGGenerationManifest
 		const FDesign2UMGGenerationManifestPayload& Payload);
 
 	/**
-	 * Reads and parses the sidecar next to the asset before reimport. Missing file / invalid JSON / unrecognized
-	 * schema returns false with a readable reason (goes into conflict diagnostics). Historical value fields inside inputs are always ignored.
+	 * Load the asset sidecar. Missing files, invalid JSON and unknown schemas return a reason.
+	 * Input declarations exclude stored design values.
 	 */
 	bool TryLoadSidecarForAsset(
 		const FString& AssetPackageName,

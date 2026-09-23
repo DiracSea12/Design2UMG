@@ -97,37 +97,37 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBoxShadowExplicitBlurPaddingMaterialParamTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FBoxShadowExplicitBlurPaddingMaterialParamTest::RunTest(const FString& Parameters)
 {
-	FUMGProceduralResourceRequest LegacyShadowRequest;
-	LegacyShadowRequest.MaterialRef = TEXT("boxshadow");
-	LegacyShadowRequest.WidthOverride = 56.0f;
-	LegacyShadowRequest.HeightOverride = 40.0f;
-	LegacyShadowRequest.ShadowBlur = 8.0f;
-	LegacyShadowRequest.MaterialParams = TEXT("{\"Color\":\"#000000FF\",\"CornerRadius\":0.0}");
+	FUMGProceduralResourceRequest DefaultPaddingRequest;
+	DefaultPaddingRequest.MaterialRef = TEXT("boxshadow");
+	DefaultPaddingRequest.WidthOverride = 56.0f;
+	DefaultPaddingRequest.HeightOverride = 40.0f;
+	DefaultPaddingRequest.ShadowBlur = 8.0f;
+	DefaultPaddingRequest.MaterialParams = TEXT("{\"Color\":\"#000000FF\",\"CornerRadius\":0.0}");
 
-	FUMGProceduralResourceRequest ExplicitPaddingShadowRequest = LegacyShadowRequest;
+	FUMGProceduralResourceRequest ExplicitPaddingShadowRequest = DefaultPaddingRequest;
 	ExplicitPaddingShadowRequest.MaterialParams = TEXT("{\"Color\":\"#000000FF\",\"CornerRadius\":0.0,\"BlurPadding\":8.0}");
 
-	UTexture2D* LegacyTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
-		LegacyShadowRequest,
+	UTexture2D* DefaultPaddingTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
+		DefaultPaddingRequest,
 		GetTransientPackageAsObject());
 	UTexture2D* ExplicitPaddingTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		ExplicitPaddingShadowRequest,
 		GetTransientPackageAsObject());
-	TestTrue(TEXT("Legacy box shadow texture generated"), LegacyTexture != nullptr);
+	TestTrue(TEXT("Default-padding box shadow texture generated"), DefaultPaddingTexture != nullptr);
 	TestTrue(TEXT("Explicit blur-padding texture generated"), ExplicitPaddingTexture != nullptr);
-	if (!LegacyTexture || !ExplicitPaddingTexture)
+	if (!DefaultPaddingTexture || !ExplicitPaddingTexture)
 	{
 		return false;
 	}
 
-	FColor LegacyCornerPixel;
+	FColor DefaultPaddingCornerPixel;
 	FColor ExplicitCornerPixel;
 	FColor ExplicitCenterPixel;
-	TestTrue(TEXT("Legacy corner pixel readable"), ReadTexturePixel(LegacyTexture, 0, 0, LegacyCornerPixel));
+	TestTrue(TEXT("Default-padding corner pixel readable"), ReadTexturePixel(DefaultPaddingTexture, 0, 0, DefaultPaddingCornerPixel));
 	TestTrue(TEXT("Explicit blur-padding corner pixel readable"), ReadTexturePixel(ExplicitPaddingTexture, 0, 0, ExplicitCornerPixel));
 	TestTrue(TEXT("Explicit blur-padding center pixel readable"), ReadTexturePixel(ExplicitPaddingTexture, 28, 20, ExplicitCenterPixel));
 
-	TestTrue(TEXT("Explicit blur-padding softens the padded corner"), ExplicitCornerPixel.A < LegacyCornerPixel.A);
+	TestTrue(TEXT("Explicit blur-padding softens the padded corner"), ExplicitCornerPixel.A < DefaultPaddingCornerPixel.A);
 	TestTrue(TEXT("Explicit blur-padding keeps the shadow core visible"), ExplicitCenterPixel.A > 150);
 	return true;
 }

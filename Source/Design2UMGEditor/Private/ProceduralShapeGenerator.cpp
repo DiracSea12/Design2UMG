@@ -17,6 +17,44 @@ namespace
 {
 	using FGeneratedGradientStop = ProceduralShapeGeneratorAssets::FGradientStop;
 
+	enum class EProceduralShapeKind : uint8
+	{
+		Unknown,
+		HorizontalStroke,
+		Circle,
+		Ring,
+		RoundedRect,
+		GradientLinear,
+		GradientH,
+		GradientV,
+		RadialGradient,
+		AngularGradient,
+		BoxShadow,
+		EllipseShadow,
+		PlaceholderHatch,
+		PlaceholderSurface
+	};
+
+	EProceduralShapeKind ResolveMaterialRefShape(const FString& MaterialRef)
+	{
+		if (MaterialRef.Equals(TEXT("horizontalstroke"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::HorizontalStroke;
+		if (MaterialRef.Equals(TEXT("circle"), ESearchCase::IgnoreCase)
+			|| MaterialRef.Equals(TEXT("ellipse"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::Circle;
+		if (MaterialRef.Equals(TEXT("ring"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::Ring;
+		if (MaterialRef.Equals(TEXT("roundedrect"), ESearchCase::IgnoreCase)
+			|| MaterialRef.Equals(TEXT("polygon"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::RoundedRect;
+		if (MaterialRef.Equals(TEXT("gradientlinear"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientLinear;
+		if (MaterialRef.Equals(TEXT("gradienth"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientH;
+		if (MaterialRef.Equals(TEXT("gradientv"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientV;
+		if (MaterialRef.Equals(TEXT("radialgradient"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::RadialGradient;
+		if (MaterialRef.Equals(TEXT("angulargradient"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::AngularGradient;
+		if (MaterialRef.Equals(TEXT("boxshadow"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::BoxShadow;
+		if (MaterialRef.Equals(TEXT("ellipseshadow"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::EllipseShadow;
+		if (MaterialRef.Equals(TEXT("placeholderhatch"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::PlaceholderHatch;
+		if (MaterialRef.Equals(TEXT("placeholdersurface"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::PlaceholderSurface;
+		return EProceduralShapeKind::Unknown;
+	}
+
 	constexpr TCHAR MaterialParamColorKey[] = TEXT("Color");
 	constexpr TCHAR MaterialParamColorStartKey[] = TEXT("ColorStart");
 	constexpr TCHAR MaterialParamColorCenterKey[] = TEXT("ColorCenter");
@@ -117,6 +155,11 @@ void FProceduralShapeGenerator::FlushPendingTextureUpdates()
 	ProceduralShapeGeneratorAssets::FlushPendingTextureUpdates();
 }
 
+TArray<UTexture2D*> FProceduralShapeGenerator::GetRootedTextureSnapshot()
+{
+	return ProceduralShapeGeneratorAssets::GetRootedTextureSnapshot();
+}
+
 UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	UTexture2D* Source,
 	float A,
@@ -149,6 +192,24 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	int32 SrcH = 0;
 	if (!ReadTexturePixels(Source, SourcePixels, SrcW, SrcH))
 	{
+		return nullptr;
+	}
+
+	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr);
+	if (!Result)
+	{
+		if (OutError)
+		{
+			if (const FString* Refusal = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError();
+				Refusal && !Refusal->IsEmpty())
+			{
+				*OutError = *Refusal;
+			}
+			else
+			{
+				*OutError = TEXT("Failed to allocate affine crop texture");
+			}
+		}
 		return nullptr;
 	}
 
@@ -205,14 +266,13 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		}
 	}
 
-	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr);
-	if (!Result)
-	{
-		return nullptr;
-	}
-
 	ProceduralShapeGeneratorAssets::FillTextureData(Result, Pixels);
 	return Result;
+}
+
+bool FProceduralShapeGenerator::IsSupportedMaterialRef(const FString& MaterialRef)
+{
+	return ResolveMaterialRefShape(MaterialRef) != EProceduralShapeKind::Unknown;
 }
 
 namespace
@@ -243,14 +303,8 @@ namespace
 		FVector2D RadialSize = FVector2D(1.0f, 1.0f);
 	};
 
-	// Thickness/CornerRadius/CornerRadii arrive in two source-side conventions with no
-	// unit marker in the payload: design-tool percentages (0-100) and normalized
-	// fractions (0-1). Values > 1.0 are treated as percentages and divided by 100;
-	// values <= 1.0 are already normalized and pass through unchanged.
-	// Known ambiguity: a value like 1.5 is read as 1.5%, not 150%, and lands near
-	// zero after the division. This cannot be tightened to a smarter cutoff without
-	// a unit flag in the source schema: any change to the >1.0 rule re-renders every
-	// existing design that relies on the current interpretation.
+	// Values above 1 are percentages; values at or below 1 are normalized fractions.
+	// The source carries no unit marker, so 1.5 means 1.5%, not 150%.
 	float NormalizePercentageOrFraction(const double Value)
 	{
 		return Value > 1.0 ? static_cast<float>(Value) / 100.0f : static_cast<float>(Value);
@@ -466,9 +520,11 @@ namespace
 		UObject* Outer,
 		bool& bRecognized)
 	{
-		bRecognized = true;
-		const FString Shape = Request.MaterialRef.ToLower();
-		if (Shape == TEXT("horizontalstroke"))
+		const EProceduralShapeKind ShapeKind = ResolveMaterialRefShape(Request.MaterialRef);
+		bRecognized = ShapeKind != EProceduralShapeKind::Unknown;
+		if (!bRecognized) return nullptr;
+
+		if (ShapeKind == EProceduralShapeKind::HorizontalStroke)
 		{
 			UTexture2D* Texture = ProceduralShapeGeneratorAssets::CreateTransientTexture(Width, Height, Outer);
 			if (!Texture) return nullptr;
@@ -487,15 +543,15 @@ namespace
 			return Texture;
 		}
 
-		if (Shape == TEXT("circle") || Shape == TEXT("ellipse"))
+		if (ShapeKind == EProceduralShapeKind::Circle)
 		{
 			return ProceduralShapeGeneratorAssets::GenerateCircle(FMath::Max(Width, Height), P.Color, Outer);
 		}
-		if (Shape == TEXT("ring"))
+		if (ShapeKind == EProceduralShapeKind::Ring)
 		{
 			return ProceduralShapeGeneratorAssets::GenerateRing(FMath::Max(Width, Height), P.Color, P.Thickness, Outer);
 		}
-		if (Shape == TEXT("roundedrect") || Shape == TEXT("polygon"))
+		if (ShapeKind == EProceduralShapeKind::RoundedRect)
 		{
 			if (P.CornerRadii[0] >= 0.0f)
 			{
@@ -512,7 +568,7 @@ namespace
 
 			return ProceduralShapeGeneratorAssets::GenerateRoundedRect(Width, Height, P.Color, P.CornerRadius, Outer);
 		}
-		if (Shape == TEXT("gradientlinear"))
+		if (ShapeKind == EProceduralShapeKind::GradientLinear)
 		{
 			if (P.MultiStops.Num() < 2)
 			{
@@ -532,19 +588,19 @@ namespace
 			}
 			return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, P.RotationDeg, P.MultiStops, Outer);
 		}
-		if (Shape == TEXT("gradienth"))
+		if (ShapeKind == EProceduralShapeKind::GradientH)
 		{
 			return P.MultiStops.Num() >= 2
 				? ProceduralShapeGeneratorAssets::GenerateGradientHMultiStop(Width, Height, P.MultiStops, Outer)
 				: ProceduralShapeGeneratorAssets::GenerateGradientH(Width, Height, P.ColorStart, P.ColorEnd, Outer);
 		}
-		if (Shape == TEXT("gradientv"))
+		if (ShapeKind == EProceduralShapeKind::GradientV)
 		{
 			return P.MultiStops.Num() >= 2
 				? ProceduralShapeGeneratorAssets::GenerateGradientVMultiStop(Width, Height, P.MultiStops, Outer)
 				: ProceduralShapeGeneratorAssets::GenerateGradientV(Width, Height, P.ColorStart, P.ColorEnd, Outer);
 		}
-		if (Shape == TEXT("radialgradient"))
+		if (ShapeKind == EProceduralShapeKind::RadialGradient)
 		{
 			return P.MultiStops.Num() >= 2
 				? ProceduralShapeGeneratorAssets::GenerateRadialGradientMultiStop(
@@ -565,7 +621,7 @@ namespace
 					P.RotationDeg,
 					Outer);
 		}
-		if (Shape == TEXT("angulargradient"))
+		if (ShapeKind == EProceduralShapeKind::AngularGradient)
 		{
 			if (P.MultiStops.Num() < 2)
 			{
@@ -575,7 +631,8 @@ namespace
 			}
 			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer);
 		}
-		if (Shape == TEXT("boxshadow") || Shape == TEXT("ellipseshadow"))
+		if (ShapeKind == EProceduralShapeKind::BoxShadow
+			|| ShapeKind == EProceduralShapeKind::EllipseShadow)
 		{
 			const float BlurPx = Request.ShadowBlur.Get(0.0f);
 			if (P.CornerRadii[0] >= 0.0f)
@@ -591,7 +648,7 @@ namespace
 					BlurPx,
 					P.BoxShadowBlurPadding,
 					Outer,
-					Shape == TEXT("ellipseshadow"));
+					ShapeKind == EProceduralShapeKind::EllipseShadow);
 			}
 
 			return ProceduralShapeGeneratorAssets::GenerateBoxShadow(
@@ -602,9 +659,9 @@ namespace
 				BlurPx,
 				P.BoxShadowBlurPadding,
 				Outer,
-				Shape == TEXT("ellipseshadow"));
+				ShapeKind == EProceduralShapeKind::EllipseShadow);
 		}
-		if (Shape == TEXT("placeholderhatch"))
+		if (ShapeKind == EProceduralShapeKind::PlaceholderHatch)
 		{
 			return ProceduralShapeGeneratorAssets::GeneratePlaceholderHatch(
 				Width,
@@ -615,7 +672,7 @@ namespace
 				P.StripeGapPx,
 				Outer);
 		}
-		if (Shape == TEXT("placeholdersurface"))
+		if (ShapeKind == EProceduralShapeKind::PlaceholderSurface)
 		{
 			return ProceduralShapeGeneratorAssets::GeneratePlaceholderSurface(
 				Width,
@@ -627,7 +684,6 @@ namespace
 				Outer);
 		}
 
-		bRecognized = false;
 		return nullptr;
 	}
 }
@@ -654,7 +710,10 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
 	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized);
 	if (!Texture && bRecognized)
 	{
-		const FString Error = FString::Printf(TEXT("Failed to generate procedural texture '%s'"), *Request.MaterialRef);
+		const FString* Refusal = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError();
+		const FString Error = Refusal && !Refusal->IsEmpty()
+			? *Refusal
+			: FString::Printf(TEXT("Failed to generate procedural texture '%s'"), *Request.MaterialRef);
 		if (OutError) *OutError = Error;
 		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
 	}

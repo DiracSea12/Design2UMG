@@ -1,16 +1,16 @@
 # Design2UMG Validation Protocol
 
-## 当前输入基线（2026-09-15 用户确认）
+## User-owned corpus and baselines
 
-当前 81-case 基线为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/review-batch-transaction-full-20260915`。当前输入与参考文件已逐项核验，原始 PNG、评分公式、阈值、成绩文件均不改写。后续完整回归显式使用该目录作为 `--reference-root`。
+The open-source capability is the runner, not a fixed collection of designs. Put your cases under a directory and pass `--design-root`; discovery is recursive and the run covers the resulting set, whatever its size. Private maintainer corpora and their counts are not public prerequisites, coverage targets or release assets. Do not upload them to CI or package them with the plugin.
 
-`Automation/_baseline.json` 是小型一次性登记指针，绑定该 run 的 summary/run_scope SHA256 与登记时间；`ReferenceCache/CURRENT.json` 同步指向它。历史重建只纳入该登记基线和登记之后的有效运行。不同源/有效参考身份不强行比较；同身份的既有历史会保留，A→B→A 不得把回来的 A 当全新基线。候选运行不能自己移动登记起点。缺失输入身份、弱参考来源、缺报告或同输入退步仍阻断。
+Use `--list-cases` to inspect discovery without Unreal. An empty normal suite reports `status=empty`, zero discovered/executed cases and `passed=null`, exits zero and starts no editor; it is not a passed visual gate. Invalid roots and malformed inputs are errors. Incomplete Figma directories without a reference PNG are reported as skipped, not passed. One Pen root is a case; one Figma export contributes `local` and `source` paths. See [Tools](../Tools/README.md) for directory layout and commands.
 
-仓库巨型 `design2umg_pinned_baseline.json` 已删除，消费者不再依赖该文件。下文旧阶段与旧 run 的记录只作历史背景，不覆盖本节已明确的当前基线。
+Select your own frozen `--reference-root`. Each case needs its PNG and baseline comparison report for `no_regression`. Keep the input/reference identities and any registered baseline pointer unchanged while comparing code revisions. History from another identity is not a regression comparison; a returning identity retains its own prior baseline. Use `--no-publish-history` to write the ordinary historical check only into this run's directory without replacing the global manifest.
 
 Chinese companion: [ValidationProtocol.zh-CN.md](ValidationProtocol.zh-CN.md)
 
-Last verified: 2026-05-18
+Last updated: 2026-09-18
 
 ## Purpose
 
@@ -64,7 +64,7 @@ Maintainer rules:
 - If a case-local font import cannot be downloaded again, prefer rebuilding the current case-local asset from an already loadable font asset over borrowing the old global automation object path directly.
 - When diagnosing a font regression, inspect both the generation-stage and compiled-instance font object paths in the Unreal log. If the family resolves to another case's `ImportedFonts` path or to the global automation path during a case-local run, treat that as contamination first and only then judge the score delta.
 
-These rules were reconfirmed during phase 21 batch 2: the real regression was caused by cross-case automation font reuse, not by the converter boundary cleanup itself.
+These rules come from a reproduced failure in which cross-case automation font reuse caused the regression; the converter boundary was not the cause.
 
 ## Required Validation Order
 
@@ -126,8 +126,7 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 `-AssetObjectPath`, `-DesignerPngPath` and `-ResultJsonPath` are required; the wrapper has no sample-specific defaults.
 
-The wrapper now kills any existing `UnrealEditor.exe` / `UnrealEditor-Cmd.exe` process by default before launching the validation editor.
-Use `-KeepExistingEditor` only when you are intentionally debugging against an already-open editor session.
+The wrapper refuses to start while an existing editor is running. It does not terminate any editor or discard unsaved work. Save and close sessions first, or use `-KeepExistingEditor` only for intentional debugging.
 
 Example:
 
@@ -217,7 +216,7 @@ The claim recorded at the time was that `LayoutMapper::TryFuseSizeConstraints()`
 
 `Tools/design2umg_fresh_process_reload_gate.py` is the executable form of this section. It launches one fresh
 editor process, reloads each target asset through `Design2UMG.AutomationRender` with `force_reload_package`,
-waits for the real process exit, then fails closed unless every result reports success, every widget tree stays
+waits for the real process exit, then fails closed unless the editor exits with code zero and every result reports success, every widget tree stays
 at or above the guarded node floor, and the fresh log contains none of the two corruption signatures (outer-load
 failures and variable-GUID ensures). Its offline selftest replays the historical failure log as negative fixture:
 
@@ -226,13 +225,13 @@ python Tools/design2umg_fresh_process_reload_gate_selftest.py
 pwsh -NoProfile -Command "python Tools/design2umg_fresh_process_reload_gate.py --project <MaintainerRuntimeProject.uproject> --editor <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe --assets /Game/.../WBP_X.WBP_X[,...] --output-root <RuntimeProjectRoot>\Saved\Design2UMG\FreshReloadGate_<stamp> --min-total-nodes <floor>"
 ```
 
-For formal multi-asset verification, pin each asset's expected node count with per-asset floors so a local
-truncation cannot hide behind another asset's larger tree:
+For a completed suite, derive the targets from its manifest instead of maintaining another list:
 
 ```text
---asset-floors "0=136,1=219"
+python Tools/design2umg_fresh_process_reload_gate.py --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --run-root <CompletedRunRoot> --output-root <NewReloadRoot>
 ```
 
+This checks every recorded asset's identity, explicit success/reload flags, structural counts, visible text and candidate pixels after a new process loads it. Empty scopes cannot establish reload evidence. Manual `--assets` mode remains available; positive per-asset floors use zero-based unique in-range indices and do not imply suite structure/pixel parity.
 Run it after any change to widget classes, the converter output shape, or the save/compile path, before trusting
 a structure snapshot from the generating process.
 
@@ -250,69 +249,44 @@ Use determinism smoke after touching any of these surfaces:
 
 This is a focused maintainer pre-gate, not release closeout.
 
-The canonical sentinel owner is `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`.
-Do not maintain a second handwritten sentinel list in wrapper logic or selftests. Inspect the current pair with:
+The expected case set comes from the run's `run_scope.json`; there is no built-in sentinel list. Validate all discovered cases, or explicitly select a focused replay with `--include` / PowerShell `-Include`.
 
 ```text
-python Tools/design2umg_determinism_smoke.py print-sentinels
+python Tools/design2umg_determinism_smoke.py validate-run-root --run-root <CompletedRunRoot>
 ```
 
-Focused smoke command:
-
-```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -ReferenceRoot <TrustedReferenceRoot> -OutputRoot <MaintainerRuntimeProjectRoot>\Saved\Design2UMG\Automation\_determinism_smoke_<stamp>
-```
-
-Smoke rules:
-
-- `-ProjectPath`, `-EditorPath`, `-ReferenceRoot`, and `-OutputRoot` must be explicit.
-- The smoke helper must fail closed if the run root, required sentinel case, compare report, `generation_vs_asset`, or `generation_vs_asset_structure` evidence is missing, stale, unreadable, or mismatched.
-- A passing smoke must prove `generation_vs_asset.changed_ratio = 0.0` and `generation_vs_asset.stable_changed_ratio = 0.0` for every sentinel.
-- A passing smoke must also prove `generation_vs_asset_structure.available = true` plus structure/text parity for every sentinel.
-- Passing this smoke only means the bootstrap-vs-asset parity path still looks trustworthy enough to continue to the formal gate.
-
-Sentinel maintenance rule:
-
-- If an isolated formal replay proves a new bootstrap-vs-asset drift case that is not covered by the current sentinel pair, the next determinism-focused batch must explicitly revisit the sentinel set instead of silently growing a second list elsewhere.
+The validator requires a nonempty, complete set with finite, non-negative error metrics, zero generation-vs-asset drift and matching structure/text. Missing, duplicate, unexpected, unreadable or mismatched evidence fails closed. A focused check remains focused evidence, not a full-corpus result.
 
 ## Current Formal Gate
 
-The current formal admissible gate is the 81-case discovered admissible set: 39 Pencil cases plus 21 Figma export roots represented by `local` and `source` paths (42 Figma cases). The locked scope is recorded by the latest full-run `run_scope.json`; a run is not a formal full run when it discovers fewer than 81 cases. The sealed baseline for this scope is `d4-seal81-20260906_01`.
-
+A full gate covers exactly the cases discovered from the caller's roots with no include/exclude filter. There is no hard-coded minimum, maximum or private case-name requirement. Record the set in `run_scope.json` and keep its input and reference identities frozen. A zero-case scan establishes no visual coverage. A new run does not promote itself to a new baseline.
 That means:
 - do not run the formal full gate with an exclude pattern
-- formal batch reports do not use raw visual-threshold `passed/failed` totals as a score
+- formal suite reports do not use raw visual-threshold `passed/failed` totals as a score
 - formal historical-best parity should be checked with:
   `python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-best-json <PluginRoot>\Saved\Design2UMG\Automation\_admissible_best_latest.json`
-- the Python helper contracts are checked separately with these UE-free selftests:
-  - `python Tools/design2umg_validation_helpers_selftest.py`
-  - `python Tools/design2umg_compatibility_selftest.py`
-  - `python Tools/design2umg_diagnostics_selftest.py`
-  - `python Tools/design2umg_run_history_selftest.py`
-- `python Tools/design2umg_evidence_epoch_selftest.py`
-  - `python Tools/design2umg_batch_report_contract_selftest.py`
-  - `python Tools/design2umg_determinism_smoke_selftest.py`
-- together they cover discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, completeness aggregation, compatibility-rule routing, diagnostic stderr shape, historical-best helper ownership, batch summary shape, and batch timing-history persistence
+- the UE-free helper contracts are run by `python Tools/run_validation_selftests.py`, the same discovery-driven runner used in public CI
+- together they cover discovery filtering, default Figma export root resolution, run-scope writing, shard sizing, completeness aggregation, compatibility-rule routing, diagnostic stderr shape, historical-best helper ownership, suite summary shape, and suite timing-history persistence
 - import diagnostic report JSON is a separate contract from those helper stderr lines; see `Docs/ImportDiagnosticContract.md`
 
 If the active render-size or pipeline-determinism rules changed, rebuild the admissible best manifest first:
 `python Tools/design2umg_rebuild_admissible_best.py --automation-root <run-history-root> --design-root <design-corpus-root> --figma-export-root <figma-export-corpus>`
 
-Historical coverage uses the discovered case names, not a fixed count. Full batch history checks discover the entire configured corpus even when the current execution is filtered. A single-source invocation checks its requested case. Complete pinned coverage requires the requested names exactly; matching counts alone are insufficient. When the corpus changes, verified pinned entries remain available and missing newly discovered cases are reported explicitly. Historical entries from other scopes remain preserved and are listed separately from missing current cases. Discovery does not manufacture missing scores or waive source-identity checks.
+Historical coverage uses the discovered case names, not a fixed count. Full suite history checks discover the entire configured corpus even when the current execution is filtered. A single-source invocation checks its requested case. Complete pinned coverage requires the requested names exactly; matching counts alone are insufficient. When the corpus changes, verified pinned entries remain available and missing newly discovered cases are reported explicitly. Historical entries from other scopes remain preserved and are listed separately from missing current cases. Discovery does not manufacture missing scores or waive source-identity checks.
 
 Historical-best evidence is rebuilt from admitted run history. Source artifact and effective-reference hashes define an evidence epoch: an identity change seeds the current result as the new epoch baseline, while later runs with the same identity are compared normally. Results from different identities are retained as diagnostics but are never compared.
 
 The older `_admissible_best_20260407_47.json` example is obsolete and must not be used for current formal gate validation.
 
 Reference sourcing for the formal gate:
-- `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no checked-in external reference root is provided
+- `pen_*` cases may use Pencil MCP / export-nodes capture as the authoritative source reference when no user-provided external reference root is provided
 - `figma_*` cases use the top-level export PNG found under each local Figma export root as the authoritative source reference
-- if you package a checked-in external reference root for a formal full run, every formal case directory must contain both `reference.png` and `compare_report.json`
-- `Tools/design2umg_auto_verify_batch.py` now auto-discovers the default local Figma export roots from the `design-root` workspace ancestry when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the full discovered case set
+- if you supply an external reference root for a full run, every formal case directory must contain both `reference.png` and `compare_report.json`
+- `Tools/design2umg_auto_verify_suite.py` now auto-discovers the default local Figma export roots recursively within the selected `--design-root` only when `--figma-export-root` is omitted, so the maintainer formal gate does not silently drop the Figma members of the full discovered case set
 
-The batch verifier requires an explicit runtime project through `--project` or `DESIGN2UMG_RUNTIME_PROJECT`. Missing project input is a hard error with no design-root inference and no HostProject creation.
+The suite verifier requires an explicit runtime project through `--project` or `DESIGN2UMG_RUNTIME_PROJECT`. Missing project input is a hard error with no design-root inference and no HostProject creation.
 
-Batch-level timing drift is recorded at `Saved/Design2UMG/Automation/batch_timing_history.jsonl`. This history is for contributor inspection only; it does not replace fidelity or no-regression as the release gate.
+Suite-level timing drift is recorded at `Saved/Design2UMG/Automation/suite_timing_history.jsonl`. This history is for contributor inspection only; it does not replace fidelity or no-regression as the release gate.
 
 Default user flow is fail-closed. If live Pencil `export_nodes` is unavailable, the verifier may still keep a `get_screenshot` witness PNG so the run can preserve diagnostic and comparison artifacts, but that witness fallback does not prove live Pencil export health and it does not relax formal or historical-best gates.
 
@@ -320,7 +294,7 @@ Maintainers may also run a local regression-only comparison against a curated ex
 
 If `reference.png` exists but the baseline `compare_report.json` is missing, the run can still render and compare, but the run root's own `summary.no_regression` becomes unavailable. That is not acceptable for the formal archived gate.
 
-Operational reminder from phase 21 Batch 6:
+For archived no-regression evidence:
 
 - If the maintainer goal is the archived `summary.no_regression` proof, do not forget `--reference-root`.
 - Omitting `--reference-root` can still produce a technically useful live Pencil run, but many Pencil cases may then downgrade to `unverified_reference`, `comparison_mode_mismatch`, or degraded reference authority, which blocks the archived no-regression gate even when the scripts themselves are behaving correctly.
@@ -337,28 +311,28 @@ Formal gate reading order:
 
 Formal gate execution discipline:
 
-- Run the full admissible case set formal gate alone. Do not run focused automation, other editor validations, or another formal batch in parallel against the same runtime project or automation asset roots.
+- Run the full admissible case set formal gate alone. Do not run focused automation, other editor validations, or another formal suite in parallel against the same runtime project or automation asset roots.
 - If a new pipeline-determinism incompatibility appears right after a concurrent validation run, rerun the formal gate in isolation before changing code. Parallel validation can manufacture false determinism noise.
 
 ### Shard-mode score variance
 
-`--editor-isolation shard` is suitable for batch execution and artifact collection, but multiple shard/editor lifecycles can share or reset Slate font caches, transient assets, and render state differently, which can make visual scores fluctuate. Treat a single shard result as screening evidence only; rerun every anomalous case exclusively and serially with `--editor-isolation case` before making a regression judgment. Record both the shard run and case-recheck paths in the report. A one-off shard fluctuation does not itself establish visual regression or improvement.
+`--editor-isolation shard` is suitable for suite execution and artifact collection, but multiple shard/editor lifecycles can share or reset Slate font caches, transient assets, and render state differently, which can make visual scores fluctuate. Treat a single shard result as screening evidence only; rerun every anomalous case exclusively and serially with `--editor-isolation case` before making a regression judgment. Record both the shard run and case-recheck paths in the report. A one-off shard fluctuation does not itself establish visual regression or improvement.
 
 ## Layered Evidence Chain (IR golden, geometry, and pixel layers)
 
 Pixel comparison is one layer, not the whole referee. The pixel score measures similarity against the Figma-rasterized reference PNG, so renderer-specific differences (antialiasing, texture resampling, font rasterization) are always mixed into the number. The layered chain separates what each layer can actually prove:
 
-- **IR golden layer** (`Tools/design2umg_ir_golden.py` + `--ir-golden <golden-root>` on the batch verifier): dumps the converted `FUMGWidgetData` typed tree per case with lossless `%.9g` floats and compares it against a frozen golden, byte-stable and zero-tolerance. It proves "conversion behavior did not change" and attributes any numeric drift directly to a field (`RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`), with no image experiment required. Its first golden (`ir-golden-20260830_01`) is bootstrapped from `ir-golden-bootstrap-full71-20260830_01`; see that directory's `BOOTSTRAP.md` for the code-state and baseline-pointer relationship. Golden is a no-regression oracle, not a correctness oracle. A case with no golden records `unavailable` and does not fail.
+- **IR golden layer** (`Tools/design2umg_ir_golden.py` + `--ir-golden <golden-root>` on the suite verifier): dumps the converted `FUMGWidgetData` typed tree per case with lossless `%.9g` floats and compares it against a frozen golden, byte-stable and zero-tolerance. It proves "conversion behavior did not change" and attributes any numeric drift directly to a field (`RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`), with no image experiment required. Each frozen set must record its code state and baseline-pointer relationship in accompanying metadata. Golden is a no-regression oracle, not a correctness oracle. A case with no golden records `unavailable` and does not fail.
 - **Pixel layer**: unchanged, end-to-end similarity, managed by tolerance.
-- **Geometry layer** (`Tools/design2umg_geometry_compare.py` + `--geometry-golden <golden-root>` on the batch verifier): per case the editor dumps runtime widget geometry (cached geometry after the compiled render) and the tool compares it against a frozen golden geometry dump on the same comparable nodes, paired through the shared tree correspondence (tolerating wrapper-inserted path migration). The case verdict is stability -- frozen golden versus current runtime, 0.75px tolerance, x/y anchored on the nearest paired ancestor, so an inserted wrapper that leaves absolute geometry unchanged is not drift; fidelity (IR-derived expectation versus runtime, measured in the IR parent's paired frame) is reported per node but does not fail the case. A case with no golden records `unavailable` and does not fail.
+- **Geometry layer** (`Tools/design2umg_geometry_compare.py` + `--geometry-golden <golden-root>` on the suite verifier): per case the editor dumps runtime widget geometry (cached geometry after the compiled render) and the tool compares it against a frozen golden geometry dump on the same comparable nodes, paired through the shared tree correspondence (tolerating wrapper-inserted path migration). The case verdict is stability -- frozen golden versus current runtime, 0.75px tolerance, x/y anchored on the nearest paired ancestor, so an inserted wrapper that leaves absolute geometry unchanged is not drift; fidelity (IR-derived expectation versus runtime, measured in the IR parent's paired frame) is reported per node but does not fail the case. A case with no golden records `unavailable` and does not fail.
 
-Scoring for the pixel layer lives in `Tools/design2umg_scoring.py` (single home; the batch verifier only calls it). The no-regression tolerance is now a parameter:
+Scoring for the pixel layer lives in `Tools/design2umg_scoring.py` (single home; the suite verifier only calls it). The no-regression tolerance is now a parameter:
 
 - `--no-regression-epsilon` defaults to `1.25e-4` and leaving it unset reproduces historical behavior exactly.
 - For a stricter seal-basis pass, pass `1e-6` explicitly. Two preconditions apply: the Pencil reference cache must be frozen (read-only or sha1-checked, because live re-rendered references drift at the `1e-4` scale and would be misreported as regression), and shard-mode runs must not use the tightened tolerance (shard state noise also lives at `1e-4`; small tolerances are for `--editor-isolation case` formal verdicts only).
-- Worked example already in evidence: against the sealed `cmsr-strictfix-full71-20260828_01` baseline, the `stringround-colorlock-full71-20260830_01` run passes 71/71 at the default tolerance, and at `1e-6` exactly six cases flip to FAIL (figma-export2 / bubbo-gameplay / team09-start, `local`+`source` each, deltas 2.3e-6~7.5e-6 — the quantization-removal drift, attributed field-by-field by the IR layer).
+- Before tightening the tolerance, rerun the complete frozen corpus with case isolation and inspect every verdict flip. Quantization-scale pixel deltas can cross a small threshold; the IR layer must attribute the corresponding field changes instead of treating the count alone as proof.
 
-IR-golden failures currently report in `summary.ir_golden` and per-case `ir_golden_report.json`; they do not gate the batch exit code yet. When a full run produces zero dumps, `design2umg_ir_golden.py` exits 2 as a configuration error (for example the console variable was not enabled), distinct from per-case `unavailable`.
+IR-golden failures currently report in `summary.ir_golden` and per-case `ir_golden_report.json`; they do not gate the suite exit code yet. When a full run produces zero dumps, `design2umg_ir_golden.py` exits 2 as a configuration error (for example the console variable was not enabled), distinct from per-case `unavailable`.
 
 ## Pencil MCP App Alias Compatibility
 

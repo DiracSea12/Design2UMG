@@ -10,11 +10,7 @@
 
 namespace
 {
-	// Placeholder surface tint tuning values. No derivation on record for any of
-	// these; each was fixed when the placeholder tint path was introduced and is
-	// kept to preserve the historical behavior.
-	// Neutral-color gate: alpha at or below the threshold, or an RGB channel
-	// spread (max - min) at or below the tolerance, reads as "neutral".
+	// Placeholder tint thresholds: low alpha or a small RGB channel spread counts as neutral.
 	constexpr uint8 NeutralPlaceholderAlphaThreshold = 0x20;
 	constexpr uint8 NeutralPlaceholderChannelTolerance = 0x10;
 	// Semantic placeholder surfaces are tinted only from this size upwards.

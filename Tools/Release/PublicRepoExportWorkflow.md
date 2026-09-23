@@ -64,7 +64,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - The maintainer full admissible gate may stay private as long as the public repo makes that boundary explicit.
 - Public docs may say that HostProject fallback is unsupported; generated fallback projects and concrete fallback paths must not ship.
 - Source workspace checks are intentionally separate from package/export workspace checks. Local ignored planning files may remain in the maintainer source workspace, but package and export workspaces must not contain them.
-- This repo currently relies on GitHub generated release notes from `.github/release.yml`; phase22.b does not add a separate checked-in release-notes template.
+- This repo relies on GitHub generated release notes from `.github/release.yml`; no separate release-notes template is checked in.
 
 ## Freeze Procedure
 

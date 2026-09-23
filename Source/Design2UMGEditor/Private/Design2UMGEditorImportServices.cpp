@@ -6,6 +6,7 @@
 #include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGEditorMcpImportPayload.h"
 #include "Design2UMGEditorUnattendedExit.h"
 #include "Design2UMGLog.h"
@@ -24,6 +25,24 @@
 
 namespace Design2UMGEditorImportServices
 {
+	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(const FUMGWidgetData& Data)
+	{
+		// These prefixes are the two explicit image-warning channels produced by
+		// DesignImportPlanning; unrelated conversion warnings must stay out of this class.
+		const bool bHasImageFailure = Data.Warnings.ContainsByPredicate([](const FString& Warning)
+		{
+			return Warning.StartsWith(TEXT("Remote image import:"))
+				|| Warning.StartsWith(TEXT("Figma image refs:"));
+		});
+		if (bHasImageFailure)
+		{
+			return EFigmaImportCompletionKind::ImageFailure;
+		}
+		return Data.Warnings.IsEmpty()
+			? EFigmaImportCompletionKind::Success
+			: EFigmaImportCompletionKind::Warnings;
+	}
+
 	void FPencilImportService::ConnectAndImport()
 	{
 		if (FPlatformAtomics::InterlockedCompareExchange(&bFetchInProgress, 1, 0) != 0)
@@ -73,8 +92,8 @@ namespace Design2UMGEditorImportServices
 
 		Connector->GetClient().CallToolAsync(
 			TEXT("batch_get"),
-			Design2UMGEditorImportRequestSetup::MakePencilBatchGetArgs(),
-			[this, FetchGeneration](const bool bBatchOk, const FString& NodesJson)
+			Design2UMGEditorImportRequestSetup::MakePencilBulkGetArgs(),
+			[this, FetchGeneration](const bool bBulkOk, const FString& NodesJson)
 			{
 				if (!IsGenerationCurrent(FetchGeneration))
 				{
@@ -82,9 +101,9 @@ namespace Design2UMGEditorImportServices
 					return;
 				}
 
-				if (!bBatchOk)
+				if (!bBulkOk)
 				{
-					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("BatchGetFailed", "Design2UMG: batch_get failed"), SNotificationItem::CS_Fail);
+					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("BulkGetFailed", "Design2UMG: batch_get failed"), SNotificationItem::CS_Fail);
 					ReleaseFetchSlot();
 					return;
 				}
@@ -226,13 +245,6 @@ namespace Design2UMGEditorImportServices
 	{
 		FString Source;
 		FJsonSerializer::Serialize(ComponentSource.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
-#if WITH_DEV_AUTOMATION_TESTS
-		if (AutomationComponentsResolved)
-		{
-			AutomationComponentsResolved(Source, ComponentImageUrls);
-			return;
-		}
-#endif
 		FDesignDocument ParsedDocument;
 		if (!FFigmaParser::ParseDocument(Source, ParsedDocument))
 		{
@@ -267,6 +279,8 @@ namespace Design2UMGEditorImportServices
 
 		if (!bImagesResolved)
 		{
+			// Keep unresolved image references visible as a degraded import result.
+			bImageResolutionFailed = true;
 			UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImport: Some image refs unresolved"));
 		}
 
@@ -300,44 +314,96 @@ namespace Design2UMGEditorImportServices
 			FFigmaImageExporter::ApplyExportedImages(Document->Children, IdToUrl);
 		}
 
-		FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
-			Design2UMGEditorImportOrchestrator::DefaultFigmaOutputPath,
-			LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
-			!FApp::IsUnattended(),
-			EDesignBlueprintGenerationMode::BlueprintAndPng,
-			SettingsSnapshot);
+		OnResolvedDocument(Document, bImageResolutionFailed);
+	}
 
-		// Single parse->convert->image-resolution pass: its result feeds the frame-count
-		// gate/notification and is handed to Execute as the precomputed analysis.
-		FImportAnalysisInput AnalysisInput;
-		AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
-		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Document, AnalysisInput);
-		if (!AnalysisResult.ErrorMessage.IsEmpty())
+	namespace
+	{
+		void ImportResolvedFigmaDocument(const TSharedRef<FDesignDocument>& Document,
+			bool bImageResolutionFailed, const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 		{
-			Design2UMGEditorImportSupport::ShowNotification(FText::FromString(AnalysisResult.ErrorMessage), SNotificationItem::CS_Fail);
-			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Font preparation failed"));
-			return;
+			FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
+				Design2UMGEditorImportOrchestrator::DefaultFigmaOutputPath,
+				LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
+				!FApp::IsUnattended(),
+				EDesignBlueprintGenerationMode::BlueprintAndPng,
+				SettingsSnapshot);
+
+			// Single parse->convert->image-resolution pass: its result feeds the frame-count
+			// gate/notification and is handed to Execute as the precomputed analysis.
+			FImportAnalysisInput AnalysisInput;
+			AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
+			AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+			FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Document, AnalysisInput);
+			if (!AnalysisResult.ErrorMessage.IsEmpty())
+			{
+				Design2UMGEditorImportSupport::ShowNotification(FText::FromString(AnalysisResult.ErrorMessage), SNotificationItem::CS_Fail);
+				Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Font preparation failed"));
+				return;
+			}
+			if (AnalysisResult.Data.RootWidget.Children.Num() == 0)
+			{
+				Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
+				Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma no frames; exiting with status 1"));
+				return;
+			}
+
+			// Unresolved image references contribute to the final commit warning state.
+			if (bImageResolutionFailed)
+			{
+				DesignImportPlanning::RecordImageResolutionFailure(AnalysisResult.Data);
+			}
+
+			// Keep the notification reason aligned with the actual warning source. A conversion
+			// warning remains visible, but it is not relabelled as an image failure.
+			const EFigmaImportCompletionKind CompletionKind = ClassifyFigmaImportCompletion(AnalysisResult.Data);
+			FText NotificationText;
+			switch (CompletionKind)
+			{
+			case EFigmaImportCompletionKind::ImageFailure:
+				NotificationText = FText::Format(
+					LOCTEXT("FigmaImportImageFailure", "Design2UMG: Imported {0} frame(s) from Figma, but some images failed to resolve"),
+					FText::AsNumber(AnalysisResult.Data.RootWidget.Children.Num()));
+				break;
+			case EFigmaImportCompletionKind::Warnings:
+				NotificationText = FText::Format(
+					LOCTEXT("FigmaImportWarnings", "Design2UMG: Imported {0} frame(s) from Figma with warnings; see import diagnostics"),
+					FText::AsNumber(AnalysisResult.Data.RootWidget.Children.Num()));
+				break;
+			default:
+				NotificationText = FText::Format(
+					LOCTEXT("FigmaSuccess", "Design2UMG: Imported {0} frame(s) from Figma"),
+					FText::AsNumber(AnalysisResult.Data.RootWidget.Children.Num()));
+				break;
+			}
+			Design2UMGEditorImportSupport::ShowNotification(
+				NotificationText,
+				CompletionKind == EFigmaImportCompletionKind::Success
+					? SNotificationItem::CS_Success
+					: SNotificationItem::CS_None);
+
+			const FDesignImportExecutionResult ExecutionResult =
+				Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest, &AnalysisResult);
+
+			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(
+				ExecutionResult.bSucceeded,
+				TEXT("Unattended mode: figma import finished; exiting"));
 		}
-		if (AnalysisResult.Data.RootWidget.Children.Num() == 0)
-		{
-			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("FigmaNoFrames", "Design2UMG: No frames found in Figma file"), SNotificationItem::CS_Fail);
-			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(false, TEXT("Unattended mode: figma no frames; exiting with status 1"));
-			return;
-		}
+	}
 
-		Design2UMGEditorImportSupport::ShowNotification(
-			FText::Format(
-				LOCTEXT("FigmaSuccess", "Design2UMG: Imported {0} frame(s) from Figma"),
-				FText::AsNumber(AnalysisResult.Data.RootWidget.Children.Num())),
-			SNotificationItem::CS_Success);
-
-		const FDesignImportExecutionResult ExecutionResult =
-			Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest, &AnalysisResult);
-
-		Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(
-			ExecutionResult.bSucceeded,
-			TEXT("Unattended mode: figma import finished; exiting"));
+	void FFigmaImportService::RunImport(const FString& FileKey, const FString& Token,
+		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
+	{
+		Invalidate();
+		const uint32 ImportGeneration = static_cast<uint32>(Generation.GetValue());
+		const TSharedRef<FFigmaImportSession> Session = MakeShared<FFigmaImportSession>(
+			*this, FileKey, Token, ImportGeneration, SettingsSnapshot,
+			[SettingsSnapshot](const TSharedRef<FDesignDocument>& Document, bool bImageResolutionFailed)
+			{
+				ImportResolvedFigmaDocument(Document, bImageResolutionFailed, SettingsSnapshot);
+			});
+		ActiveSession = Session;
+		Session->Start();
 	}
 }
 

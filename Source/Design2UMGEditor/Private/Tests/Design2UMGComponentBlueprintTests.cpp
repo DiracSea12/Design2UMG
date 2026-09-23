@@ -1,9 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "Tests/Design2UMGFileFailureFixture.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
+#include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "Design2UMGEditorImportServices.h"
 #include "Design2UMGLocalFigmaImport.h"
@@ -12,13 +14,15 @@
 #include "FigmaComponentDependencies.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Misc/ScopeExit.h"
+#include "Templates/UnrealTemplate.h"
 #include "ImageUtils.h"
 #include "ImageCore.h"
 #include "UMGGenerator.h"
+#include "UMGJsonSerializer.h"
 #include "GeneratedAssetLifecycle.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGWidgetUtils.h"
-#include "Tests/Design2UMGMappingQAWidget.h"
+#include "Tests/Design2UMGComponentInputTestWidget.h"
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -34,7 +38,9 @@
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "WidgetBlueprint.h"
+#include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
@@ -173,7 +179,7 @@ bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
 	Entry.DocumentScope = TEXT("component-blueprint-test");
 	Entry.ComponentKey = TEXT("override-key");
 	Entry.Key = Entry.Provider + TEXT("|") + Entry.DocumentScope + TEXT("|") + Entry.ComponentKey;
-	Entry.WidgetClass = UDesign2UMGMappingQAWidget::StaticClass()->GetPathName();
+	Entry.WidgetClass = UDesign2UMGComponentInputTestWidget::StaticClass()->GetPathName();
 	auto& Input = Entry.Inputs.AddDefaulted_GetRef();
 	Input.Source = TEXT("label");
 	Input.Target = TEXT("BoolValue");
@@ -185,10 +191,10 @@ bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
 	UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Skipped override input does not fail generation"), Blueprint)) return false;
-	UDesign2UMGMappingQAWidget* Mapped = nullptr;
+	UDesign2UMGComponentInputTestWidget* Mapped = nullptr;
 	Blueprint->WidgetTree->ForEachWidget([&](UWidget* Widget)
 	{
-		if (auto* Candidate = Cast<UDesign2UMGMappingQAWidget>(Widget)) Mapped = Candidate;
+		if (auto* Candidate = Cast<UDesign2UMGComponentInputTestWidget>(Widget)) Mapped = Candidate;
 	});
 	if (!TestNotNull(TEXT("Override actually materializes the mapped class"), Mapped)) return false;
 	TestTrue(TEXT("Invalid override input preserves default bool"), Mapped->BoolValue);
@@ -389,15 +395,15 @@ bool FComponentBlueprintNestedTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentReadOnlyBatchSaveTest,
-	"Design2UMG.ComponentBlueprints.ReadOnlyBatchSave", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FComponentReadOnlyBatchSaveTest::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentReadOnlyBulkSaveTest,
+	"Design2UMG.ComponentBlueprints.ReadOnlyBulkSave", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentReadOnlyBulkSaveTest::RunTest(const FString&)
 {
 	FDesignDocument Document;
 	if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Before")), Document)) return false;
 	FDesign2UMGImportSettingsSnapshot Settings;
 	Settings.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
-	const FString Folder = TEXT("/Game/Design2UMG/Automation/ReadOnlyBatch_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/ReadOnlyBulk_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
 	UWidgetBlueprint* Root = FUMGGenerator::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &Output);
@@ -415,7 +421,7 @@ bool FComponentReadOnlyBatchSaveTest::RunTest(const FString&)
 	FDesign2UMGGenerationOutput UpdatedOutput;
 	TestNull(TEXT("Read-only dependency prevents batch save"), FUMGGenerator::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(UpdatedDocument, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &UpdatedOutput));
-	TestTrue(TEXT("Batch preflight identifies the read-only dependency file"), UpdatedOutput.MappingDiagnostics.ContainsByPredicate(
+	TestTrue(TEXT("Bulk preflight identifies the read-only dependency file"), UpdatedOutput.MappingDiagnostics.ContainsByPredicate(
 		[&](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
 			return Diagnostic.Kind == TEXT("component_save_blocked") && Diagnostic.Message.Contains(Sidecar)
@@ -511,11 +517,12 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	GEditor->EndTransaction();
 	const int32 UndoEntriesBeforeSaveFailure = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount();
 	const int32 UndoCountBeforeSaveFailure = GEditor->Trans->GetUndoCount();
-	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
-	AddExpectedError(TEXT("GenerationManifest: failed to write manifest"), EAutomationExpectedErrorFlags::Contains, 1);
+	Design2UMGEditorTests::FScopedFileFailures FileFailures;
+	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
+	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FDesignReimportResult SaveFailure = DesignImportPipeline::Reimport(FailedUpdate, Request);
 	TestFalse(TEXT("Sidecar save failure fails the complete batch"), SaveFailure.bSucceeded);
-	TestTrue(TEXT("Batch did not commit"), SaveFailure.Commit.Status == EDesign2UMGCommitStatus::NotCommitted);
+	TestTrue(TEXT("Bulk did not commit"), SaveFailure.Commit.Status == EDesign2UMGCommitStatus::NotCommitted);
 	TestTrue(TEXT("Asset files restored"), SaveFailure.Commit.Asset == EDesign2UMGFileState::Restored);
 	TestTrue(TEXT("Manifests restored"), SaveFailure.Commit.Manifest == EDesign2UMGFileState::Restored);
 	TestTrue(TEXT("Memory restored independently"), SaveFailure.Commit.Memory == EDesign2UMGMemoryState::Restored);
@@ -539,7 +546,7 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	RestoredDefault->TakeWidget();
 	TestTrue(TEXT("Changed component definition is rolled back in memory"), FindText(RestoredDefault->WidgetTree).Contains(TEXT("Default")));
 	RestoredDefault->ReleaseSlateResources(true);
-	TestEqual(TEXT("Batch failure preserves unrelated user edit"), UndoProbe->GetText().ToString(), FString(TEXT("After user edit")));
+	TestEqual(TEXT("Bulk failure preserves unrelated user edit"), UndoProbe->GetText().ToString(), FString(TEXT("After user edit")));
 	TestTrue(TEXT("Earlier user edit still supports undo"), GEditor->UndoTransaction(false));
 	TestEqual(TEXT("Earlier undo restores its actual value"), UndoProbe->GetText().ToString(), FString(TEXT("Before user edit")));
 	TestFalse(TEXT("No batch transaction remains open"), GEditor->IsTransactionActive());
@@ -601,7 +608,7 @@ bool FComponentResourceDiagnosticTest::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBlueprintBuildFailureTest,
-	"Design2UMG.ComponentBlueprints.BuildFailureRestoresExistingBatch", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+	"Design2UMG.ComponentBlueprints.BuildFailureRestoresExistingBulk", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FComponentBlueprintBuildFailureTest::RunTest(const FString&)
 {
@@ -655,11 +662,12 @@ bool FComponentBlueprintNewSaveFailureTest::RunTest(const FString&)
 	FDesignDocument Document;
 	if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")), Document)) return false;
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	const FString Folder = TEXT("/Game/Design2UMG/Automation/NewBatchSaveFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/NewBulkSaveFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
-	Design2UMGGenerationManifest::ArmAutomationSidecarWriteFailureOnce();
-	AddExpectedError(TEXT("GenerationManifest: failed to write manifest"), EAutomationExpectedErrorFlags::Contains, 1);
+	Design2UMGEditorTests::FScopedFileFailures FileFailures;
+	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
+	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestNull(TEXT("Failed new batch is not returned as success"), FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output));
 	TArray<FAssetData> Assets;
 	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssetsByPath(FName(*Folder), Assets, true);
@@ -807,7 +815,7 @@ bool FComponentBlueprintRestTest::RunTest(const FString&)
 	const TArray<FString> Responses = {RootResponse, TEXT("{\"meta\":{\"file_key\":\"library\",\"node_id\":\"main\"}}"), LibraryResponse, TEXT("{\"meta\":{\"images\":{}}}")};
 	int32 Requests = 0;
 	Design2UMGEditorTests::FScopedHttpTestTransport Transport;
-	Transport.Hooks->StartRequest = [&](int32, const FHttpRequestPtr& Request)
+	Transport.StartRequest = [&](int32, const FHttpRequestPtr& Request)
 	{
 		if (Requests >= Responses.Num()) return false;
 		const FString Response = Responses[Requests++];
@@ -816,14 +824,15 @@ bool FComponentBlueprintRestTest::RunTest(const FString&)
 	};
 	Design2UMGEditorImportServices::FFigmaImportService Owner;
 	FDesign2UMGImportSettingsSnapshot Settings;
+	TSharedPtr<FDesignDocument> ResolvedDocument;
 	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
-		Owner, TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings, TEXT("root"));
-	FString Resolved;
-	Session->AutomationComponentsResolved = [&](const FString& Source, const TMap<FString, FString>&) { Resolved = Source; };
+		Owner, TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings,
+		[&](const TSharedRef<FDesignDocument>& Document, bool bImageFailure) { ResolvedDocument = Document; }, TEXT("root"), Transport);
 	Session->Start();
 	TestEqual(TEXT("Root, published identity, library and image requests executed once"), Requests, 4);
-	FDesignDocument Document;
-	if (!TestTrue(TEXT("Remote dependency result parses"), FFigmaParser::ParseDocument(Resolved, Document))) return false;
+	if (!TestTrue(TEXT("Remote dependency resolution completes"), ResolvedDocument.IsValid())) return false;
+	const FDesignDocument& Document = *ResolvedDocument;
+
 	TestEqual(TEXT("Remote selection keeps exactly one root"), Document.Children.Num(), 1);
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Remote selection preserves source identity"), Data.RootWidget.GetStableDesignNodeId(), FString(TEXT("root")));
@@ -866,7 +875,7 @@ bool FRemoteSetMappingDependencyTest::RunTest(const FString&)
 	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Response));
 	int32 Requests = 0;
 	Design2UMGEditorTests::FScopedHttpTestTransport Transport;
-	Transport.Hooks->StartRequest = [&](int32, const FHttpRequestPtr& Request)
+	Transport.StartRequest = [&](int32, const FHttpRequestPtr& Request)
 	{
 		++Requests;
 		if (Requests != 1) return false;
@@ -879,12 +888,12 @@ bool FRemoteSetMappingDependencyTest::RunTest(const FString&)
 	Mapping.DocumentScope = TEXT("component-blueprint-test");
 	Mapping.ComponentKey = TEXT("published-set");
 	Mapping.Key = TEXT("figma|component-blueprint-test|published-set");
-	Mapping.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappingQAWidget");
+	Mapping.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
 	Design2UMGEditorImportServices::FFigmaImportService Owner;
-	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(Owner,
-		TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings);
 	bool Resolved = false;
-	Session->AutomationComponentsResolved = [&](const FString&, const TMap<FString, FString>&) { Resolved = true; };
+	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
+		Owner, TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings,
+		[&](const TSharedRef<FDesignDocument>&, bool bImageFailure) { Resolved = !bImageFailure; }, FString(), Transport);
 	Session->Start();
 	TestTrue(TEXT("Set mapping resolves without the source library"), Resolved);
 	TestEqual(TEXT("Only the selected document is fetched"), Requests, 1);
@@ -1032,10 +1041,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBlueprintRealDesignTest,
 
 bool FComponentBlueprintRealDesignTest::RunTest(const FString&)
 {
-	const FString PluginRoot = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"))->GetBaseDir();
-	for (const FString& Name : {FString(TEXT("figma_game_party_home")), FString(TEXT("figma_general_data_analytics"))})
+	FString ExportRoot;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("D2URealDesignExportRoot="), ExportRoot))
 	{
-		const FString SourcePath = PluginRoot / TEXT("FigmaExports") / Name / TEXT("design.json");
+		AddError(TEXT("Missing required -D2URealDesignExportRoot=<directory> for real-design component layout coverage"));
+		return false;
+	}
+	ExportRoot = FPaths::ConvertRelativePathToFull(ExportRoot);
+
+	for (const FString& Name : { FString(TEXT("figma_game_party_home")), FString(TEXT("figma_general_data_analytics")) })
+	{
+		const FString SourcePath = ExportRoot / Name / TEXT("design.json");
 		FString Source, Prepared, Error;
 		if (!TestTrue(TEXT("Read existing real design without modifying it"), FFileHelper::LoadFileToString(Source, *SourcePath))) return false;
 		if (!TestTrue(TEXT("Resolve real file component identities"), FigmaComponentDependencies::PrepareRestFile(Source, SourcePath, Prepared, Error))) return false;
@@ -1238,7 +1254,7 @@ bool FEmptyComponentBundleImportTest::RunTest(const FString&)
 	FDesign2UMGGenerationOutput UnrelatedOutput;
 	UWidgetBlueprint* Third = FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
 	if (!TestNotNull(TEXT("Ordinary page imports with unrelated component definitions"), Third)) return false;
-	TestFalse(TEXT("Unrelated definitions do not switch page ownership"), UnrelatedOutput.Manifest.bComponentBatchRoot);
+	TestFalse(TEXT("Unrelated definitions do not switch page ownership"), UnrelatedOutput.Manifest.bComponentBulkRoot);
 	TestTrue(TEXT("Ordinary page retains its authored asset name"), Third->GetName().StartsWith(Data.WidgetName));
 	UWidgetBlueprint* Fourth = FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
 	TestTrue(TEXT("Unrelated definitions preserve ordinary repeated-import behavior"), Fourth && Fourth != Third);
@@ -1432,7 +1448,7 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	Entry.WidgetClass = TEXT("/Script/CoreUObject.Object");
 	auto& Override = Settings.ClassOverrides.AddDefaulted_GetRef();
 	Override.NamePattern = TEXT("First");
-	Override.WidgetClass = UDesign2UMGMappingQAWidget::StaticClass();
+	Override.WidgetClass = UDesign2UMGComponentInputTestWidget::StaticClass();
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/MappingFallback_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
 	UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(
@@ -1579,15 +1595,16 @@ bool FComponentSlotConflictReloadTest::RunTest(const FString&)
 }
 
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBatchIncompleteRecoveryTest,
-	"Design2UMG.CommitResult.BatchIncompleteRecovery", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FComponentBatchIncompleteRecoveryTest::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBulkIncompleteRecoveryTest,
+	"Design2UMG.CommitResult.BulkIncompleteRecovery", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentBulkIncompleteRecoveryTest::RunTest(const FString&)
 {
 	AddExpectedError(TEXT("Error moving file"), EAutomationExpectedErrorFlags::Contains, 2);
 	AddExpectedError(TEXT("GenerationManifest: failed to finalize manifest"), EAutomationExpectedErrorFlags::Contains, 2);
 	for (const bool bFailUndo : {true, false})
 	{
-		const FString Folder = TEXT("/Game/Design2UMG/Automation/IncompleteBatch_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		Design2UMGEditorTests::FScopedTransactionBuffer Transactions;
+		const FString Folder = TEXT("/Game/Design2UMG/Automation/IncompleteBulk_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
 		FDesignDocument Document;
 		if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Before")), Document)) return false;
@@ -1614,9 +1631,14 @@ bool FComponentBatchIncompleteRecoveryTest::RunTest(const FString&)
 		Request.TargetAssetPath = RootPackage;
 		Request.SettingsSnapshot = Settings;
 		const int32 UndoEntries = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount();
-		Design2UMGGenerationManifest::ArmAutomationSidecarFinalizeFailureOnce();
-		if (bFailUndo) GeneratedAssetLifecycle::ArmAutomationUndoFailureOnce();
-		else FUMGGenerator::ArmAutomationBatchRestoreFailureOnce();
+		Design2UMGEditorTests::FScopedFileFailures FinalizeFailure;
+		FinalizeFailure.RejectMove = [](const FString& Path, const FString&) { return Path.EndsWith(TEXT(".d2u.json")); };
+		Transactions.Buffer->bRejectUndo = bFailUndo;
+		if (!bFailUndo)
+		{
+			const FString ChildFile = FPaths::ConvertRelativePathToFull(FPackageName::LongPackageNameToFilename(ChildPackage, TEXT(".uasset")));
+			FinalizeFailure.RejectWrite = [ChildFile](const FString& Path) { return Path == ChildFile; };
+		}
 		const FDesignReimportResult Result = DesignImportPipeline::Reimport(Updated, Request);
 		TestFalse(TEXT("Incomplete recovery is not success"), Result.bSucceeded);
 		TestTrue(TEXT("Recovery explicitly incomplete"), Result.Commit.Status == EDesign2UMGCommitStatus::RollbackIncomplete);
@@ -1636,10 +1658,136 @@ bool FComponentBatchIncompleteRecoveryTest::RunTest(const FString&)
 		}
 		TestFalse(TEXT("Incomplete recovery never emits batch-restored diagnostic"), Result.ComponentMappingDiagnostics.ContainsByPredicate(
 			[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("component_batch_restored"); }));
+		Transactions.Buffer->bRejectUndo = false;
 		if (GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount() > UndoEntries)
 			TestTrue(TEXT("Caller can undo retained batch changes"), GEditor->UndoTransaction(false));
 	}
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextDependencyGenerationTest,
+	"Design2UMG.PreviewContext.DependencyGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewContextDependencyGenerationTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Parse dependencies"), FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")), Document))) return false;
+	const FUMGWidgetData Original = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	for (int32 Mode = 0; Mode < 3; ++Mode)
+	{
+		FUMGWidgetData Data = Original;
+		if (Mode == 2) Data.RootWidget.Render.RenderOpacity = 0.8f;
+		if (Mode != 0)
+		{
+			FPreviewRefreshInput Input;
+			Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
+			Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
+			Input.bResolveImages = false;
+			auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+			if (!TestTrue(TEXT("Preview refresh with dependencies succeeds"), Refreshed.bSucceeded)) continue;
+			Data = MoveTemp(Refreshed.Data);
+		}
+		const FString Folder = TEXT("/Game/Design2UMG/Automation/PreviewDependencies_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+		FDesign2UMGGenerationOutput Output;
+		UWidgetBlueprint* Blueprint = FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output);
+		if (!TestNotNull(TEXT("Direct and preview paths generate"), Blueprint)) continue;
+		TestEqual(TEXT("Shared component dependency is generated"), Output.Components.Num(), 1);
+		TestEqual(TEXT("Both component instances are retained"), FindInstances(Blueprint->WidgetTree).Num(), 2);
+	}
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBulkSharesGeneratedTextureBudgetTest,
+	"Design2UMG.ComponentBlueprints.SharedGeneratedTextureBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentBulkSharesGeneratedTextureBudgetTest::RunTest(const FString&)
+{
+	TGuardValue<int32> RestoreBudget(UDesign2UMGSettings::Get()->GeneratedTextureBudgetMiB, 1);
+	TSharedPtr<FJsonObject> Json;
+	if (!FJsonSerializer::Deserialize(
+		TJsonReaderFactory<>::Create(MakeComponentImportJson(TEXT("Cancel"))), Json)) return false;
+
+	auto MakeGradientRectangle = [](const TCHAR* Id, const TCHAR* Name, const double Y)
+	{
+		TSharedRef<FJsonObject> Node = MakeShared<FJsonObject>();
+		Node->SetStringField(TEXT("id"), Id);
+		Node->SetStringField(TEXT("name"), Name);
+		Node->SetStringField(TEXT("type"), TEXT("RECTANGLE"));
+		TSharedRef<FJsonObject> Bounds = MakeShared<FJsonObject>();
+		Bounds->SetNumberField(TEXT("x"), 0.0);
+		Bounds->SetNumberField(TEXT("y"), Y);
+		Bounds->SetNumberField(TEXT("width"), 400.0);
+		Bounds->SetNumberField(TEXT("height"), 400.0);
+		Node->SetObjectField(TEXT("absoluteBoundingBox"), Bounds);
+
+		TSharedRef<FJsonObject> Fill = MakeShared<FJsonObject>();
+		Fill->SetStringField(TEXT("type"), TEXT("GRADIENT_LINEAR"));
+		Fill->SetBoolField(TEXT("visible"), true);
+		TArray<TSharedPtr<FJsonValue>> Handles;
+		for (const FVector2D Point : {FVector2D(0.0, 0.5), FVector2D(1.0, 0.5), FVector2D(0.0, 1.0)})
+		{
+			TSharedRef<FJsonObject> Handle = MakeShared<FJsonObject>();
+			Handle->SetNumberField(TEXT("x"), Point.X);
+			Handle->SetNumberField(TEXT("y"), Point.Y);
+			Handles.Add(MakeShared<FJsonValueObject>(Handle));
+		}
+		Fill->SetArrayField(TEXT("gradientHandlePositions"), Handles);
+		TArray<TSharedPtr<FJsonValue>> Stops;
+		for (int32 Index = 0; Index < 2; ++Index)
+		{
+			TSharedRef<FJsonObject> Stop = MakeShared<FJsonObject>();
+			Stop->SetNumberField(TEXT("position"), Index);
+			TSharedRef<FJsonObject> Color = MakeShared<FJsonObject>();
+			Color->SetNumberField(TEXT("r"), Index == 0 ? 1.0 : 0.0);
+			Color->SetNumberField(TEXT("g"), 0.0);
+			Color->SetNumberField(TEXT("b"), Index == 0 ? 0.0 : 1.0);
+			Color->SetNumberField(TEXT("a"), 1.0);
+			Stop->SetObjectField(TEXT("color"), Color);
+			Stops.Add(MakeShared<FJsonValueObject>(Stop));
+		}
+		Fill->SetArrayField(TEXT("gradientStops"), Stops);
+		Node->SetArrayField(TEXT("fills"), {MakeShared<FJsonValueObject>(Fill)});
+		return MakeShared<FJsonValueObject>(Node);
+	};
+
+	TSharedPtr<FJsonObject> Page = Json->GetObjectField(TEXT("document"));
+	TArray<TSharedPtr<FJsonValue>> PageChildren = Page->GetArrayField(TEXT("children"));
+	PageChildren.Add(MakeGradientRectangle(TEXT("page-gradient"), TEXT("PageGradient"), 100.0));
+	Page->SetArrayField(TEXT("children"), PageChildren);
+
+	TSharedPtr<FJsonObject> Catalog = Json->GetObjectField(TEXT("design2umgComponentDependencies"));
+	TArray<TSharedPtr<FJsonValue>> Definitions = Catalog->GetArrayField(TEXT("definitions"));
+	TSharedPtr<FJsonObject> ComponentDocument = Definitions[0]->AsObject()->GetObjectField(TEXT("document"));
+	TArray<TSharedPtr<FJsonValue>> ComponentChildren = ComponentDocument->GetArrayField(TEXT("children"));
+	ComponentChildren.Add(MakeGradientRectangle(TEXT("component-gradient"), TEXT("ComponentGradient"), 40.0));
+	ComponentDocument->SetArrayField(TEXT("children"), ComponentChildren);
+
+	FString Source;
+	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Budget fixture parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/ComponentBudget_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FDesign2UMGGenerationOutput Output;
+	AddExpectedError(
+		TEXT("Failed to generate 'WBP_"),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	AddExpectedError(
+		TEXT("Component import failed: Failed to build component batch root: root"),
+		EAutomationExpectedErrorFlags::Contains,
+		1);
+	TestNull(TEXT("Component and parent builds share one generated-texture budget"),
+		FUMGGenerator::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output));
+	TestTrue(TEXT("The parent allocation reports the cumulative operation limit"),
+		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
+		{
+			return Diagnostic.Message.Contains(TEXT("operation limit"));
+		}));
+	return true;
+}
 #endif

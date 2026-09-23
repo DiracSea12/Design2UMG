@@ -34,50 +34,19 @@ namespace Design2UMGPrototypeGraphWiring
 	bool IsSimpleMouseActionBinding(const FUMGPrototypeNavigationBinding& Binding);
 
 	/**
-	 * Destroys every node previously authored by this wiring (identified via the shared node comment),
-	 * including whole generated keyboard-override function graphs carrying marker nodes. A function
-	 * graph that contains both marker nodes and unmarked nodes is user-modified: it is preserved as a
-	 * whole (regeneration for that keyboard event is skipped so the graph can neither be deleted nor
-	 * masked), and the graph name is optionally reported through OutPreservedMixedGraphs.
-	 * Reimport calls this before applying the update plan: generated wiring is plugin-owned transient
-	 * content that the save re-authors, and it must not feed reimport's "referenced by blueprint graphs"
-	 * safety gates (those protect genuinely user-authored nodes only).
+	 * Remove generated navigation nodes and wholly generated keyboard graphs.
+	 * Preserve mixed user/generated graphs and report their names so regeneration skips them.
+	 * Reimport clears generated wiring before checking user references to widgets.
 	 */
 	void ClearGeneratedBindings(UWidgetBlueprint* WBP, TArray<FString>* OutPreservedMixedGraphs = nullptr);
 
 	/**
-	 * Clears previously generated prototype navigation nodes, then wires eligible bindings:
-	 * mouse triggers (Click/Hover/Press) with exactly one step, and keyboard triggers
-	 * (ON_KEY_DOWN/ON_KEY_UP) with exactly one Navigate or OpenLink step.
-	 *   - OpenLink: bound event -> UKismetSystemLibrary::LaunchURL(url literal).
-	 *   - Navigate without transition: bound event -> VariableGet(history) ->
-	 *     KismetArrayLibrary::Array_Add(history, UWidgetSwitcher::GetActiveWidgetIndex(switcher)) ->
-	 *     VariableGet(switcher) -> UWidgetSwitcher::SetActiveWidgetIndex(resolved page index).
-	 *     The history push runs immediately before the switch so the pushed index is the page
-	 *     actually left.
-	 *   - Navigate with generated transition animations: as above, prefixed by
-	 *     PlayAnimation(outgoing) -> Delay(phase duration) and suffixed by PlayAnimation(incoming).
-	 *   - Overlay: bound event -> VariableGet(overlay host) -> UWidget::SetVisibility(SelfHitTestInvisible).
-	 *     The old runtime reparented the overlay page into the host, which standard nodes cannot
-	 *     express; the visible host standing in for the overlay layer is the decided encoding.
-	 *   - Back: bound event -> [host SetVisibility(Collapsed) when an overlay host exists: the old
-	 *     runtime popped the overlay before history] -> Branch(KismetArrayLibrary::Array_IsEmpty(history))
-	 *     with the true path as a no-op; false path -> SetActiveWidgetIndex(Array_LastIndex(history)) ->
-	 *     Array_Remove(history, same index).
-	 *   - Keyboard Navigate/OpenLink: a generated function-graph override of UUserWidget::OnKeyDown /
-	 *     OnKeyUp (they return FEventReply, so they cannot be ubergraph events), Branch per key code
-	 *     (UKismetInputLibrary::GetKey(InKeyEvent) == literal FKey) guarding the same step chains;
-	 *     the class CDO is flagged focusable so the events can actually fire.
-	 * The history stack is the generated TArray&lt;int32&gt; member variable named by
-	 * NavHistoryVariableName (created on first need; re-generation reuses it).
-	 * All other bindings (multi-step programs, SetVariable/SetVariableMode/conditional flows, drag
-	 * triggers, keyboard steps other than Navigate/OpenLink) are skipped with one Verbose log +
-	 * OutWarnings entry each.
-	 *
-	 * Contract: must run after the widget tree is built and the skeleton class carries the tree
-	 * widgets' properties (i.e. after MarkBlueprintAsStructurallyModified), and before the final
-	 * full compile, so nodes reference real properties and the compiler registers the delegate
-	 * binding (UComponentDelegateBinding) from the authored source nodes.
+	 * Regenerate engine-standard graphs for single-action mouse bindings and keyboard
+	 * Navigate/OpenLink bindings. Navigate records history and plays available transitions;
+ * Overlay controls hosted-page visibility, Back closes an open overlay or pops history,
+	 * and OpenLink launches its URL. Keyboard graphs guard by key and active page.
+	 * Unsupported bindings produce warnings. User-authored bindings remain intact.
+	 * Refresh the Blueprint skeleton before wiring; compile after wiring.
 	 */
 	void WireSimplePrototypeBindings(
 		UWidgetBlueprint* WBP,

@@ -228,7 +228,7 @@ namespace Design2UMGEditorCommandOwner
 			ECVF_Default);
 
 		// Automated construction channel for WBP event bindings (FDelegateEditorBinding): the only scripted entry
-		// outside the editor UI (black-box binding scenarios / command-line QA), with no special-casing logic.
+		// outside the editor UI (black-box binding scenarios / command-line validation), with no special-casing logic.
 		IConsoleManager::Get().RegisterConsoleCommand(
 			TEXT("Design2UMG.WidgetBindings"),
 			TEXT("Inspect/add WBP widget event bindings: Design2UMG.WidgetBindings <WBPAssetPath> [--add <WidgetName> <PropertyName> <FunctionName>]"),

@@ -10,17 +10,9 @@
 namespace Design2UMGEditorUnattendedExit
 {
 	/**
-	 * Unattended exit policy lives at the command/orchestration boundary and covers
-	 * every Run* entry point in the import orchestrator (PenConvert/PenImport/ImportSource/
-	 * FigmaImport/LocalFigmaImport/DesignReimport, including their async Figma callbacks):
-	 * business import functions report success/failure, and this single helper
-	 * turns the final outcome into an engine exit status (0 = ok, 1 = failed).
-	 * Attended sessions are untouched - it returns false and the editor keeps running.
-	 * Automation test sessions are untouched as well: FApp::IsUnattended() counts
-	 * GIsAutomationTesting as unattended, but there a RequestExit from a command would
-	 * kill the editor before the framework reports results (TEST COMPLETE); their
-	 * lifecycle is owned by -TestExit. Returns true when an exit was requested
-	 * (genuinely unattended mode only).
+	 * Requests process exit at the command boundary: zero on success, one on failure.
+	 * Interactive sessions keep running. Automation tests leave exit to their test runner.
+	 * Returns whether an exit was requested.
 	 */
 	bool ExitUnattendedWithStatus(const bool bSuccess, const TCHAR* Message)
 	{

@@ -139,7 +139,7 @@ namespace
 		const FVector2D& Start,
 		const FVector2D& End,
 		float Radius,
-		bool bRoundCap,
+		bool bCircularCap,
 		bool bSquareCap)
 	{
 		const FVector2D Segment = End - Start;
@@ -162,12 +162,12 @@ namespace
 		}
 
 		const float RawT = FVector2D::DotProduct(Point - Start, Segment) / SegmentLengthSq;
-		if (!bRoundCap && (RawT < 0.0f || RawT > 1.0f))
+		if (!bCircularCap && (RawT < 0.0f || RawT > 1.0f))
 		{
 			return false;
 		}
 
-		const float T = bRoundCap ? FMath::Clamp(RawT, 0.0f, 1.0f) : RawT;
+		const float T = bCircularCap ? FMath::Clamp(RawT, 0.0f, 1.0f) : RawT;
 		const FVector2D ClosestPoint = Start + Segment * T;
 		return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
 	}
@@ -188,9 +188,9 @@ namespace
 		}
 
 		const float Radius = StrokeWidth * 0.5f;
-		const bool bRoundCap = StrokeCap.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+		const bool bCircularCap = StrokeCap.Equals(TEXT("round"), ESearchCase::IgnoreCase);
 		const bool bSquareCap = StrokeCap.Equals(TEXT("square"), ESearchCase::IgnoreCase);
-		const bool bRoundJoin = StrokeJoin.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+		const bool bCircularJoin = StrokeJoin.Equals(TEXT("round"), ESearchCase::IgnoreCase);
 
 		for (const TArray<FPathPoint>& Path : SubPaths)
 		{
@@ -220,7 +220,7 @@ namespace
 					for (int32 X = MinX; X <= MaxX; ++X)
 					{
 						const FVector2D Sample(X + 0.5f, Y + 0.5f);
-						if (IsPointInsideStrokeSegment(Sample, Start, End, Radius, bRoundCap, bSquareCap))
+						if (IsPointInsideStrokeSegment(Sample, Start, End, Radius, bCircularCap, bSquareCap))
 						{
 							InOutPixels[Y * Width + X] = StrokeColor;
 						}
@@ -228,7 +228,7 @@ namespace
 				}
 			}
 
-			if (bRoundJoin)
+			if (bCircularJoin)
 			{
 				const int32 JoinStartIndex = bClosed ? 0 : 1;
 				// Closed paths duplicate the first point as their last entry (see IsClosedPath),
@@ -809,7 +809,8 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	float StrokeWidth,
 	const FString& StrokeCap,
 	const FString& StrokeJoin,
-	FString* OutError)
+	FString* OutError,
+	DesignImageResources::FImageOperationBudget* Budget)
 {
 	check(IsInGameThread());
 	if (OutError) OutError->Reset();
@@ -864,8 +865,19 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 
 	// Transform path coordinates to pixel space
 	FVector2D BoundsSize = Bounds.GetSize();
-	if (BoundsSize.X <= 0 || BoundsSize.Y <= 0)
-		return nullptr;
+	// Centerlines may have a collapsed axis. Reserve stroke thickness on that axis;
+	// fill-only zero-area geometry remains a valid, transparent raster.
+	const float CollapsedExtent = bHasVisibleStroke ? StrokeWidth : 1.0f;
+	if (BoundsSize.X == 0)
+	{
+		Bounds.Min.X -= CollapsedExtent * 0.5f;
+		BoundsSize.X = CollapsedExtent;
+	}
+	if (BoundsSize.Y == 0)
+	{
+		Bounds.Min.Y -= CollapsedExtent * 0.5f;
+		BoundsSize.Y = CollapsedExtent;
+	}
 
 	float ScaleX = Width / BoundsSize.X;
 	float ScaleY = Height / BoundsSize.Y;
@@ -882,6 +894,27 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		}
 	}
 
+	// Charge cache misses before allocating the raster buffer. Cache hits allocate nothing.
+	{
+		DesignImageResources::FImageOperationBudget* PassBudget =
+			Budget ? Budget : DesignImageResources::FScopedOperationBudget::GetCurrent();
+		if (PassBudget)
+		{
+			FString BudgetError;
+			if (!PassBudget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{
+				if (OutError) *OutError = BudgetError;
+				if (FString* RefusalError = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError())
+				{
+					*RefusalError = BudgetError;
+				}
+				// Not logged here: the refusal text travels through OutError (and through the
+				// pass's refusal sink), and the owner of the pass reports it exactly once.
+				return nullptr;
+			}
+		}
+	}
+
 	MakeCacheRoom(static_cast<int64>(Width) * Height);
 	TArray<FColor> Pixels;
 	Pixels.SetNumZeroed(static_cast<int32>(static_cast<int64>(Width) * Height));
@@ -892,18 +925,9 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		ScanlineFill(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
 	}
 
-	// Evenodd fallback heuristic, kept for glyph-style complex paths: multi-subpath vectors
-	// (logo/icon glyphs) can arrive with contour winding that our flattened nonzero scanline
-	// fill interprets too aggressively, collapsing the glyph's counters/holes and rendering
-	// the whole shape as a solid block. When the JSON did not explicitly request evenodd
-	// ("FillRule"), the fill is rasterized a second time with evenodd and both coverages are
-	// compared; "NonZeroCoverage > EvenOddCoverage * 12 / 10" means nonzero filled more than
-	// 1.2x the evenodd area, which for real glyphs indicates the holes were swallowed.
-	// The comparison uses integer math (12/10, not 1.2f) on pixel counts.
-	// Tightening the 1.2x threshold re-breaks those glyph inputs (solid-bar regression);
-	// loosening it toward parity would start flipping legitimate overlapping nonzero fills
-	// to evenodd and punch unwanted holes. The cost is one extra ScanlineFill pass (the
-	// complex path is rendered twice) on nonzero-filled multi-subpath inputs only.
+	// For implicit nonzero fills with multiple contours, compare an evenodd raster.
+	// Select evenodd when nonzero coverage exceeds it by 20%, preserving glyph holes.
+	// Explicit fill rules bypass this extra rasterization.
 	if (bHasVisibleFill && !bEvenOdd)
 	{
 		TArray<FColor> EvenOddPixels;

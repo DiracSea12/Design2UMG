@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "WidgetResourceBinder.h"
+#include "DesignPathRasterizer.h"
+#include "DesignPathRasterDefaults.h"
 #include "DesignResourceResolver.h"
 #include "Design2UMGLog.h"
 #include "UMGImageCropUtils.h"
@@ -8,6 +10,31 @@
 
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
+
+namespace
+{
+	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node)
+	{
+		if (!Node.Path.Geometry.IsSet()) return false;
+		FIntPoint Size;
+		if (!FDesignPathRasterizer::TryGetRasterSize(
+			Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
+			Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), Size)) return false;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
+			Node.Path.Geometry.GetValue(), Size.X, Size.Y, Node.Path.FillColor,
+			Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule), Node.Path.StrokeColor,
+			Node.Path.StrokeThickness.Get(0.0f), Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap),
+			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin));
+		if (!Texture) return false;
+		Image->SetBrushFromTexture(Texture);
+		FSlateBrush Brush = Image->GetBrush();
+		Brush.ImageSize = FVector2D(Size.X / DesignPathRasterDefaults::Supersample, Size.Y / DesignPathRasterDefaults::Supersample);
+		Brush.Tiling = ESlateBrushTileType::NoTile;
+		Image->SetBrush(Brush);
+		Image->SetDesiredSizeOverride(Brush.ImageSize);
+		return true;
+	}
+}
 
 FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolveProceduralTexture(
 	const FUMGWidgetNode& Node,
@@ -55,7 +82,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 		return true;
 	}
 	case EProceduralTextureResult::EmptyMaterialRef:
-		return false;
+		return BindPathTexture(ImageWidget, Node);
 	case EProceduralTextureResult::UnknownShape:
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' has unknown procedural shape type '%s'; falling back to TexturePath."), *Node.Name, *ResourceRequest.MaterialRef);
 		break;
@@ -69,7 +96,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	const FString TrimmedPath = TexPath.TrimStartAndEnd();
 	if (TrimmedPath.IsEmpty())
 	{
-		return false;
+		return BindPathTexture(ImageWidget, Node);
 	}
 
 	UTexture2D* Texture = nullptr;
@@ -86,7 +113,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	}
 	if (!Texture)
 	{
-		return false;
+		return BindPathTexture(ImageWidget, Node);
 	}
 
 	const FSlateBrush OldBrush = ImageWidget->GetBrush();

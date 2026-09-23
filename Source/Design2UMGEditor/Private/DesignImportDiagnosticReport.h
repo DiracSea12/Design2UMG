@@ -24,7 +24,8 @@ namespace DesignImportDiagnosticReport
 		TOptional<FDesign2UMGCommitResult> Commit;
 	};
 
-	void Write(
+	/** Best-effort report output; false means no complete report was written. Never changes asset commit state. */
+	bool Write(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
 		const FImportReportArtifacts& Artifacts,
@@ -37,7 +38,7 @@ namespace DesignImportDiagnosticReport
 	 * per-node diagnostics go into the top-level reimport section (kind/message entries, same shape as componentMapping).
 	 * ComponentMappingDiagnostics (optional) lands in the componentMapping section, the same classification exit as the import path.
 	 */
-	void WriteReimport(
+	bool WriteReimport(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
 		const FString& TargetAssetPath,

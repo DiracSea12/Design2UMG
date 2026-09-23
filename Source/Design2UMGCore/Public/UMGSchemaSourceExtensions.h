@@ -183,7 +183,9 @@ struct FUMGPrototypeNavigationBinding
 
 	UPROPERTY() FString TriggerWidgetId;
 	UPROPERTY() FString TriggerWidgetName;
-	/** Top-level page id containing the trigger node (empty for legacy/manual data); keyboard wiring uses it to gate the binding to its own page. */
+	/**
+	 * Top-level action summary for binding-level consumers.
+	 */
 	UPROPERTY() FString SourcePageId;
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;

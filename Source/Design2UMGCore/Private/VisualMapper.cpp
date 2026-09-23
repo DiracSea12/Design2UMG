@@ -50,14 +50,8 @@ namespace
 		}
 	}
 
-	// Pencil composites an INSIDE stroke over the node fill at the edge band, while
-	// the UMG RoundedBox outline REPLACES that band with the stroke color alone.
-	// When the stroke is translucent and sits on an opaque solid fill, bake the
-	// "stroke over fill" composite into the outline color so the band carries the
-	// authored combination instead of a bare translucent stripe on transparency.
-	// Inside-only by geometry: ApplyStroke pushes Center/Outside strokes off the
-	// node body (negative margin / centered band), so their band does not overlay
-	// the node's own fill and compositing against it would be physically wrong.
+	// Composite a translucent inside stroke over its opaque fill for UMG RoundedBox.
+	// Center/outside strokes lie outside that fill band and keep their own color.
 	FDesignStroke ResolveStrokeCompositedOverFill(const TSharedPtr<FDesignNode>& Node)
 	{
 		FDesignStroke Stroke = Node->Visual.Stroke;

@@ -8,6 +8,7 @@
 #include "RefExpander.h"
 #include "DesignSchema.h"
 #include "SizeEstimator.h"
+#include "DesignTreeBudget.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -224,11 +225,11 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
 	TestEqual(TEXT("Current icon type"), CurrentIcon->Type, EDesignNodeType::IconFont);
 	TestEqual(TEXT("Current icon name"), CurrentIcon->Text.IconFontName, FString(TEXT("search")));
 	TestEqual(TEXT("Current icon family"), CurrentIcon->Text.IconFontFamily, FString(TEXT("lucide")));
-	const TSharedPtr<FDesignNode>& LegacyIcon = Doc.Children[1];
-	TestTrue(TEXT("Legacy icon node remains structurally present"), LegacyIcon.IsValid());
-	TestEqual(TEXT("Legacy icon type is rejected"), LegacyIcon->Type, EDesignNodeType::Unknown);
-	TestTrue(TEXT("Legacy icon name is not migrated"), LegacyIcon->Text.IconFontName.IsEmpty());
-	TestTrue(TEXT("Legacy icon family is not migrated"), LegacyIcon->Text.IconFontFamily.IsEmpty());
+	const TSharedPtr<FDesignNode>& UnsupportedIcon = Doc.Children[1];
+	TestTrue(TEXT("Unsupported icon node remains structurally present"), UnsupportedIcon.IsValid());
+	TestEqual(TEXT("Unsupported icon type is rejected"), UnsupportedIcon->Type, EDesignNodeType::Unknown);
+	TestTrue(TEXT("Unsupported icon name is not migrated"), UnsupportedIcon->Text.IconFontName.IsEmpty());
+	TestTrue(TEXT("Unsupported icon family is not migrated"), UnsupportedIcon->Text.IconFontFamily.IsEmpty());
 	return true;
 }
 
@@ -340,12 +341,12 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode>& Current = Doc.Children[0];
 	const TSharedPtr<FDesignNode>& CurrentInner = Doc.Children[1];
 	const TSharedPtr<FDesignNode>& MalformedThickness = Doc.Children[2];
-	const TSharedPtr<FDesignNode>& LegacyNestedStroke = Doc.Children[3];
+	const TSharedPtr<FDesignNode>& UnsupportedNestedStroke = Doc.Children[3];
 	TestTrue(TEXT("Current stroke valid"), Current.IsValid());
 	TestTrue(TEXT("Current inner stroke valid"), CurrentInner.IsValid());
 	TestTrue(TEXT("Malformed thickness node valid"), MalformedThickness.IsValid());
-	TestTrue(TEXT("Legacy nested stroke node valid"), LegacyNestedStroke.IsValid());
-	if (!Current.IsValid() || !CurrentInner.IsValid() || !MalformedThickness.IsValid() || !LegacyNestedStroke.IsValid())
+	TestTrue(TEXT("Unsupported nested stroke node valid"), UnsupportedNestedStroke.IsValid());
+	if (!Current.IsValid() || !CurrentInner.IsValid() || !MalformedThickness.IsValid() || !UnsupportedNestedStroke.IsValid())
 	{
 		return false;
 	}
@@ -356,7 +357,7 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
 	TestEqual(TEXT("Current right thickness"), Current->Visual.Stroke.Thickness.Right, 2.0f);
 	TestEqual(TEXT("Current bottom thickness"), Current->Visual.Stroke.Thickness.Bottom, 3.0f);
 	TestEqual(TEXT("Current left thickness"), Current->Visual.Stroke.Thickness.Left, 4.0f);
-	TestEqual(TEXT("Current cap is normalized for shared conversion"), Current->Visual.Stroke.Cap, EDesignStrokeCap::Round);
+	TestEqual(TEXT("Current cap is normalized for shared conversion"), Current->Visual.Stroke.Cap, EDesignStrokeCap::Circular);
 	TestEqual(TEXT("Current join is normalized for shared conversion"), Current->Visual.Stroke.Join, EDesignStrokeJoin::Bevel);
 	TestTrue(TEXT("Current fill set"), Current->Visual.Stroke.Fill.IsSet());
 	if (Current->Visual.Stroke.Fill.IsSet())
@@ -376,11 +377,11 @@ bool FPenParserStrokeNodeFormatsTest::RunTest(const FString&)
 		MalformedThickness->Visual.Stroke.Thickness.bUniform);
 	TestFalse(TEXT("Malformed thickness object does not fabricate a stroke"),
 		MalformedThickness->Visual.Stroke.HasStroke());
-	TestFalse(TEXT("Legacy nested stroke is not parsed"), LegacyNestedStroke->Visual.Stroke.HasStroke());
-	TestFalse(TEXT("Legacy join is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.join")));
-	TestFalse(TEXT("Legacy miter angle is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.miterAngle")));
-	TestFalse(TEXT("Legacy cap is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.cap")));
-	TestFalse(TEXT("Legacy dash pattern is not migrated to metadata"), LegacyNestedStroke->Metadata.Contains(TEXT("stroke.dashPattern")));
+	TestFalse(TEXT("Unsupported nested stroke is not parsed"), UnsupportedNestedStroke->Visual.Stroke.HasStroke());
+	TestFalse(TEXT("Legacy join is not migrated to metadata"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.join")));
+	TestFalse(TEXT("Legacy miter angle is not migrated to metadata"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.miterAngle")));
+	TestFalse(TEXT("Legacy cap is not migrated to metadata"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.cap")));
+	TestFalse(TEXT("Legacy dash pattern is not migrated to metadata"), UnsupportedNestedStroke->Metadata.Contains(TEXT("stroke.dashPattern")));
 
 	return true;
 }
@@ -554,10 +555,8 @@ bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode> TableRef = Root->Children[0];
 	const FVector2D Precomputed = SizeEstimator::PromoteFitContentSizes(Root, Doc,
 		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc); });
-	TestTrue(TEXT("Precompute sees the expanded table height"),
-		FMath::IsNearlyEqual(Precomputed.Y, 268.0f, KINDA_SMALL_NUMBER));
-	TestTrue(TEXT("Ref instance keeps the expanded table height"),
-		FMath::IsNearlyEqual(TableRef->Transform.Height.Value, 268.0f, KINDA_SMALL_NUMBER));
+	TestEqual(TEXT("Precompute sees the expanded table height"), Precomputed.Y, 268.0);
+	TestEqual(TEXT("Ref instance keeps the expanded table height"), TableRef->Transform.Height.Value, 268.0f);
 
 	for (int32 Index = 0; Index < 4; ++Index)
 	{
@@ -584,8 +583,7 @@ bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
 	}
 
 	const FVector2D ParentEstimate = SizeEstimator::EstimateNodeSize(Root, 1440.0f);
-	TestTrue(TEXT("Parent uses expanded ref table height instead of one row"),
-		FMath::IsNearlyEqual(ParentEstimate.Y, 268.0f, KINDA_SMALL_NUMBER));
+	TestEqual(TEXT("Parent uses expanded ref table height instead of one row"), ParentEstimate.Y, 268.0);
 	TestTrue(TEXT("Row-like source fit minimum remains source-authored"),
 		TableRef->Children[1]->Transform.bSourceHasHeight);
 
@@ -927,12 +925,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FPenParserUnresolvablePaintTest::RunTest(const FString&)
 {
-	// The escaped-literal node keeps the raw fill string in the source; the
-	// variable registry has no entry for it, mirroring the harvest documents.
-	// The trailing nodes cover the drop rule's remaining contracts: an escaped
-	// entry inside a fill array is skipped and the scan keeps looking for a
-	// legal entry; the empty string and a plain numeric string are dropped; the
-	// object form's legal hex keeps the legacy color behavior.
+	// Unresolvable string paints are skipped. Fill arrays continue to a valid entry;
+	// empty and numeric strings are dropped, while valid object colors are retained.
 	const FString Json =
 		TEXT("{")
 		TEXT("\"version\":\"1.0\",")
@@ -979,8 +973,7 @@ bool FPenParserUnresolvablePaintTest::RunTest(const FString&)
 	TestEqual(TEXT("variable fill type"), Doc.Children[3]->Visual.TopmostFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("variable fill color"), Doc.Children[3]->Visual.TopmostFill().SolidColor, FString(TEXT("#DC2626")));
 
-	// A malformed hex-prefixed literal keeps the legacy pass-through contract
-	// (renderer fallback stays authoritative), matching DesignNodeSemanticsTests.
+	// Hex-prefixed values pass through to the renderer, including malformed ones.
 	TestEqual(TEXT("malformed hex fill type"), Doc.Children[4]->Visual.TopmostFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("malformed hex stays untouched"), Doc.Children[4]->Visual.TopmostFill().SolidColor, FString(TEXT("#xyz")));
 
@@ -994,11 +987,109 @@ bool FPenParserUnresolvablePaintTest::RunTest(const FString&)
 	TestEqual(TEXT("empty string fill dropped"), Doc.Children[6]->Visual.TopmostFill().Type, EDesignFillType::None);
 	TestEqual(TEXT("numeric string fill dropped"), Doc.Children[7]->Visual.TopmostFill().Type, EDesignFillType::None);
 
-	// The object form's legal hex keeps the legacy color behavior (the drop
-	// rule is string-form only).
+	// Valid object-form colors are unaffected by string-paint filtering.
 	TestEqual(TEXT("object fill type"), Doc.Children[8]->Visual.TopmostFill().Type, EDesignFillType::Color);
 	TestEqual(TEXT("object fill color"), Doc.Children[8]->Visual.TopmostFill().SolidColor, FString(TEXT("#ABCDEF")));
 
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// shared tree budget. A wide-but-shallow document (many siblings, shallow
+// depth) must be bounded by the single node-count budget just like a deep tree,
+// and a breach must reject the WHOLE parse (never a truncated success tree).
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FPenParserNodeCountBudgetTest,
+	"Design2UMG.Unit.PenParser.NodeCountBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserNodeCountBudgetTest::RunTest(const FString&)
+{
+	// The breach logs once at the offending node and once at the document level.
+	AddExpectedError(TEXT("exceeds the maximum parsed node count"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("exceeds supported size/depth limits"), EAutomationExpectedErrorFlags::Contains, 1);
+
+	// Build a wide, shallow document: one root with (MaxParsedNodeCount + 1) minimal
+	// children. Depth stays at 1, so this exercises node-count, not depth.
+	TArray<FString> Children;
+	Children.Reserve(DesignTreeLimits::MaxParsedNodeCount + 1);
+	for (int32 Index = 0; Index < DesignTreeLimits::MaxParsedNodeCount + 1; ++Index)
+	{
+		Children.Add(FString::Printf(TEXT("{\"id\":\"n%d\",\"name\":\"n%d\",\"type\":\"frame\"}"), Index, Index));
+	}
+	const FString ChildrenJson = FString::Join(Children, TEXT(","));
+	const FString Json = FString::Printf(
+		TEXT("{\"version\":\"1.0\",\"children\":[%s]}"), *ChildrenJson);
+
+	FDesignDocument Doc;
+	TestFalse(TEXT("Wide-but-shallow document over the node-count budget is rejected"), FPenParser::ParseDocument(Json, Doc));
+	// No truncated tree is published: a rejected parse yields no children.
+	TestEqual(TEXT("Rejected parse publishes no nodes"), Doc.Children.Num(), 0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSizeEstimatorFlowFallbackTest,
+	"Design2UMG.Unit.SizeEstimator.FlowFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSizeEstimatorFlowFallbackTest::RunTest(const FString&)
+{
+	for (const bool bVertical : {false, true})
+	{
+		FDesignDocument Document;
+		const FString Json = FString::Printf(TEXT(R"JSON({"version":"2.14","children":[
+		{"id":"flow","type":"frame","layout":"%s","width":"fit_content(120)","height":"fit_content(120)",
+		"padding":6,"gap":8,"children":[
+		{"id":"a","type":"rectangle","width":20,"height":20,"fill":"#ff0000"},
+		{"id":"b","type":"rectangle","width":20,"height":20,"fill":"#ff0000"}]}]})JSON"), bVertical ? TEXT("vertical") : TEXT("horizontal"));
+		if (!TestTrue(TEXT("Flow fallback fixture parses"), FPenParser::ParseDocument(Json, Document))) return false;
+		const auto Node = Document.Children[0];
+		const FVector2D Expected = bVertical ? FVector2D(32, 60) : FVector2D(60, 32);
+		TestEqual(TEXT("Read-only estimate uses children rather than fallback minimum"), SizeEstimator::EstimateNodeSize(Node), Expected);
+		auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document); };
+		TestEqual(TEXT("Promotion stores actual flow content dimensions"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve), Expected);
+		Node->Children.RemoveAt(1);
+		TestEqual(TEXT("A subsequent smaller content measurement can shrink"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve), FVector2D(32, 32));
+		Node->Transform.Width = FDesignSize::Fixed(120);
+		TestEqual(TEXT("Fixed size stays fixed"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve).X, 120.0);
+		Node->Transform.Width = FDesignSize::Fill(120);
+		TestEqual(TEXT("Fill size is not replaced by content"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve).X, 120.0);
+		Node->Transform.Height = FDesignSize::Fit(120);
+		Node->Children[0]->Transform.bEnabled = false;
+		TestEqual(TEXT("No visible content keeps the declared fallback"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve).Y, 120.0);
+	}
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Slot fallback fixture parses"), FPenParser::ParseDocument(TEXT(R"JSON({"version":"2.14","children":[
+		{"id":"slot","type":"frame","reusable":true,"layout":"vertical","width":80,"height":"fit_content(120)","padding":6},
+		{"id":"instance","type":"ref","ref":"slot","height":"fit_content(120)","children":[
+		{"id":"row","type":"rectangle","width":20,"height":20,"fill":"#ff0000"}]}]})JSON"), Document))) return false;
+	auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document); };
+	TestEqual(TEXT("Empty slot retains its fallback height"), SizeEstimator::PromoteFitContentSizes(Document.Children[0], Document, Resolve).Y, 120.0);
+	TestEqual(TEXT("Populated ref measures its replacement children"), SizeEstimator::PromoteFitContentSizes(Document.Children[1], Document, Resolve).Y, 32.0);
+	TestEqual(TEXT("Instance cached height is updated when content shrinks"), Document.Children[1]->Transform.Height.Value, 32.0f);
+	TestTrue(TEXT("A measured ref preserves the definition's fixed width mode"), Document.Children[1]->Transform.Width.IsFixed());
+	TestEqual(TEXT("Inherited fixed width is not replaced by narrower content"), Document.Children[1]->Transform.Width.Value, 80.f);
+	TestTrue(TEXT("An explicitly authored fit height stays content-sized"), Document.Children[1]->Transform.Height.IsFit());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenPlaceholderRequiresSemanticFieldTest,
+	"Design2UMG.Unit.PenParser.PlaceholderRequiresSemanticField",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenPlaceholderRequiresSemanticFieldTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Semantic surface fixture parses"), FPenParser::ParseDocument(TEXT(R"JSON({"version":"2.14","children":[
+		{"id":"art","type":"frame","name":"image-placeholder","width":160,"height":80,"fill":"#eeeeee"},
+		{"id":"named","type":"frame","name":"slot content","width":160,"height":80},
+		{"id":"slot","type":"frame","slot":[],"width":160,"height":80},
+		{"id":"marked","type":"frame","placeholder":true,"width":160,"height":80}
+	]})JSON"), Document))) return false;
+	TestFalse(TEXT("An artwork name does not override its authored paint"), Document.Children[0]->LayoutData.bSemanticPlaceholderSurface);
+	TestFalse(TEXT("A slot-like name alone has no semantic meaning"), Document.Children[1]->LayoutData.bSemanticPlaceholderSurface);
+	TestTrue(TEXT("An explicit empty slot remains a semantic surface"), Document.Children[2]->LayoutData.bSemanticPlaceholderSurface);
+	TestTrue(TEXT("An explicit placeholder marker remains supported"), Document.Children[3]->LayoutData.bSemanticPlaceholderSurface);
 	return true;
 }
 

@@ -2,8 +2,10 @@
 
 #pragma once
 
-#include "ExternalServices/DesignHttpClientSlot.h"
+#include "HttpModule.h"
+#include "HttpRequestAdapter.h"
 #include "Interfaces/IHttpResponse.h"
+#include "Misc/EngineVersionComparison.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 namespace Design2UMGEditorTests
@@ -42,6 +44,9 @@ namespace Design2UMGEditorTests
 		FString GetContentType() const override { return GetHeader(TEXT("Content-Type")); }
 		uint64 GetContentLength() const override { return Content.Num(); }
 		const TArray<uint8>& GetContent() const override { return Content; }
+#if !UE_VERSION_OLDER_THAN(5, 8, 0)
+		TArray<uint8> TakeContent() override { return MoveTemp(Content); }
+#endif
 		int32 GetResponseCode() const override { return Code; }
 		FString GetContentAsString() const override
 		{
@@ -61,9 +66,9 @@ namespace Design2UMGEditorTests
 	};
 
 	/** Declare before the client so cancellation is observed during client teardown. */
-	struct FScopedHttpTestTransport
+	struct FScopedHttpTestTransport final : FHttpModule
 	{
-		TSharedRef<FDesignHttpClientSlotAutomationHooks> Hooks = MakeShared<FDesignHttpClientSlotAutomationHooks>();
+		TFunction<bool(int32, const FHttpRequestPtr&)> StartRequest;
 		TMap<int32, FHttpRequestPtr> Pending;
 		TArray<int32> CancelledIds;
 		int32 LastStartedId = 0;
@@ -71,19 +76,21 @@ namespace Design2UMGEditorTests
 
 		FScopedHttpTestTransport()
 		{
-			Hooks->StartRequest = [this](int32 Id, const FHttpRequestPtr& Request)
+			StartRequest = [this](int32 Id, const FHttpRequestPtr& Request)
 			{
 				LastStartedId = Id;
 				if (!bStartRequests) return false;
 				Pending.Add(Id, Request);
 				return true;
 			};
-			Hooks->CancelRequest = [this](int32 Id) { CancelledIds.Add(Id); };
-			SetDesignHttpClientSlotAutomationHooks(Hooks);
 		}
-		~FScopedHttpTestTransport() { ResetDesignHttpClientSlotAutomationHooks(); }
 		FScopedHttpTestTransport(const FScopedHttpTestTransport&) = delete;
 		FScopedHttpTestTransport& operator=(const FScopedHttpTestTransport&) = delete;
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateRequest() override
+		{
+			return MakeShared<FRequest, ESPMode::ThreadSafe>(*this, ++NextId);
+		}
 
 		static void Reply(const FHttpRequestPtr& Request, bool bConnected, const FHttpResponsePtr& Response)
 		{
@@ -110,6 +117,20 @@ namespace Design2UMGEditorTests
 			const FHttpRequestPtr Request = Pending.FindAndRemoveChecked(Id);
 			Reply(Request, Body, Code, Headers);
 		}
+	private:
+		int32 NextId = 0;
+		class FRequest final : public FHttpRequestAdapterBase
+		{
+		public:
+			FRequest(FScopedHttpTestTransport& InTransport, int32 InId)
+				: FHttpRequestAdapterBase(FHttpModule::Get().CreateRequest()), Transport(InTransport), Id(InId) {}
+			bool ProcessRequest() override { return Transport.StartRequest(Id, AsShared()); }
+			void CancelRequest() override { Transport.CancelledIds.Add(Id); }
+		private:
+			FScopedHttpTestTransport& Transport;
+			int32 Id;
+		};
+
 	};
 }
 #endif

@@ -94,29 +94,30 @@ using DesignJsonUtils::GetObject;
 				};
 				for (const auto& Field : Override->Values)
 				{
-					const EJson* ExpectedType = RepresentedFields.Find(Field.Key);
+					const FString FieldName(Field.Key);
+					const EJson* ExpectedType = RepresentedFields.Find(FieldName);
 					if (!ExpectedType)
 					{
 						OutNode.Text.ParseWarnings.AddUnique(FString::Printf(
-							TEXT("Unsupported character style %d property '%s'; value not applied."), StyleId, *Field.Key));
+							TEXT("Unsupported character style %d property '%s'; value not applied."), StyleId, *FieldName));
 						continue;
 					}
 					// Figma explicitly uses null when an exact PostScript face name is unavailable.
 					// Family/weight/size still describe a valid style and must remain applicable.
-					if (Field.Key == TEXT("fontPostScriptName") && Field.Value.IsValid() && Field.Value->IsNull()) continue;
+					if (FieldName == TEXT("fontPostScriptName") && Field.Value.IsValid() && Field.Value->IsNull()) continue;
 					bool bValid = Field.Value.IsValid() && Field.Value->Type == *ExpectedType;
 					if (bValid && *ExpectedType == EJson::Number)
 					{
 						const double Number = Field.Value->AsNumber();
 						bValid = FMath::IsFinite(Number) && FMath::Abs(Number) <= MAX_flt;
-						if (Field.Key == TEXT("fontSize")) bValid &= Number > 0.0;
-						if (Field.Key == TEXT("fontWeight")) bValid &= Number >= 1.0 && Number <= 1000.0;
-						if (Field.Key.StartsWith(TEXT("lineHeight"))) bValid &= Number >= 0.0;
+						if (FieldName == TEXT("fontSize")) bValid &= Number > 0.0;
+						if (FieldName == TEXT("fontWeight")) bValid &= Number >= 1.0 && Number <= 1000.0;
+						if (FieldName.StartsWith(TEXT("lineHeight"))) bValid &= Number >= 0.0;
 					}
 					if (!bValid)
 					{
 						OutNode.Text.ParseWarnings.AddUnique(FString::Printf(
-							TEXT("Invalid character style %d property '%s': wrong type or numeric range; base style retained."), StyleId, *Field.Key));
+							TEXT("Invalid character style %d property '%s': wrong type or numeric range; base style retained."), StyleId, *FieldName));
 						return;
 					}
 				}

@@ -41,11 +41,7 @@ struct FDesign2UMGGeneratedInstanceRecord
 };
 
 /**
- * Component Mapping state during one generation:
- * - holds the config (match table),
- * - records hit IR nodes, created mapped instances, and top-level generated nodes,
- * - collects generation-time diagnostics (hit/fallback/inputs write/Prototype inert).
- * Lives only within one BuildWidgetBlueprint run; not a global object.
+ * Owns mapping matches, generated instances and diagnostics for one Blueprint build.
  */
 class FDesign2UMGComponentMappingBuildState
 {

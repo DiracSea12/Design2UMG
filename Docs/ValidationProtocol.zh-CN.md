@@ -1,16 +1,12 @@
 # Design2UMG Validation Protocol
 
-## 当前输入基线（2026-09-15 用户确认）
+## 用户测试集与基线
 
-当前 81-case 基线为 `G:/UE5/FPSRoguelike/Saved/Design2UMG/Automation/review-batch-transaction-full-20260915`。当前输入与参考文件已逐项核验，原始 PNG、评分公式、阈值、成绩文件均不改写。后续完整回归显式使用该目录作为 `--reference-root`。
+开源的是验证工具，不是维护者的私有测试集。将自己的用例集中到一个目录，以 `--design-root` 指定；工具递归扫描，发现多少个就验证多少个，没有固定的案例名或数量要求。维护者本地的用例数量只描述该次运行，不是用户必须满足的门槛。私有设计稿、参考图、基线和完整运行日志不上传到公共CI或打进插件包。
 
-`Automation/_baseline.json` 是小型一次性登记指针，绑定该 run 的 summary/run_scope SHA256 与登记时间；`ReferenceCache/CURRENT.json` 同步指向它。历史重建只纳入该登记基线和登记之后的有效运行。不同源/有效参考身份不强行比较；同身份的既有历史会保留，A→B→A 不得把回来的 A 当全新基线。候选运行不能自己移动登记起点。缺失输入身份、弱参考来源、缺报告或同输入退步仍阻断。
+`--list-cases` 可在没有UE的环境中列出实际发现集合并写出 `run_scope.json`。空目录的普通 suite 运行记录 `status=empty`、发现/执行均为0、`passed=null`，退出码0且不启动编辑器；这不代表视觉验证通过。错误目录或坏输入须报错；只有design.json、尚无参考PNG的Figma目录暂不构成可运行case，扫描会明确警告跳过，不记作通过。一个符合条件的Pen根节点算一个case；一个Figma导出沿用local/source两条验证路径，不把文件数冒称case数。目录示例见 [Tools](../Tools/README.md)。
 
-仓库巨型 `design2umg_pinned_baseline.json` 已删除，消费者不再依赖该文件。下文旧阶段与旧 run 的记录只作历史背景，不覆盖本节已明确的当前基线。
-
-English canonical: [ValidationProtocol.md](ValidationProtocol.md)
-
-Last verified: 2026-05-18
+基线由用户通过 `--reference-root` 提供；每个case目录包含参考PNG和基线比较报告，才能执行 `no_regression`。代码比较期间冻结源/参考身份和已登记的指针，不自动把待测结果提升为新基线；不同身份不强比，同身份返回时沿用已有历史。`--no-publish-history` 保留历史检查但只写本次目录，不改全局历史清单。
 
 ## 目的
 
@@ -64,7 +60,7 @@ automation 字体导入是“每个 case 自己的临时证据”，不是共享
 - 如果 case-local 字体重新下载失败，优先把“已经能加载的现有字体资产”重建到当前 case-local 路径，而不是直接借用旧的全局 automation object path。
 - 查字体回退时，必须同时看 Unreal log 里的 generation 阶段和 compiled-instance 阶段字体对象路径。只要当前 case-local run 里出现别的 case 的 `ImportedFonts` 路径，或者出现全局 automation 路径，就先按污染查，不要先怪业务逻辑。
 
-phase21 batch2 这次已经重新验证过：真正的问题是 automation 字体串跑污染，不是 converter boundary cleanup 把逻辑稳定改坏了。
+这些规则来自一次可复现失败：真正的问题是 automation 字体串跑污染，不是 converter boundary 本身。
 
 ## 必要验证顺序
 
@@ -111,6 +107,8 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 `-AssetObjectPath`、`-DesignerPngPath`、`-ResultJsonPath` 为必填参数，wrapper 没有样例专属默认值。
 
+该 PowerShell wrapper 默认检测已有编辑器并拒绝继续，不再强制结束任何会话。先保存并关闭编辑器；只有明确要保留现有调试会话时才使用 `-KeepExistingEditor`。
+
 不要把 PowerShell 命令返回当成验证完成。必须等实际 `UnrealEditor.exe` 退出，或使用 wrapper 管理。
 
 ### 7. Saved asset parity 相关时运行结构快照验证
@@ -147,7 +145,7 @@ pwsh -NoProfile -File <PluginRoot>\Tools\Run-DesignerSnapshotValidation.ps1 -Pro
 
 `Tools/design2umg_fresh_process_reload_gate.py` 是本节的 executable 版本。它启动一个全新编辑器进程，
 用 `force_reload_package` 通过 `Design2UMG.AutomationRender` 重载每个目标资产，等待真实进程退出，
-然后 fail-closed 判定：每个结果必须 success、每棵 WidgetTree 节点数不得低于保护下限、新进程日志不得出现
+然后 fail-closed 判定：编辑器退出码必须为零、每个结果必须 success、每棵 WidgetTree 节点数不得低于保护下限、新进程日志不得出现
 两类损坏签名（外部容器加载失败、变量 GUID ensure）。它的离线自测把历史失败日志当负样本回放：
 
 ```text
@@ -166,6 +164,14 @@ pwsh -NoProfile -Command "python Tools/design2umg_fresh_process_reload_gate.py -
 
 这条结论限定在当前 `Design2UMGConstrained*` 实现和保存/重载链；其他自定义控件需要单独通过新进程重载验证。同一进程内存快照只作过程证据，saved-asset parity 的最终证据必须包含新进程重载结果。
 
+完整 suite 可直接使用已记录的集合进行新进程重载，无需另写资产名单或很长的命令行：
+
+```text
+python Tools/design2umg_fresh_process_reload_gate.py --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --run-root <CompletedRunRoot> --output-root <NewReloadRoot>
+```
+
+正式入口核对每项资产身份、严格成功和重载标志，并比较节点数、文本、类型统计及候选像素。手工 `--assets` 模式只验证指定的正数节点下限，索引必须唯一且在范围内；不冒称验证了未提供的 suite 基线。
+
 ### 8. 只要改了 automation-render parity 相关面，就先跑 determinism smoke，再进 formal gate
 
 以下改动都必须先过 determinism smoke：
@@ -178,38 +184,21 @@ pwsh -NoProfile -Command "python Tools/design2umg_fresh_process_reload_gate.py -
 
 这一步是维护者用的 focused pre-gate，不是 release closeout。
 
-canonical sentinel owner 固定在 `Tools/design2umg_determinism_smoke.py:CANONICAL_SENTINEL_CASES`。不要在 wrapper 或 selftest 里再手写第二份列表。要看当前 pair，直接跑：
+预期集合来自本次 `run_scope.json`，没有固定的sentinel名单。默认验证完整发现集合；需要定向复跑时显式传 `--include`（PowerShell为 `-Include`）。
 
 ```text
-python Tools/design2umg_determinism_smoke.py print-sentinels
+python Tools/design2umg_determinism_smoke.py validate-run-root --run-root <CompletedRunRoot>
 ```
 
-推荐命令：
-
-```text
-pwsh -NoProfile -File <PluginRoot>\Tools\Run-Design2UMGDeterminismSmoke.ps1 -ProjectPath <MaintainerRuntimeProject.uproject> -EditorPath <UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe -ReferenceRoot <TrustedReferenceRoot> -OutputRoot <MaintainerRuntimeProjectRoot>\Saved\Design2UMG\Automation\_determinism_smoke_<stamp>
-```
-
-这条 smoke 的规则很直接：
-
-- `-ProjectPath`、`-EditorPath`、`-ReferenceRoot`、`-OutputRoot` 都必须显式传。
-- 缺 run root、缺 sentinel case、缺 compare report、缺 `generation_vs_asset`、缺 `generation_vs_asset_structure`、证据 stale / unreadable / mismatch，都必须 fail closed。
-- 通过时，每个 sentinel 的 `generation_vs_asset.changed_ratio` 和 `generation_vs_asset.stable_changed_ratio` 都必须是 `0.0`。
-- 通过时，每个 sentinel 的 `generation_vs_asset_structure.available` 也必须是 `true`，并且结构/文本 parity 不能坏。
-- 这一步通过，只代表 bootstrap-vs-asset parity 这条路径当前还值得继续跑 formal gate；它不是 formal 81-case 的替代品。
-
-sentinel 维护规则：
-
-- 如果后续某次 isolated formal replay 证明了一个当前 sentinel pair 没覆盖到的新 bootstrap-vs-asset drift case，那么下一次 determinism-focused batch 必须显式重审 sentinel set，不能默默在别处再长一份新名单。
+必须有非空且完整的用例集合、有限非负的误差指标、零生成/重载漂移及一致的结构/文本。缺失、重复、额外、不可读或身份不符的证据均不放行。局部检查不能冒充完整测试集通过。
 
 ## 当前 formal gate
 
-当前 formal admissible gate 是 81 个 discovered admissible case：39 个 Pencil，加上 21 个 Figma export root 各自的 `local` 与 `source` 两条路径（共 42 个 Figma case）。锁定口径以最新 full-run 的 `run_scope.json` 为准；发现数少于 81 的 run 不算正式 full run。该口径的封板基线是 `d4-seal81-20260906_01`。
-
+正式full run是用户目录实际发现的完整集合，不使用include/exclude过滤，不设置固定最小值、最大值或私有案例名。以 `run_scope.json` 记录范围，比较期间冻结输入和参考身份。零用例只说明没有执行测试，不构成视觉覆盖；新的运行目录不等于获准更换基线。
 这意味着：
 
 - formal full gate 不能带 exclude pattern。
-- formal batch report 不能把 raw visual-threshold `passed/failed` totals 当成成绩。
+- formal suite report 不能把 raw visual-threshold `passed/failed` totals 当成成绩。
 - formal historical-best parity 要用：
 
 ```text
@@ -221,16 +210,16 @@ python Tools/design2umg_validate_run.py --output-root <run_root> --admissible-be
   - `python Tools/design2umg_compatibility_selftest.py`
   - `python Tools/design2umg_diagnostics_selftest.py`
   - `python Tools/design2umg_run_history_selftest.py`
-  - `python Tools/design2umg_batch_report_contract_selftest.py`
+  - `python Tools/design2umg_suite_report_contract_selftest.py`
   - `python Tools/design2umg_determinism_smoke_selftest.py`
-- 它们一起覆盖 case discovery 过滤、默认 Figma export root 解析、run scope 写入、shard sizing、completeness 聚合、compatibility 规则路由、diagnostic stderr 形状、historical-best helper owner，以及 batch summary / timing-history 落盘合同。
+- 它们一起覆盖 case discovery 过滤、默认 Figma export root 解析、run scope 写入、shard sizing、completeness 聚合、compatibility 规则路由、diagnostic stderr 形状、historical-best helper owner，以及 suite summary / timing-history 落盘合同。
 - import diagnostic report JSON 和这些 helper 的 stderr 行不是一回事；前者单独见 `Docs/ImportDiagnosticContract.md`。
-- batch verifier 必须通过 `--project` 或 `DESIGN2UMG_RUNTIME_PROJECT` 显式传入真实 runtime project。缺少 project 输入时要直接报错，不能靠 design-root 推断，也不能生成 HostProject。
-- batch 级耗时漂移会落到 `Saved/Design2UMG/Automation/batch_timing_history.jsonl`。这只是给维护者看趋势的证据，不是替代 fidelity / no-regression 的发布门禁。
+- suite verifier 必须通过 `--project` 或 `DESIGN2UMG_RUNTIME_PROJECT` 显式传入真实 runtime project。缺少 project 输入时要直接报错，不能靠 design-root 推断，也不能生成 HostProject。
+- suite 级耗时漂移会落到 `Saved/Design2UMG/Automation/suite_timing_history.jsonl`。这只是给维护者看趋势的证据，不是替代 fidelity / no-regression 的发布门禁。
 
 正式 full-run 如果使用 external reference root，每个 formal case 目录都必须同时有 `reference.png` 和 `compare_report.json`。只有 `reference.png` 会让 run root 的 `summary.no_regression` 变成 unavailable，不能作为正式归档 gate。
 
-phase21 Batch 6 又把一个很容易复犯的坑踩实了：
+归档级 no-regression 证据还必须注意：
 
 - 如果这次 formal 的目标是拿归档级 `summary.no_regression` 证据，就不能漏掉 `--reference-root`。
 - 不带 `--reference-root` 也能跑出一条对 live Pencil 健康度有参考价值的 run，但很多 Pencil case 会合法降级成 `unverified_reference`、`comparison_mode_mismatch` 或 reference authority 变差。
@@ -248,7 +237,7 @@ formal gate 读数顺序：
 
 formal gate 执行纪律：
 
-- full 71 formal gate 必须独占串行跑。不能和 focused automation、别的 editor validation、另一个 formal batch 并行打同一个真实工程或 automation 资产目录。
+- 完整 formal suite 必须独占串行跑。不能和 focused automation、别的 editor validation、另一个 formal suite 并行使用同一个真实工程或 automation 资产目录。
 - 如果某次并行验证后突然冒出新的 pipeline determinism incompatibility，先独占重跑 formal gate，再决定要不要改代码。并行验证本身就可能制造假的 determinism 噪音。
 
 ### shard 模式的分数波动
@@ -259,17 +248,17 @@ formal gate 执行纪律：
 
 像素对比是其中一层裁判，不是全部。像素分数衡量的是与 Figma 光栅化参考 PNG 的相似度，渲染器固有差异（抗锯齿、纹理重采样、字体光栅化）永远混在数字里。分层证据链把每层真正能证明的东西分开：
 
-- **IR golden 层**（`Tools/design2umg_ir_golden.py` + 批量工具的 `--ir-golden <golden-root>`）：每个 case dump 转换后的 `FUMGWidgetData` typed 树（浮点 `%.9g` 无损、字节稳定），与冻结 golden 零容差对比。证明"转换行为没变"，任何数值漂移直接寻址到字段（如 `RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`），不需要图像实验。首版 golden（`ir-golden-20260830_01`）由 `ir-golden-bootstrap-full71-20260830_01` 自举，代码状态与基线指针关系见该目录的 `BOOTSTRAP.md`。golden 是 no-regression 口径，不是正确性口径。无 golden 的 case 记 `unavailable` 不算失败。
+- **IR golden 层**（`Tools/design2umg_ir_golden.py` + suite verifier 的 `--ir-golden <golden-root>`）：每个 case dump 转换后的 `FUMGWidgetData` typed 树（浮点 `%.9g` 无损、字节稳定），与冻结 golden 零容差对比。证明"转换行为没变"，任何数值漂移直接寻址到字段（如 `RootWidget...Brush.BrushColor.R: golden=0.108 dump=0.1098`），不需要图像实验。每份冻结集合都必须在配套元数据中记录代码状态和基线指针关系。golden 是 no-regression 口径，不是正确性口径。无 golden 的 case 记 `unavailable` 不算失败。
 - **像素层**：原样保留，端到端相似度，由容差管理。
-- **几何层**（`Tools/design2umg_geometry_compare.py` + 批量工具的 `--geometry-golden <golden-root>`）：每 case 由编辑器在编译渲染后 dump 运行时 widget 几何（cached geometry），与冻结 golden 几何 dump 在同一组可比节点上对比，节点配对复用共享树对应（容忍 wrapper 插入导致的路径迁移）。case 判定是 stability——冻结 golden 对当前运行时、0.75px 容差、x/y 锚定最近配对祖先，插入了 wrapper 但绝对几何不变不算漂移；fidelity（IR 推导期望对运行时，坐标取 IR 父的运行时配对系）逐节点记录但不判 case 失败。无 golden 的 case 记 `unavailable` 不算失败。
+- **几何层**（`Tools/design2umg_geometry_compare.py` + suite verifier 的 `--geometry-golden <golden-root>`）：每 case 由编辑器在编译渲染后 dump 运行时 widget 几何（cached geometry），与冻结 golden 几何 dump 在同一组可比节点上对比，节点配对复用共享树对应（容忍 wrapper 插入导致的路径迁移）。case 判定是 stability——冻结 golden 对当前运行时、0.75px 容差、x/y 锚定最近配对祖先，插入了 wrapper 但绝对几何不变不算漂移；fidelity（IR 推导期望对运行时，坐标取 IR 父的运行时配对系）逐节点记录但不判 case 失败。无 golden 的 case 记 `unavailable` 不算失败。
 
-像素层的评分逻辑统一在 `Tools/design2umg_scoring.py`（唯一归属地，批量工具只调用）。no-regression 容差已参数化：
+像素层的评分逻辑统一在 `Tools/design2umg_scoring.py`（唯一归属地，suite verifier 只调用）。no-regression 容差已参数化：
 
 - `--no-regression-epsilon` 默认 `1.25e-4`，不传参时行为与历史完全一致。
 - 封板口径可显式传 `1e-6` 收紧。两个前置条件：Pencil reference cache 必须冻结（read-only 或核对 sha1，live 重渲染的 reference 漂移在 `1e-4` 量级，会被小容差误报成回退）；shard 模式不得使用收紧容差（shard 状态噪音同样在 `1e-4` 量级，小容差只用于 `--editor-isolation case` 的正式判定）。
-- 已有实证样例：对封板基线 `cmsr-strictfix-full71-20260828_01`，`stringround-colorlock-full71-20260830_01` run 在默认容差下 71/71 通过，在 `1e-6` 下恰好 6 个 case 翻 FAIL（figma-export2 / bubbo-gameplay / team09-start 各 local+source，delta 2.3e-6~7.5e-6——即量化收口漂移，IR 层已逐字段归因）。
+- 收紧容差前，必须用 case isolation 重跑完整冻结集合，逐个检查判定反转。量化级像素差异可能跨过小阈值；必须由 IR 层归因对应字段变化，不能只用反转数量作结论。
 
-IR golden 失败目前报告在 `summary.ir_golden` 与每 case 的 `ir_golden_report.json`，暂不耦合 batch exit code。整 run 零 dump 时 `design2umg_ir_golden.py` 以 exit 2 报配置错误（例如 cvar 未开启），与单 case `unavailable` 区分。
+IR golden 失败目前报告在 `summary.ir_golden` 与每 case 的 `ir_golden_report.json`，暂不耦合 suite exit code。整 run 零 dump 时 `design2umg_ir_golden.py` 以 exit 2 报配置错误（例如 cvar 未开启），与单 case `unavailable` 区分。
 
 ## HostProject 和 Pencil MCP 边界
 

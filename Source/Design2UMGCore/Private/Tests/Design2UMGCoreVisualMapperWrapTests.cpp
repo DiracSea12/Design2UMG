@@ -306,12 +306,21 @@ bool FVisualMapperWrapWithBorderSingleFlowSemanticsMatrixTest::RunTest(const FSt
 		Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
 		Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Top;
 
+		const FUMGWidgetNode OriginalWidget = Widget;
 		const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 		TestEqual(TEXT("FitContent justify promotes without synthetic spacers"), Wrapped.Children.Num(), 1);
 		if (Wrapped.Children.Num() == 1)
 		{
 			TestEqual(TEXT("FitContent justify keeps content identity"), Wrapped.Children[0].Name, FString(TEXT("FitJustifyChild")));
 			TestEqual(TEXT("FitContent justify maps to Border alignment"), Wrapped.Children[0].Slot.HorizontalAlignment, EUMGSlotHorizontalAlignment::Center);
+			Node->Children[0]->Transform.SetPosition(0.f, 0.f);
+			Node->Transform.Width = FDesignSize::Fill();
+			Node->LayoutData.JustifyContent = EDesignJustifyContent::Start;
+			const FUMGWidgetNode FillWrapped = VisualMapper::WrapWithBorder(FUMGWidgetNode(OriginalWidget), Node);
+			if (TestEqual(TEXT("Unresolved Fill does not imply zero available width"), FillWrapped.Children.Num(), 1))
+			{
+				TestEqual(TEXT("Unresolved Fill keeps content identity"), FillWrapped.Children[0].Name, FString(TEXT("FitJustifyChild")));
+			}
 		}
 	}
 	{
@@ -395,7 +404,21 @@ bool FVisualMapperWrapWithBorderSingleFlowBoundaryTest::RunTest(const FString& P
 		TSharedPtr<FDesignNode> Child = MakeFixedNode(EDesignNodeType::Text, 80.0f, 20.0f);
 		Child->Transform.SetPosition(12.0f, 4.0f);
 		Node->Children.Add(Child);
-		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("Positioned child does not promote"));
+		const FUMGWidgetNode Wrapped = BuildWrapped(Node, false);
+		if (TestEqual(TEXT("Ignored flow coordinates preserve one content child"), Wrapped.Children.Num(), 1))
+		{
+			TestEqual(TEXT("Ignored coordinates do not preserve the panel"), Wrapped.Children[0].Name, FString(TEXT("BoundaryChild")));
+		}
+		Child->LayoutData.bAbsoluteLayoutPositioning = true;
+		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("Actual absolute positioning still needs its layout"));
+	}
+	{
+		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
+		Node->LayoutData.Layout = EDesignLayout::Horizontal;
+		Node->LayoutData.ExplicitPadding = FDesignPadding{16.f, 16.f, 16.f, 16.f};
+		Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 140.0f, 20.0f));
+		Node->Children[0]->Transform.SetPosition(0.f, 0.f);
+		AssertKeptFlowPanel(BuildWrapped(Node, false), TEXT("Content that overflows after padding keeps its allocation"));
 	}
 	{
 		TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 48.0f);
@@ -632,4 +655,3 @@ bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& P
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

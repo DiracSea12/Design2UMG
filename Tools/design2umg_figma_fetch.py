@@ -8,7 +8,7 @@ Stages (token required, reads FIGMA_PAT env):
 
 A built dir dropped into the plugin's FigmaExports/ container (or any
 --figma-export-root container) is discovered as local+source cases by the
-next batch run with zero tooling changes. Community files must be
+next suite run with zero tooling changes. Community files must be
 duplicated into your own drafts first (the REST API cannot read them
 directly); files you own are readable by key.
 
@@ -153,10 +153,10 @@ def main():
         collect_vector_nodes(node_doc, vec_ids, node_doc.get("id"))
         done = 0
         for start in range(0, len(vec_ids), 60):
-            batch = vec_ids[start:start + 60]
-            query = urllib.parse.urlencode({"ids": ",".join(batch), "format": "png", "scale": "2"})
+            suite = vec_ids[start:start + 60]
+            query = urllib.parse.urlencode({"ids": ",".join(suite), "format": "png", "scale": "2"})
             fills = http_json(f"{API}/images/{key}?{query}", token).get("images") or {}
-            for vid in batch:
+            for vid in suite:
                 url = fills.get(vid)
                 if not url:
                     continue

@@ -88,9 +88,7 @@ namespace DesignJsonUtils
 	}
 
 	/**
-	 * Serialize a JSON value/object to a pretty-printed multi-line string (TJsonWriter<>
-	 * defaults to TPrettyJsonPrintPolicy: indented, spaced). Historical consumers are the
-	 * Figma/Pen parser metadata fields; their output has always been pretty-printed.
+	 * Serialize JSON with indented, spaced formatting for parser metadata.
 	 */
 	inline FString ToPrettyString(const TSharedPtr<FJsonValue>& Value)
 	{
@@ -116,10 +114,7 @@ namespace DesignJsonUtils
 	}
 
 /**
- * Serialize a JSON value/object to a condensed single-line string (no indentation, no
- * spaces) via TCondensedJsonPrintPolicy. Historical consumers are the prototype step
- * graph fields (EasingJson/TransitionJson/VariableValueJson/ConditionJson);
- * their output has always been condensed.
+ * Serialize JSON without whitespace for prototype step payloads.
  */
 	inline FString ToCondensedString(const TSharedPtr<FJsonValue>& Value)
 	{

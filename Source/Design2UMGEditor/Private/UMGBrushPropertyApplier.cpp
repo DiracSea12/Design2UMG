@@ -2,8 +2,6 @@
 #include "UMGBrushPropertyApplier.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
-#include "DesignPathRasterDefaults.h"
-#include "DesignPathRasterizer.h"
 #include "DesignResourceResolver.h"
 #include "UMGImageCropUtils.h"
 #include "UMGPropertyKeys.h"
@@ -20,14 +18,8 @@
 
 namespace
 {
-	// Intentionally kept as a serialized-protocol round trip: the per-case
-	// no_regression gate pins each case's pixel score to the quantized output,
-	// so removal requires a gate-scope change or renewed gate consensus. The
-	// 2026-09-02 removal experiment was fidelity-neutral: of 240,390 changed
-	// pixels, 112,376 moved closer to the reference, 127,414 moved farther,
-	// and 600 kept their distance; shadow/AA boundary pixels merely flip under
-	// the +/-1/255 bias shift (deltas up to +/-211/255). It was vetoed only by
-	// stable_changed_ratio upticks (+2.5e-4..+8.5e-4 on 6 figma cases).
+	// Use the serialized brush-color representation so typed colors receive the same
+	// channel quantization as JSON brush properties.
 	FLinearColor NormalizeTypedDescriptorColor(const FLinearColor& Color)
 	{
 		return FUMGValueParser::ParseColor(
@@ -98,66 +90,6 @@ namespace UMGBrushPropertyApplier
 			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
 		}
 
-		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
-		UTexture2D* GeneratedTexture = nullptr;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Image, GeneratedTexture)
-			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
-		{
-			Image->SetBrushFromTexture(GeneratedTexture);
-			FSlateBrush GeneratedBrush = Image->GetBrush();
-			GeneratedBrush.ImageSize = ResolveWidgetImageSize(
-				Node,
-				FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY()));
-			GeneratedBrush.Tiling = ESlateBrushTileType::NoTile;
-			Image->SetBrush(GeneratedBrush);
-			Image->SetDesiredSizeOverride(GeneratedBrush.ImageSize);
-			return;
-		}
-
-		if (Node.Path.Geometry.IsSet())
-		{
-			const FString FillRule = Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule);
-			const TOptional<FLinearColor>& FillColor = Node.Path.FillColor;
-			const TOptional<FLinearColor>& StrokeColor = Node.Path.StrokeColor;
-			const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
-			const FString StrokeCap = Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
-			const FString StrokeJoin = Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
-			FIntPoint RasterSize;
-			if (!FDesignPathRasterizer::TryGetRasterSize(
-				Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-				Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), RasterSize)) return;
-			const int32 PathPixelWidth = RasterSize.X / DesignPathRasterDefaults::Supersample;
-			const int32 PathPixelHeight = RasterSize.Y / DesignPathRasterDefaults::Supersample;
-
-			if (UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-				Node.Path.Geometry.GetValue(),
-				RasterSize.X,
-				RasterSize.Y,
-				FillColor,
-				FillRule,
-				StrokeColor,
-				StrokeThickness,
-				StrokeCap,
-				StrokeJoin))
-			{
-				Image->SetBrushFromTexture(Texture);
-				FSlateBrush PathBrush = Image->GetBrush();
-				PathBrush.ImageSize = FVector2D(PathPixelWidth, PathPixelHeight);
-				PathBrush.Tiling = ESlateBrushTileType::NoTile;
-				Image->SetBrush(PathBrush);
-				Image->SetDesiredSizeOverride(FVector2D(PathPixelWidth, PathPixelHeight));
-				return;
-			}
-		}
-
-		const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(FString());
-		if (!TexturePath.IsEmpty())
-		{
-			if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
-			{
-				Image->SetBrushFromTexture(Texture);
-			}
-		}
 
 		FSlateBrush Brush = Image->GetBrush();
 		bool bBrushModified = false;
@@ -171,13 +103,6 @@ namespace UMGBrushPropertyApplier
 			Brush.ImageSize.Y = Node.WidgetStyle.HeightOverride.GetValue();
 			bBrushModified = true;
 		}
-
-		bBrushModified = ApplyImageModeToSlateBrush(Brush, Node, [&Image, &Brush, &bBrushModified](UTexture2D* Cropped)
-		{
-			Image->SetBrushFromTexture(Cropped);
-			Brush = Image->GetBrush();
-			bBrushModified = false;
-		}) || bBrushModified;
 
 		if (bBrushModified)
 		{

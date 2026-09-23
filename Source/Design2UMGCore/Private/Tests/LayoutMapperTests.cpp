@@ -7,6 +7,10 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "UMGWidgetTypes.h"
+#include "Design2UMGConverterFlowChildPreResolution.h"
 
 namespace
 {
@@ -142,6 +146,19 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FLayoutMapperCanvasSlotTest::RunTest(const FString&)
 {
+	for (const bool bFitWidth : {false, true})
+	for (const float FitValue : {0.f, 32.f})
+	{
+		FUMGWidgetNode Widget;
+		const auto Node = MakeNode(
+			bFitWidth ? EDesignSizeMode::FitContent : EDesignSizeMode::Fixed, bFitWidth ? FitValue : 120.f,
+			bFitWidth ? EDesignSizeMode::Fixed : EDesignSizeMode::FitContent, bFitWidth ? 80.f : FitValue);
+		LayoutMapper::ApplySlotProperties(Widget, Node, EDesignLayout::None);
+		TestEqual(TEXT("Only an unresolved fit axis uses desired size"), Widget.Slot.bAutoSize, FitValue == 0.f);
+		TestEqual(TEXT("Mixed-size canvas preserves width"), Widget.Slot.Offsets.Right, Node->Transform.Width.Value);
+		TestEqual(TEXT("Mixed-size canvas preserves height"), Widget.Slot.Offsets.Bottom, Node->Transform.Height.Value);
+	}
+
 	// Fixed child in Canvas -> offsets match x/y/w/h
 	{
 		FUMGWidgetNode Widget;
@@ -239,6 +256,97 @@ bool FLayoutMapperSourceTextBoxUsesStrictSizeBoxTest::RunTest(const FString&)
 	TestEqual(TEXT("Wrapped child keeps standard TextBlock type"), Wrapper.Children[0].Type, FString(TEXT("TextBlock")));
 	TestEqual(TEXT("Wrapped child keeps id"), Wrapper.Children[0].Id, FString(TEXT("text")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperNativeLinearPaddingTest,
+	"Design2UMG.Unit.LayoutMapper.NativeLinearPadding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutMapperNativeLinearPaddingTest::RunTest(const FString&)
+{
+	FDesignPadding Padding;
+	Padding.Left = 11; Padding.Top = 7; Padding.Right = 13; Padding.Bottom = 17;
+	for (const bool bVertical : {false, true})
+	{
+		FUMGWidgetNode Box;
+		Box.Type = bVertical ? UMGWidgetTypes::VerticalBox : UMGWidgetTypes::HorizontalBox;
+		Box.Children.SetNum(2);
+		LayoutMapper::ApplyGap(Box.Children, 9, bVertical ? EDesignLayout::Vertical : EDesignLayout::Horizontal);
+		LayoutMapper::ApplyPadding(Box, Padding);
+		TestEqual(TEXT("First slot carries leading and cross-axis insets"), Box.Children[0].Slot.Padding,
+			bVertical ? FMargin(11, 7, 13, 0) : FMargin(11, 7, 0, 17));
+		TestEqual(TEXT("Last slot retains gap and carries trailing inset"), Box.Children[1].Slot.Padding,
+			bVertical ? FMargin(11, 9, 13, 17) : FMargin(9, 7, 13, 17));
+		FUMGWidgetNode Single;
+		Single.Type = Box.Type;
+		Single.Children.SetNum(1);
+		LayoutMapper::ApplyPadding(Single, Padding);
+		TestEqual(TEXT("Single slot gets all four insets exactly once"), Single.Children[0].Slot.Padding, FMargin(11, 7, 13, 17));
+	}
+	FUMGWidgetNode Border;
+	Border.Type = UMGWidgetTypes::Border;
+	LayoutMapper::ApplyPadding(Border, Padding);
+	TestEqual(TEXT("Border retains native padding property"), Border.WidgetStyle.Padding.Get(FMargin()), FMargin(11, 7, 13, 17));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperPositionedFlowPaddingTest,
+	"Design2UMG.Unit.LayoutMapper.PositionedFlowPadding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutMapperPositionedFlowPaddingTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Positioned flow parses"), FPenParser::ParseDocument(TEXT(R"JSON(
+		{"version":"2.14","children":[{"id":"container","type":"frame","width":200,"height":150,
+		"layout":"vertical","padding":12,"gap":9,"children":[
+		{"id":"first","type":"rectangle","x":12,"y":12,"width":30,"height":20,"fill":"#FFFFFF"},
+		{"id":"second","type":"rectangle","x":12,"y":41,"width":30,"height":20,"fill":"#FFFFFF"}]}]}
+	)JSON"), Document))) return false;
+	TestFalse(TEXT("Parser preserves baked-coordinate ownership, without a second wrapper"),
+		Document.Children[0]->LayoutData.PaddingRequiresRuntimeWrap.Get(true));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode& Box = Data.RootWidget;
+	TestEqual(TEXT("Flow remains native without an added Border"), Box.Type, UMGWidgetTypes::VerticalBox);
+	if (!TestEqual(TEXT("Both flow slots survive conversion"), Box.Children.Num(), 2)) return false;
+	TestEqual(TEXT("Discarded flow coordinates are replaced by the declared inset"), Box.Children[0].Slot.Padding, FMargin(12, 12, 12, 0));
+	TestEqual(TEXT("Gap and trailing inset are each applied once"), Box.Children[1].Slot.Padding, FMargin(12, 9, 12, 12));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutMapperInheritedFillTest,
+	"Design2UMG.Unit.LayoutMapper.InheritedFill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutMapperInheritedFillTest::RunTest(const FString&)
+{
+	for (const bool bVertical : {false, true})
+	{
+		FDesignDocument Document;
+		const FString Json = FString::Printf(TEXT(R"JSON({"version":"2.14","children":[
+			{"id":"cell","type":"frame","reusable":true,"width":"fill_container(90)","height":"fill_container(80)","fill":"#FFFFFF"},
+			{"id":"parent","type":"frame","layout":"%s","width":200,"height":120,"children":[
+				{"id":"a","type":"ref","ref":"cell"},{"id":"b","type":"ref","ref":"cell"}]}]})JSON"),
+			bVertical ? TEXT("vertical") : TEXT("horizontal"));
+		if (!TestTrue(TEXT("Inherited fill fixture parses"), FPenParser::ParseDocument(Json, Document))) return false;
+		const auto Parent = Document.Children[1];
+		FUMGWidgetNode Panel;
+		Panel.Bounds.W = 200;
+		Panel.Bounds.H = 120;
+		const TMap<FString, FString> Theme;
+		Design2UMGConverterInternal::FFlowChildPreResolutionResolver Resolver(Document, Theme);
+		Resolver.PreResolveFlowChildren(Parent, Panel, Parent->Children);
+		for (const auto& Child : Parent->Children)
+		{
+			const auto Expanded = Resolver.ResolveExpandedChild(Child, true);
+			if (!TestTrue(TEXT("Measured instance expands"), Expanded.IsValid())) return false;
+			TestTrue(TEXT("Inherited main and cross fill modes survive measurement"),
+				Expanded->Transform.Width.IsFill() && Expanded->Transform.Height.IsFill());
+			TestEqual(TEXT("Resolved width uses available parent space"), Expanded->Transform.Width.Value, bVertical ? 200.f : 100.f);
+			TestEqual(TEXT("Resolved height uses available parent space"), Expanded->Transform.Height.Value, bVertical ? 60.f : 120.f);
+			FUMGWidgetNode Widget;
+			LayoutMapper::ApplySlotProperties(Widget, Expanded, Parent->LayoutData.Layout);
+			TestEqual(TEXT("Runtime slot still fills instead of taking its fallback width"), Widget.Slot.SizeRule, EUMGSlotSizeRule::Fill);
+		}
+	}
 	return true;
 }
 

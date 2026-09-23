@@ -16,6 +16,9 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/SOverlay.h"
+#include "UObject/Package.h"
+#include "MaterialDomain.h"
+#include "TextureResource.h"
 
 namespace
 {

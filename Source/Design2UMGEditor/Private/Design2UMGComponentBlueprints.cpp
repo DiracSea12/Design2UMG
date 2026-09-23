@@ -8,6 +8,7 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGLog.h"
+#include "DesignImageResourceLimits.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "FigmaComponentDependencies.h"
 #include "FigmaParser.h"
@@ -249,28 +250,32 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 	const FString& Folder, const FDesign2UMGGenerationSettingsSnapshot* Settings,
 	FDesign2UMGGenerationOutput* Output, FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint)
 {
+	// Some reimport entry points call the component batch directly. Own one budget there;
+	// calls reached through FUMGGenerator already have one and this scope simply reuses it.
+	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+
 	FDesign2UMGGenerationSettingsSnapshot Effective = Settings ? *Settings
 		: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
 	Effective.ComponentBlueprints = MakeShared<FDesign2UMGComponentBlueprintContext>();
 	auto& Context = *Effective.ComponentBlueprints;
 	Context.DocumentScope = Data.SourceDocument().DocumentScope;
 	TArray<UWidgetBlueprint*> TouchedAssets;
-	int32 BatchTransactionIndex = INDEX_NONE;
-	auto EndBatchTransaction = [&](FDesign2UMGGenerationOutput& Result)
+	int32 BulkTransactionIndex = INDEX_NONE;
+	auto EndBulkTransaction = [&](FDesign2UMGGenerationOutput& Result)
 	{
-		if (BatchTransactionIndex == INDEX_NONE) return;
+		if (BulkTransactionIndex == INDEX_NONE) return;
 		// Capture our identity before End; an empty transaction can be removed there.
-		Result.ComponentBatchTransactionId = GUndo ? GUndo->GetContext().TransactionId : FGuid();
+		Result.ComponentBulkTransactionId = GUndo ? GUndo->GetContext().TransactionId : FGuid();
 		GEditor->EndTransaction();
-		BatchTransactionIndex = INDEX_NONE;
+		BulkTransactionIndex = INDEX_NONE;
 	};
 	auto Fail = [&](const TCHAR* Kind = TEXT("component_generation_failed"),
 		EDesign2UMGCommitStatus FailureStatus = EDesign2UMGCommitStatus::NotCommitted) -> UWidgetBlueprint*
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Component import failed: %s"), *Context.Error);
 		if (Output) Output->MappingDiagnostics.Add({Kind, Context.Error});
-		if (Output) EndBatchTransaction(*Output);
-		const EDesign2UMGMemoryState Memory = FUMGGenerator::RestoreUnsavedComponentBatch(TouchedAssets, Output);
+		if (Output) EndBulkTransaction(*Output);
+		const EDesign2UMGMemoryState Memory = FUMGGenerator::RestoreUnsavedComponentBulk(TouchedAssets, Output);
 		if (Output)
 		{
 			Output->Commit.Memory = Memory;
@@ -430,8 +435,8 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			Context.Error = TEXT("Finish the active editor transaction before importing a component batch");
 			return Fail(TEXT("component_transaction_busy"), EDesign2UMGCommitStatus::Conflict);
 		}
-		BatchTransactionIndex = GEditor->BeginTransaction(TEXT("Design2UMG Component Batch"),
-			NSLOCTEXT("Design2UMG", "ComponentBatchTransaction", "Design2UMG Component Batch"), ExistingRoot);
+		BulkTransactionIndex = GEditor->BeginTransaction(TEXT("Design2UMG Component Bulk"),
+			NSLOCTEXT("Design2UMG", "ComponentBulkTransaction", "Design2UMG Component Bulk"), ExistingRoot);
 		TArray<UWidgetBlueprint*> ExistingAssets;
 		Existing.GenerateValueArray(ExistingAssets);
 		ExistingAssets.AddUnique(ExistingRoot);
@@ -441,7 +446,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			Asset->SetFlags(RF_Transactional);
 			Asset->Modify();
 			TArray<UObject*> TreeObjects;
-			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, true);
+			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, EGetObjectsFlags::IncludeNestedObjects);
 			TreeObjects.Add(Asset->WidgetTree);
 			for (UObject* Object : TreeObjects)
 			{
@@ -567,10 +572,10 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			Result.MappingDiagnostics.Add({Diagnostic.Kind, FString::Printf(TEXT("Component '%s': %s"), *Key, *Diagnostic.Message)});
 		}
 	}
-	Result.Manifest.bComponentBatchRoot = true;
+	Result.Manifest.bComponentBulkRoot = true;
 	Result.Commit.Memory = EDesign2UMGMemoryState::Modified;
 	if (Root) Result.Commit.AssetPath = Root->GetPathName();
-	EndBatchTransaction(Result);
+	EndBulkTransaction(Result);
 	if (Output) *Output = MoveTemp(Result);
 	if (!Root)
 	{

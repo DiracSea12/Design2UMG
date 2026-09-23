@@ -142,10 +142,10 @@ def write_case_report(case_dir: Path, result: dict) -> Path:
     return report_path
 
 
-def annotate_batch_case_result(case_result: dict, golden_root: str, case_name: str, case_dir: Path) -> None:
-    """Batch integration hook: compare one case dump, write its report, and attach summary fields.
+def annotate_suite_case_result(case_result: dict, golden_root: str, case_name: str, case_dir: Path) -> None:
+    """Bulk integration hook: compare one case dump, write its report, and attach summary fields.
 
-    Zero-op semantics for the batch when the IR golden layer is disabled; missing
+    Zero-op semantics for the suite when the IR golden layer is disabled; missing
     golden/dump mark the case unavailable (never a failure).
     """
     result = compare_case(Path(golden_root), case_name, case_dir / DUMP_NAME)

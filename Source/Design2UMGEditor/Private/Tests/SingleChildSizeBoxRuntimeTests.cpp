@@ -14,6 +14,9 @@
 #include "Slate/WidgetRenderer.h"
 #include "RenderingThread.h"
 #include "UObject/StrongObjectPtr.h"
+#include "TextureResource.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSingleChildSizeBoxRuntimeTest,

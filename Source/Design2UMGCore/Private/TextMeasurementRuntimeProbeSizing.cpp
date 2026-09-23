@@ -115,20 +115,9 @@ FResolvedTextLayoutForUMG ResolveTextLayoutForUMGInternal(
 			// Baselines use font ascent/descent, not UTextBlock's shadow-expanded desired size.
 			const float NaturalFontHeight = RuntimeProbe::MeasureTextSize(SingleLineText, Result.FontSize,
 				Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, 0, FontMappings).Y;
-			// Slate keeps the first-line baseline at the font's natural ascent no
-			// matter how LineHeightPercentage rescales the line box (FTextLayout
-			// places blocks by the unscaled MaxAboveBaseline). A half-leading
-			// source editor instead centers the natural line box inside the
-			// authored line height and baselines at the hhea ascent only, so the
-			// Slate text renders lower by
-			//   (NaturalLineHeight - SourceLineHeight) / 2 + hheaLineGap / 2
-			// where the lineGap term exists because Slate's Metrics layout adds
-				// the hhea lineGap on top of the ascent (FT_Face height = ascender -
-				// descender + lineGap). The shift below moves the rendered text back
-				// up by that amount. Whole-pixel rounding was evaluated and rejected:
-				// the reference renderer places the baseline at sub-pixel half-leading
-				// positions, so snapping the shift to whole pixels moves mid-way
-				// cases further from the reference (course-builder measured worse).
+			// Align Slate's natural-ascent baseline to the source editor's half-leading baseline.
+			// Shift upward by (NaturalLineHeight - SourceLineHeight + hheaLineGap) / 2.
+			// Keep subpixel precision to preserve half-leading placement.
 			if (IsFinitePositive(NaturalFontHeight))
 			{
 				Result.LineHeightBaselineShift = -((NaturalFontHeight - SourceLineHeight) / 2.0f + LineGapPx / 2.0f);

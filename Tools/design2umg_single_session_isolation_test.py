@@ -42,7 +42,7 @@ EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 30.0
 
 # ---------------------------------------------------------------------------
 # Case selection: the current formal gate scope.  Read the frozen
-# run scope so this experiment cannot silently drift from batch discovery.
+# run scope so this experiment cannot silently drift from suite discovery.
 # ---------------------------------------------------------------------------
 def formal_scope_pointer(runtime_project: Path) -> Path:
     return runtime_project.parent / "Saved" / "Design2UMG" / "ReferenceCache" / "CURRENT.json"
@@ -167,14 +167,6 @@ def editor_driver_started(driver_log_path: Path) -> bool:
     return driver_log_path.is_file()
 
 
-def log_indicates_clean_editor_shutdown(log_path: Path) -> bool:
-    try:
-        text = log_path.read_text(encoding="utf-8-sig", errors="replace")
-        return "LogExit: Exiting." in text
-    except Exception:
-        return False
-
-
 def run_editor_process(editor_path, project_path, driver_script_path, result_paths, log_path,
                        idle_timeout_sec, startup_timeout_sec, extra_cmds=""):
     driver_script_path = driver_script_path.resolve()
@@ -197,6 +189,7 @@ def run_editor_process(editor_path, project_path, driver_script_path, result_pat
     last_result_count = 0
     last_log_size = 0
     observed = False
+    driver_started = False
 
     while True:
         ec = proc.poll()
@@ -208,11 +201,8 @@ def run_editor_process(editor_path, project_path, driver_script_path, result_pat
             last_result_count = cur_results
             last_progress = time.time()
             observed = True
-        if cur_results >= len(result_paths) and log_indicates_clean_editor_shutdown(log_path):
-            proc.kill()
-            return 0
-
-        if editor_driver_started(driver_log_path):
+        if not driver_started and editor_driver_started(driver_log_path):
+            driver_started = True
             last_progress = time.time()
             observed = True
 
@@ -248,9 +238,6 @@ def run_editor_process(editor_path, project_path, driver_script_path, result_pat
 
     if not editor_driver_started(driver_log_path):
         raise RuntimeError(f"Editor exited before driver started, exit_code={ec}")
-    if ec != 0 and all(p.is_file() for p in result_paths):
-        if log_indicates_clean_editor_shutdown(log_path):
-            return 0
     return ec
 
 
@@ -281,8 +268,7 @@ _write(f"driver:run:{{spec_path}}")
 # Call transient state reset BEFORE render (like the real step mode)
 world = unreal.EditorLevelLibrary.get_editor_world()
 unreal.SystemLibrary.execute_console_command(world, "Design2UMG.AutomationRender " + spec_path + " --no-quit")
-_write("driver:quit")
-unreal.SystemLibrary.execute_console_command(world, "QUIT_EDITOR")
+_write("driver:complete")
 '''
     script_path.write_text(content, encoding="utf-8")
 
@@ -316,8 +302,7 @@ for i, spec_path in enumerate(SPEC_PATHS):
     unreal.SystemLibrary.execute_console_command(world, "Design2UMG.AutomationRender " + spec_path + " --no-quit")
     _write(f"driver:done:{{i+1}}")
 
-_write("driver:quit")
-unreal.SystemLibrary.execute_console_command(world, "QUIT_EDITOR")
+_write("driver:complete")
 '''
     script_path.write_text(content, encoding="utf-8")
 
@@ -378,9 +363,9 @@ def run_experiment(runtime_project: Path):
     write_json(session_manifest, {"spec_paths": session_specs, "spec_path": session_specs[0]})
 
     # ------------------------------------------------------------------------
-    # Phase 1: Step mode (baseline)
+    # Separate editor processes (baseline)
     # ------------------------------------------------------------------------
-    print(f"\n[PHASE 1] Step mode - each case in its own editor process")
+    print(f"\n[SEPARATE PROCESSES] Step mode - each case in its own editor process")
     print(f"  Output: {step_root}")
     print()
 
@@ -417,9 +402,9 @@ def run_experiment(runtime_project: Path):
             print("NO_RESULT")
 
     # ------------------------------------------------------------------------
-    # Phase 2: Single-session mode
+    # Shared editor process
     # ------------------------------------------------------------------------
-    print(f"\n[PHASE 2] Single-session mode - all cases in one editor")
+    print(f"\n[SHARED PROCESS] Single-session mode - all cases in one editor")
     print(f"  Output: {session_root}")
     print()
 
@@ -442,9 +427,9 @@ def run_experiment(runtime_project: Path):
         print(f"  Session failed: {e}")
 
     # ------------------------------------------------------------------------
-    # Phase 3: Compare
+    # Compare process-isolation results
     # ------------------------------------------------------------------------
-    print(f"\n[PHASE 3] Comparing step vs single-session outputs")
+    print(f"\n[COMPARISON] Comparing step vs single-session outputs")
     print()
 
     rows = []

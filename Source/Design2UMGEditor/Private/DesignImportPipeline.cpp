@@ -43,8 +43,7 @@ namespace DesignImportPipeline
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument,
-			const FUMGIconFontMappingChanges& IconFontMappingChanges);
+			const TOptional<FDesignDocument>& DiagnosticDocument);
 		FDesignImportExecutionResult ExecuteWithAnalysis(
 			FUMGWidgetData& Data,
 			const FImportAnalysisResult& AnalysisResult,
@@ -144,6 +143,7 @@ namespace DesignImportPipeline
 			}
 
 			Result.Commit = GenerationOutput.Commit;
+			Result.Warnings = Data.Warnings;
 			if (Result.Commit.IsSuccess() && !Data.Warnings.IsEmpty())
 				Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
 			Result.bSucceeded = Result.bSucceeded && Result.Commit.IsSuccess();
@@ -168,18 +168,15 @@ namespace DesignImportPipeline
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument,
-			const FUMGIconFontMappingChanges& IconFontMappingChanges)
+			const TOptional<FDesignDocument>& DiagnosticDocument)
 		{
 			return FOnPreviewConfirmed::CreateLambda(
-				[CapturedIconFontMappingChanges = IconFontMappingChanges,
-				 CapturedGeneration = Request.Generation,
+				[CapturedGeneration = Request.Generation,
 				 bCapturedResolveImages = Request.bResolveImages,
 				 CapturedDiagnosticDocument = DiagnosticDocument,
 				 CapturedSettingsSnapshot = Request.SettingsSnapshot](const FPreviewGenerationRequest& PreviewGenerationRequest)
 				{
-					FPreviewApprovedSnapshot ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
-					ApprovedSnapshot.Data.IconFontMappingChanges = CapturedIconFontMappingChanges;
+					const FPreviewApprovedSnapshot& ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
 
 					FArtifactGenerationRequest GenerationRequest = PreviewGenerationRequest.GenerationRequest;
 					GenerationRequest.Generation = CapturedGeneration;
@@ -191,11 +188,11 @@ namespace DesignImportPipeline
 
 					if (CapturedSettingsSnapshot.IsSet())
 					{
-						GenerateArtifacts(ApprovedSnapshot, GenerationRequest, CapturedSettingsSnapshot->GenerationSettings);
+						return GenerateArtifacts(ApprovedSnapshot, GenerationRequest, CapturedSettingsSnapshot->GenerationSettings);
 					}
 					else
 					{
-						GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
+						return GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
 					}
 				});
 		}
@@ -233,7 +230,7 @@ namespace DesignImportPipeline
 					Data,
 					Request.OutputPath,
 					Request.PreviewWindowTitle,
-					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, AnalysisResult.Data.IconFontMappingChanges),
+					CreatePreviewConfirmedHandler(Request, DiagnosticDocument),
 					FOnPreviewCancelled::CreateLambda(
 						[]()
 						{

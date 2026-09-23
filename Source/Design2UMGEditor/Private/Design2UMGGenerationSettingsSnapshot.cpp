@@ -26,7 +26,7 @@ FDesignPreviewMaterializationSettingsSnapshot FDesignPreviewMaterializationSetti
 }
 
 // Single copy boundary for the reverse (materialization -> generation) narrowing
-// step. When a new generation field must round-trip through preview approval,
+// step. When a new generation field must survive preview approval serialization,
 // copy it here once.
 FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::FromMaterializationSettings(
 	const FDesignPreviewMaterializationSettingsSnapshot& MaterializationSettings)

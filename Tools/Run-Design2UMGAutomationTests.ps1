@@ -4,6 +4,7 @@ param(
     [string]$EditorPath = "",
     [string]$LogPath = "",
     [string]$Tests = "Design2UMG",
+    [string]$RealDesignExportRoot = "",
     [switch]$ValidateOnly
 )
 
@@ -13,6 +14,15 @@ $ErrorActionPreference = "Stop"
 
 $ProjectPath = Resolve-D2URequiredProjectPath $ProjectPath
 $EditorPath = Resolve-D2URequiredEditorPath $EditorPath
+if (-not [string]::IsNullOrWhiteSpace($RealDesignExportRoot)) {
+    $RealDesignExportRoot = (Resolve-Path -LiteralPath $RealDesignExportRoot -ErrorAction Stop).Path
+    foreach ($designName in @("figma_game_party_home", "figma_general_data_analytics")) {
+        $designPath = Join-Path $RealDesignExportRoot "$designName/design.json"
+        if (-not (Test-Path -LiteralPath $designPath -PathType Leaf)) {
+            throw "Real-design automation input not found: $designPath"
+        }
+    }
+}
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path (Split-Path -Parent $PSScriptRoot) "Saved\Logs\Design2UMG-Automation.log"
 }
@@ -48,6 +58,9 @@ $arguments.Add('-NoSplash')
 $arguments.Add('-NoSound')
 $arguments.Add('-nop4')
 $arguments.Add('-nocefaccelpaint')
+if (-not [string]::IsNullOrWhiteSpace($RealDesignExportRoot)) {
+    $arguments.Add(('"-D2URealDesignExportRoot={0}"' -f $RealDesignExportRoot))
+}
 # Automation waits for a 10 FPS interactive rate before running tests; a background
 # editor window is throttled below that, burning the default 10-minute timeout.
 # Cap the wait instead: timing out continues the run and only skips the wait.

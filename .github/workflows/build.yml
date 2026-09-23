@@ -41,13 +41,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install Pillow
-          python -m py_compile Tools/design2umg_auto_verify.py Tools/design2umg_auto_verify_batch.py Tools/design2umg_determinism_smoke.py Tools/design2umg_verify_lib/batch_discovery.py Tools/design2umg_verify_lib/compatibility.py Tools/design2umg_verify_lib/diagnostics.py Tools/design2umg_verify_lib/execution_shards.py Tools/design2umg_verify_lib/run_history.py Tools/design2umg_validation_helpers_selftest.py Tools/design2umg_compatibility_selftest.py Tools/design2umg_diagnostics_selftest.py Tools/design2umg_run_history_selftest.py Tools/design2umg_batch_report_contract_selftest.py Tools/design2umg_determinism_smoke_selftest.py
-          python Tools/design2umg_validation_helpers_selftest.py
-          python Tools/design2umg_compatibility_selftest.py
-          python Tools/design2umg_diagnostics_selftest.py
-          python Tools/design2umg_run_history_selftest.py
-          python Tools/design2umg_batch_report_contract_selftest.py
-          python Tools/design2umg_determinism_smoke_selftest.py
+          python Tools/run_validation_selftests.py
+
+      - name: Test validation process isolation
+        shell: pwsh
+        run: ./Tools/Tests/Test-ValidationProcessIsolation.ps1
+
+      - name: Test CI automation report contract
+        shell: pwsh
+        run: ./Tools/Tests/Test-CIAutomationReportContract.ps1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Test Figma exporter
+        working-directory: Tools/FigmaExporter
+        run: |
+          npm ci
+          npm test
 
   build-plugin:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -68,7 +80,7 @@ jobs:
             throw "UE_ROOT is not set on runner. Point it to your UnrealEngine root."
           }
 
-          $uat = Join-Path $env:UE_ROOT "Engine\Build\BatchFiles\RunUAT.bat"
+          $uat = Join-Path $env:UE_ROOT "Engine\Build\BulkFiles\RunUAT.bat"
           if (-not (Test-Path $uat)) {
             throw "RunUAT not found at: $uat"
           }
@@ -95,7 +107,10 @@ jobs:
             ".vs",
             "Intermediate",
             "Saved",
-            "openspec"
+            "openspec",
+            "PenDesigns",
+            "FigmaExports",
+            "CODE_QUALITY_OPTIMIZATION_PLAN.md"
           )
 
           foreach ($relativePath in $maintainerOnlyPaths) {
@@ -117,7 +132,7 @@ jobs:
           $packageDescriptor = Join-Path $pwd "dist\Design2UMG\Design2UMG.uplugin"
           $installedDescriptor = Join-Path $env:UE_ROOT "Engine\Plugins\Marketplace\Design2UMG\Design2UMG.uplugin"
           $installedDescriptorBackup = "$installedDescriptor.ci-disabled"
-          $logPath = Join-Path $env:RUNNER_TEMP "Design2UMG-Automation-$env:GITHUB_RUN_ID.log"
+          $artifactRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Automation-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
 
           if (-not $project) {
             throw "DESIGN2UMG_RUNTIME_PROJECT is not set on runner. Point it to the maintainer runtime project."
@@ -143,35 +158,83 @@ jobs:
               $descriptorWasMoved = $true
             }
 
-            $testFilters = @(
-              "Design2UMG.Generation",
-              "Design2UMG.Unit.FigmaParser",
-              "Design2UMG.BatchD"
+            New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+            $PSNativeCommandUseErrorActionPreference = $false
+            $testRuns = @(
+              [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
+              [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Http"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Pencil.RetryTickerLifecycle"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.LayoutData.Layout.WrapGapUsesInnerSlotPaddingOnly"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.RemoteImages.ReceiveBudget"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Resources.Failure"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.PreviewContext"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Unit.UMGJsonParser"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.Unit.ParserBudget"; Mode = "NullRHI" },
+              [pscustomobject]@{ Filter = "Design2UMG.PreviewWindow"; Mode = "RenderOffscreen" },
+              [pscustomobject]@{ Filter = "Design2UMG.Resources.GeneratedTextureBudget"; Mode = "RenderOffscreen" },
+              [pscustomobject]@{ Filter = "Design2UMG.Preview.ResourceLifetime"; Mode = "RenderOffscreen" }
             )
-            foreach ($testFilter in $testFilters) {
-              $filterLogPath = $logPath.Replace(".log", "-$($testFilter.Replace('.', '-')).log")
-              & $editor `
-                $project `
-                "-PLUGIN=$packageDescriptor" `
-                -unattended `
-                -NullRHI `
-                -NoSplash `
-                -NoSound `
-                -nop4 `
-                "-ExecCmds=Automation RunTests $testFilter; Quit" `
-                "-TestExit=Automation Test Queue Empty" `
-                "-AbsLog=$filterLogPath"
-              if ($LASTEXITCODE -ne 0) {
-                throw "$testFilter automation exited with code $LASTEXITCODE. Log: $filterLogPath"
+            $validationFailures = [System.Collections.Generic.List[string]]::new()
+            foreach ($testRun in $testRuns) {
+              $safeName = $testRun.Filter -replace '[^A-Za-z0-9._-]', '-'
+              $runRoot = Join-Path $artifactRoot $safeName
+              $reportRoot = Join-Path $runRoot "report"
+              $filterLogPath = Join-Path $runRoot "automation.log"
+              $summaryPath = Join-Path $runRoot "summary.json"
+              New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
+
+              $editorArguments = @(
+                $project,
+                "-PLUGIN=$packageDescriptor",
+                "-ReportExportPath=$reportRoot",
+                "-ExecCmds=Automation RunTests $($testRun.Filter); Quit",
+                "-TestExit=Automation Test Queue Empty",
+                "-AbsLog=$filterLogPath",
+                "-unattended",
+                "-NoSplash",
+                "-NoSound",
+                "-nop4"
+              )
+              if ($testRun.Mode -eq "NullRHI") {
+                $editorArguments += "-NullRHI"
+              }
+              else {
+                $editorArguments += "-RenderOffscreen"
               }
 
-              $logContent = Get-Content -LiteralPath $filterLogPath -Raw
-              if ($logContent -notmatch '\*\*\*\* TEST COMPLETE\. EXIT CODE: 0 \*\*\*\*') {
-                throw "Automation success marker not found for $testFilter. Log: $filterLogPath"
+              & $editor @editorArguments
+              $processExitCode = $LASTEXITCODE
+              [System.IO.File]::WriteAllText(
+                (Join-Path $runRoot "exit-code.txt"),
+                "$processExitCode`n",
+                [System.Text.UTF8Encoding]::new($false))
+              [System.IO.File]::WriteAllText(
+                (Join-Path $runRoot "invocation.json"),
+                ([ordered]@{
+                  test_filter = $testRun.Filter
+                  render_mode = $testRun.Mode
+                  arguments = $editorArguments
+                } | ConvertTo-Json -Depth 4),
+                [System.Text.UTF8Encoding]::new($false))
+
+              try {
+                ./Tools/CI/Assert-Design2UMGAutomationReport.ps1 `
+                  -TestFilter $testRun.Filter `
+                  -ReportPath (Join-Path $reportRoot "index.json") `
+                  -LogPath $filterLogPath `
+                  -ProcessExitCode $processExitCode `
+                  -SummaryPath $summaryPath `
+                  -RenderMode $testRun.Mode
               }
-              if ($logContent -match '(?i)Design2UMG.*(duplicate|same name|already exists|ignored)') {
-                throw "Duplicate Design2UMG plugin warning detected. Log: $filterLogPath"
+              catch {
+                $validationFailures.Add("$($testRun.Filter): $($_.Exception.Message)")
               }
+            }
+            if ($validationFailures.Count -gt 0) {
+              throw ($validationFailures -join [Environment]::NewLine)
             }
           }
           finally {
@@ -179,6 +242,15 @@ jobs:
               Move-Item -LiteralPath $installedDescriptorBackup -Destination $installedDescriptor
             }
           }
+
+      - name: Upload focused automation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Design2UMG-Automation-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/Design2UMG-Automation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload packaged plugin artifact
         uses: actions/upload-artifact@v4

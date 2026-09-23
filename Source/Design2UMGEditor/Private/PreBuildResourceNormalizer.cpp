@@ -18,15 +18,13 @@
 #include "TextureCompiler.h"
 #include "TextureResource.h"
 #include "UObject/SavePackage.h"
+#include "UObject/SoftObjectPath.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/SecureHash.h"
 #include "Serialization/MemoryWriter.h"
 
 namespace
 {
-#if WITH_DEV_AUTOMATION_TESTS
-	bool GFailTextureSaveOnce = false;
-#endif
 	void ReplaceNodeFillWithTexturePath(FUMGWidgetNode& Node, const FString& TexturePath)
 	{
 		Node.Path = FUMGPathData();
@@ -51,6 +49,16 @@ namespace
 		Writer << Path.Geometry << Path.FillRule << Path.FillColor << Path.StrokeColor
 			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Width << Height;
 		return Key;
+	}
+
+	bool HasVisiblePathPaint(const FUMGWidgetNode& Node)
+	{
+		const bool bHasVisibleFill = Node.Path.FillColor.IsSet()
+			&& Node.Path.FillColor.GetValue().A > KINDA_SMALL_NUMBER;
+		const bool bHasVisibleStroke = Node.Path.StrokeColor.IsSet()
+			&& Node.Path.StrokeColor.GetValue().A > KINDA_SMALL_NUMBER
+			&& Node.Path.StrokeThickness.Get(0.0f) > KINDA_SMALL_NUMBER;
+		return bHasVisibleFill || bHasVisibleStroke;
 	}
 
 	FTextureRequestKey MakeProceduralTextureKey(FUMGProceduralResourceRequest Request)
@@ -194,17 +202,13 @@ namespace
 		Texture->MarkPackageDirty();
 		Package->MarkPackageDirty();
 
-		IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true);
+		// SavePackage's final file move can be fatal when its directory is missing.
+		// Surface directory creation failure while the scoped asset cleanup still runs.
+		if (!IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFilename), true)) return false;
 
 		FSavePackageArgs SaveArgs;
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-#if WITH_DEV_AUTOMATION_TESTS
-		if (GFailTextureSaveOnce)
-		{
-			GFailTextureSaveOnce = false;
-			return false;
-		}
-#endif
+		SaveArgs.SaveFlags = SAVE_NoError; // The caller reports failure through its structured result.
 		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs)) return false;
 		if (!EnsurePersistedTextureReady(Texture))
 		{
@@ -245,6 +249,11 @@ namespace
 		{
 			return false;
 		}
+		if (!HasVisiblePathPaint(Node))
+		{
+			// A transparent path is a valid empty visual, not a failed texture request.
+			return false;
+		}
 
 		OutPlan.Key = MakePathTextureKey(Node);
 		OutPlan.Filter = TF_Nearest;
@@ -254,7 +263,8 @@ namespace
 		return true;
 	}
 
-	UTexture2D* CreatePathTexture(const FUMGWidgetNode& Node, const FTextureMaterializationPlan&, FString& OutError)
+	UTexture2D* CreatePathTexture(const FUMGWidgetNode& Node, const FTextureMaterializationPlan&, FString& OutError,
+		DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
 		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::FillRule : Node.Path.FillRule.GetValue();
@@ -271,9 +281,18 @@ namespace
 		if (Fill.IsSet()) Fill = FLinearColor::FromSRGBColor(Fill->ToFColor(true));
 		TOptional<FLinearColor> Stroke = Node.Path.StrokeColor;
 		if (Stroke.IsSet()) Stroke = FLinearColor::FromSRGBColor(Stroke->ToFColor(true));
-		return FDesignPathRasterizer::Rasterize(
+		// The rasterizer bills this raster against the materialization budget on a cache
+		// miss, i.e. exactly when it allocates; a cache hit allocates nothing and is free.
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
 			*Geometry, RasterSize.X, RasterSize.Y,
-			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError);
+			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError, Budget);
+		if (!Texture && !OutError.IsEmpty())
+		{
+			// Name the node here: the refusal happens inside the rasterizer, which has no idea
+			// which design node it was drawing for, and callers report this string verbatim.
+			OutError = FString::Printf(TEXT("Path '%s': %s"), *Node.Name, *OutError);
+		}
+		return Texture;
 	}
 
 	bool TryBuildProceduralTextureMaterializationPlan(
@@ -288,6 +307,29 @@ namespace
 			return false;
 		}
 
+		if (!FProceduralShapeGenerator::IsSupportedMaterialRef(ResourceRequest.MaterialRef))
+		{
+			const FString SubstitutePath = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
+			UTexture2D* SubstituteTexture = SubstitutePath.IsEmpty()
+				? nullptr
+				: FindObject<UTexture2D>(nullptr, *SubstitutePath);
+			if (!SubstituteTexture && !SubstitutePath.IsEmpty())
+			{
+				const FString PackageName = FSoftObjectPath(SubstitutePath).GetLongPackageName();
+				if (!PackageName.IsEmpty() && FPackageName::DoesPackageExist(PackageName))
+				{
+					SubstituteTexture = DesignResourceResolver::LoadTextureFromPath(
+						SubstitutePath, DesignResourceResolver::ELoadMode::LoadThenFind);
+				}
+			}
+
+			if (SubstituteTexture)
+			{
+				// Only a loaded or loadable texture is a valid external-material substitute.
+				return false;
+			}
+		}
+
 		OutPlan.Key = MakeProceduralTextureKey(ResourceRequest);
 		OutPlan.Filter = TF_Bilinear;
 		OutPlan.Kind = FTextureMaterializationPlan::EKind::Procedural;
@@ -298,7 +340,8 @@ namespace
 		return true;
 	}
 
-	UTexture2D* CreateProceduralTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError)
+	UTexture2D* CreateProceduralTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError,
+		DesignImageResources::FImageOperationBudget*)
 	{
 		return FProceduralShapeGenerator::GenerateFromMaterialRef(Plan.ProceduralRequest, nullptr, &OutError);
 	}
@@ -326,7 +369,8 @@ namespace
 		return true;
 	}
 
-	UTexture2D* CreateImageTransformTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError)
+	UTexture2D* CreateImageTransformTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError,
+		DesignImageResources::FImageOperationBudget*)
 	{
 		UTexture2D* SourceTexture = DesignResourceResolver::LoadTextureFromPath(
 			Plan.SourceTexturePath,
@@ -366,7 +410,8 @@ namespace
 		FUMGWidgetNode& Node, const FString& TextureImportPath, const FString& AssetPrefix,
 		TMap<FTextureRequestKey, FString>& Cache,
 		TFunctionRef<bool(const FUMGWidgetNode&, const FString&, FTextureMaterializationPlan&)> TryBuildPlan,
-		TFunctionRef<UTexture2D*(const FUMGWidgetNode&, const FTextureMaterializationPlan&, FString&)> CreateTexture,
+		TFunctionRef<UTexture2D*(const FUMGWidgetNode&, const FTextureMaterializationPlan&, FString&, DesignImageResources::FImageOperationBudget*)> CreateTexture,
+		DesignImageResources::FImageOperationBudget* Budget,
 		FString* OutError)
 	{
 		FTextureMaterializationPlan Plan;
@@ -379,7 +424,7 @@ namespace
 			else
 			{
 				FString CreationError;
-				UTexture2D* Generated = CreateTexture(Node, Plan, CreationError);
+				UTexture2D* Generated = CreateTexture(Node, Plan, CreationError, Budget);
 				if (!CreationError.IsEmpty())
 				{
 					const FString Error = FString::Printf(TEXT("Failed to create generated texture for '%s': %s"), *Node.Name, *CreationError);
@@ -409,80 +454,139 @@ namespace
 					Cache.Add(Plan.Key, ObjectPath);
 					UE_LOG(LogDesign2UMG, Log, TEXT("Persisted generated texture '%s' -> %s"), *Node.Name, *ObjectPath);
 				}
+				else
+				{
+					// A planned resource that produces neither a texture nor an error is still a failure.
+					const FString Error = FString::Printf(
+						TEXT("Required generated texture for node '%s' ('%s') was not produced and reported no error"),
+						*Node.Name, *Plan.AssetName);
+					if (OutError) *OutError = Error;
+					UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
+					return false;
+				}
 			}
 		}
 		for (FUMGWidgetNode& Child : Node.Children)
 		{
-			if (!NormalizeTextureResourcesRecursive(Child, TextureImportPath, AssetPrefix, Cache, TryBuildPlan, CreateTexture, OutError)) return false;
+			if (!NormalizeTextureResourcesRecursive(Child, TextureImportPath, AssetPrefix, Cache, TryBuildPlan, CreateTexture, Budget, OutError)) return false;
 		}
 		return true;
 	}
 }
 
+bool FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
+	FUMGWidgetNode& Root, const FString& PackagePath, const FString& AssetPrefix, FString& OutError)
+{
+	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+	return NormalizePathTextures(Root, PackagePath / TEXT("D2U_PathTextures"), AssetPrefix, &OutError)
+		&& NormalizeProceduralTextures(Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetPrefix, &OutError)
+		&& NormalizeImageTransformTextures(Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetPrefix, &OutError);
+}
+
 bool FPreBuildResourceNormalizer::NormalizePathTextures(
-	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError)
+	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError,
+	DesignImageResources::FImageOperationBudget* Budget)
 {
 	if (OutError) OutError->Reset();
+	// Only path rasters draw from this budget, and they draw at the rasterizer's real
+	// allocation point. A caller-supplied budget is the one the whole materialization
+	// shares; without one this normalization pass gets its own.
+	DesignImageResources::FImageOperationBudget* PassBudget = Budget
+		? Budget
+		: DesignImageResources::FScopedOperationBudget::GetCurrent();
+	TUniquePtr<DesignImageResources::FImageOperationBudget> OwnBudget;
+	if (!PassBudget)
+	{
+		OwnBudget = MakeUnique<DesignImageResources::FImageOperationBudget>(
+			DesignImageResources::GetGeneratedTextureLimits());
+		PassBudget = OwnBudget.Get();
+	}
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildPathTextureMaterializationPlan, CreatePathTexture, OutError);
+		TryBuildPathTextureMaterializationPlan, CreatePathTexture, PassBudget, OutError);
 }
 
 bool FPreBuildResourceNormalizer::NormalizeProceduralTextures(
 	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError)
 {
+	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
 	if (OutError) OutError->Reset();
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildProceduralTextureMaterializationPlan, CreateProceduralTexture, OutError);
+		TryBuildProceduralTextureMaterializationPlan, CreateProceduralTexture, nullptr, OutError);
 }
 
 bool FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
 	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError)
 {
+	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
 	if (OutError) OutError->Reset();
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildImageTransformTextureMaterializationPlan, CreateImageTransformTexture, OutError);
+		TryBuildImageTransformTextureMaterializationPlan, CreateImageTransformTexture, nullptr, OutError);
 }
 
 
-bool FPreBuildResourceNormalizer::ValidatePathTextureBudget(const FUMGWidgetNode& Root, FString& OutError)
+bool FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
+	const FUMGWidgetNode& Root,
+	FString& OutError)
 {
 	OutError.Reset();
-	const DesignImageResources::FImageResourceLimits Limits;
-	DesignImageResources::FImageOperationBudget Budget(Limits);
-	TSet<FTextureRequestKey> CountedRequests;
+	const DesignImageResources::FImageResourceLimits Limits = DesignImageResources::GetGeneratedTextureLimits();
 	TFunction<bool(const FUMGWidgetNode&)> Visit = [&](const FUMGWidgetNode& Node)
 	{
-		if (Node.Type == UMGWidgetTypes::Image && !Node.Path.Geometry.Get(FString()).IsEmpty())
+		if (Node.Type == UMGWidgetTypes::Image
+			&& !Node.Path.Geometry.Get(FString()).IsEmpty()
+			&& HasVisiblePathPaint(Node))
 		{
-			FIntPoint Size;
+			FIntPoint RasterSize;
 			if (!FDesignPathRasterizer::TryGetRasterSize(
 				Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-				Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), Size))
+				Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
+				RasterSize))
 			{
-				OutError = FString::Printf(TEXT("Path '%s' has invalid or excessive texture dimensions"), *Node.Name);
+				OutError = FString::Printf(
+					TEXT("Failed to create generated texture for '%s': invalid or excessive path texture dimensions"),
+					*Node.Name);
 				return false;
 			}
-			const FTextureRequestKey Key = MakePathTextureKey(Node);
-			if (!CountedRequests.Contains(Key)
-				&& !Budget.ConsumeDecodedPixels(static_cast<int64>(Size.X) * Size.Y, OutError))
-			{
-				OutError = FString::Printf(TEXT("Path '%s': %s"), *Node.Name, *OutError);
-				return false;
-			}
-			CountedRequests.Add(Key);
 		}
-		for (const FUMGWidgetNode& Child : Node.Children) if (!Visit(Child)) return false;
+
+		FUMGProceduralResourceRequest ResourceRequest;
+		if (Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest)
+			&& ResourceRequest.HasNonEmptyMaterialRef()
+			&& FProceduralShapeGenerator::IsSupportedMaterialRef(ResourceRequest.MaterialRef))
+		{
+			FIntPoint Size;
+			if (!Limits.TryGetPixelSize(
+				ResourceRequest.WidthOverride.Get(64.0f),
+				ResourceRequest.HeightOverride.Get(64.0f), Size))
+			{
+				OutError = FString::Printf(
+					TEXT("Failed to create generated texture for '%s': invalid or excessive procedural texture dimensions"),
+					*Node.Name);
+				return false;
+			}
+		}
+
+		UMGImageCropUtils::FImageCropRequest CropRequest;
+		if (Node.Brush.Image.Transform.IsSet()
+			&& Node.Brush.Image.Mode.Get(FString()).Equals(TEXT("Crop"), ESearchCase::IgnoreCase)
+			&& UMGImageCropUtils::TryBuildCropRequest(Node, CropRequest)
+			&& !UMGImageCropUtils::CanUseUvRegion(CropRequest.Transform)
+			&& !Limits.AllowsDimensions(CropRequest.OutputWidth, CropRequest.OutputHeight))
+		{
+			OutError = FString::Printf(
+				TEXT("Failed to create generated texture for '%s': invalid or excessive affine crop dimensions"),
+				*Node.Name);
+			return false;
+		}
+
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			if (!Visit(Child)) return false;
+		}
 		return true;
 	};
 	return Visit(Root);
 }
-
-#if WITH_DEV_AUTOMATION_TESTS
-void FPreBuildResourceNormalizer::ArmTextureSaveFailureOnce()
-{
-	GFailTextureSaveOnce = true;
-}
-#endif

@@ -7,13 +7,8 @@
 struct FUMGWidgetData;
 
 /**
- * Validation layer 1 (IR golden): fidelity serialization of the converted FUMGWidgetData
- * typed tree. Writes a byte-stable ir_dump.json (object keys sorted, floats via %.9g)
- * so consecutive runs can be diffed field-by-field against a frozen golden.
- *
- * Off by default: gated by the design2umgAutomation.IrDump console variable plus a
- * non-empty automation dump path (set by the automation driver per render spec via
- * TGuardValue, mirroring GDesign2UMGAutomationFontImportPath).
+ * Dump converted widget IR with sorted keys and %.9g floats for deterministic comparison.
+ * Requires design2umgAutomation.IrDump and a non-empty per-render output path.
  */
 namespace Design2UMGAutomationIrDump
 {

@@ -10,9 +10,6 @@ namespace GeneratedAssetLifecycle
 {
 	/** Undo only the latest completed transaction with this identity; never a user's later edit. */
 	bool UndoOwnedTransaction(const FGuid& TransactionId);
-#if WITH_DEV_AUTOMATION_TESTS
-	void ArmAutomationUndoFailureOnce();
-#endif
 	/** Existing uassets allow a read-only check; only sidecars allow an append-open probe. */
 	bool IsFileWritableForSave(const FString& Path, bool bAllowWriteProbe, FString& OutReason);
 	bool DiscardUnsavedAsset(UObject* Asset);

@@ -4,6 +4,7 @@
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
+#include "Design2UMGNotifications.h"
 
 #include "TimerManager.h"
 #include "Engine/World.h"
@@ -26,6 +27,26 @@
 namespace
 {
 	constexpr float JsonEditDebounceSeconds = 0.5f;
+	const TCHAR* DescribeFileState(EDesign2UMGFileState State)
+	{
+		switch (State)
+		{
+		case EDesign2UMGFileState::Saved: return TEXT("saved");
+		case EDesign2UMGFileState::Restored: return TEXT("restored");
+		case EDesign2UMGFileState::Indeterminate: return TEXT("indeterminate");
+		default: return TEXT("unchanged");
+		}
+	}
+	const TCHAR* DescribeMemoryState(EDesign2UMGMemoryState State)
+	{
+		switch (State)
+		{
+		case EDesign2UMGMemoryState::Modified: return TEXT("modified");
+		case EDesign2UMGMemoryState::Restored: return TEXT("restored");
+		case EDesign2UMGMemoryState::RecoveryFailed: return TEXT("recovery failed");
+		default: return TEXT("unchanged");
+		}
+	}
 
 	class FDesignImportPipelinePreviewRefreshAnalyzer final : public IDesignPreviewRefreshAnalyzer
 	{
@@ -43,6 +64,7 @@ namespace
 void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 {
 	CurrentJson = InArgs._OriginalJson;
+	OriginalData = InArgs._OriginalData;
 	CurrentOutputPath = InArgs._OutputPath;
 	ConversionWarnings = InArgs._Warnings;
 	CachedMaterializationSettingsSnapshot = InArgs._InitialMaterializationSettingsSnapshot;
@@ -220,6 +242,14 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		];
 	}
 
+	BottomBox->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
+	[
+		SNew(STextBlock)
+		.Text_Lambda([this]() { return GenerationStatus; })
+		.AutoWrapText(true)
+		.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.2f)))
+	];
+
 	BottomBox->AddSlot()
 	.AutoHeight()
 	.Padding(0, 0, 0, 8)
@@ -324,7 +354,53 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 	GenerationRequest.GenerationRequest.SourceRequestId = GenerationRequest.ApprovedSnapshot.RequestId;
 	GenerationRequest.GenerationRequest.OutputPath = CurrentOutputPath;
 	GenerationRequest.GenerationRequest.RuntimeImageReport = GenerationRequest.ApprovedSnapshot.ImageReport;
-	OnConfirmed.ExecuteIfBound(GenerationRequest);
+	if (!OnConfirmed.IsBound())
+	{
+		GenerationStatus = LOCTEXT("NoConfirmationHandler", "Generation was not started: no confirmation handler is bound.");
+		return FReply::Handled();
+	}
+	const FArtifactGenerationResult Result = OnConfirmed.Execute(GenerationRequest);
+	if (!Result.bSucceeded)
+	{
+		FString Message;
+		switch (Result.Commit.Status)
+		{
+		case EDesign2UMGCommitStatus::CommittedWithMetadataFailure:
+			Message = TEXT("The asset was saved, but its generation metadata was not completed.");
+			break;
+		case EDesign2UMGCommitStatus::RollbackIncomplete:
+			Message = TEXT("Generation failed and recovery is incomplete. Check the asset and in-memory state before retrying.");
+			Message += FString::Printf(TEXT("\nAsset state: %s; metadata state: %s; memory state: %s."),
+				DescribeFileState(Result.Commit.Asset), DescribeFileState(Result.Commit.Manifest), DescribeMemoryState(Result.Commit.Memory));
+			break;
+		case EDesign2UMGCommitStatus::Conflict:
+			Message = TEXT("Generation stopped because of a conflict.");
+			break;
+		default:
+			Message = Result.Commit.IsSuccess() ? TEXT("The asset was committed, but a requested output was not completed.") : TEXT("Generation did not complete.");
+			break;
+		}
+		const FString AssetPath = Result.GeneratedAssetPath.IsEmpty() ? Result.Commit.AssetPath : Result.GeneratedAssetPath;
+		if (!AssetPath.IsEmpty()) Message += TEXT("\nAsset: ") + AssetPath;
+		if (!Result.ErrorMessage.IsEmpty()) Message += TEXT("\n") + Result.ErrorMessage;
+		for (const auto& Diagnostic : Result.ComponentMappingDiagnostics)
+		{
+			if (!Diagnostic.Message.IsEmpty()) Message += TEXT("\n") + Diagnostic.Message;
+		}
+		GenerationStatus = FText::FromString(Message);
+		return FReply::Handled();
+	}
+	GenerationStatus = FText::GetEmpty();
+	if (Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation)
+	{
+		FString Summary = FString::Join(Result.Warnings, TEXT("\n"));
+		for (const auto& Diagnostic : Result.ComponentMappingDiagnostics)
+		{
+			if (!Diagnostic.Message.IsEmpty()) Summary += TEXT("\n") + Diagnostic.Message;
+		}
+		if (Summary.IsEmpty()) Summary = TEXT("Generation completed with degradation. Review the import diagnostics.");
+		FDesign2UMGNotification::Warning(FText::FromString(Summary));
+	}
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
 	if (Window.IsValid())
@@ -528,6 +604,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	FPreviewRefreshInput RefreshInput;
 	RefreshInput.RequestId = RequestId;
 	RefreshInput.EditedJson = JsonString;
+	RefreshInput.OriginalData = OriginalData;
 	RefreshInput.bResolveImages = false;
 	const FPreviewRefreshResult RefreshResult = PreviewRefreshAnalyzer->AnalyzePreview(RefreshInput);
 	if (RequestId != LatestRequestedRefreshId)
@@ -571,14 +648,13 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	MaterializationRequest.ApprovedSnapshot = ApprovedSnapshot;
 
 	FDesignPreviewMaterializationResult MaterializationResult;
-	if (PreviewMaterializationService->MaterializePreview(MaterializationRequest, MaterializationResult)
-		&& MaterializationResult.bSucceeded)
+	const bool bMaterialized = PreviewMaterializationService->MaterializePreview(MaterializationRequest, MaterializationResult);
+	if (RequestId != LatestRequestedRefreshId)
 	{
-		if (RequestId != LatestRequestedRefreshId)
-		{
-			return;
-		}
-
+		return;
+	}
+	if (bMaterialized && MaterializationResult.bSucceeded)
+	{
 		UUserWidget* MaterializedPreviewWidget = PreviewMaterializationService->GetMaterializedPreviewWidget();
 		if (!MaterializedPreviewWidget)
 		{
@@ -633,6 +709,10 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	{
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
+		const FText FailureMessage = MaterializationResult.ErrorMessage.IsEmpty()
+			? LOCTEXT("PreviewFailed", "Failed to create preview widget.\nCheck the Output Log for details.")
+			: FText::Format(LOCTEXT("PreviewResourceLimit", "Preview stopped because image resources exceed the limit.\n{0}\n\nReduce image sizes or preview fewer nodes, then try again."),
+				FText::FromString(MaterializationResult.ErrorMessage));
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
@@ -640,14 +720,18 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 			.Padding(8)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("PreviewFailed", "Failed to create preview widget.\nCheck the Output Log for details."))
+				.Text(FailureMessage)
 				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.6f, 0.3f)))
 				.AutoWrapText(true)
 			]
 		);
+		if (!MaterializationResult.ErrorMessage.IsEmpty())
+		{
+			FMessageDialog::Open(EAppMsgType::Ok, FailureMessage,
+				LOCTEXT("PreviewResourceLimitTitle", "Design2UMG - Preview resource limit"));
+		}
 	}
 }
 
 #undef LOCTEXT_NAMESPACE
-
 

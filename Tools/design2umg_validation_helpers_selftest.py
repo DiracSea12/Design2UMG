@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -10,14 +11,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import design2umg_auto_verify as verify
-import design2umg_auto_verify_batch as batch_verify
+import design2umg_auto_verify_suite as suite_verify
 import design2umg_geometry_compare as geometry_compare
 import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_scoring as scoring
+import design2umg_single_session_isolation_test as single_session_isolation
 import design2umg_validate_run as validate_run
-from design2umg_verify_lib import batch_discovery
+from design2umg_verify_lib import suite_discovery
 from design2umg_verify_lib import evidence_contract
 from design2umg_verify_lib import execution_shards
+from design2umg_verify_lib import editor_driver_writer
 
 
 PNG_1X1 = (
@@ -90,30 +93,76 @@ def make_figma_export_fixture(workspace_root: Path) -> list[Path]:
     return roots
 
 
+def test_dynamic_corpus_cardinality_and_scope() -> None:
+    for count in (0, 1, 7, 100, 1000):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "cases"
+            root.mkdir()
+            # An unrelated corpus outside the selected root must never leak in.
+            make_figma_export_fixture(Path(directory))
+            for index in range(count):
+                write_text(root / f"group-{index % 3}" / f"case-{index}.pen", json.dumps({
+                    "children": [{"id": "root", "type": "frame", "width": 100, "height": 100}]}))
+            command = [sys.executable, str(Path(suite_verify.__file__)), "--design-root", str(root),
+                       "--output-root", str(Path(directory) / "output"), "--list-cases"]
+            result = subprocess.run(command, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+            scope = json.loads(result.stdout)
+            assert_equal(scope["discovered_total"], count)
+            assert_equal(len(set(scope["case_names"])), count)
+            assert_equal(scope["figma_export_roots"], [])
+            if count == 0:
+                result = subprocess.run(command[:-1], capture_output=True, text=True)
+                assert result.returncode == 0, result.stderr
+                summary = verify.helper_load_json(Path(directory) / "output/summary.json")
+                assert_equal(summary["status"], "empty")
+                assert_equal(summary["total"], 0)
+                assert_equal(summary["executed"], 0)
+                assert summary["passed"] is None
+
+
+def test_nested_export_discovery_and_unique_names() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        for folder in ("a/screen", "b/screen", "c/screen-2"):
+            write_text(root / folder / "design.json", '{"document":{"children":[]}}')
+            write_bytes(root / folder / "reference.png", PNG_1X1)
+        roots = suite_discovery.resolve_default_figma_export_roots(root, [])
+        assert_equal(len(roots), 3)
+        assert_equal(suite_discovery.resolve_default_figma_export_roots(root, [str(root), roots[0]]), roots)
+        cases = suite_discovery.discover_figma_export_cases(roots, "", "")
+        assert_equal(len(cases), 6)
+        assert_equal(len({case["name"] for case in cases}), 6)
+        write_text(root / "incomplete/design.json", '{}')
+        # Partly collected data is not a runnable case; diagnostics explain the skipped export.
+        assert_equal(len(suite_discovery.discover_figma_export_cases(
+            suite_discovery.resolve_default_figma_export_roots(root, []), "", "")), 6)
+
+
 def test_discovery_and_run_scope_contracts() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         workspace_root = Path(temp_dir)
         design_root = workspace_root / "Designs" / "Nested"
         pen_path = make_pen_fixture(design_root)
-        figma_roots = make_figma_export_fixture(workspace_root)
+        figma_roots = make_figma_export_fixture(design_root)
 
         assert_equal(
-            batch_discovery.sanitize_case_name("  Hello, UE 5.7!  "),
+            suite_discovery.sanitize_case_name("  Hello, UE 5.7!  "),
             "hello-ue-5-7",
         )
-        assert_equal(batch_discovery.classify_run_scope("", ""), "full")
-        assert_equal(batch_discovery.classify_run_scope("hero", ""), "focus")
-        assert_equal(batch_discovery.classify_run_scope("", "skip"), "full_with_exclusions")
+        assert_equal(suite_discovery.classify_run_scope("", ""), "full")
+        assert_equal(suite_discovery.classify_run_scope("hero", ""), "focus")
+        assert_equal(suite_discovery.classify_run_scope("", "skip"), "full_with_exclusions")
 
-        default_roots = batch_discovery.resolve_default_figma_export_roots(design_root, [])
+        default_roots = suite_discovery.resolve_default_figma_export_roots(design_root, [])
         assert_equal(default_roots, [str(root.resolve()) for root in figma_roots])
-        explicit_roots = batch_discovery.resolve_default_figma_export_roots(design_root, [str(figma_roots[1]), ""])
+        explicit_roots = suite_discovery.resolve_default_figma_export_roots(design_root, [str(figma_roots[1]), ""])
         assert_equal(explicit_roots, [str(figma_roots[1].resolve())])
-        container_roots = batch_discovery.resolve_default_figma_export_roots(
+        container_roots = suite_discovery.resolve_default_figma_export_roots(
             design_root, [str(figma_roots[0].parent)])
         assert_equal(container_roots, [str(root.resolve()) for root in figma_roots])
 
-        pen_cases = batch_discovery.discover_pen_cases(design_root, "", "")
+        pen_cases = suite_discovery.discover_pen_cases(design_root, "", "")
         assert_equal(
             [case["name"] for case in pen_cases],
             [
@@ -122,10 +171,10 @@ def test_discovery_and_run_scope_contracts() -> None:
                 "pen_sample-screen_inferred-root",
             ],
         )
-        assert_equal(batch_discovery.discover_pen_cases(design_root, "inferred", ""), [pen_cases[2]])
-        assert_equal(batch_discovery.discover_pen_cases(design_root, "", "-2$"), [pen_cases[0], pen_cases[2]])
+        assert_equal(suite_discovery.discover_pen_cases(design_root, "inferred", ""), [pen_cases[2]])
+        assert_equal(suite_discovery.discover_pen_cases(design_root, "", "-2$"), [pen_cases[0], pen_cases[2]])
 
-        figma_cases = batch_discovery.discover_figma_export_cases(default_roots, "", "")
+        figma_cases = suite_discovery.discover_figma_export_cases(default_roots, "", "")
         assert_equal(
             [case["name"] for case in figma_cases],
             [
@@ -140,7 +189,7 @@ def test_discovery_and_run_scope_contracts() -> None:
         output_root = workspace_root / "Run"
         args = SimpleNamespace(include="figma", exclude="")
         all_cases = [pen_cases[0], figma_cases[0]]
-        run_scope_path = batch_discovery.write_run_scope(output_root, args, all_cases, default_roots)
+        run_scope_path = suite_discovery.write_run_scope(output_root, args, all_cases, default_roots)
         run_scope = verify.helper_load_json(run_scope_path)
         assert_equal(run_scope["scope"], "focus")
         assert_equal(run_scope["formal_admissible_candidate"], False)
@@ -164,7 +213,7 @@ def test_completeness_contract() -> None:
             {"case": {"name": "case-a"}, "output_dir": state_a_dir},
             {"case": {"name": "case-b"}, "output_dir": state_b_dir},
         ]
-        completeness = batch_discovery.collect_batch_completeness(
+        completeness = suite_discovery.collect_suite_completeness(
             states,
             [{"name": "case-a", "report_path": str(state_a_dir / "compare_report.json")}],
         )
@@ -349,7 +398,7 @@ def test_load_baseline_case_metrics_rejects_incomplete_metrics() -> None:
         scoring.render_rule.evaluate_report_render_size_rule = original_render_rule
 
 
-def test_batch_summary_fails_required_unavailable_no_regression() -> None:
+def test_suite_summary_fails_required_unavailable_no_regression() -> None:
     args = SimpleNamespace(
         parallel_editors=1,
         idle_timeout_sec=180,
@@ -381,7 +430,7 @@ def test_batch_summary_fails_required_unavailable_no_regression() -> None:
             "no_regression_reasons": ["current_metrics_incomplete"],
         },
     ]
-    summary = batch_verify.build_batch_summary(
+    summary = suite_verify.build_suite_summary(
         args=args,
         editor_exit_code=0,
         editor_exit_codes=[0],
@@ -389,10 +438,10 @@ def test_batch_summary_fails_required_unavailable_no_regression() -> None:
         shard_results=[{"shard_id": 0, "exit_code": 0}],
         post_workers=1,
         design_root=Path("G:/Designs"),
-        output_root=Path("G:/Runs/batch_run"),
-        run_scope_path=Path("G:/Runs/batch_run/run_scope.json"),
+        output_root=Path("G:/Runs/suite_run"),
+        run_scope_path=Path("G:/Runs/suite_run/run_scope.json"),
         reference_cache_root=None,
-        batch_start_time=10.0,
+        suite_start_time=10.0,
         prep_completed_at=11.0,
         editor_completed_at=12.0,
         postprocess_completed_at=13.0,
@@ -414,12 +463,12 @@ def test_no_regression_epsilon_rejects_non_finite_and_negative() -> None:
             raise AssertionError(f"expected ValueError for epsilon={bad_epsilon!r}")
     for raw in ("nan", "inf", "-inf", "-1"):
         try:
-            batch_verify.parse_no_regression_epsilon(raw)
+            suite_verify.parse_no_regression_epsilon(raw)
         except argparse.ArgumentTypeError:
             pass
         else:
             raise AssertionError(f"expected argparse rejection for epsilon {raw!r}")
-    assert batch_verify.parse_no_regression_epsilon("1e-6") == 1e-6
+    assert suite_verify.parse_no_regression_epsilon("1e-6") == 1e-6
 
 
 def run_tool_cli(script_name: str, *args: str) -> subprocess.CompletedProcess:
@@ -783,7 +832,7 @@ def make_step_isolation_state(root: Path, *, include_generation: bool = True) ->
             "spec_path": generation_spec_path,
             "result_json_path": generate_result_path,
             "render_png_path": output_dir / "candidate.bootstrap.png",
-            "log_path": output_dir / "unreal_batch.log",
+            "log_path": output_dir / "unreal_suite.log",
             "editor_exit_code": None,
             "fallback_error": "",
         }
@@ -792,7 +841,7 @@ def make_step_isolation_state(root: Path, *, include_generation: bool = True) ->
         "spec_path": asset_spec_path,
         "result_json_path": asset_result_path,
         "render_png_path": output_dir / "candidate.png",
-        "log_path": output_dir / "unreal_batch.log",
+        "log_path": output_dir / "unreal_suite.log",
         "editor_exit_code": None,
         "fallback_error": "",
     }
@@ -813,8 +862,8 @@ def make_step_isolation_state_with_name(root: Path, case_name: str) -> dict:
 def test_editor_isolation_defaults_to_shard() -> None:
     original_argv = sys.argv
     try:
-        sys.argv = ["design2umg_auto_verify_batch.py", "--design-root", "."]
-        assert_equal(batch_verify.parse_args().editor_isolation, "shard")
+        sys.argv = ["design2umg_auto_verify_suite.py", "--design-root", "."]
+        assert_equal(suite_verify.parse_args().editor_isolation, "shard")
     finally:
         sys.argv = original_argv
 
@@ -826,10 +875,10 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
         driver_specs: dict[Path, list[Path]] = {}
         calls = []
 
-        original_writer = batch_verify.write_editor_driver_script
-        original_runner = batch_verify.run_editor_driver
+        original_writer = suite_verify.write_editor_driver_script
+        original_runner = suite_verify.run_editor_driver
         try:
-            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "suite") -> Path:
                 assert_equal(len(spec_paths), 1)
                 driver_path = output_root / f"driver-{tag}.py"
                 driver_specs[driver_path] = list(spec_paths)
@@ -846,10 +895,10 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
                     verify.write_json(result_path, {"success": True, "generated_asset_path": "/Game/Generated.CaseA"})
                 return 0
 
-            batch_verify.write_editor_driver_script = fake_writer
-            batch_verify.run_editor_driver = fake_runner
+            suite_verify.write_editor_driver_script = fake_writer
+            suite_verify.run_editor_driver = fake_runner
             with redirect_stdout(StringIO()):
-                results = batch_verify.run_execution_steps(
+                results = suite_verify.run_execution_steps(
                     [state],
                     root,
                     "UnrealEditor.exe",
@@ -859,8 +908,8 @@ def test_step_editor_isolation_runs_single_specs_in_dependency_order() -> None:
                     "",
                 )
         finally:
-            batch_verify.write_editor_driver_script = original_writer
-            batch_verify.run_editor_driver = original_runner
+            suite_verify.write_editor_driver_script = original_writer
+            suite_verify.run_editor_driver = original_runner
 
         assert_equal(calls, ["automation_generate_spec.json", "automation_asset_spec.json"])
         assert_equal([item["spec_count"] for item in results], [1, 1])
@@ -875,10 +924,10 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
         state = make_step_isolation_state_with_name(root, long_case_name)
         driver_paths = []
 
-        original_writer = batch_verify.write_editor_driver_script
-        original_runner = batch_verify.run_editor_driver
+        original_writer = suite_verify.write_editor_driver_script
+        original_runner = suite_verify.run_editor_driver
         try:
-            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "suite") -> Path:
                 driver_path = output_root / f"editor_driver_{tag}.py"
                 driver_paths.append(driver_path)
                 return driver_path
@@ -891,13 +940,13 @@ def test_step_editor_isolation_uses_short_driver_script_names() -> None:
                     verify.write_json(result_paths[0], {"success": True})
                 return 0
 
-            batch_verify.write_editor_driver_script = fake_writer
-            batch_verify.run_editor_driver = fake_runner
+            suite_verify.write_editor_driver_script = fake_writer
+            suite_verify.run_editor_driver = fake_runner
             with redirect_stdout(StringIO()):
-                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
+                suite_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
-            batch_verify.write_editor_driver_script = original_writer
-            batch_verify.run_editor_driver = original_runner
+            suite_verify.write_editor_driver_script = original_writer
+            suite_verify.run_editor_driver = original_runner
 
         assert_equal([path.name for path in driver_paths], ["editor_driver_step-001.py", "editor_driver_step-002.py"])
         assert long_case_name not in " ".join(path.name for path in driver_paths)
@@ -910,11 +959,11 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
         driver_specs: dict[Path, list[Path]] = {}
         attempts = []
 
-        original_writer = batch_verify.write_editor_driver_script
-        original_runner = batch_verify.run_editor_driver
-        original_attempts = batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS
+        original_writer = suite_verify.write_editor_driver_script
+        original_runner = suite_verify.run_editor_driver
+        original_attempts = suite_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS
         try:
-            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "batch") -> Path:
+            def fake_writer(output_root: Path, spec_paths: list[Path], tag: str = "suite") -> Path:
                 driver_path = output_root / f"driver-{tag}.py"
                 driver_specs[driver_path] = list(spec_paths)
                 return driver_path
@@ -923,7 +972,7 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
                 spec_path = driver_specs[driver_script_path][0]
                 attempts.append(spec_path.name)
                 if spec_path.name == "automation_generate_spec.json" and attempts.count(spec_path.name) == 1:
-                    raise batch_verify.EditorDriverStartError("driver did not start")
+                    raise suite_verify.EditorDriverStartError("driver did not start")
                 spec = verify.helper_load_json(spec_path)
                 result_path = Path(spec["result_json_path"])
                 if spec["mode"] == "pen":
@@ -932,15 +981,15 @@ def test_step_editor_isolation_retries_driver_start_once() -> None:
                     verify.write_json(result_path, {"success": True})
                 return 0
 
-            batch_verify.write_editor_driver_script = fake_writer
-            batch_verify.run_editor_driver = fake_runner
-            batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
+            suite_verify.write_editor_driver_script = fake_writer
+            suite_verify.run_editor_driver = fake_runner
+            suite_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = 2
             with redirect_stdout(StringIO()):
-                batch_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
+                suite_verify.run_execution_steps([state], root, "UnrealEditor.exe", "G:/SampleProject/SampleProject.uproject", 180, 60, "")
         finally:
-            batch_verify.write_editor_driver_script = original_writer
-            batch_verify.run_editor_driver = original_runner
-            batch_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = original_attempts
+            suite_verify.write_editor_driver_script = original_writer
+            suite_verify.run_editor_driver = original_runner
+            suite_verify.EDITOR_STEP_DRIVER_START_ATTEMPTS = original_attempts
 
         assert_equal(attempts, ["automation_generate_spec.json", "automation_generate_spec.json", "automation_asset_spec.json"])
 
@@ -951,15 +1000,15 @@ def test_step_editor_isolation_blocks_asset_before_generation_result() -> None:
         state = make_step_isolation_state(root, include_generation=False)
         calls = []
 
-        original_runner = batch_verify.run_editor_driver
+        original_runner = suite_verify.run_editor_driver
         try:
             def fake_runner(*args, **kwargs) -> int:
                 calls.append(args)
                 return 0
 
-            batch_verify.run_editor_driver = fake_runner
+            suite_verify.run_editor_driver = fake_runner
             try:
-                batch_verify.run_execution_steps(
+                suite_verify.run_execution_steps(
                     [state],
                     root,
                     "UnrealEditor.exe",
@@ -973,7 +1022,7 @@ def test_step_editor_isolation_blocks_asset_before_generation_result() -> None:
             else:
                 raise AssertionError("expected asset step to be blocked before editor launch")
         finally:
-            batch_verify.run_editor_driver = original_runner
+            suite_verify.run_editor_driver = original_runner
 
         assert_equal(calls, [])
 
@@ -992,8 +1041,8 @@ def test_step_editor_isolation_reports_driver_never_started() -> None:
             def poll(self):
                 return 1
 
-        original_popen = batch_verify.subprocess.Popen
-        original_deadline = batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
+        original_popen = suite_verify.subprocess.Popen
+        original_deadline = suite_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
         try:
             def fake_popen(command, stdout=None, stderr=None):
                 if stdout is not None:
@@ -1001,10 +1050,10 @@ def test_step_editor_isolation_reports_driver_never_started() -> None:
                     stdout.flush()
                 return FakeProcess()
 
-            batch_verify.subprocess.Popen = fake_popen
-            batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 0.0
+            suite_verify.subprocess.Popen = fake_popen
+            suite_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = 0.0
             try:
-                batch_verify.run_editor_driver(
+                suite_verify.run_editor_driver(
                     "UnrealEditor.exe",
                     "G:/SampleProject/SampleProject.uproject",
                     driver_path,
@@ -1020,11 +1069,121 @@ def test_step_editor_isolation_reports_driver_never_started() -> None:
             else:
                 raise AssertionError("expected missing driver start to fail explicitly")
         finally:
-            batch_verify.subprocess.Popen = original_popen
-            batch_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = original_deadline
+            suite_verify.subprocess.Popen = original_popen
+            suite_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC = original_deadline
 
 
-def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
+def execute_generated_editor_driver(
+    root: Path,
+    spec_paths: list[Path],
+    fail_at_command: int | None = None,
+) -> tuple[list[str], str, Exception | None]:
+    script_path = root / "generated_editor_driver.py"
+    manifest_path = root / "generated_editor_driver_manifest.json"
+    driver_log_path = root / "generated_editor_driver.log"
+    manifest_key = "spec_path" if len(spec_paths) == 1 else "spec_paths"
+    manifest_fields = {
+        manifest_key: str(spec_paths[0]) if len(spec_paths) == 1 else [str(path) for path in spec_paths]
+    }
+    editor_driver_writer.write_editor_driver_script(
+        script_path,
+        manifest_path,
+        driver_log_path,
+        manifest_fields,
+        manifest_key,
+    )
+    compile(script_path.read_text(encoding="utf-8"), str(script_path), "exec")
+
+    commands: list[str] = []
+
+    class FakeEditorLevelLibrary:
+        @staticmethod
+        def get_editor_world():
+            return object()
+
+    class FakeSystemLibrary:
+        @staticmethod
+        def execute_console_command(world, command):
+            del world
+            commands.append(command)
+            if fail_at_command is not None and len(commands) == fail_at_command:
+                raise RuntimeError("synthetic render failure")
+
+    fake_unreal = SimpleNamespace(
+        EditorLevelLibrary=FakeEditorLevelLibrary,
+        SystemLibrary=FakeSystemLibrary,
+    )
+    original_unreal = sys.modules.get("unreal")
+    caught: Exception | None = None
+    try:
+        sys.modules["unreal"] = fake_unreal
+        runpy.run_path(str(script_path), run_name="__design2umg_driver_selftest__")
+    except Exception as exc:
+        caught = exc
+    finally:
+        if original_unreal is None:
+            sys.modules.pop("unreal", None)
+        else:
+            sys.modules["unreal"] = original_unreal
+    return commands, driver_log_path.read_text(encoding="utf-8"), caught
+
+
+def test_generated_editor_driver_single_spec_returns_normally() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        spec_path = Path(temp_dir) / "single.json"
+        commands, driver_log, caught = execute_generated_editor_driver(Path(temp_dir), [spec_path])
+    assert caught is None
+    assert_equal(commands, [f"Design2UMG.AutomationRender {spec_path} --no-quit"])
+    assert "driver:complete" in driver_log
+    assert "driver:quit" not in driver_log
+
+
+def test_generated_editor_driver_multiple_specs_return_normally() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        spec_paths = [root / "first.json", root / "second.json"]
+        commands, driver_log, caught = execute_generated_editor_driver(root, spec_paths)
+    assert caught is None
+    assert_equal(commands, [f"Design2UMG.AutomationRender {path} --no-quit" for path in spec_paths])
+    assert_equal(driver_log.count("driver:run:"), 2)
+    assert "driver:complete" in driver_log
+    assert "driver:quit" not in driver_log
+
+
+def test_generated_editor_driver_error_propagates_without_forcing_exit() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        spec_paths = [root / "first.json", root / "second.json"]
+        commands, driver_log, caught = execute_generated_editor_driver(root, spec_paths, fail_at_command=1)
+    assert isinstance(caught, RuntimeError)
+    assert_equal(commands, [f"Design2UMG.AutomationRender {spec_paths[0]} --no-quit"])
+    assert "synthetic render failure" in driver_log
+    assert "driver:quit" not in driver_log
+
+
+def test_single_session_generated_drivers_compile_without_forced_exit() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        step_driver = root / "step.py"
+        suite_driver = root / "suite.py"
+        single_session_isolation.write_step_driver(
+            step_driver,
+            root / "spec.json",
+            root / "step.log",
+        )
+        single_session_isolation.write_single_session_driver(
+            suite_driver,
+            [str(root / "first.json"), str(root / "second.json")],
+            root / "suite.log",
+        )
+        for driver_path in (step_driver, suite_driver):
+            source = driver_path.read_text(encoding="utf-8")
+            compile(source, str(driver_path), "exec")
+            assert "QUIT_EDITOR" not in source
+            assert "driver:complete" in source
+
+
+def test_run_editor_driver_waits_for_natural_exit_after_clean_shutdown() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         driver_path = root / "editor_driver_step-001.py"
@@ -1040,9 +1199,11 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
 
             def __init__(self):
                 self.killed = False
+                self.poll_count = 0
 
             def poll(self):
-                return None
+                self.poll_count += 1
+                return None if self.poll_count == 1 else 3221225477
 
             def kill(self):
                 self.killed = True
@@ -1051,7 +1212,8 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
                 return 0
 
         fake_process = FakeProcess()
-        original_popen = batch_verify.subprocess.Popen
+        original_popen = suite_verify.subprocess.Popen
+        original_sleep = suite_verify.time.sleep
         try:
             def fake_popen(command, stdout=None, stderr=None):
                 if stdout is not None:
@@ -1059,8 +1221,9 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
                     stdout.flush()
                 return fake_process
 
-            batch_verify.subprocess.Popen = fake_popen
-            exit_code = batch_verify.run_editor_driver(
+            suite_verify.subprocess.Popen = fake_popen
+            suite_verify.time.sleep = lambda _seconds: None
+            exit_code = suite_verify.run_editor_driver(
                 "UnrealEditor.exe",
                 "G:/SampleProject/SampleProject.uproject",
                 driver_path,
@@ -1071,10 +1234,240 @@ def test_run_editor_driver_returns_after_clean_shutdown_result() -> None:
                 "",
             )
         finally:
-            batch_verify.subprocess.Popen = original_popen
+            suite_verify.subprocess.Popen = original_popen
+            suite_verify.time.sleep = original_sleep
 
-        assert_equal(exit_code, 0)
+        assert_equal(exit_code, 3221225477)
+        assert not fake_process.killed
+
+
+def test_run_editor_driver_idle_timeout_is_not_refreshed_by_existing_start_marker() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        driver_path = root / "editor_driver_step-001.py"
+        driver_path.write_text("", encoding="utf-8")
+        write_text(driver_path.with_suffix(".log"), "2026-06-12T00:00:00.000Z driver:start\n")
+        result_path = root / "missing_result.json"
+        log_path = root / "unreal.log"
+
+        class FakeProcess:
+            pid = 12345
+
+            def __init__(self):
+                self.killed = False
+                self.poll_count = 0
+
+            def poll(self):
+                self.poll_count += 1
+                return None if self.poll_count < 20 else 9
+
+            def kill(self):
+                self.killed = True
+
+            def wait(self, timeout=None):
+                return 0
+
+        fake_process = FakeProcess()
+        clock = {"now": 0.0}
+
+        def fake_time():
+            clock["now"] += 1.0
+            return clock["now"]
+
+        original_popen = suite_verify.subprocess.Popen
+        original_time = suite_verify.time.time
+        original_sleep = suite_verify.time.sleep
+        try:
+            suite_verify.subprocess.Popen = lambda *args, **kwargs: fake_process
+            suite_verify.time.time = fake_time
+            suite_verify.time.sleep = lambda _seconds: None
+            try:
+                suite_verify.run_editor_driver(
+                    "UnrealEditor.exe",
+                    "G:/SampleProject/SampleProject.uproject",
+                    driver_path,
+                    [result_path],
+                    log_path,
+                    3,
+                    100,
+                    "",
+                )
+            except TimeoutError as exc:
+                assert "made no progress" in str(exc)
+            else:
+                raise AssertionError("expected idle timeout despite a persistent driver:start marker")
+        finally:
+            suite_verify.subprocess.Popen = original_popen
+            suite_verify.time.time = original_time
+            suite_verify.time.sleep = original_sleep
         assert fake_process.killed
+
+
+def test_execute_automation_render_preserves_nonzero_editor_exit_code() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        spec_path = root / "automation_spec.json"
+        result_path = root / "ue_render_result.json"
+        log_path = root / "unreal.log"
+        verify.write_json(result_path, {"success": True})
+        write_text(log_path, "LogExit: Exiting.\n")
+        spec = {"result_json_path": str(result_path)}
+        args = SimpleNamespace(
+            editor="UnrealEditor.exe",
+            project="G:/SampleProject/SampleProject.uproject",
+            project_plugin_root=str(root),
+            log_cmds="",
+            idle_timeout_sec=180,
+            startup_timeout_sec=60,
+        )
+
+        original_writer = verify.write_single_editor_driver_script
+        original_sync = verify.sync_project_plugin_build_id
+        original_runner = verify.run_editor
+        try:
+            verify.write_single_editor_driver_script = lambda output_dir, path: root / "driver.py"
+            verify.sync_project_plugin_build_id = lambda editor, plugin_root: None
+            verify.run_editor = lambda *runner_args, **runner_kwargs: 3221225477
+            result = verify.execute_automation_render(args, spec_path, log_path, spec)
+        finally:
+            verify.write_single_editor_driver_script = original_writer
+            verify.sync_project_plugin_build_id = original_sync
+            verify.run_editor = original_runner
+        assert_equal(result["editor_exit_code"], 3221225477)
+
+
+def test_single_run_final_exit_fails_when_generation_process_was_nonzero() -> None:
+    generation_result = {
+        "editor_exit_code": 3221225477,
+        "log_path": "unreal_generate.log",
+    }
+    asset_result = {
+        "editor_exit_code": 0,
+        "log_path": "unreal_asset_render.log",
+    }
+    native_generation_result = {
+        "editor_exit_code": 19,
+        "log_path": "unreal_native_generate.log",
+    }
+    render_chain = {
+        "generation": generation_result,
+        "asset_render": asset_result,
+        "native_self_check": {
+            "generation": native_generation_result,
+            "asset_render": {"editor_exit_code": 0, "log_path": "unreal_native_asset.log"},
+        },
+    }
+    editor_exit_code, editor_log_path = verify.select_render_chain_editor_process_outcome(render_chain)
+    assert_equal(editor_exit_code, 3221225477)
+    assert_equal(editor_log_path, Path("unreal_generate.log"))
+    assert_equal(verify.determine_single_run_exit_code(True, editor_exit_code), 1)
+    generation_result["editor_exit_code"] = 0
+    editor_exit_code, editor_log_path = verify.select_render_chain_editor_process_outcome(render_chain)
+    assert_equal(editor_exit_code, 19)
+    assert_equal(editor_log_path, Path("unreal_native_generate.log"))
+    assert_equal(verify.determine_single_run_exit_code(True, 0), 0)
+    assert_equal(verify.determine_single_run_exit_code(False, 0), 1)
+
+
+def test_process_case_result_records_nonzero_editor_process_failure() -> None:
+    state = {
+        "args": SimpleNamespace(mode="asset"),
+        "case": {"name": "case-a"},
+        "candidate_path": Path("missing-candidate.png"),
+        "reference_validation": {},
+        "reference_context": {},
+        "native_plan": {"available": False},
+        "steps": {
+            "asset_render": {
+                "result": {
+                    "editor_exit_code": 17,
+                    "log_path": "case-a.log",
+                    "ue_result": {"success": True},
+                },
+                "fallback_error": "",
+            },
+        },
+    }
+    original_failure_writer = suite_verify.write_render_failure_report
+    try:
+        suite_verify.write_render_failure_report = lambda *args, **kwargs: Path("render_failure.json")
+        result = suite_verify.process_case_result(state, 17, Path("case-a.log"))
+    finally:
+        suite_verify.write_render_failure_report = original_failure_writer
+    assert_equal(result["editor_exit_code"], 17)
+    assert result["editor_process_failed"]
+
+
+def test_suite_final_exit_fails_on_editor_process_nonzero() -> None:
+    args = SimpleNamespace(
+        parallel_editors=1,
+        idle_timeout_sec=180,
+        startup_timeout_sec=60,
+        editor_isolation="shard",
+        post_workers=1,
+        include="case-a",
+        exclude="",
+        reference_cache="read-write",
+        native_self_check="off",
+        ir_golden="",
+        geometry_golden="",
+    )
+    summary = suite_verify.build_suite_summary(
+        args=args,
+        editor_exit_code=17,
+        editor_exit_codes=[17],
+        shards=[{"shard_id": 0}],
+        shard_results=[{"shard_id": 0, "exit_code": 17}],
+        post_workers=1,
+        design_root=Path("G:/Designs"),
+        output_root=Path("G:/Runs/suite_run"),
+        run_scope_path=Path("G:/Runs/suite_run/run_scope.json"),
+        reference_cache_root=None,
+        suite_start_time=10.0,
+        prep_completed_at=11.0,
+        editor_completed_at=12.0,
+        postprocess_completed_at=13.0,
+        case_results=[{"name": "case-a", "blocked": False}],
+        completeness={"blocked": False},
+    )
+    assert_equal(summary["editor_process"], {"passed": 0, "failed": 1})
+    historical_validation = {"blocked": False, "historical_best_regressions": []}
+    assert_equal(suite_verify.determine_suite_exit_code(
+        formal_gate_candidate=False,
+        completeness={"blocked": False},
+        historical_validation=historical_validation,
+        summary=summary,
+    ), 1)
+    summary["editor_process"] = {"passed": 1, "failed": 0}
+    assert_equal(suite_verify.determine_suite_exit_code(
+        formal_gate_candidate=False,
+        completeness={"blocked": False},
+        historical_validation=historical_validation,
+        summary=summary,
+    ), 0)
+
+
+def test_process_case_results_uses_each_cases_editor_outcome() -> None:
+    args = SimpleNamespace(ir_golden_root="", geometry_golden_root="")
+    states = [
+        {"name": "case-a", "args": args, "steps": {"render": {"editor_exit_code": 0, "log_path": Path("case-a.log")}}},
+        {"name": "case-b", "args": args, "steps": {"render": {"editor_exit_code": 17, "log_path": Path("case-b.log")}}},
+    ]
+    observed: list[tuple[str, int, Path]] = []
+    original_processor = suite_verify.process_case_result
+    try:
+        def fake_processor(state, exit_code, log_path):
+            observed.append((state["name"], exit_code, log_path))
+            return {"name": state["name"]}
+
+        suite_verify.process_case_result = fake_processor
+        suite_verify.process_case_results(states, 17, Path("unreal_suite.log"), 1)
+    finally:
+        suite_verify.process_case_result = original_processor
+    assert_equal(observed, [
+        ("case-a", 0, Path("case-a.log")),
+        ("case-b", 17, Path("case-b.log")),
+    ])
 
 
 def test_terminate_owned_editor_process_targets_only_passed_process() -> None:
@@ -1116,8 +1509,8 @@ def test_terminate_owned_editor_process_targets_only_passed_process() -> None:
 
 
 def test_extend_deadline_never_shortens_existing_wait() -> None:
-    current_deadline = batch_verify.time.time() + 180.0
-    extended = batch_verify.extend_deadline(current_deadline, 30.0)
+    current_deadline = suite_verify.time.time() + 180.0
+    extended = suite_verify.extend_deadline(current_deadline, 30.0)
     assert extended >= current_deadline
 
 
@@ -1141,6 +1534,8 @@ def main() -> None:
     # Rich text remains subject to text geometry correspondence on both sides.
     assert "RichTextBlock" in geometry_compare.SOURCE_TEXT_TYPES
     assert "RichTextBlock" in geometry_compare.RUNTIME_TEXT_CLASSES
+    test_dynamic_corpus_cardinality_and_scope()
+    test_nested_export_discovery_and_unique_names()
     test_discovery_and_run_scope_contracts()
     test_completeness_contract()
     test_transparent_rgb_does_not_count_as_visible_change()
@@ -1155,7 +1550,7 @@ def main() -> None:
     test_geometry_disappeared_node_fails()
     test_geometry_ir_unmatched_without_golden_drift_passes()
     test_directory_mode_enumerates_golden_run_union()
-    test_batch_summary_fails_required_unavailable_no_regression()
+    test_suite_summary_fails_required_unavailable_no_regression()
     test_execution_shards_contracts()
     test_evidence_contract_shared_by_manifest_and_run_validation()
     test_binary_binding_contract_shared_by_manifest_production()
@@ -1165,7 +1560,17 @@ def main() -> None:
     test_step_editor_isolation_retries_driver_start_once()
     test_step_editor_isolation_blocks_asset_before_generation_result()
     test_step_editor_isolation_reports_driver_never_started()
-    test_run_editor_driver_returns_after_clean_shutdown_result()
+    test_generated_editor_driver_single_spec_returns_normally()
+    test_generated_editor_driver_multiple_specs_return_normally()
+    test_generated_editor_driver_error_propagates_without_forcing_exit()
+    test_single_session_generated_drivers_compile_without_forced_exit()
+    test_run_editor_driver_waits_for_natural_exit_after_clean_shutdown()
+    test_run_editor_driver_idle_timeout_is_not_refreshed_by_existing_start_marker()
+    test_execute_automation_render_preserves_nonzero_editor_exit_code()
+    test_single_run_final_exit_fails_when_generation_process_was_nonzero()
+    test_process_case_result_records_nonzero_editor_process_failure()
+    test_suite_final_exit_fails_on_editor_process_nonzero()
+    test_process_case_results_uses_each_cases_editor_outcome()
     test_terminate_owned_editor_process_targets_only_passed_process()
     test_extend_deadline_never_shortens_existing_wait()
     test_runtime_project_fails_closed_without_explicit_input()

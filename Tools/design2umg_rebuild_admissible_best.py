@@ -593,14 +593,14 @@ def main() -> None:
     if not automation_root.is_dir():
         raise RuntimeError(f"Automation root not found: {automation_root}")
 
-    from design2umg_verify_lib import batch_discovery
+    from design2umg_verify_lib import suite_discovery
 
     design_root = Path(args.design_root).resolve()
     if not design_root.is_dir():
         raise RuntimeError(f"Design root not found: {design_root}")
-    export_roots = batch_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
-    discovered = batch_discovery.discover_pen_cases(design_root, "", "")
-    discovered.extend(batch_discovery.discover_figma_export_cases(export_roots, "", ""))
+    export_roots = suite_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
+    discovered = suite_discovery.discover_pen_cases(design_root, "", "")
+    discovered.extend(suite_discovery.discover_figma_export_cases(export_roots, "", ""))
     _, manifest, _ = resolve_admissible_best_manifest(
         automation_root, expected_case_names={case["name"] for case in discovered}
     )

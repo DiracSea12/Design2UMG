@@ -66,13 +66,8 @@ namespace
 	}
 
 	/**
-	 * Appends UUserWidget::StopAnimation(out) fed by the animation's class property, immediately
-	 * before the outgoing-only translation reset. PlayAnimation(out) and the Delay share the same
-	 * duration and start on the same exec tick, and the animation only starts advancing on the next
-	 * frame while the latent manager advances on the click frame already - so the animation's final
-	 * evaluation (the off-screen key) lands after the reset and re-overwrites the translation.
-	 * StopAnimation parks the animation state so no further evaluation can fight the reset (stopping
-	 * an already finished animation is a no-op).
+	 * Stop the outgoing animation before resetting translation: its final evaluation
+	 * can occur after the latent delay and would otherwise overwrite the reset.
 	 */
 	bool AppendStopAnimationCall(
 		UEdGraph* Graph,
@@ -244,13 +239,8 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 	const auto& OverlayHostPages = Targets.OverlayHostPages;
 	int32 WiredCount = 0;
 
-	// One bound-event + action chain for one trigger of a resolved binding. A trigger whose widget
-	// physically sits inside the overlay host (the dual-target/initial mirror copy, or a plain
-	// overlay-target page) reuses the same authoring with overlay-context semantics: Navigate
-	// prepends the overlay-exit collapse (Figma semantics: navigate replaces the current screen,
-	// overlay included) and skips the transition animations (the overlay layer is closing, not
-	// animating the switcher underneath); Back/Overlay/OpenLink are the same chain. The copy type
-	// is deliberately not the discriminator: an overlay-only page has no mirror twin at all.
+	// Overlay-context Navigate closes the overlay and switches pages without animating
+	// the underlying switcher. Back, Overlay and OpenLink use their normal action chains.
 	const auto AuthorTriggerChain = [&](const FResolvedBinding& Resolved, const FName TriggerWidgetName,
 		const bool bMirrorTrigger, FChainLayout& Layout) -> bool
 	{
@@ -309,13 +299,8 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 
 		case EUMGPrototypeNavigationStepKind::Back:
 		{
-			// Back first asks whether an overlay is open: GetVisibility() is the widget's own UMG
-			// property, so this is correct even before the Slate tree caches the widget. Any
-			// non-Collapsed host counts as open (the generated open chain uses SelfHitTestInvisible);
-			// TRUE (overlay open): collapse the host and every hosted page, then STOP - no history
-			// pop and the active page is unchanged, so A->B->open overlay->Back stays on B. FALSE:
-			// the history pop chain runs (empty-history guard unchanged). Without a host the pop
-			// chain runs directly off the event.
+			// Back closes an open overlay without changing the active page or history.
+			// When no overlay is open, pop history if it contains a page.
 			UK2Node_IfThenElse* HostBranchNode = nullptr;
 			if (OverlayHost && OverlayHostProperty)
 			{
@@ -594,16 +579,9 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 					&& LinkExecChain(Layout.ExecChain);
 				break;
 			}
-			// Chain shape by which transition animations resolved (the animation builder generates
-			// out-only for MOVE_OUT, in-only for MOVE_IN, both otherwise):
-			// - both: out -> delay -> switch -> in (bidirectional/fade keep the classic chain);
-			// - out only: out -> delay -> switch -> stop(out) -> reset translation. The stop runs
-			//   immediately before the reset because the outgoing animation can still have its
-			//   final evaluation pending when the latent delay resumes (the animation only starts
-			//   advancing on the next frame while the latent manager advances on the click frame);
-			//   without the stop, that residual evaluation re-overwrites the reset with the final
-			//   off-screen key. Stopping an already finished animation is a no-op;
-			// - in only: switch -> in (switch first; a pre-switch delay would be dead time).
+			// Both animations: out -> delay -> switch -> in. Incoming only: switch -> in.
+			// Outgoing only: out -> delay -> switch -> stop -> reset translation.
+			// Stopping prevents a delayed animation evaluation from overwriting the reset.
 			const bool bHasOutgoing = Resolved.bTransitionChain && Resolved.OutgoingAnimationName != NAME_None;
 			const bool bHasIncoming = Resolved.bTransitionChain && Resolved.IncomingAnimationName != NAME_None;
 			if (bHasOutgoing)
