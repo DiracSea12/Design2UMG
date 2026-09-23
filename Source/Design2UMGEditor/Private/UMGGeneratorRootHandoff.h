@@ -7,6 +7,8 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Materials/MaterialInterface.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UWidget;
 class UWidgetBlueprint;
 class FDesign2UMGComponentMappingBuildState;
@@ -26,11 +28,11 @@ namespace UMGGeneratorRootHandoff
 	FPreparedRoot PrepareRootForBuild(
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
-		const FString& AssetName);
+		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
 		FDesign2UMGComponentMappingBuildState* ComponentMappingState = nullptr,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 }

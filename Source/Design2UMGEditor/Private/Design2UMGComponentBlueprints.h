@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UUserWidget;
 class UWidgetTree;
 class FDesign2UMGComponentMappingBuildState;
@@ -31,9 +33,9 @@ public:
 	bool ApplyInstance(UUserWidget* Instance, UWidgetTree* OwnerTree, const FUMGWidgetNode& Node,
 		const FDesign2UMGGenerationSettingsSnapshot& Settings, const TMap<FString, UTexture2D*>* Textures,
 		const FIntPoint* DesignSize,
-		FDesign2UMGComponentMappingBuildState* Ownership = nullptr);
+		FDesign2UMGComponentMappingBuildState* Ownership = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	static UWidgetBlueprint* Build(const FUMGWidgetData& Data, const FString& Folder,
 		const FDesign2UMGGenerationSettingsSnapshot* Settings, FDesign2UMGGenerationOutput* Output,
-		FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint = nullptr);
+		FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 };

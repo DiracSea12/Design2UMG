@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "WidgetResourceBinder.h"
+#include "DesignImageResourceLimits.h"
 #include "DesignPathRasterizer.h"
 #include "DesignPathRasterDefaults.h"
 #include "DesignResourceResolver.h"
@@ -13,7 +14,7 @@
 
 namespace
 {
-	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node)
+	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (!Node.Path.Geometry.IsSet()) return false;
 		FIntPoint Size;
@@ -24,7 +25,7 @@ namespace
 			Node.Path.Geometry.GetValue(), Size.X, Size.Y, Node.Path.FillColor,
 			Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule), Node.Path.StrokeColor,
 			Node.Path.StrokeThickness.Get(0.0f), Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap),
-			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin));
+			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin), nullptr, Budget);
 		if (!Texture) return false;
 		Image->SetBrushFromTexture(Texture);
 		FSlateBrush Brush = Image->GetBrush();
@@ -40,7 +41,7 @@ FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolv
 	const FUMGWidgetNode& Node,
 	UObject* Outer,
 	UTexture2D*& OutTexture,
-	FUMGProceduralResourceRequest* OutRequest)
+	FUMGProceduralResourceRequest* OutRequest, DesignImageResources::FImageOperationBudget* Budget)
 {
 	FUMGProceduralResourceRequest ResourceRequest;
 	if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest))
@@ -58,16 +59,18 @@ FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolv
 		return EProceduralTextureResult::EmptyMaterialRef;
 	}
 
-	OutTexture = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, Outer);
+	OutTexture = DesignResourceResolver::ResolveTextureFromMaterialRef(ResourceRequest, Outer, Budget);
 	return OutTexture != nullptr ? EProceduralTextureResult::Resolved : EProceduralTextureResult::UnknownShape;
 }
 
-bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
+bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	// --- material (procedural shape) path ---
 	UTexture2D* ProceduralTexture = nullptr;
 	FUMGProceduralResourceRequest ResourceRequest;
-	switch (TryResolveProceduralTexture(Node, ImageWidget, ProceduralTexture, &ResourceRequest))
+	switch (TryResolveProceduralTexture(Node, ImageWidget, ProceduralTexture, &ResourceRequest, Budget))
 	{
 	case EProceduralTextureResult::Resolved:
 	{
@@ -82,7 +85,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 		return true;
 	}
 	case EProceduralTextureResult::EmptyMaterialRef:
-		return BindPathTexture(ImageWidget, Node);
+		return BindPathTexture(ImageWidget, Node, Budget);
 	case EProceduralTextureResult::UnknownShape:
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' has unknown procedural shape type '%s'; falling back to TexturePath."), *Node.Name, *ResourceRequest.MaterialRef);
 		break;
@@ -96,7 +99,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	const FString TrimmedPath = TexPath.TrimStartAndEnd();
 	if (TrimmedPath.IsEmpty())
 	{
-		return BindPathTexture(ImageWidget, Node);
+		return BindPathTexture(ImageWidget, Node, Budget);
 	}
 
 	UTexture2D* Texture = nullptr;
@@ -113,7 +116,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	}
 	if (!Texture)
 	{
-		return BindPathTexture(ImageWidget, Node);
+		return BindPathTexture(ImageWidget, Node, Budget);
 	}
 
 	const FSlateBrush OldBrush = ImageWidget->GetBrush();
@@ -143,7 +146,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 			{
 				ImageWidget->SetBrushFromTexture(Cropped);
 				Brush = ImageWidget->GetBrush();
-			});
+			}, Budget);
 	}
 
 	ImageWidget->SetBrush(Brush);

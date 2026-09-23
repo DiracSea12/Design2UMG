@@ -11,6 +11,7 @@
 #include "Design2UMGComponentBlueprints.h"
 #include "DesignImportDiagnosticReport.h"
 #include "Misc/PackageName.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
@@ -129,8 +130,16 @@ namespace DesignImportPipeline
 		TSet<FString> AliveInstanceWidgetNames;
 		TransactionIndex = INDEX_NONE;
 		TSet<UObject*> ExistingObjects;
+		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+		DesignImageResources::FImageOperationBudget* Budget = Session.Budget ? Session.Budget : &LocalBudget;
 		const auto FailApply = [&]()
 		{
+			const FString& ResourceError = Budget->GetRefusalError();
+			if (!ResourceError.IsEmpty() && !Result.Diagnostics.ContainsByPredicate(
+				[&](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Message.Contains(ResourceError); }))
+			{
+				AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, ResourceError);
+			}
 			FString Note = Result.Commit.Memory == EDesign2UMGMemoryState::Unchanged
 				? TEXT("Preparation failed before mutation; asset and manifest unchanged")
 				: TEXT("Reimport not saved; no reimport-owned transaction to undo. Earlier in-memory changes remain for the caller to recover");
@@ -182,12 +191,11 @@ namespace DesignImportPipeline
 		}
 
 		// Prepare persistent resources before mutating the old tree. Nested builds share this budget.
-		DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
 		const FString PackagePath = FPackageName::GetLongPackagePath(WBP->GetOutermost()->GetName());
 		const FString AssetName = WBP->GetName();
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(PreparedRoot, PrepareFailureReason)
 			|| !FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
-				PreparedRoot, PackagePath, AssetName, PrepareFailureReason))
+				PreparedRoot, PackagePath, AssetName, PrepareFailureReason, Budget))
 		{
 			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
 			return FailApply();
@@ -195,7 +203,11 @@ namespace DesignImportPipeline
 
 		// Apply the update plan inside an editor transaction.
 		TArray<UObject*> Objects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		GetObjectsWithOuter(WBP->WidgetTree, Objects, false);
+#else
 		GetObjectsWithOuter(WBP->WidgetTree, Objects, EGetObjectsFlags::None);
+#endif
 		ExistingObjects.Append(Objects);
 		Result.Commit.Memory = EDesign2UMGMemoryState::Modified;
 		TransactionIndex = BeginReimportApplyTransaction(WBP);
@@ -221,6 +233,7 @@ namespace DesignImportPipeline
 		Shared.HostPanel = Cast<UPanelWidget>(WBP->WidgetTree->RootWidget);
 		Shared.DesignSize = DesignSize;
 		Shared.GenerationSettings = &GenerationSettings;
+		Shared.Budget = Budget;
 		Shared.OwnedNames = &ManifestOwnedNames;
 		Shared.InstancesById = &InstancesById;
 		Shared.TreeIndex = &TreeIndex;
@@ -264,6 +277,8 @@ namespace DesignImportPipeline
 		{
 			return FailApply();
 		}
+		if (!Budget->GetRefusalError().IsEmpty()) return FailApply();
+
 		ReportNestedRemovalLeftovers(Shared, NestedMoveCandidates);
 
 		// Regenerate transition animations on the updated tree and carry their names into navigation wiring.

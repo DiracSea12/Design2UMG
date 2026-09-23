@@ -170,8 +170,10 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	float TY,
 	int32 OutW,
 	int32 OutH,
-	FString* OutError)
+	FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	if (OutError) OutError->Reset();
 	if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(OutW, OutH)
 		|| !FMath::IsFinite(A) || !FMath::IsFinite(B) || !FMath::IsFinite(TX)
@@ -195,15 +197,14 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		return nullptr;
 	}
 
-	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr);
+	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr, Budget);
 	if (!Result)
 	{
 		if (OutError)
 		{
-			if (const FString* Refusal = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError();
-				Refusal && !Refusal->IsEmpty())
+			if (const FString& Refusal = Budget->GetRefusalError(); !Refusal.IsEmpty())
 			{
-				*OutError = *Refusal;
+				*OutError = Refusal;
 			}
 			else
 			{
@@ -518,7 +519,7 @@ namespace
 		const int32 Width,
 		const int32 Height,
 		UObject* Outer,
-		bool& bRecognized)
+		bool& bRecognized, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const EProceduralShapeKind ShapeKind = ResolveMaterialRefShape(Request.MaterialRef);
 		bRecognized = ShapeKind != EProceduralShapeKind::Unknown;
@@ -526,7 +527,7 @@ namespace
 
 		if (ShapeKind == EProceduralShapeKind::HorizontalStroke)
 		{
-			UTexture2D* Texture = ProceduralShapeGeneratorAssets::CreateTransientTexture(Width, Height, Outer);
+			UTexture2D* Texture = ProceduralShapeGeneratorAssets::CreateTransientTexture(Width, Height, Outer, Budget);
 			if (!Texture) return nullptr;
 			Texture->Filter = TF_Nearest;
 			TArray<FColor> Pixels;
@@ -545,11 +546,11 @@ namespace
 
 		if (ShapeKind == EProceduralShapeKind::Circle)
 		{
-			return ProceduralShapeGeneratorAssets::GenerateCircle(FMath::Max(Width, Height), P.Color, Outer);
+			return ProceduralShapeGeneratorAssets::GenerateCircle(FMath::Max(Width, Height), P.Color, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::Ring)
 		{
-			return ProceduralShapeGeneratorAssets::GenerateRing(FMath::Max(Width, Height), P.Color, P.Thickness, Outer);
+			return ProceduralShapeGeneratorAssets::GenerateRing(FMath::Max(Width, Height), P.Color, P.Thickness, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::RoundedRect)
 		{
@@ -563,10 +564,10 @@ namespace
 					P.CornerRadii[1],
 					P.CornerRadii[2],
 					P.CornerRadii[3],
-					Outer);
+					Outer, Budget);
 			}
 
-			return ProceduralShapeGeneratorAssets::GenerateRoundedRect(Width, Height, P.Color, P.CornerRadius, Outer);
+			return ProceduralShapeGeneratorAssets::GenerateRoundedRect(Width, Height, P.Color, P.CornerRadius, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::GradientLinear)
 		{
@@ -584,21 +585,21 @@ namespace
 					P.LinearStart,
 					P.LinearEnd,
 					P.MultiStops,
-					Outer);
+					Outer, Budget);
 			}
-			return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, P.RotationDeg, P.MultiStops, Outer);
+			return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::GradientH)
 		{
 			return P.MultiStops.Num() >= 2
-				? ProceduralShapeGeneratorAssets::GenerateGradientHMultiStop(Width, Height, P.MultiStops, Outer)
-				: ProceduralShapeGeneratorAssets::GenerateGradientH(Width, Height, P.ColorStart, P.ColorEnd, Outer);
+				? ProceduralShapeGeneratorAssets::GenerateGradientHMultiStop(Width, Height, P.MultiStops, Outer, Budget)
+				: ProceduralShapeGeneratorAssets::GenerateGradientH(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::GradientV)
 		{
 			return P.MultiStops.Num() >= 2
-				? ProceduralShapeGeneratorAssets::GenerateGradientVMultiStop(Width, Height, P.MultiStops, Outer)
-				: ProceduralShapeGeneratorAssets::GenerateGradientV(Width, Height, P.ColorStart, P.ColorEnd, Outer);
+				? ProceduralShapeGeneratorAssets::GenerateGradientVMultiStop(Width, Height, P.MultiStops, Outer, Budget)
+				: ProceduralShapeGeneratorAssets::GenerateGradientV(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::RadialGradient)
 		{
@@ -610,7 +611,7 @@ namespace
 					P.RadialCenter,
 					P.RadialSize,
 					P.RotationDeg,
-					Outer)
+					Outer, Budget)
 				: ProceduralShapeGeneratorAssets::GenerateRadialGradient(
 					Width,
 					Height,
@@ -619,7 +620,7 @@ namespace
 					P.RadialCenter,
 					P.RadialSize,
 					P.RotationDeg,
-					Outer);
+					Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::AngularGradient)
 		{
@@ -629,7 +630,7 @@ namespace
 				P.MultiStops.Add({0.0f, P.ColorStart});
 				P.MultiStops.Add({1.0f, P.ColorEnd});
 			}
-			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer);
+			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::BoxShadow
 			|| ShapeKind == EProceduralShapeKind::EllipseShadow)
@@ -648,7 +649,7 @@ namespace
 					BlurPx,
 					P.BoxShadowBlurPadding,
 					Outer,
-					ShapeKind == EProceduralShapeKind::EllipseShadow);
+					ShapeKind == EProceduralShapeKind::EllipseShadow, Budget);
 			}
 
 			return ProceduralShapeGeneratorAssets::GenerateBoxShadow(
@@ -659,7 +660,7 @@ namespace
 				BlurPx,
 				P.BoxShadowBlurPadding,
 				Outer,
-				ShapeKind == EProceduralShapeKind::EllipseShadow);
+				ShapeKind == EProceduralShapeKind::EllipseShadow, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::PlaceholderHatch)
 		{
@@ -670,7 +671,7 @@ namespace
 				P.StripeColor,
 				P.StripeWidthPx,
 				P.StripeGapPx,
-				Outer);
+				Outer, Budget);
 		}
 		if (ShapeKind == EProceduralShapeKind::PlaceholderSurface)
 		{
@@ -681,7 +682,7 @@ namespace
 				P.StripeColor,
 				P.InsetPx,
 				P.StripeWidthPx,
-				Outer);
+				Outer, Budget);
 		}
 
 		return nullptr;
@@ -689,8 +690,10 @@ namespace
 }
 
 UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
-	const FUMGProceduralResourceRequest& Request, UObject* Outer, FString* OutError)
+	const FUMGProceduralResourceRequest& Request, UObject* Outer, FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	if (OutError) OutError->Reset();
 	const DesignImageResources::FImageResourceLimits Limits;
 	FIntPoint Size;
@@ -707,12 +710,12 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
 	else ParseMaterialRefParams(Request, P);
 
 	bool bRecognized = false;
-	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized);
+	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized, Budget);
 	if (!Texture && bRecognized)
 	{
-		const FString* Refusal = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError();
-		const FString Error = Refusal && !Refusal->IsEmpty()
-			? *Refusal
+		const FString& Refusal = Budget->GetRefusalError();
+		const FString Error = !Refusal.IsEmpty()
+			? Refusal
 			: FString::Printf(TEXT("Failed to generate procedural texture '%s'"), *Request.MaterialRef);
 		if (OutError) *OutError = Error;
 		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);

@@ -14,10 +14,10 @@ public:
 		FString& OutError);
 	// Persist path, procedural and transformed-image textures in dependency order.
 	static bool NormalizeGeneratedTextures(FUMGWidgetNode& Root, const FString& PackagePath,
-		const FString& AssetPrefix, FString& OutError);
+		const FString& AssetPrefix, FString& OutError, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	static bool NormalizePathTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr,
 		DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	static bool NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
-	static bool NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr);
+	static bool NormalizeProceduralTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+	static bool NormalizeImageTransformTextures(FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 };

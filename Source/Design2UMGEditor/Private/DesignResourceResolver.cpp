@@ -21,9 +21,9 @@ namespace DesignResourceResolver
 		}
 	}
 
-	UTexture2D* ResolveTextureFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer)
+	UTexture2D* ResolveTextureFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
-		return FProceduralShapeGenerator::GenerateFromMaterialRef(Request, Outer);
+		return FProceduralShapeGenerator::GenerateFromMaterialRef(Request, Outer, nullptr, Budget);
 	}
 
 	UTexture2D* LoadTextureFromPath(const FString& Path, ELoadMode Mode)

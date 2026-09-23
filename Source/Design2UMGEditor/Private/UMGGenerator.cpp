@@ -2,7 +2,6 @@
 
 #include "UMGGenerator.h"
 #include "Design2UMGComponentBlueprints.h"
-#include "FigmaComponentDependencies.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGGenerationManifest.h"
@@ -32,6 +31,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/UObjectHash.h"
+#include "Misc/EngineVersionComparison.h"
 
 namespace
 {
@@ -137,7 +137,13 @@ namespace
 				}
 
 				return true;
-			}, EGetObjectsFlags::IncludeNestedObjects, RF_Transient, EInternalObjectFlags::Garbage);
+			},
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		true,
+#else
+		EGetObjectsFlags::IncludeNestedObjects,
+#endif
+		RF_Transient, EInternalObjectFlags::Garbage);
 		}
 
 		if (ClearedWidgetCount > 0 || SanitizedNavigationObjects.Num() > 0)
@@ -236,67 +242,13 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 	FDesign2UMGGenerationOutput* OutGenerationOutput,
 	FUMGPrototypeNavigationData* OutNavigationData,
-	UWidgetBlueprint* ExistingGeneratedBlueprint)
+	UWidgetBlueprint* ExistingGeneratedBlueprint, DesignImageResources::FImageOperationBudget* Budget)
 {
-	// This is the outer operation boundary for ordinary generation. Component builds
-	// recurse through this function and therefore reuse this same cumulative budget.
-	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+	// Standalone builds own a budget; component batches pass their shared budget.
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 
-	if (WidgetData.HasSourceDocumentData()
-		&& WidgetData.SourceDocument().Provider == DesignComponentMapping::ProviderFigma
-		&& WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
-		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
-	{
-		const FDesign2UMGGenerationSettingsSnapshot Effective = GenerationSettings ? *GenerationSettings
-			: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
-		TArray<FString> Unresolved;
-		TFunction<void(const FUMGWidgetNode&)> Collect = [&](const FUMGWidgetNode& Node)
-		{
-			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE"))
-			{
-				DesignComponentMapping::FDesignComponentIdentity Identity;
-				bool AtSet = false;
-				if (DesignComponentMapping::TryResolveFigmaComponentIdentity(Node.Source(),
-					WidgetData.SourceDocument().DocumentScope, Identity)
-					&& Effective.ComponentMapping.Table.Match(Identity, AtSet)) return;
-				Unresolved.AddUnique(Identity.ComponentKey.IsEmpty() ? Node.Id : Identity.ComponentKey);
-			}
-			for (const auto& Child : Node.Children) Collect(Child);
-		};
-		Collect(WidgetData.RootWidget);
-		if (!Unresolved.IsEmpty())
-		{
-			const FString Error = TEXT("Missing component dependency data for: ") + FString::Join(Unresolved, TEXT(", "));
-			UE_LOG(LogDesign2UMG, Error, TEXT("Component import failed: %s"), *Error);
-			if (OutGenerationOutput) OutGenerationOutput->MappingDiagnostics.Add({TEXT("component_generation_failed"), Error});
-			return nullptr;
-		}
-	}
-	if (WidgetData.HasSourceDocumentData()
-		&& !WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
-		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
-	{
-		FigmaComponentDependencies::FCatalog Catalog;
-		FString BundleError;
-		const bool bParsed = FigmaComponentDependencies::Parse(
-			WidgetData.SourceDocument().ComponentDependenciesJson, Catalog, BundleError);
-		TFunction<bool(const FUMGWidgetNode&)> HasInstance = [&](const FUMGWidgetNode& Node)
-		{
-			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE")) return true;
-			for (const auto& Child : Node.Children) if (HasInstance(Child)) return true;
-			return false;
-		};
-		// Empty exporter metadata is not an instruction to replace an ordinary page.
-		// Malformed bundles and unresolved instances still take the diagnostic path.
-		// Definitions outside the selected tree do not change ordinary import ownership.
-		if (!bParsed || HasInstance(WidgetData.RootWidget))
-		{
-			FDesign2UMGGenerationOutput LocalGenerationOutput;
-			return FDesign2UMGComponentBlueprintContext::Build(
-				WidgetData, PackagePath, GenerationSettings,
-				OutGenerationOutput ? OutGenerationOutput : &LocalGenerationOutput, OutNavigationData);
-		}
-	}
+
 	FString AssetName = ObjectTools::SanitizeObjectName(WidgetData.WidgetName);
 	FString FullPath = PackagePath / AssetName;
 
@@ -336,7 +288,7 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	// Prepare persistent effects before touching an existing WidgetTree.
 	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
-		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName);
+		UMGGeneratorRootHandoff::PrepareRootForBuild(WidgetData, PackagePath, AssetName, Budget);
 	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
 	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
 	if (!PreparedRoot.ErrorMessage.IsEmpty())
@@ -465,8 +417,12 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 
 	// Use the shared widget creation path.
 	UWidget* Root = UMGGeneratorRootHandoff::CreateRootWidget(
-		WBP, PreparedRoot, &MappingBuildState, &EffectiveGenerationSettings);
-	if (!Root || (EffectiveGenerationSettings.ComponentBlueprints && !EffectiveGenerationSettings.ComponentBlueprints->Error.IsEmpty()))
+		WBP, PreparedRoot, &MappingBuildState, &EffectiveGenerationSettings, Budget);
+	if (!Budget->GetRefusalError().IsEmpty() && OutGenerationOutput)
+	{
+		OutGenerationOutput->MappingDiagnostics.Add({TEXT("resource_preparation_failed"), Budget->GetRefusalError()});
+	}
+	if (!Root || !Budget->GetRefusalError().IsEmpty() || (EffectiveGenerationSettings.ComponentBlueprints && !EffectiveGenerationSettings.ComponentBlueprints->Error.IsEmpty()))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("Failed to create root widget for widget '%s': package path '%s', asset name '%s', WidgetBlueprint '%s', root type '%s', root name '%s', root id '%s'. The design may contain unsupported node types."),

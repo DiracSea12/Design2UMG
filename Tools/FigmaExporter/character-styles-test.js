@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict');
 globalThis.__html__ = '';
 globalThis.figma = { mixed: Symbol('mixed'), showUI() {}, ui: { postMessage() {} } };
-require('./code.js');
-const { serializeNode } = globalThis.__design2umgExporterTestApi;
+const loadExporterTestApi = require('./load-exporter-test-api');
+const { serializeNode } = loadExporterTestApi();
 const normal = { fontName: { family: 'Example Sans', style: 'Regular' }, fontWeight: 400,
   fontStyle: 'REGULAR', fontSize: 18, textDecoration: 'NONE', textCase: 'ORIGINAL',
   lineHeight: { unit: 'PIXELS', value: 24 }, letterSpacing: { unit: 'PIXELS', value: 1 },

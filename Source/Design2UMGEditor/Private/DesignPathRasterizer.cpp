@@ -894,25 +894,14 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		}
 	}
 
-	// Charge cache misses before allocating the raster buffer. Cache hits allocate nothing.
+	// Cache hits allocate nothing. Charge misses before allocating the raster buffer.
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
+	FString BudgetError;
+	if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 	{
-		DesignImageResources::FImageOperationBudget* PassBudget =
-			Budget ? Budget : DesignImageResources::FScopedOperationBudget::GetCurrent();
-		if (PassBudget)
-		{
-			FString BudgetError;
-			if (!PassBudget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-			{
-				if (OutError) *OutError = BudgetError;
-				if (FString* RefusalError = DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError())
-				{
-					*RefusalError = BudgetError;
-				}
-				// Not logged here: the refusal text travels through OutError (and through the
-				// pass's refusal sink), and the owner of the pass reports it exactly once.
-				return nullptr;
-			}
-		}
+		if (OutError) *OutError = BudgetError;
+		return nullptr;
 	}
 
 	MakeCacheRoom(static_cast<int64>(Width) * Height);

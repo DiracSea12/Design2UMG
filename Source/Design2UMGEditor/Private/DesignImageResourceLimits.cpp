@@ -47,6 +47,7 @@ namespace DesignImageResources
 			OutError = FString::Printf(
 				TEXT("Total compressed image data exceeds the operation limit (%llu bytes)"),
 				static_cast<unsigned long long>(Limits.MaxTotalCompressedBytes));
+			if (RefusalError.IsEmpty()) RefusalError = OutError;
 			return false;
 		}
 		TotalCompressedBytes = NewTotal;
@@ -59,6 +60,7 @@ namespace DesignImageResources
 		if (PixelCount < 0 || static_cast<uint64>(PixelCount) > TNumericLimits<uint64>::Max() / Bgra8BytesPerPixel)
 		{
 			OutError = TEXT("Decoded image size is invalid");
+			if (RefusalError.IsEmpty()) RefusalError = OutError;
 			return false;
 		}
 
@@ -69,52 +71,11 @@ namespace DesignImageResources
 			OutError = FString::Printf(
 				TEXT("Total decoded image data exceeds the operation limit (%llu bytes)"),
 				static_cast<unsigned long long>(Limits.MaxTotalDecodedBytes));
+			if (RefusalError.IsEmpty()) RefusalError = OutError;
 			return false;
 		}
 		TotalDecodedBytes = NewTotal;
 		OutError.Reset();
 		return true;
 	}
-
-	namespace
-	{
-		FImageOperationBudget* GCurrentOperationBudget = nullptr;
-		FString* GCurrentRefusalError = nullptr;
-	}
-
-	FScopedOperationBudget::FScopedOperationBudget(FImageOperationBudget& InBudget, FString* InRefusalError)
-		: PreviousBudget(GCurrentOperationBudget)
-		, PreviousRefusalError(GCurrentRefusalError)
-	{
-		GCurrentOperationBudget = &InBudget;
-		GCurrentRefusalError = InRefusalError;
-		if (GCurrentRefusalError)
-		{
-			GCurrentRefusalError->Reset();
-		}
-	}
-
-	FScopedOperationBudget::~FScopedOperationBudget()
-	{
-		GCurrentOperationBudget = PreviousBudget;
-		GCurrentRefusalError = PreviousRefusalError;
-	}
-
-	FImageOperationBudget* FScopedOperationBudget::GetCurrent()
-	{
-		return GCurrentOperationBudget;
-	}
-
-	FString* FScopedOperationBudget::GetCurrentRefusalError()
-	{
-		return GCurrentRefusalError;
-	}
-
-	FScopedGeneratedTextureOperation::FScopedGeneratedTextureOperation()
-	{
-		if (FScopedOperationBudget::GetCurrent()) return;
-		OwnedBudget = MakeUnique<FImageOperationBudget>(GetGeneratedTextureLimits());
-		OwnedScope = MakeUnique<FScopedOperationBudget>(*OwnedBudget, &RefusalError);
-	}
-
 }

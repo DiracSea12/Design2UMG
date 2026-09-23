@@ -648,12 +648,11 @@ bool FGeneratedRasterActualAllocationBudgetTest::RunTest(const FString&)
 	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{1.0f, 0.25f, 0.0f, 0.0f, 1.0f, 0.0f};
 
 	DesignImageResources::FImageOperationBudget Budget(DesignImageResources::GetGeneratedTextureLimits());
-	FString RefusalError;
-	DesignImageResources::FScopedOperationBudget BudgetScope(Budget, &RefusalError);
+	const FString& RefusalError = Budget.GetRefusalError();
 	FString Error;
 	TestTrue(TEXT("The first real 400x400 procedural allocation fits one MiB"),
 		FPreBuildResourceNormalizer::NormalizeProceduralTextures(
-			Node, Folder / TEXT("Procedural"), TEXT("Actual"), &Error));
+			Node, Folder / TEXT("Procedural"), TEXT("Actual"), &Error, &Budget));
 	TestFalse(TEXT("Procedural normalization writes the source used by the following crop"),
 		Node.Brush.Image.TexturePath.Get(FString()).IsEmpty());
 	TestTrue(TEXT("The image transform survives procedural normalization"),
@@ -661,7 +660,7 @@ bool FGeneratedRasterActualAllocationBudgetTest::RunTest(const FString&)
 
 	TestFalse(TEXT("The following real 400x400 affine allocation exceeds the same operation budget"),
 		FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
-			Node, Folder / TEXT("Transform"), TEXT("Actual"), &Error));
+			Node, Folder / TEXT("Transform"), TEXT("Actual"), &Error, &Budget));
 	TestTrue(TEXT("The allocation refusal reaches the normalizer result"),
 		Error.Contains(TEXT("operation limit")) || RefusalError.Contains(TEXT("operation limit")));
 	TestTrue(TEXT("A refused crop preserves the already materialized source path"),

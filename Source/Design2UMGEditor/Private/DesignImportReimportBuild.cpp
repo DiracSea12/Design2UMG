@@ -8,6 +8,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
+#include "Misc/EngineVersionComparison.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UObjectHash.h"
 #include "WidgetBlueprint.h"
@@ -27,7 +28,11 @@ namespace DesignImportPipeline
 				: State(*InShared.MappingBuildState), Shared(InShared)
 			{
 				TArray<UObject*> Objects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+				GetObjectsWithOuter(Shared.WidgetTree, Objects, false);
+#else
 				GetObjectsWithOuter(Shared.WidgetTree, Objects, EGetObjectsFlags::None);
+#endif
 				ExistingObjects.Append(Objects);
 			}
 
@@ -45,7 +50,7 @@ namespace DesignImportPipeline
 			UWidget* Create(const FUMGWidgetNode& Node)
 			{
 				UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(Shared.WidgetTree, Node, nullptr,
-					nullptr, &Shared.DesignSize, &State, nullptr, Shared.GenerationSettings);
+					nullptr, &Shared.DesignSize, &State, nullptr, Shared.GenerationSettings, Shared.Budget);
 				if (!Widget)
 				{
 					AddReimportDiagnostic(*Shared.Diagnostics, ReimportDiagnosticKinds::PrepareFailed,
@@ -84,7 +89,11 @@ namespace DesignImportPipeline
 		TSet<UWidget*> Attached;
 		WidgetTree->ForEachWidget([&](UWidget* Widget) { Attached.Add(Widget); });
 		TArray<UObject*> Objects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		GetObjectsWithOuter(WidgetTree, Objects, false);
+#else
 		GetObjectsWithOuter(WidgetTree, Objects, EGetObjectsFlags::None);
+#endif
 		for (UObject* Object : Objects)
 		{
 			UWidget* Widget = Cast<UWidget>(Object);
@@ -207,7 +216,7 @@ namespace DesignImportPipeline
 		FReimportWidgetBuild Build(Shared);
 		TStrongObjectPtr<UUserWidget> Prepared(NewObject<UUserWidget>(GetTransientPackage(), Instance->GetClass()));
 		if (!Context.ApplyInstance(Prepared.Get(), Shared.WidgetTree, Node, *Shared.GenerationSettings,
-			nullptr, &Shared.DesignSize, &Build.State))
+			nullptr, &Shared.DesignSize, &Build.State, Shared.Budget))
 			return Fail(TEXT("Could not prepare instance overrides; existing content preserved"));
 
 		TArray<UWidget*> OldContents;

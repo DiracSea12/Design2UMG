@@ -247,7 +247,7 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 		&& Node->Source().Prototype.FlowStartingPoints[0].NodeId == TEXT("0:2")
 		&& Node->Source().Prototype.FlowStartingPoints[0].Name == TEXT("Flow 1"));
 	TestTrue(TEXT("figma doc prototypeStartNodeID typed"), Doc.SourceDocument().PrototypeStartNodeId == TEXT("0:2"));
-	TestTrue(TEXT("figma doc prototypeDevice typed"), Doc.SourceDocument().PrototypeDeviceJson.Contains(TEXT("DESKTOP")));
+	TestTrue(TEXT("figma doc prototypeDevice metadata carries device type"), Doc.Metadata.FindRef(TEXT("prototypeDevice")).Contains(TEXT("DESKTOP")));
 	TestTrue(TEXT("figma doc flowStartingPoints typed"), Doc.SourceDocument().FlowStartingPoints.Num() == 1
 		&& Doc.SourceDocument().FlowStartingPoints[0].NodeId == TEXT("0:2")
 		&& Doc.SourceDocument().FlowStartingPoints[0].Name == TEXT("Doc Flow"));

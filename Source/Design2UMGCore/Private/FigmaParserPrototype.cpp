@@ -188,10 +188,6 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 		if (!TransitionNodeId.IsEmpty())
 			Action.TransitionNodeId = TransitionNodeId;
 
-		const TSharedPtr<FJsonValue> TransitionField = DesignJsonUtils::TryGetField(AObj, TEXT("transition"));
-		if (TransitionField.IsValid())
-			Action.TransitionJson = DesignJsonUtils::ToPrettyString(TransitionField);
-
 		ParsePrototypeTransitionData(DesignJsonUtils::GetObject(AObj, TEXT("transition")), Action.Transition);
 
 		const FString VariableId = DesignJsonUtils::GetString(AObj, TEXT("variableId"));
@@ -334,10 +330,6 @@ void MergePrototypeDocumentData(const TSharedPtr<FJsonObject>& SourceObj, FDesig
 	const FString StartNodeId = DesignJsonUtils::GetString(SourceObj, TEXT("prototypeStartNodeID"));
 	if (!StartNodeId.IsEmpty())
 		OutData.PrototypeStartNodeId = StartNodeId;
-
-	const TSharedPtr<FJsonValue> DeviceField = DesignJsonUtils::TryGetField(SourceObj, TEXT("prototypeDevice"));
-	if (DeviceField.IsValid())
-		OutData.PrototypeDeviceJson = DesignJsonUtils::ToPrettyString(DeviceField);
 
 	ParseFlowStartingPoints(SourceObj, OutData.FlowStartingPoints);
 }

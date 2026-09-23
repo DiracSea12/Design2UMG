@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UTexture2D;
 class UWidget;
 class UWidgetTree;
@@ -20,6 +22,7 @@ struct FWidgetTreeChildBuildContext
 	TMap<FString, UClass*>* ClassOverrideCache = nullptr;
 	/** Generation settings for name-based class overrides; null skips the override block like the caller had none. */
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
+	DesignImageResources::FImageOperationBudget* Budget = nullptr;
 };
 
 namespace FWidgetTreeChildBuilder

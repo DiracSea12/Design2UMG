@@ -81,7 +81,6 @@ struct FDesignPrototypeAction
 	UPROPERTY() FString DestinationId;
 	UPROPERTY() FString Navigation;
 	UPROPERTY() FString TransitionNodeId;
-	UPROPERTY() FString TransitionJson;
 	UPROPERTY() FDesignPrototypeTransitionData Transition;
 
 	// SET_VARIABLE payload: variableId and condensed JSON from variableValue or value.
@@ -150,7 +149,6 @@ struct FDesignSourceDocumentData
 	UPROPERTY() FString ComponentDependenciesJson;
 	UPROPERTY() TMap<FString, FString> ResolvedComponentImageUrls;
 	UPROPERTY() FString PrototypeStartNodeId;
-	UPROPERTY() FString PrototypeDeviceJson;
 	UPROPERTY() TArray<FDesignFlowStartingPoint> FlowStartingPoints;
 };
 

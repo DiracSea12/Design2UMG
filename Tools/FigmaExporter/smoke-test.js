@@ -16,9 +16,11 @@ globalThis.figma = {
   },
 };
 
-require('./code.js');
-const api = globalThis.__design2umgExporterTestApi;
+const loadExporterTestApi = require('./load-exporter-test-api');
+const api = loadExporterTestApi();
 assert.ok(api, 'exporter test api missing');
+assert.equal(Object.hasOwn(globalThis, '__design2umgExporterTestApi'), false,
+  'exporter internals must stay outside the production global object');
 
 const gradientPaint = {
   type: 'GRADIENT_LINEAR',

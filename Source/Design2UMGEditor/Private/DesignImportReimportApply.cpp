@@ -577,7 +577,7 @@ namespace DesignImportPipeline
 		}
 		Widget->Modify();
 		ApplySlotForNode(Widget, Node, Shared);
-		if (AutomaticKey.IsEmpty()) FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+		if (AutomaticKey.IsEmpty()) FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node, nullptr, Shared.Budget);
 		if (AutomaticKey.IsEmpty()
 			&& !RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 

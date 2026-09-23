@@ -8,6 +8,7 @@ public class Design2UMGEditor : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		AddEngineThirdPartyPrivateStaticDependencies(Target, "FreeType2");
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "libcurl", "OpenSSL");
 
 		// Public dependencies are limited to types exposed by Public/*.h:
 		// module entrypoint, preview contracts, UUserWidget surfaces, and
@@ -44,6 +45,7 @@ public class Design2UMGEditor : ModuleRules
 			"ImageCore",
 			"ImageWrapper",
 			"HTTP",
+			"SSL",
 			"RenderCore",
 			"RHI",
 			"ToolMenus",

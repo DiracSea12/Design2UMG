@@ -8,6 +8,8 @@
 #include "DesignImportPipeline.h"
 #include "UMGGenerator.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 struct FDesignDocument;
 
 class UPanelWidget;
@@ -62,6 +64,7 @@ namespace DesignImportPipeline
 		const FDesignReimportRequest& Request;
 		FUMGWidgetData& Data;
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings;
+		DesignImageResources::FImageOperationBudget* Budget = nullptr;
 	};
 
 	/**
@@ -107,6 +110,7 @@ namespace DesignImportPipeline
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
 		/** Captured generation settings (class overrides et al.): every rebuild path must thread them, matching the import-time generation chain. */
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
+		DesignImageResources::FImageOperationBudget* Budget = nullptr;
 		/** Set view of the manifest.d2uOwned list (data source of the delete/move ownership decisions). */
 		const TSet<FString>* OwnedNames = nullptr;
 		const TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*>* InstancesById = nullptr;

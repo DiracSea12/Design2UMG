@@ -1,6 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportUtils.h"
+#include "Design2UMGComponentBlueprints.h"
+#include "FigmaComponentDependencies.h"
+#include "DesignImageResourceLimits.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Automation/Design2UMGAutomationRender.h"
@@ -558,7 +561,7 @@ namespace
 				const FString FinalPath = ResolveImportOutputPath(OutputPath);
 				DesignImportUtils::ApplyPendingIconFontMappingChanges(Data);
 				FBuiltBlueprint Built;
-				Built.WidgetBlueprint = FUMGGenerator::BuildWidgetBlueprint(
+				Built.WidgetBlueprint = DesignImportUtils::BuildWidgetBlueprint(
 					Data, FinalPath, GenerationSettings, &Built.GenerationOutput, &Built.PrototypeNavigation);
 				if (!Built.WidgetBlueprint)
 				{
@@ -779,6 +782,98 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 	}
 }
 
+UWidgetBlueprint* DesignImportUtils::BuildWidgetBlueprint(
+	const FUMGWidgetData& WidgetData,
+	const FString& PackagePath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	FUMGPrototypeNavigationData* OutNavigationData)
+{
+	DesignImageResources::FImageOperationBudget Budget(DesignImageResources::GetGeneratedTextureLimits());
+
+	if (WidgetData.HasSourceDocumentData()
+		&& WidgetData.SourceDocument().Provider == DesignComponentMapping::ProviderFigma
+		&& WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
+		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
+	{
+		const FDesign2UMGGenerationSettingsSnapshot Effective = GenerationSettings ? *GenerationSettings
+			: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+		TArray<FString> Unresolved;
+		TFunction<void(const FUMGWidgetNode&)> Collect = [&](const FUMGWidgetNode& Node)
+		{
+			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE"))
+			{
+				DesignComponentMapping::FDesignComponentIdentity Identity;
+				bool AtSet = false;
+				if (DesignComponentMapping::TryResolveFigmaComponentIdentity(Node.Source(),
+					WidgetData.SourceDocument().DocumentScope, Identity)
+					&& Effective.ComponentMapping.Table.Match(Identity, AtSet)) return;
+				Unresolved.AddUnique(Identity.ComponentKey.IsEmpty() ? Node.Id : Identity.ComponentKey);
+			}
+			for (const auto& Child : Node.Children) Collect(Child);
+		};
+		Collect(WidgetData.RootWidget);
+		if (!Unresolved.IsEmpty())
+		{
+			const FString Error = TEXT("Missing component dependency data for: ") + FString::Join(Unresolved, TEXT(", "));
+			UE_LOG(LogDesign2UMG, Error, TEXT("Component import failed: %s"), *Error);
+			if (OutGenerationOutput) OutGenerationOutput->MappingDiagnostics.Add({TEXT("component_generation_failed"), Error});
+			return nullptr;
+		}
+	}
+	if (WidgetData.HasSourceDocumentData()
+		&& !WidgetData.SourceDocument().ComponentDependenciesJson.IsEmpty()
+		&& (!GenerationSettings || !GenerationSettings->ComponentBlueprints))
+	{
+		FigmaComponentDependencies::FCatalog Catalog;
+		FString BundleError;
+		const bool bParsed = FigmaComponentDependencies::Parse(
+			WidgetData.SourceDocument().ComponentDependenciesJson, Catalog, BundleError);
+		TFunction<bool(const FUMGWidgetNode&)> HasInstance = [&](const FUMGWidgetNode& Node)
+		{
+			if (Node.HasSourceData() && Node.Source().SourceNodeType == TEXT("INSTANCE")) return true;
+			for (const auto& Child : Node.Children) if (HasInstance(Child)) return true;
+			return false;
+		};
+		// Empty exporter metadata is not an instruction to replace an ordinary page.
+		// Malformed bundles and unresolved instances still take the diagnostic path.
+		// Definitions outside the selected tree do not change ordinary import ownership.
+		if (!bParsed || HasInstance(WidgetData.RootWidget))
+		{
+			FDesign2UMGGenerationOutput LocalGenerationOutput;
+			return FDesign2UMGComponentBlueprintContext::Build(
+				WidgetData, PackagePath, GenerationSettings,
+				OutGenerationOutput ? OutGenerationOutput : &LocalGenerationOutput, OutNavigationData, nullptr, &Budget);
+		}
+	}
+	return FUMGGenerator::BuildWidgetBlueprint(
+		WidgetData, PackagePath, GenerationSettings, OutGenerationOutput, OutNavigationData, nullptr, &Budget);
+}
+
+UWidgetBlueprint* DesignImportUtils::GenerateWidgetBlueprint(
+	const FUMGWidgetData& WidgetData,
+	const FString& PackagePath,
+	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
+	FDesign2UMGGenerationOutput* OutGenerationOutput)
+{
+	FDesign2UMGGenerationOutput GenerationOutput;
+	FUMGPrototypeNavigationData NavigationData;
+	UWidgetBlueprint* Blueprint = BuildWidgetBlueprint(
+		WidgetData, PackagePath, GenerationSettings, &GenerationOutput, &NavigationData);
+	const FString BuiltPath = GetPathNameSafe(Blueprint);
+	if (Blueprint && !FUMGGenerator::SaveWidgetBlueprint(Blueprint, &GenerationOutput, &NavigationData).IsSuccess())
+	{
+		GenerationOutput.MappingDiagnostics.Add({TEXT("generation_save_failed"),
+			FString::Printf(TEXT("Asset batch save failed for '%s'; inspect dependency and recovery diagnostics"), *BuiltPath)});
+		Blueprint = nullptr;
+	}
+	if (OutGenerationOutput)
+	{
+		*OutGenerationOutput = MoveTemp(GenerationOutput);
+	}
+	return Blueprint;
+}
+
 UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
@@ -803,7 +898,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			ApplyPendingIconFontMappingChanges(Data);
 			FDesign2UMGGenerationOutput GenerationOutput;
 			FUMGPrototypeNavigationData NavigationData;
-			UWidgetBlueprint* BuiltWBP = FUMGGenerator::BuildWidgetBlueprint(
+			UWidgetBlueprint* BuiltWBP = DesignImportUtils::BuildWidgetBlueprint(
 				Data, FinalPath, GenerationSettings, &GenerationOutput, &NavigationData);
 			if (!BuiltWBP)
 			{

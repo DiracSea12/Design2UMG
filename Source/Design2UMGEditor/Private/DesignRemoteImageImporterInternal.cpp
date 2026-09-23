@@ -17,6 +17,30 @@
 #include "Misc/ScopeLock.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Modules/ModuleManager.h"
+#include "SslModule.h"
+#include "Interfaces/ISslCertificateManager.h"
+// OpenSSL's UI typedef collides with UObject's UI namespace. Rename only the
+// third-party type token while reading its headers; no exported symbols change.
+#pragma push_macro("UI")
+#undef UI
+#define UI UI_ST
+THIRD_PARTY_INCLUDES_START
+#include <openssl/ssl.h>
+THIRD_PARTY_INCLUDES_END
+#pragma pop_macro("UI")
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include "curl/curl.h"
+#include "Windows/HideWindowsPlatformTypes.h"
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include "curl/curl.h"
+#endif
 
 namespace DesignRemoteImageImporterInternal
 {
@@ -27,69 +51,30 @@ namespace DesignRemoteImageImporterInternal
 		// Cap individual diagnostic lines to bound resource-resolution reports.
 		constexpr int32 MaxResolveReportMessages = 32;
 
-		bool IsIpv4Literal(const FString& Host)
-		{
-			bool bHasDigit = false;
-			for (const TCHAR Character : Host)
-			{
-				if (FChar::IsDigit(Character))
-				{
-					bHasDigit = true;
-				}
-				else if (Character != TEXT('.'))
-				{
-					return false;
-				}
-			}
-			return bHasDigit;
-		}
-
 		bool ExtractUrlHost(const FString& Url, FString& OutHost)
 		{
-			const int32 SchemeEnd = Url.Find(TEXT("://"), ESearchCase::IgnoreCase, ESearchDir::FromStart);
-			if (SchemeEnd == INDEX_NONE)
+			CURLU* Parsed = curl_url();
+			if (!Parsed) return false;
+			const FTCHARToUTF8 Utf8Url(*Url);
+			char* Host = nullptr;
+			char* Zone = nullptr;
+			const bool bValid = curl_url_set(Parsed, CURLUPART_URL, Utf8Url.Get(), CURLU_DISALLOW_USER) == CURLUE_OK
+				&& curl_url_get(Parsed, CURLUPART_HOST, &Host, 0) == CURLUE_OK
+				&& curl_url_get(Parsed, CURLUPART_ZONEID, &Zone, 0) == CURLUE_NO_ZONEID;
+			if (bValid)
 			{
-				return false;
-			}
-
-			FString Authority = Url.Mid(SchemeEnd + 3);
-			int32 PathStart = INDEX_NONE;
-			for (const TCHAR Delimiter : { TEXT('/'), TEXT('?'), TEXT('#') })
-			{
-				const int32 Candidate = Authority.FindChar(Delimiter, PathStart) ? PathStart : INDEX_NONE;
-				if (Candidate != INDEX_NONE)
+				OutHost = UTF8_TO_TCHAR(Host);
+				if (OutHost.StartsWith(TEXT("[")) && OutHost.EndsWith(TEXT("]")))
 				{
-					Authority.LeftInline(Candidate);
+					OutHost = OutHost.Mid(1, OutHost.Len() - 2);
 				}
+				while (OutHost.RemoveFromEnd(TEXT("."))) {}
+				OutHost.ToLowerInline();
 			}
-			if (Authority.IsEmpty() || Authority.Contains(TEXT("@")))
-			{
-				return false;
-			}
-
-			if (Authority.StartsWith(TEXT("[")))
-			{
-				const int32 ClosingBracket = Authority.Find(TEXT("]"));
-				if (ClosingBracket == INDEX_NONE)
-				{
-					return false;
-				}
-				OutHost = Authority.Mid(1, ClosingBracket - 1);
-			}
-			else
-			{
-				int32 PortSeparator = INDEX_NONE;
-				OutHost = Authority.FindChar(TEXT(':'), PortSeparator)
-					? Authority.Left(PortSeparator)
-					: Authority;
-			}
-
-			OutHost.TrimStartAndEndInline();
-			while (OutHost.RemoveFromEnd(TEXT(".")))
-			{
-			}
-			OutHost.ToLowerInline();
-			return !OutHost.IsEmpty();
+			curl_free(Host);
+			curl_free(Zone);
+			curl_url_cleanup(Parsed);
+			return bValid && !OutHost.IsEmpty();
 		}
 
 	}
@@ -189,6 +174,31 @@ namespace DesignRemoteImageImporterInternal
 		return true;
 	}
 
+	bool FImagePayloadIO::IsPublicNetworkAddress(const TConstArrayView<uint8> Address)
+	{
+		if (Address.Num() == 4)
+		{
+			const uint8 A = Address[0], B = Address[1], C = Address[2];
+			// IANA IPv4 special-purpose registry: PCP/TURN anycast are globally
+			// reachable exceptions within the otherwise restricted 192.0.0.0/24.
+			if (A == 192 && B == 0 && C == 0 && (Address[3] == 9 || Address[3] == 10)) return true;
+			return !(A == 0 || A == 10 || A == 127 || A >= 224
+				|| (A == 100 && B >= 64 && B <= 127)
+				|| (A == 169 && B == 254) || (A == 172 && B >= 16 && B <= 31)
+				|| (A == 192 && (B == 168 || (B == 0 && (C == 0 || C == 2))))
+				|| (A == 192 && B == 88 && C == 99)
+				|| (A == 198 && (B == 18 || B == 19 || (B == 51 && C == 100)))
+				|| (A == 203 && B == 0 && C == 113));
+		}
+		// Only native global unicast. Reject mapped, NAT64, 6to4, Teredo and
+		// special-purpose ranges rather than allowing a tunnel to hide a local peer.
+		return Address.Num() == 16 && (Address[0] & 0xe0) == 0x20
+			&& !(Address[0] == 0x20 && Address[1] == 0x02)
+			&& !(Address[0] == 0x20 && Address[1] == 0x01 && Address[2] < 2)
+			&& !(Address[0] == 0x20 && Address[1] == 0x01 && Address[2] == 0x0d && Address[3] == 0xb8)
+			&& !(Address[0] == 0x3f && Address[1] == 0xff && (Address[2] & 0xf0) == 0);
+	}
+
 	bool FImagePayloadIO::ValidateRemoteUrl(
 		const FString& Url,
 		const bool bAllowUnsafeRemoteUrls,
@@ -209,15 +219,21 @@ namespace DesignRemoteImageImporterInternal
 			OutError = TEXT("Remote image URL has an invalid host");
 			return false;
 		}
-		if (!bAllowUnsafeRemoteUrls
-			&& (Host == TEXT("localhost")
-				|| Host.EndsWith(TEXT(".localhost"))
-				|| Host.EndsWith(TEXT(".local"))
-				|| !Host.Contains(TEXT("."))
-				|| Host.Contains(TEXT(":"))
-				|| IsIpv4Literal(Host)))
+		if (bAllowUnsafeRemoteUrls) return true;
+		const FTCHARToUTF8 Utf8Host(*Host);
+		uint8 Address[16] = {};
+		const bool bV6 = Host.Contains(TEXT(":"));
+		const bool bLiteral = inet_pton(bV6 ? AF_INET6 : AF_INET, Utf8Host.Get(), Address) == 1;
+		if (bLiteral)
 		{
-			OutError = TEXT("Remote image URL points to a local-style or IP-literal host");
+			if (IsPublicNetworkAddress(MakeArrayView(Address, bV6 ? 16 : 4))) return true;
+			OutError = TEXT("Remote image URL points to a non-public IP address");
+			return false;
+		}
+		if (bV6 || Host == TEXT("localhost") || Host.EndsWith(TEXT(".localhost"))
+			|| Host.EndsWith(TEXT(".local")) || !Host.Contains(TEXT(".")))
+		{
+			OutError = TEXT("Remote image URL points to a local-style or invalid host");
 			return false;
 		}
 		return true;
@@ -626,6 +642,220 @@ namespace DesignRemoteImageImporterInternal
 		}
 	}
 
+
+	namespace
+	{
+		struct FPublicImageTransfer
+		{
+			FString Url;
+			CURL* Handle = nullptr;
+			TSharedRef<FDownloadState, ESPMode::ThreadSafe> State = MakeShared<FDownloadState, ESPMode::ThreadSafe>();
+			TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe> Budget;
+			uint64 MaxBytes;
+			bool bBlockedDestination = false;
+
+			FPublicImageTransfer(const FString& InUrl,
+				const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& InBudget,
+				uint64 InMaxBytes) : Url(InUrl), Budget(InBudget), MaxBytes(InMaxBytes) {}
+		};
+
+		curl_socket_t OpenPublicImageSocket(void* UserData, curlsocktype Purpose, curl_sockaddr* Address)
+		{
+			FPublicImageTransfer& Transfer = *static_cast<FPublicImageTransfer*>(UserData);
+			TConstArrayView<uint8> Bytes;
+			if (Address->family == AF_INET)
+			{
+				const auto* V4 = reinterpret_cast<const sockaddr_in*>(&Address->addr);
+				Bytes = MakeArrayView(reinterpret_cast<const uint8*>(&V4->sin_addr), 4);
+			}
+			else if (Address->family == AF_INET6)
+			{
+				const auto* V6 = reinterpret_cast<const sockaddr_in6*>(&Address->addr);
+				Bytes = MakeArrayView(reinterpret_cast<const uint8*>(&V6->sin6_addr), 16);
+			}
+			// Runs for every new connection, including DNS retries and redirects.
+			// The checked sockaddr is the very address libcurl passes to connect().
+			if (Purpose != CURLSOCKTYPE_IPCXN || !FImagePayloadIO::IsPublicNetworkAddress(Bytes))
+			{
+				Transfer.bBlockedDestination = true;
+				return CURL_SOCKET_BAD;
+			}
+			return socket(Address->family, Address->socktype, Address->protocol);
+		}
+
+		size_t ReceivePublicImage(char* Data, size_t Size, size_t Count, void* UserData)
+		{
+			FPublicImageTransfer& Transfer = *static_cast<FPublicImageTransfer*>(UserData);
+			if (Size != 0 && Count > static_cast<size_t>(MAX_int32) / Size)
+			{
+				return 0;
+			}
+			const int64 Bytes = static_cast<int64>(Size * Count);
+			if (!AcceptChunkForSingleImageLimit(Transfer.State, Bytes, Transfer.MaxBytes)
+				|| !ChargeChunkToOperationBudget(Transfer.State, Transfer.Budget, Bytes))
+			{
+				return 0;
+			}
+			AppendAcceptedChunk(Transfer.State, reinterpret_cast<const uint8*>(Data), Bytes);
+			return static_cast<size_t>(Bytes);
+		}
+
+		int VerifyImageCertificate(int Preverified, X509_STORE_CTX* Context)
+		{
+			if (Preverified == 1)
+			{
+				SSL* Connection = static_cast<SSL*>(X509_STORE_CTX_get_ex_data(Context, SSL_get_ex_data_X509_STORE_CTX_idx()));
+				const char* Host = Connection ? SSL_get_servername(Connection, TLSEXT_NAMETYPE_host_name) : nullptr;
+				const FString Domain = Host ? UTF8_TO_TCHAR(Host) : TEXT("");
+				return FSslModule::Get().GetCertificateManager().VerifySslCertificates(Context, Domain) ? 1 : 0;
+			}
+			return Preverified;
+		}
+
+		CURLcode ConfigureImageCertificates(CURL*, void* Context, void*)
+		{
+			SSL_CTX* SslContext = static_cast<SSL_CTX*>(Context);
+			FSslModule::Get().GetCertificateManager().AddCertificatesToSslContext(SslContext);
+			SSL_CTX_set_verify(SslContext, SSL_CTX_get_verify_mode(SslContext), &VerifyImageCertificate);
+			return CURLE_OK;
+		}
+
+		void DownloadPublicImages(const TArray<FString>& Urls, const float TimeoutSeconds,
+			const DesignImageResources::FImageResourceLimits& Limits,
+			const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& Budget,
+			TMap<FString, FUrlDownloadResult>& OutResults,
+			const TFunction<bool()>& IsCancellationRequested)
+		{
+			// A private multi handle has no shared DNS/connection cache. No proxy or
+			// alternate transport may bypass the destination check. TLS uses UE roots.
+			FSslModule::Get();
+			const bool bCurlReady = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
+			CURLM* Multi = bCurlReady ? curl_multi_init() : nullptr;
+			TArray<TUniquePtr<FPublicImageTransfer>> Transfers;
+			for (const FString& Url : Urls)
+			{
+				FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
+				Result = FUrlDownloadResult();
+				if (!FImagePayloadIO::ValidateRemoteUrl(Url, false, Result.Error))
+				{
+					continue;
+				}
+				auto Transfer = MakeUnique<FPublicImageTransfer>(Url, Budget, Limits.MaxCompressedBytes);
+				Transfer->Handle = Multi ? curl_easy_init() : nullptr;
+				CURL* Handle = Transfer->Handle;
+				const FTCHARToUTF8 Utf8Url(*Url);
+				const long TimeoutMs = static_cast<long>(FMath::Clamp(static_cast<double>(TimeoutSeconds) * 1000.0, 1000.0, 2147483647.0));
+				const bool bConfigured = Handle
+					&& curl_easy_setopt(Handle, CURLOPT_URL, Utf8Url.Get()) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_PROTOCOLS_STR, "https") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_REDIR_PROTOCOLS_STR, "https") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_FOLLOWLOCATION, 1L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_MAXREDIRS, 10L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_PROXY, "") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_FRESH_CONNECT, 1L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_FORBID_REUSE, 1L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_SSL_VERIFYPEER, 1L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_SSL_VERIFYHOST, 2L) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_CAINFO, nullptr) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_SSL_CTX_FUNCTION, &ConfigureImageCertificates) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_OPENSOCKETFUNCTION, &OpenPublicImageSocket) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_OPENSOCKETDATA, Transfer.Get()) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_WRITEFUNCTION, &ReceivePublicImage) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_WRITEDATA, Transfer.Get()) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_PRIVATE, Transfer.Get()) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_USERAGENT, "Design2UMG/RemoteImageImporter") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_TIMEOUT_MS, TimeoutMs) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_NOSIGNAL, 1L) == CURLE_OK;
+				if (!bConfigured || curl_multi_add_handle(Multi, Handle) != CURLM_OK)
+				{
+					Result.Error = TEXT("Failed to initialize destination-checked HTTPS request");
+					if (Handle) curl_easy_cleanup(Handle);
+					continue;
+				}
+				Transfers.Add(MoveTemp(Transfer));
+			}
+			const bool bShowProgress = !FApp::IsUnattended() && FSlateApplication::IsInitialized();
+			FScopedSlowTask Progress(static_cast<float>(Transfers.Num()),
+				NSLOCTEXT("Design2UMG", "DownloadingPublicImages", "Downloading remote images..."), bShowProgress);
+			if (bShowProgress && !Transfers.IsEmpty()) Progress.MakeDialog(true);
+			bool bCancelled = false;
+			CURLMcode MultiResult = CURLM_OK;
+			int Running = 0;
+			do
+			{
+				if (!Multi || Transfers.IsEmpty()) break;
+				if ((IsCancellationRequested && IsCancellationRequested()) || Progress.ShouldCancel())
+				{
+					bCancelled = true;
+					break;
+				}
+				MultiResult = curl_multi_perform(Multi, &Running);
+				int Queued = 0;
+				while (CURLMsg* Message = curl_multi_info_read(Multi, &Queued))
+				{
+					if (Message->msg != CURLMSG_DONE) continue;
+					FPublicImageTransfer* Transfer = nullptr;
+					curl_easy_getinfo(Message->easy_handle, CURLINFO_PRIVATE, &Transfer);
+					long Status = 0;
+					curl_easy_getinfo(Message->easy_handle, CURLINFO_RESPONSE_CODE, &Status);
+					FUrlDownloadResult& Result = OutResults.FindChecked(Transfer->Url);
+					Result.bSuccess = Transfer->State->ErrorString.IsEmpty()
+						&& Message->data.result == CURLE_OK && Status >= 200 && Status < 300
+						&& !Transfer->State->Downloaded.IsEmpty();
+					if (Result.bSuccess)
+					{
+						Result.Data = MoveTemp(Transfer->State->Downloaded);
+						Result.Error.Reset();
+					}
+					else
+					{
+						Result.Data.Reset();
+						if (!Transfer->State->ErrorString.IsEmpty())
+						{
+							Result.Error = Transfer->State->ErrorString;
+						}
+						else if (Message->data.result == CURLE_COULDNT_CONNECT && Transfer->bBlockedDestination)
+						{
+							Result.Error = TEXT("HTTPS connection failed; non-public destination candidates were rejected");
+						}
+						else if (Message->data.result != CURLE_OK)
+						{
+							Result.Error = FString::Printf(TEXT("HTTPS image request failed: %s (HTTP %ld)"),
+								UTF8_TO_TCHAR(curl_easy_strerror(Message->data.result)), Status);
+						}
+						else if (Status < 200 || Status >= 300)
+						{
+							Result.Error = FString::Printf(TEXT("Server returned an error (HTTP %ld)"), Status);
+						}
+						else
+						{
+							Result.Error = TEXT("Server returned an empty response");
+						}
+					}
+					Transfer->State->bDone = true;
+					Progress.EnterProgressFrame();
+				}
+				if (Running > 0 && MultiResult == CURLM_OK) FPlatformProcess::Sleep(HttpWaitTickSeconds);
+			} while (Running > 0 && MultiResult == CURLM_OK);
+			for (const auto& Transfer : Transfers)
+			{
+				// Removal synchronously stops all callbacks before the borrowed budget dies.
+				curl_multi_remove_handle(Multi, Transfer->Handle);
+				curl_easy_cleanup(Transfer->Handle);
+				if (!Transfer->State->bDone)
+				{
+					FUrlDownloadResult& Result = OutResults.FindChecked(Transfer->Url);
+					Result.bSuccess = false;
+					Result.Data.Reset();
+					Result.Error = !Transfer->State->ErrorString.IsEmpty() ? Transfer->State->ErrorString
+						: bCancelled ? TEXT("cancelled by user") : TEXT("HTTPS transfer manager failed");
+				}
+			}
+			if (Multi) curl_multi_cleanup(Multi);
+			if (bCurlReady) curl_global_cleanup();
+		}
+	}
+
 	void FImagePayloadIO::DownloadUrls(
 		const TArray<FString>& Urls,
 		const float TimeoutSeconds,
@@ -635,6 +865,11 @@ namespace DesignRemoteImageImporterInternal
 		TMap<FString, FUrlDownloadResult>& OutResults,
 		const TFunction<bool()>& IsCancellationRequested)
 	{
+		if (!bAllowUnsafeRemoteUrls)
+		{
+			DownloadPublicImages(Urls, TimeoutSeconds, Limits, BulkBudget, OutResults, IsCancellationRequested);
+			return;
+		}
 		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
 		TArray<FPendingRequest> Pending;
 

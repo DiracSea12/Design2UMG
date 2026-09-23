@@ -272,27 +272,18 @@ namespace ProceduralShapeGeneratorAssets
 		return Snapshot;
 	}
 
-	UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer)
+	UTexture2D* CreateTransientTexture(int32 Width, int32 Height, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height))
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive generated raster dimensions: %dx%d"), Width, Height);
 			return nullptr;
 		}
-		if (DesignImageResources::FImageOperationBudget* Budget =
-			DesignImageResources::FScopedOperationBudget::GetCurrent())
-		{
-			FString BudgetError;
-			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-			{
-				if (FString* RefusalError =
-					DesignImageResources::FScopedOperationBudget::GetCurrentRefusalError())
-				{
-					*RefusalError = BudgetError;
-				}
-				return nullptr;
-			}
-		}
+		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+		if (!Budget) Budget = &LocalBudget;
+		FString BudgetError;
+		if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError)) return nullptr;
+
 		UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 		if (Texture)
 		{
@@ -330,9 +321,10 @@ namespace ProceduralShapeGeneratorAssets
 		int32 Width,
 		int32 Height,
 		UObject* Outer,
+		DesignImageResources::FImageOperationBudget* Budget,
 		TFunctionRef<FColor(int32 X, int32 Y)> PixelColorAt)
 	{
-		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
 		if (!Texture)
 		{
 			return nullptr;
@@ -352,13 +344,13 @@ namespace ProceduralShapeGeneratorAssets
 		return Texture;
 	}
 
-	UTexture2D* GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer)
+	UTexture2D* GenerateCircle(int32 Size, FLinearColor Color, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const float Center = (Size - 1) / 2.0f;
 		const float Radius = Center;
 		const FColor FillColor = Color.ToFColor(true);
 
-		return GenerateShapeTexture(Size, Size, Outer, [Center, Radius, FillColor](int32 X, int32 Y)
+		return GenerateShapeTexture(Size, Size, Outer, Budget, [Center, Radius, FillColor](int32 X, int32 Y)
 		{
 			const float Distance = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
 			const float Alpha = FMath::Clamp(Radius - Distance + 0.5f, 0.0f, 1.0f);
@@ -366,14 +358,14 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateRing(int32 Size, FLinearColor Color, float Thickness, UObject* Outer)
+	UTexture2D* GenerateRing(int32 Size, FLinearColor Color, float Thickness, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const float Center = (Size - 1) / 2.0f;
 		const float OuterRadius = Center;
 		const float InnerRadius = Center * (1.0f - Thickness * 2.0f);
 		const FColor FillColor = Color.ToFColor(true);
 
-		return GenerateShapeTexture(Size, Size, Outer, [Center, OuterRadius, InnerRadius, FillColor](int32 X, int32 Y)
+		return GenerateShapeTexture(Size, Size, Outer, Budget, [Center, OuterRadius, InnerRadius, FillColor](int32 X, int32 Y)
 		{
 			const float Distance = FMath::Sqrt(FMath::Square(X - Center) + FMath::Square(Y - Center));
 			const float OuterAlpha = FMath::Clamp(OuterRadius - Distance + 0.5f, 0.0f, 1.0f);
@@ -383,12 +375,12 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float CornerRadius, UObject* Outer)
+	UTexture2D* GenerateRoundedRect(int32 Width, int32 Height, FLinearColor Color, float CornerRadius, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const float Radius = FMath::Min(Width, Height) * CornerRadius * 0.5f;
 		const FColor FillColor = Color.ToFColor(true);
 
-		return GenerateShapeTexture(Width, Height, Outer, [Width, Height, Radius, FillColor](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, Radius, FillColor](int32 X, int32 Y)
 		{
 			float Alpha = 1.0f;
 			FVector2D CornerCenter = FVector2D::ZeroVector;
@@ -433,13 +425,13 @@ namespace ProceduralShapeGeneratorAssets
 		float RadiusTR,
 		float RadiusBR,
 		float RadiusBL,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (FMath::IsNearlyEqual(RadiusTL, RadiusTR)
 			&& FMath::IsNearlyEqual(RadiusTR, RadiusBR)
 			&& FMath::IsNearlyEqual(RadiusBR, RadiusBL))
 		{
-			return GenerateRoundedRect(Width, Height, Color, RadiusTL, Outer);
+			return GenerateRoundedRect(Width, Height, Color, RadiusTL, Outer, Budget);
 		}
 
 		const float HalfMin = FMath::Min(Width, Height) * 0.5f;
@@ -449,7 +441,7 @@ namespace ProceduralShapeGeneratorAssets
 		const float RBL = HalfMin * RadiusBL;
 		const FColor FillColor = Color.ToFColor(true);
 
-		return GenerateShapeTexture(Width, Height, Outer, [Width, Height, RTL, RTR, RBR, RBL, FillColor](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, RTL, RTR, RBR, RBL, FillColor](int32 X, int32 Y)
 		{
 			float Alpha = 1.0f;
 			float Radius = 0.0f;
@@ -491,46 +483,46 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
+	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
-		return GenerateShapeTexture(Width, Height, Outer, [Width, ColorStart, ColorEnd](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
 		});
 	}
 
-	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
 			return nullptr;
 		}
 
-		return GenerateShapeTexture(Width, Height, Outer, [Width, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, &Stops](int32 X, int32 Y)
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
 		});
 	}
 
-	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer)
+	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
-		return GenerateShapeTexture(Width, Height, Outer, [Height, ColorStart, ColorEnd](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
 		});
 	}
 
-	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer)
+	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
 			return nullptr;
 		}
 
-		return GenerateShapeTexture(Width, Height, Outer, [Height, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, &Stops](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
@@ -543,7 +535,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& StartNormalized,
 		const FVector2D& EndNormalized,
 		const TArray<FGradientStop>& Stops,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -560,7 +552,7 @@ namespace ProceduralShapeGeneratorAssets
 			return nullptr;
 		}
 
-		return GenerateShapeTexture(Width, Height, Outer, [&Stops, StartPixel, Direction, DirectionSizeSquared](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [&Stops, StartPixel, Direction, DirectionSizeSquared](int32 X, int32 Y)
 		{
 			const FVector2D Pixel(static_cast<float>(X) + 0.5f, static_cast<float>(Y) + 0.5f);
 			const float T = FMath::Clamp(
@@ -571,7 +563,7 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -589,7 +581,7 @@ namespace ProceduralShapeGeneratorAssets
 		const float TMax = FMath::Max(FMath::Max(T00, T10), FMath::Max(T01, T11));
 		const float TRange = TMax - TMin;
 
-		return GenerateShapeTexture(Width, Height, Outer, [Width, Height, DirX, DirY, TMin, TRange, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, DirX, DirY, TMin, TRange, &Stops](int32 X, int32 Y)
 		{
 			const float NX = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			const float NY = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
@@ -599,7 +591,7 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer)
+	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -610,7 +602,7 @@ namespace ProceduralShapeGeneratorAssets
 		const float CenterY = (Height - 1) / 2.0f;
 		const float StartRad = FMath::DegreesToRadians(StartAngleDeg);
 
-		return GenerateShapeTexture(Width, Height, Outer, [CenterX, CenterY, StartRad, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [CenterX, CenterY, StartRad, &Stops](int32 X, int32 Y)
 		{
 			const float Angle = FMath::Atan2(Y - CenterY, X - CenterX) - StartRad;
 			float T = Angle / (2.0f * PI);
@@ -627,9 +619,9 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
-		return GenerateShapeTexture(Width, Height, Outer, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, ColorCenter, ColorEdge](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, ColorCenter, ColorEdge](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return FMath::Lerp(ColorCenter, ColorEdge, T).ToFColor(true);
@@ -643,14 +635,14 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (Stops.Num() < 2)
 		{
 			return nullptr;
 		}
 
-		return GenerateShapeTexture(Width, Height, Outer, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, &Stops](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return SampleGradientStops(Stops, T).ToFColor(true);
@@ -683,7 +675,7 @@ namespace ProceduralShapeGeneratorAssets
 		float BlurRadius,
 		float BlurPadding,
 		UObject* Outer,
-		bool bEllipse)
+		bool bEllipse, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		return GenerateBoxShadow(
 			Width,
@@ -696,7 +688,7 @@ namespace ProceduralShapeGeneratorAssets
 			BlurRadius,
 			BlurPadding,
 			Outer,
-			bEllipse);
+			bEllipse, Budget);
 	}
 
 	UTexture2D* GenerateBoxShadow(
@@ -710,7 +702,7 @@ namespace ProceduralShapeGeneratorAssets
 		float BlurRadius,
 		float BlurPadding,
 		UObject* Outer,
-		bool bEllipse)
+		bool bEllipse, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height))
 		{
@@ -723,7 +715,7 @@ namespace ProceduralShapeGeneratorAssets
 			UE_LOG(LogDesign2UMG, Warning, TEXT("Invalid or excessive CPU shadow blur workload: %dx%d blur=%g"), Width, Height, BlurRadius);
 			return nullptr;
 		}
-		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer);
+		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
 		if (!Texture) return nullptr;
 		TArray<float> Alpha;
 		const bool bHasExplicitBlurPadding = BlurPadding >= 0.0f;
@@ -804,13 +796,13 @@ namespace ProceduralShapeGeneratorAssets
 		FLinearColor StripeColor,
 		int32 StripeWidthPx,
 		int32 StripeGapPx,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const FColor FillColor = BackgroundColor.ToFColor(true);
 		const FColor LineColor = StripeColor.ToFColor(true);
 		const int32 Period = FMath::Max(1, StripeWidthPx + StripeGapPx);
 
-		return GenerateShapeTexture(Width, Height, Outer, [FillColor, LineColor, Period, StripeWidthPx](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [FillColor, LineColor, Period, StripeWidthPx](int32 X, int32 Y)
 		{
 			const bool bOnStripe = ((X + Y) % Period) < StripeWidthPx;
 			return bOnStripe ? LineColor : FillColor;
@@ -824,7 +816,7 @@ namespace ProceduralShapeGeneratorAssets
 		FLinearColor OutlineColor,
 		int32 InsetPx,
 		int32 StripeWidthPx,
-		UObject* Outer)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		constexpr int32 PlaceholderSupersample = 2;
 		const int64 RasterWidth64 = static_cast<int64>(Width) * PlaceholderSupersample;
@@ -867,7 +859,7 @@ namespace ProceduralShapeGeneratorAssets
 		const int32 MaxX = RasterWidth - EffectiveInset - 1;
 		const int32 MaxY = RasterHeight - EffectiveInset - 1;
 
-		return GenerateShapeTexture(RasterWidth, RasterHeight, Outer, [FillPixel, OutlinePixel, OutlineWidth, MinX, MinY, MaxX, MaxY](int32 X, int32 Y)
+		return GenerateShapeTexture(RasterWidth, RasterHeight, Outer, Budget, [FillPixel, OutlinePixel, OutlineWidth, MinX, MinY, MaxX, MaxY](int32 X, int32 Y)
 		{
 			if (X < MinX || X > MaxX || Y < MinY || Y > MaxY)
 			{

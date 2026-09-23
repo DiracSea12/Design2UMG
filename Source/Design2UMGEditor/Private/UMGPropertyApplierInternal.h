@@ -6,8 +6,10 @@
 
 class UWidget;
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 namespace UMGPropertyApplierInternal
 {
 	void ApplyCommonProperties(UWidget* Widget, const FUMGWidgetNode& Node);
-	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node);
+	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 }

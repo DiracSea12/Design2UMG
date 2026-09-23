@@ -29,6 +29,45 @@ bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters
 	Limits.MaxTotalDecodedBytes = 48;
 
 	FString Error;
+	const uint8 PublicV4[] = { 8, 8, 8, 8 };
+	TestTrue(TEXT("Public IPv4 socket destination accepted"), FImagePayloadIO::IsPublicNetworkAddress(PublicV4));
+	const uint8 PrivateV4[][4] = {
+		{ 0, 0, 0, 0 }, { 10, 1, 2, 3 }, { 100, 64, 0, 1 }, { 127, 0, 0, 1 },
+		{ 169, 254, 169, 254 }, { 172, 16, 0, 1 }, { 192, 168, 1, 1 },
+		{ 192, 0, 0, 1 }, { 192, 0, 2, 1 }, { 192, 88, 99, 1 }, { 198, 18, 0, 1 },
+		{ 198, 51, 100, 1 }, { 203, 0, 113, 1 }, { 224, 0, 0, 1 }, { 255, 255, 255, 255 }
+	};
+	for (const auto& Address : PrivateV4)
+	{
+		TestFalse(TEXT("Non-public resolved IPv4 destination rejected"), FImagePayloadIO::IsPublicNetworkAddress(Address));
+	}
+	const uint8 PublicV6[16] = { 0x26, 0x06, 0x47, 0x00, 0x47, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x11, 0x11 };
+	TestTrue(TEXT("Public IPv6 socket destination accepted"), FImagePayloadIO::IsPublicNetworkAddress(PublicV6));
+	const uint8 PrivateV6[][16] = {
+		{ 0 }, { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+		{ 0xfc }, { 0xfe, 0x80 }, { 0xff }, { 0x20, 0x02 },
+		{ 0x20, 0x01, 0, 0 }, { 0x20, 0x01, 0x0d, 0xb8 }, { 0x3f, 0xff },
+		{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 127, 0, 0, 1 }
+	};
+	for (const auto& Address : PrivateV6)
+	{
+		TestFalse(TEXT("Non-public or transitional IPv6 destination rejected"), FImagePayloadIO::IsPublicNetworkAddress(Address));
+	}
+	const uint8 PublicBoundaries[][4] = { { 100, 63, 255, 255 }, { 100, 128, 0, 1 }, { 172, 15, 255, 255 }, { 172, 32, 0, 1 } };
+	for (const auto& Address : PublicBoundaries)
+	{
+		TestTrue(TEXT("Public addresses adjacent to restricted blocks remain accepted"), FImagePayloadIO::IsPublicNetworkAddress(Address));
+	}
+	TestFalse(TEXT("Unknown socket address family is rejected"), FImagePayloadIO::IsPublicNetworkAddress({}));
+	for (int32 LastOctet = 0; LastOctet <= 255; ++LastOctet)
+	{
+		const uint8 Address[] = { 192, 0, 0, static_cast<uint8>(LastOctet) };
+		const bool bGlobalAnycast = LastOctet == 9 || LastOctet == 10;
+		TestEqual(TEXT("192.0.0/24 allows only globally reachable anycast exceptions"),
+			FImagePayloadIO::IsPublicNetworkAddress(Address), bGlobalAnycast);
+		TestEqual(TEXT("Literal URL agrees with the actual connection address policy"),
+			FImagePayloadIO::ValidateRemoteUrl(FString::Printf(TEXT("https://192.0.0.%d/image.png"), LastOctet), false, Error), bGlobalAnycast);
+	}
 	TestTrue(TEXT("Payload at byte limit is accepted"), FImagePayloadIO::ValidateCompressedByteCount(8, Limits, Error));
 	TestFalse(TEXT("Payload above byte limit is rejected"), FImagePayloadIO::ValidateCompressedByteCount(9, Limits, Error));
 	TestFalse(TEXT("Rejected payload reports an error"), Error.IsEmpty());
@@ -55,7 +94,17 @@ bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters
 	TestFalse(TEXT("Short numeric loopback URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://127.1/image.png"), false, Error));
 	TestFalse(TEXT("Trailing-dot localhost URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://localhost./image.png"), false, Error));
 	TestFalse(TEXT("Private IPv4 image URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://192.168.1.2/image.png"), false, Error));
-	TestFalse(TEXT("Public IPv4 image URL is rejected by default"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://203.0.113.1/image.png"), false, Error));
+	TestFalse(TEXT("Documentation IPv4 addresses are not public destinations"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://203.0.113.1/image.png"), false, Error));
+	TestTrue(TEXT("Public IPv4 literal accepted without unsafe override"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://8.8.8.8/image.png"), false, Error));
+	TestTrue(TEXT("Public IPv6 literal accepted without unsafe override"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://[2606:4700:4700::1111]:443/image.png"), false, Error));
+	TestFalse(TEXT("IPv6 loopback literal rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://[::1]/image.png"), false, Error));
+	TestFalse(TEXT("IPv4-mapped loopback literal rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://[::ffff:127.0.0.1]/image.png"), false, Error));
+	TestFalse(TEXT("IPv6 unique-local literal rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://[fd00::1]/image.png"), false, Error));
+	TestFalse(TEXT("Integer loopback alias canonicalized and rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://2130706433/image.png"), false, Error));
+	TestFalse(TEXT("Hex loopback alias canonicalized and rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://0x7f000001/image.png"), false, Error));
+	TestFalse(TEXT("Invalid suffix after IPv6 literal rejected"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://[2606:4700:4700::1111]invalid/image.png"), false, Error));
+	TestFalse(TEXT("Invalid port rejected by the transport URL parser"), FImagePayloadIO::ValidateRemoteUrl(TEXT("https://8.8.8.8:70000/image.png"), false, Error));
+	TestTrue(TEXT("Explicit unsafe option allows private IPv6 HTTP"), FImagePayloadIO::ValidateRemoteUrl(TEXT("http://[::1]/image.png"), true, Error));
 	TestTrue(TEXT("Explicit unsafe URL setting permits HTTP fixtures"), FImagePayloadIO::ValidateRemoteUrl(TEXT("http://127.0.0.1/image.png"), true, Error));
 	const FString OversizedFile = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2UImageLimit"), TEXT(".bin"));
 	TArray<uint8> OversizedBytes;

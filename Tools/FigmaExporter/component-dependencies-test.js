@@ -1,8 +1,8 @@
 const assert = require('node:assert/strict');
 globalThis.__html__ = '';
 globalThis.figma = { mixed: Symbol('mixed'), showUI() {}, ui: {} };
-require('./code.js');
-const api = globalThis.__design2umgExporterTestApi;
+const loadExporterTestApi = require('./load-exporter-test-api');
+const api = loadExporterTestApi();
 
 function node(id, type, children = []) {
   return { id, name: 'Same name', type, visible: true, children };

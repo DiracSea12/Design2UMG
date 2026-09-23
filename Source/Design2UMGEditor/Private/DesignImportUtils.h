@@ -45,6 +45,21 @@ namespace DesignImportUtils
 	UWidgetBlueprint* ReloadWidgetBlueprintForRender(
 		UWidgetBlueprint* WidgetBlueprint,
 		FString* OutAutomationPreparationError = nullptr);
+	/** Assemble an unsaved import, including source component dependencies when present. */
+	UWidgetBlueprint* BuildWidgetBlueprint(
+		const FUMGWidgetData& WidgetData,
+		const FString& PackagePath,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
+		FUMGPrototypeNavigationData* OutNavigationData = nullptr);
+
+	/** Build and save an import without interactive progress or notifications. */
+	UWidgetBlueprint* GenerateWidgetBlueprint(
+		const FUMGWidgetData& WidgetData,
+		const FString& PackagePath,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+
 	UWidgetBlueprint* GenerateBlueprint(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,

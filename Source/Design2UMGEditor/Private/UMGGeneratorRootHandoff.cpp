@@ -15,7 +15,7 @@ namespace UMGGeneratorRootHandoff
 	FPreparedRoot PrepareRootForBuild(
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
-		const FString& AssetName)
+		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		FPreparedRoot Prepared;
 		Prepared.Root = WidgetData.RootWidget;
@@ -40,7 +40,7 @@ namespace UMGGeneratorRootHandoff
 
 		Prepared.DesignSize = FIntPoint(RootWidth, RootHeight);
 		if (!FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
-			Prepared.Root, PackagePath, AssetName, Prepared.ErrorMessage)) return Prepared;
+			Prepared.Root, PackagePath, AssetName, Prepared.ErrorMessage, Budget)) return Prepared;
 
 		UE_LOG(LogDesign2UMG, Log,
 			TEXT("Using source root design size %dx%d (root bounds %.2fx%.2f)"),
@@ -54,7 +54,7 @@ namespace UMGGeneratorRootHandoff
 		UWidgetBlueprint* WidgetBlueprint,
 		const FPreparedRoot& PreparedRoot,
 		FDesign2UMGComponentMappingBuildState* ComponentMappingState,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (!WidgetBlueprint || !WidgetBlueprint->WidgetTree)
 		{
@@ -76,7 +76,7 @@ namespace UMGGeneratorRootHandoff
 			&PreparedRoot.DesignSize,
 			ComponentMappingState,
 			nullptr,
-			GenerationSettings);
+			GenerationSettings, Budget);
 		return RootWidget;
 	}
 }

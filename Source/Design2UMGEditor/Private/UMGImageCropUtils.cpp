@@ -50,7 +50,7 @@ bool UMGImageCropUtils::TryApplyCropToBrush(
 	FSlateBrush& InOutBrush,
 	UTexture2D* SourceTexture,
 	const FImageCropRequest& Request,
-	TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture)
+	TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture, DesignImageResources::FImageOperationBudget* Budget)
 {
 	const FUMGVisualBrushData::FImageTransformData& Transform = Request.Transform;
 	if (CanUseUvRegion(Transform))
@@ -76,7 +76,7 @@ bool UMGImageCropUtils::TryApplyCropToBrush(
 		Transform.D,
 		Transform.TY,
 		Request.OutputWidth,
-		Request.OutputHeight))
+		Request.OutputHeight, nullptr, Budget))
 	{
 		ApplyAffineCropTexture(Cropped);
 		InOutBrush.Tiling = ESlateBrushTileType::NoTile;

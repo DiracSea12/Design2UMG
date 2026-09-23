@@ -170,13 +170,8 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 		return nullptr;
 	}
 
-	// Publish the pass budget (and a sink for a refused path raster) for the duration of
-	// the widget build: the path rasterizer is reached from the widget builder, several
-	// layers below this scope, and the builder itself has no way to report an allocation
-	// refusal, so the refusal is collected here and rejects the whole pass below.
+	// One explicit budget covers every allocation in this preview tree.
 	DesignImageResources::FImageOperationBudget PreviewBudget(DesignImageResources::GetGeneratedTextureLimits());
-	FString RasterRefusal;
-	DesignImageResources::FScopedOperationBudget ScopedPreviewBudget(PreviewBudget, &RasterRefusal);
 
 	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
 		TempWidget->WidgetTree,
@@ -186,7 +181,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 		&DesignSize,
 		nullptr,
 		nullptr,
-		&GenerationSettings);
+		&GenerationSettings, &PreviewBudget);
 
 	// Collect this attempt's rooted textures before any failure return, including partial builds.
 	const TArray<UTexture2D*> RootedAfter = FProceduralShapeGenerator::GetRootedTextureSnapshot();
@@ -201,6 +196,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 
 	// Reject incomplete widget trees when a raster allocation exceeds the budget.
 	// MaterializePreview then releases this attempt's resources.
+	const FString& RasterRefusal = PreviewBudget.GetRefusalError();
 	if (!RasterRefusal.IsEmpty())
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Preview materialization rejected: %s"), *RasterRefusal);

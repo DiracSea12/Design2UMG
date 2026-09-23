@@ -179,7 +179,7 @@ namespace
 			Context.ExplicitDesignSize,
 			Context.ComponentMappingState,
 			Context.ClassOverrideCache,
-			Context.GenerationSettings);
+			Context.GenerationSettings, Context.Budget);
 	}
 
 	bool BuildPanelChildren(

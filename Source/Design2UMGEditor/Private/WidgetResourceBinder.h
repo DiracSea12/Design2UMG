@@ -6,6 +6,8 @@
 #include "UMGSchema.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UImage;
 class UObject;
 class UTexture2D;
@@ -14,7 +16,7 @@ class FWidgetResourceBinder
 {
 public:
 	// Prefer material first, then fall back to texture; returns whether any resource was bound.
-	static bool BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap);
+	static bool BindImageResource(UImage* ImageWidget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	// Shared procedural resolution for image resources and border brushes.
 	enum class EProceduralTextureResult : uint8
@@ -29,5 +31,5 @@ public:
 		const FUMGWidgetNode& Node,
 		UObject* Outer,
 		UTexture2D*& OutTexture,
-		FUMGProceduralResourceRequest* OutRequest = nullptr);
+		FUMGProceduralResourceRequest* OutRequest = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 };

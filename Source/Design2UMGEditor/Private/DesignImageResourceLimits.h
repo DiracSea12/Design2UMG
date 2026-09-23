@@ -45,51 +45,14 @@ namespace DesignImageResources
 		bool ConsumeCompressedBytes(uint64 ByteCount, FString& OutError);
 		bool ConsumeDecodedPixels(int64 PixelCount, FString& OutError);
 
-	private:
-		FImageResourceLimits Limits;
-		uint64 TotalCompressedBytes = 0;
-		uint64 TotalDecodedBytes = 0;
-	};
-
-	/**
-	 * Publishes the active materialization budget and optional allocation-error sink.
-	 * Allocation sites charge this shared budget; nested scopes restore the previous pair.
-	 */
-	class FScopedOperationBudget
-	{
-	public:
-		/**
-		 * InBudget supplies the allocation limit. InRefusalError, when supplied, records
-		 * allocation failures for callers whose widget-building path has no direct error return.
-		 */
-		explicit FScopedOperationBudget(FImageOperationBudget& InBudget, FString* InRefusalError = nullptr);
-		~FScopedOperationBudget();
-		FScopedOperationBudget(const FScopedOperationBudget&) = delete;
-		FScopedOperationBudget& operator=(const FScopedOperationBudget&) = delete;
-
-		/** Budget published by the innermost active scope, or null outside any scope. */
-		static FImageOperationBudget* GetCurrent();
-		/** Refusal sink published by the innermost active scope, or null. */
-		static FString* GetCurrentRefusalError();
-
-	private:
-		FImageOperationBudget* PreviousBudget;
-		FString* PreviousRefusalError;
-	};
-
-	/**
-	 * Starts one generated-texture operation only when the caller is the outermost owner.
-	 * Nested component/root builds reuse the already published budget instead of resetting it.
-	 */
-	class FScopedGeneratedTextureOperation
-	{
-	public:
-		FScopedGeneratedTextureOperation();
+		/** First allocation refusal in this operation; successful calls leave it intact. */
+		const FString& GetRefusalError() const { return RefusalError; }
 
 	private:
 		FString RefusalError;
-		TUniquePtr<FImageOperationBudget> OwnedBudget;
-		TUniquePtr<FScopedOperationBudget> OwnedScope;
+		FImageResourceLimits Limits;
+		uint64 TotalCompressedBytes = 0;
+		uint64 TotalDecodedBytes = 0;
 	};
 
 }

@@ -27,9 +27,7 @@ public:
 		const FString& StrokeCap = DesignPathRasterDefaults::StrokeCap,
 		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin,
 		FString* OutError = nullptr,
-		// Budget this raster is drawn from, when the caller owns one. Null falls back to
-		// the budget published for the current materialization pass (and then to "no
-		// budget"), which keeps every pre-existing call site's behaviour unchanged.
+		// Share a budget across allocations; null starts a standalone operation.
 		DesignImageResources::FImageOperationBudget* Budget = nullptr);
 	static void FlushPendingTextureUpdates();
 	static void ClearCache();

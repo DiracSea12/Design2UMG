@@ -5,6 +5,8 @@
 #include "Templates/Function.h"
 #include "UMGSchema.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UTexture2D;
 struct FSlateBrush;
 
@@ -23,6 +25,6 @@ namespace UMGImageCropUtils
 		FSlateBrush& InOutBrush,
 		UTexture2D* SourceTexture,
 		const FImageCropRequest& Request,
-		TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture);
+		TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 }
 

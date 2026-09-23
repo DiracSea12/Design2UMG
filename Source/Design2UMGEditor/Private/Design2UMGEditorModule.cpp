@@ -17,6 +17,7 @@
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
 #include "Misc/CoreDelegates.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Subsystems/ImportSubsystem.h"
 #include "IContentBrowserSingleton.h"
 #include "Framework/Docking/TabManager.h"
@@ -25,6 +26,15 @@
 
 namespace
 {
+	FSimpleMulticastDelegate& GetPostEngineInitDelegate()
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return FCoreDelegates::OnPostEngineInit;
+#else
+		return FCoreDelegates::GetOnPostEngineInit();
+#endif
+	}
+
 	void ShowEditorNotification(FNotificationInfo&& Info, const SNotificationItem::ECompletionState CompletionState)
 	{
 		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
@@ -115,14 +125,14 @@ void FDesign2UMGEditorModule::StartupModule()
 	// an editor module reload can subscribe immediately.
 	if (!TrySubscribeFontReimportHook())
 	{
-		FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FDesign2UMGEditorModule::HandlePostEngineInit);
+		GetPostEngineInitDelegate().AddRaw(this, &FDesign2UMGEditorModule::HandlePostEngineInit);
 	}
 	Design2UMGEditorMenuOwner::MaybeShowWelcomeDialog();
 }
 
 void FDesign2UMGEditorModule::ShutdownModule()
 {
-	FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
+	GetPostEngineInitDelegate().RemoveAll(this);
 	if (UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
 	{
 		ImportSubsystem->OnAssetReimport.RemoveAll(this);

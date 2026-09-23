@@ -59,6 +59,8 @@ namespace DesignRemoteImageImporterInternal
 		static bool ValidateDimensions(int32 Width, int32 Height, const DesignImageResources::FImageResourceLimits& Limits, FString& OutError);
 		static bool ValidateUrlCount(int32 UrlCount, const DesignImageResources::FImageResourceLimits& Limits, FString& OutError);
 		static bool ValidateRemoteUrl(const FString& Url, bool bAllowUnsafeRemoteUrls, FString& OutError);
+		/** Address bytes from the socket destination, not a separate DNS lookup. */
+		static bool IsPublicNetworkAddress(TConstArrayView<uint8> Address);
 		static bool LoadLocalFile(
 			const FString& FilePath,
 			const DesignImageResources::FImageResourceLimits& Limits,

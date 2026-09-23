@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UObject;
 class UTexture2D;
 
@@ -21,8 +23,8 @@ class FProceduralShapeGenerator
 public:
 	/** True only for material refs implemented by the CPU procedural generator. */
 	static bool IsSupportedMaterialRef(const FString& MaterialRef);
-	static UTexture2D* GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer = nullptr, FString* OutError = nullptr);
-	static UTexture2D* ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH, FString* OutError = nullptr);
+	static UTexture2D* GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer = nullptr, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+	static UTexture2D* ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 	static void ReleaseTransientTextures();
 	static void ReleaseTransientTexture(UTexture2D* Texture);
 	static void FlushPendingTextureUpdates();

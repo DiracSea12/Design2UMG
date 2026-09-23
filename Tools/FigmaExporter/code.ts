@@ -966,27 +966,6 @@ function applyComponentIdentities(node: RestNode, identities: Record<string, Com
   for (const child of node.children || []) applyComponentIdentities(child, identities);
 }
 
-const testApi = {
-  attachRenderFallbackMetadata,
-  indexRestNodes,
-  makeRenderFallbackKey,
-  serializePaint,
-  serializeEffect,
-  buildTextStyle,
-  serializeNode,
-  unwrapRestExportResponse,
-  collectReferencedComponents,
-  collectComponentDependencies,
-  collectComponentDependencyImages,
-  collectImages,
-  exportReferencePng,
-  shouldExportNodeRenderFallback,
-};
-
-if (typeof globalThis !== 'undefined') {
-  (globalThis as any).__design2umgExporterTestApi = testApi;
-}
-
 // ── Main Export Flow ──
 if (typeof figma !== 'undefined') {
   figma.showUI(__html__, { width: 360, height: 200 });

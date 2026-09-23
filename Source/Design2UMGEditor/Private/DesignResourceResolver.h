@@ -5,6 +5,8 @@
 #include "Fonts/SlateFontInfo.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UTexture2D;
 
 namespace DesignResourceResolver
@@ -13,7 +15,7 @@ namespace DesignResourceResolver
 	void ApplyFontFamily(FSlateFontInfo& FontInfo, const FString& Value, bool bIsIconFontWidget);
 
 	// Generate a UTexture2D from a typed procedural request via FProceduralShapeGenerator.
-	UTexture2D* ResolveTextureFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer);
+	UTexture2D* ResolveTextureFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	enum class ELoadMode : uint8
 	{

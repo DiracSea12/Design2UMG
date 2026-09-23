@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportReimportInternal.h"
+#include "DesignImportUtils.h"
 
 #include "DesignImportDiagnosticReport.h"
 #include "UMGPrototypeAnimationBuilder.h"
@@ -220,7 +221,7 @@ namespace DesignImportPipeline
 
 		Session.Data.WidgetName = CopyName;
 		FDesign2UMGGenerationOutput GenerationOutput;
-		FUMGGenerator::GenerateWidgetBlueprint(
+		DesignImportUtils::GenerateWidgetBlueprint(
 			Session.Data, PackageDir, &Session.GenerationSettings, &GenerationOutput);
 		Result.ResolutionCopyCommit = GenerationOutput.Commit;
 		if (GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved)

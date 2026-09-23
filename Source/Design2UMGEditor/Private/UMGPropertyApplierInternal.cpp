@@ -188,7 +188,6 @@ namespace
 			{UWrapBox::StaticClass(), &ApplyWrapBoxProps},
 			{UScrollBox::StaticClass(), &ApplyScrollBoxProps},
 			{UWidgetSwitcher::StaticClass(), &ApplyWidgetSwitcherProps},
-			{UBorder::StaticClass(), &UMGBrushPropertyApplier::ApplyBorderProps},
 			{USizeBox::StaticClass(), &ApplySizeBoxProps},
 			{UScaleBox::StaticClass(), &ApplyScaleBoxProps},
 			{UBackgroundBlur::StaticClass(), &ApplyBackgroundBlurProps},
@@ -255,7 +254,7 @@ namespace
 		}
 	}
 
-	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node)
+	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		if (!Widget)
 		{
@@ -265,6 +264,11 @@ namespace
 		const TMap<UClass*, FApplyPropsFunc>& ApplierMap = GetPropsApplierMap();
 		for (UClass* Class = Widget->GetClass(); Class; Class = Class->GetSuperClass())
 		{
+			if (Class == UBorder::StaticClass())
+			{
+				UMGBrushPropertyApplier::ApplyBorderProps(Widget, Node, Budget);
+				break;
+			}
 			if (const FApplyPropsFunc* Func = ApplierMap.Find(Class))
 			{
 				(*Func)(Widget, Node);

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
+#include "DesignImageResourceLimits.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
@@ -183,8 +184,10 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	// Class-override lookups are cached per tree: each root call owns the cache; recursive
 	// BuildWidgetTree/CreateWidgetRecursive entries reuse the same map so rule loading
 	// happens at most once per node name during one build.
@@ -256,7 +259,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 			}
 			// Blueprint templates must not initialize a transient runtime tree before slot bindings are authored.
 			UUserWidget* Instance = CastChecked<UUserWidget>(WidgetTree->ConstructWidget<UWidget>(Class, WidgetName));
-			if (!Context.ApplyInstance(Instance, WidgetTree, Node, *GenerationSettings, TextureMap, ExplicitDesignSize, ComponentMappingState)) return nullptr;
+			if (!Context.ApplyInstance(Instance, WidgetTree, Node, *GenerationSettings, TextureMap, ExplicitDesignSize, ComponentMappingState, Budget)) return nullptr;
 			if (ComponentMappingState) ComponentMappingState->OnWidgetConstructed(Instance);
 			return Instance;
 		}
@@ -330,7 +333,8 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 		ExplicitDesignSize,
 		ComponentMappingState,
 		ClassOverrideCache,
-		GenerationSettings
+		GenerationSettings,
+		Budget
 	};
 	if (!FWidgetTreeChildBuilder::BuildChildren(WidgetTree, NewWidget, Node, Context))
 	{
@@ -340,11 +344,13 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
+UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	const FIntPoint EffectiveDesignSize = ResolveEffectiveDesignSize(Node, ExplicitDesignSize);
 
-	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache, GenerationSettings);
+	UWidget* NewWidget = BuildWidgetTree(WidgetTree, Node, TextureMap, &EffectiveDesignSize, ComponentMappingState, ClassOverrideCache, GenerationSettings, Budget);
 	if (!NewWidget)
 	{
 		return nullptr;
@@ -377,7 +383,8 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 		&& !GenerationSettings->ComponentBlueprints->ResolveKey(Node).IsEmpty();
 	// The child blueprint root (or its instance override) owns source visuals. Applying them
 	// again to the UserWidget wrapper would multiply opacity and repeat render transforms.
-	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node, TextureMap);
+	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node, TextureMap, Budget);
+	if (!Budget->GetRefusalError().IsEmpty()) return nullptr;
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).
 	if (ComponentMappingState
@@ -445,17 +452,19 @@ TOptional<FVector2D> FUMGWidgetUtils::GetBlueprintDesignTimeSize(UWidgetBlueprin
 	return TOptional<FVector2D>();
 }
 
-void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap)
+void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	if (!Widget)
 	{
 		return;
 	}
 
-	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node);
+	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node, Budget);
 	if (UImage* Image = Cast<UImage>(Widget))
 	{
-		FWidgetResourceBinder::BindImageResource(Image, Node, TextureMap);
+		FWidgetResourceBinder::BindImageResource(Image, Node, TextureMap, Budget);
 	}
 }
 

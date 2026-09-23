@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "UMGBrushPropertyApplier.h"
+#include "DesignImageResourceLimits.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "DesignResourceResolver.h"
@@ -34,7 +35,7 @@ namespace
 	bool ApplyImageModeToSlateBrush(
 		FSlateBrush& Brush,
 		const FUMGWidgetNode& Node,
-		TFunctionRef<void(UTexture2D*)> ApplyCroppedTexture)
+		TFunctionRef<void(UTexture2D*)> ApplyCroppedTexture, DesignImageResources::FImageOperationBudget* Budget)
 	{
 		const FString Mode = ResolveImageMode(Node);
 		if (Mode.IsEmpty())
@@ -54,7 +55,7 @@ namespace
 				Brush,
 				Cast<UTexture2D>(Brush.GetResourceObject()),
 				CropRequest,
-				ApplyCroppedTexture);
+				ApplyCroppedTexture, Budget);
 		}
 
 		if (Mode == TEXT("Fit"))
@@ -118,8 +119,10 @@ namespace UMGBrushPropertyApplier
 		}
 	}
 
-	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node)
+	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
 	{
+		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+		if (!Budget) Budget = &LocalBudget;
 		UBorder* Border = CastChecked<UBorder>(Widget);
 		Border->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Border->Background;
@@ -127,7 +130,7 @@ namespace UMGBrushPropertyApplier
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture)
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget)
 			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Brush.SetResourceObject(GeneratedTexture);
@@ -236,7 +239,7 @@ namespace UMGBrushPropertyApplier
 		bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
 		{
 			Brush.SetResourceObject(Cropped);
-		}) || bBrushChanged;
+		}, Budget) || bBrushChanged;
 
 		if (bBrushChanged)
 		{

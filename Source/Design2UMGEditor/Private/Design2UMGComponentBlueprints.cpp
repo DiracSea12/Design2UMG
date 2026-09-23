@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Design2UMGComponentBlueprints.h"
+#include "Misc/EngineVersionComparison.h"
 #include "DesignImportReimportInternal.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
@@ -200,8 +201,10 @@ FString FDesign2UMGComponentBlueprintContext::ResolveKey(const FUMGWidgetNode& N
 
 bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, UWidgetTree* OwnerTree,
 	const FUMGWidgetNode& Node, const FDesign2UMGGenerationSettingsSnapshot& Settings,
-	const TMap<FString, UTexture2D*>* Textures, const FIntPoint* DesignSize, FDesign2UMGComponentMappingBuildState* Ownership)
+	const TMap<FString, UTexture2D*>* Textures, const FIntPoint* DesignSize, FDesign2UMGComponentMappingBuildState* Ownership, DesignImageResources::FImageOperationBudget* Budget)
 {
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	const FComponent* Component = Components.Find(ResolveKey(Node));
 	if (!Component || !Instance) return false;
 	TFunction<bool(const FUMGWidgetNode&, const FUMGWidgetNode&, const FString&)> Apply;
@@ -225,7 +228,7 @@ bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, 
 			Content.Slot = FUMGSlotData();
 			FDesign2UMGComponentMappingBuildState Mapping(Settings.ComponentMapping);
 			Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(Content, Settings.ComponentMapping, Component->Data, Mapping);
-			UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(OwnerTree, Content, nullptr, Textures, DesignSize, &Mapping, nullptr, &Settings);
+			UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(OwnerTree, Content, nullptr, Textures, DesignSize, &Mapping, nullptr, &Settings, Budget);
 			if (!Widget) return false;
 			if (Ownership) Ownership->IncludeInstanceContent(Mapping);
 			Instance->SetContentForSlot(SlotName(Path), Widget);
@@ -248,11 +251,11 @@ bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, 
 
 UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetData& Data,
 	const FString& Folder, const FDesign2UMGGenerationSettingsSnapshot* Settings,
-	FDesign2UMGGenerationOutput* Output, FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint)
+	FDesign2UMGGenerationOutput* Output, FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint, DesignImageResources::FImageOperationBudget* Budget)
 {
-	// Some reimport entry points call the component batch directly. Own one budget there;
-	// calls reached through FUMGGenerator already have one and this scope simply reuses it.
-	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+	// Every component and the page root draw from the same operation budget.
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 
 	FDesign2UMGGenerationSettingsSnapshot Effective = Settings ? *Settings
 		: FDesign2UMGGenerationSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
@@ -446,7 +449,11 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 			Asset->SetFlags(RF_Transactional);
 			Asset->Modify();
 			TArray<UObject*> TreeObjects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, true);
+#else
 			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, EGetObjectsFlags::IncludeNestedObjects);
+#endif
 			TreeObjects.Add(Asset->WidgetTree);
 			for (UObject* Object : TreeObjects)
 			{
@@ -470,7 +477,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 				return Fail();
 			FDesignReimportRequest Request;
 			Request.TargetAssetPath = Existing[Key]->GetOutermost()->GetName();
-			const DesignImportPipeline::FReimportSession Session{nullptr, Request, Template, Effective};
+			const DesignImportPipeline::FReimportSession Session{nullptr, Request, Template, Effective, Budget};
 			FUMGPrototypeNavigationData ComponentNavigation;
 			int32 TransactionIndex = INDEX_NONE;
 			const FDesignReimportResult Updated = DesignImportPipeline::ApplyPreparedReimport(
@@ -485,7 +492,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		{
 			// New assets are discarded on failure, rather than undone into empty blueprints.
 			TGuardValue<ITransaction*> SuspendNewAssetUndo(GUndo, nullptr);
-			Generated.Blueprint = FUMGGenerator::BuildWidgetBlueprint(Template, Component.PackageFolder, &Effective, Generated.Output.Get());
+			Generated.Blueprint = FUMGGenerator::BuildWidgetBlueprint(Template, Component.PackageFolder, &Effective, Generated.Output.Get(), nullptr, nullptr, Budget);
 		}
 		if (!Generated.Blueprint)
 		{
@@ -530,7 +537,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		}
 		FDesignReimportRequest Request;
 		Request.TargetAssetPath = ExistingRoot->GetOutermost()->GetName();
-		const DesignImportPipeline::FReimportSession Session{nullptr, Request, RootData, Effective};
+		const DesignImportPipeline::FReimportSession Session{nullptr, Request, RootData, Effective, Budget};
 		FUMGPrototypeNavigationData UpdatedNavigation;
 		FDesign2UMGGenerationOutput UpdatedOutput;
 		int32 TransactionIndex = INDEX_NONE;
@@ -555,7 +562,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 	else
 	{
 		TGuardValue<ITransaction*> SuspendNewAssetUndo(GUndo, nullptr);
-		Root = FUMGGenerator::BuildWidgetBlueprint(RootData, Folder, &Effective, &Result, Navigation);
+		Root = FUMGGenerator::BuildWidgetBlueprint(RootData, Folder, &Effective, &Result, Navigation, nullptr, Budget);
 	}
 	// Root generation writes its own diagnostics. Append dependency diagnostics
 	// afterwards so successful, off-page components are represented in the report.

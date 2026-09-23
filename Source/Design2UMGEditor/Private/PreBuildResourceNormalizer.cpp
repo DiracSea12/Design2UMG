@@ -341,9 +341,9 @@ namespace
 	}
 
 	UTexture2D* CreateProceduralTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError,
-		DesignImageResources::FImageOperationBudget*)
+		DesignImageResources::FImageOperationBudget* Budget)
 	{
-		return FProceduralShapeGenerator::GenerateFromMaterialRef(Plan.ProceduralRequest, nullptr, &OutError);
+		return FProceduralShapeGenerator::GenerateFromMaterialRef(Plan.ProceduralRequest, nullptr, &OutError, Budget);
 	}
 
 	bool TryBuildImageTransformTextureMaterializationPlan(
@@ -370,7 +370,7 @@ namespace
 	}
 
 	UTexture2D* CreateImageTransformTexture(const FUMGWidgetNode&, const FTextureMaterializationPlan& Plan, FString& OutError,
-		DesignImageResources::FImageOperationBudget*)
+		DesignImageResources::FImageOperationBudget* Budget)
 	{
 		UTexture2D* SourceTexture = DesignResourceResolver::LoadTextureFromPath(
 			Plan.SourceTexturePath,
@@ -390,7 +390,7 @@ namespace
 			Transform.D,
 			Transform.TY,
 			Plan.ImageCropRequest.OutputWidth,
-			Plan.ImageCropRequest.OutputHeight, &OutError);
+			Plan.ImageCropRequest.OutputHeight, &OutError, Budget);
 	}
 
 	void ApplyMaterializedTextureToNode(
@@ -410,7 +410,7 @@ namespace
 		FUMGWidgetNode& Node, const FString& TextureImportPath, const FString& AssetPrefix,
 		TMap<FTextureRequestKey, FString>& Cache,
 		TFunctionRef<bool(const FUMGWidgetNode&, const FString&, FTextureMaterializationPlan&)> TryBuildPlan,
-		TFunctionRef<UTexture2D*(const FUMGWidgetNode&, const FTextureMaterializationPlan&, FString&, DesignImageResources::FImageOperationBudget*)> CreateTexture,
+		TFunctionRef<UTexture2D*(const FUMGWidgetNode&, const FTextureMaterializationPlan&, FString&, DesignImageResources::FImageOperationBudget* Budget)> CreateTexture,
 		DesignImageResources::FImageOperationBudget* Budget,
 		FString* OutError)
 	{
@@ -475,12 +475,13 @@ namespace
 }
 
 bool FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
-	FUMGWidgetNode& Root, const FString& PackagePath, const FString& AssetPrefix, FString& OutError)
+	FUMGWidgetNode& Root, const FString& PackagePath, const FString& AssetPrefix, FString& OutError, DesignImageResources::FImageOperationBudget* Budget)
 {
-	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
-	return NormalizePathTextures(Root, PackagePath / TEXT("D2U_PathTextures"), AssetPrefix, &OutError)
-		&& NormalizeProceduralTextures(Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetPrefix, &OutError)
-		&& NormalizeImageTransformTextures(Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetPrefix, &OutError);
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
+	return NormalizePathTextures(Root, PackagePath / TEXT("D2U_PathTextures"), AssetPrefix, &OutError, Budget)
+		&& NormalizeProceduralTextures(Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetPrefix, &OutError, Budget)
+		&& NormalizeImageTransformTextures(Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetPrefix, &OutError, Budget);
 }
 
 bool FPreBuildResourceNormalizer::NormalizePathTextures(
@@ -488,42 +489,33 @@ bool FPreBuildResourceNormalizer::NormalizePathTextures(
 	DesignImageResources::FImageOperationBudget* Budget)
 {
 	if (OutError) OutError->Reset();
-	// Only path rasters draw from this budget, and they draw at the rasterizer's real
-	// allocation point. A caller-supplied budget is the one the whole materialization
-	// shares; without one this normalization pass gets its own.
-	DesignImageResources::FImageOperationBudget* PassBudget = Budget
-		? Budget
-		: DesignImageResources::FScopedOperationBudget::GetCurrent();
-	TUniquePtr<DesignImageResources::FImageOperationBudget> OwnBudget;
-	if (!PassBudget)
-	{
-		OwnBudget = MakeUnique<DesignImageResources::FImageOperationBudget>(
-			DesignImageResources::GetGeneratedTextureLimits());
-		PassBudget = OwnBudget.Get();
-	}
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildPathTextureMaterializationPlan, CreatePathTexture, PassBudget, OutError);
+		TryBuildPathTextureMaterializationPlan, CreatePathTexture, Budget, OutError);
 }
 
 bool FPreBuildResourceNormalizer::NormalizeProceduralTextures(
-	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError)
+	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
 {
-	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	if (OutError) OutError->Reset();
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildProceduralTextureMaterializationPlan, CreateProceduralTexture, nullptr, OutError);
+		TryBuildProceduralTextureMaterializationPlan, CreateProceduralTexture, Budget, OutError);
 }
 
 bool FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
-	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError)
+	FUMGWidgetNode& Root, const FString& TextureImportPath, const FString& AssetPrefix, FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
 {
-	DesignImageResources::FScopedGeneratedTextureOperation GeneratedTextureOperation;
+	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+	if (!Budget) Budget = &LocalBudget;
 	if (OutError) OutError->Reset();
 	TMap<FTextureRequestKey, FString> Cache;
 	return NormalizeTextureResourcesRecursive(Root, TextureImportPath, AssetPrefix, Cache,
-		TryBuildImageTransformTextureMaterializationPlan, CreateImageTransformTexture, nullptr, OutError);
+		TryBuildImageTransformTextureMaterializationPlan, CreateImageTransformTexture, Budget, OutError);
 }
 
 

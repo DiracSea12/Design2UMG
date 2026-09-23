@@ -8,6 +8,8 @@
 #include "Design2UMGGenerationManifest.h"
 #include "UMGSchema.h"
 
+namespace DesignImageResources { class FImageOperationBudget; }
+
 class UWidgetBlueprint;
 struct FUMGPrototypeNavigationData;
 struct FDesign2UMGGenerationOutput;
@@ -50,7 +52,7 @@ public:
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
 		FUMGPrototypeNavigationData* OutNavigationData = nullptr,
-		UWidgetBlueprint* ExistingGeneratedBlueprint = nullptr);
+		UWidgetBlueprint* ExistingGeneratedBlueprint = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
 	/**
 	 * Compile/save the WBP, then its manifest, and return the actual commit state.
