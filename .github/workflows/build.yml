@@ -80,7 +80,7 @@ jobs:
             throw "UE_ROOT is not set on runner. Point it to your UnrealEngine root."
           }
 
-          $uat = Join-Path $env:UE_ROOT "Engine\Build\BulkFiles\RunUAT.bat"
+          $uat = Join-Path $env:UE_ROOT "Engine\Build\BatchFiles\RunUAT.bat"
           if (-not (Test-Path $uat)) {
             throw "RunUAT not found at: $uat"
           }
