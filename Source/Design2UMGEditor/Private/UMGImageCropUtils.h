@@ -27,4 +27,3 @@ namespace UMGImageCropUtils
 		const FImageCropRequest& Request,
 		TFunctionRef<void(UTexture2D*)> ApplyAffineCropTexture, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 }
-

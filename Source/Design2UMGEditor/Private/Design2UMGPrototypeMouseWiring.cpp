@@ -224,7 +224,6 @@ namespace
 	}
 }
 
-
 int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
 	const FBindingPlan& Plan, const FBindingGraphTargets& Targets, TArray<FString>& OutWarnings)

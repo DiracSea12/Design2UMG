@@ -12,7 +12,6 @@
 
 using namespace Design2UMGCoreTests;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBoxShadowTextureExtentClampTest,
 	"Design2UMG.VisualMapper.BoxShadowTextureExtentClamp",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -431,4 +430,3 @@ bool FVisualMapperSubtreePaintBoundsTest::RunTest(const FString&)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

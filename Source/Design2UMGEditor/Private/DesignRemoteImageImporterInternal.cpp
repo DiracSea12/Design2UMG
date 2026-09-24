@@ -654,7 +654,6 @@ namespace DesignRemoteImageImporterInternal
 		}
 	}
 
-
 	namespace
 	{
 		struct FPublicImageTransfer

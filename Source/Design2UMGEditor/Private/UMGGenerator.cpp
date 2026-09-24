@@ -10,7 +10,7 @@
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGLog.h"
@@ -50,7 +50,7 @@ namespace
 			return;
 		}
 
-		FUMGWidgetUtils::DumpTextBlockFontStates(
+		FUMGWidgetRenderer::DumpTextBlockFontStates(
 			ELogVerbosity::Verbose,
 			Stage,
 			WidgetBlueprint->WidgetTree,
@@ -185,7 +185,7 @@ namespace
 
 	FIntPoint ReadDesignPreviewSize(UWidgetBlueprint* WBP)
 	{
-		const TOptional<FVector2D> CurrentSize = FUMGWidgetUtils::GetBlueprintDesignTimeSize(WBP);
+		const TOptional<FVector2D> CurrentSize = FUMGWidgetRenderer::GetBlueprintDesignTimeSize(WBP);
 		if (CurrentSize.IsSet())
 		{
 			return FIntPoint(
@@ -472,7 +472,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
 
-
 	FResolvedWidgetAssetTarget AssetTarget;
 	if (!ResolveWidgetAssetTarget(WidgetData, PackagePath, ExistingGeneratedBlueprint, AssetTarget))
 	{
@@ -503,7 +502,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	FDesign2UMGGenerationSettingsSnapshot FallbackGenerationSettings;
 	const FDesign2UMGGenerationSettingsSnapshot& EffectiveGenerationSettings =
 		ResolveGenerationSettingsSnapshot(GenerationSettings, FallbackGenerationSettings);
-
 
 	// Component Mapping: before generation, run two-tier matching on the IR (PreparedRoot is a copy of the
 	// WidgetData; markers affect this generation only) and write the hit Keys; no config / non-Figma documents make it a no-op, so the plain generation path is unchanged.
@@ -556,7 +554,6 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	return WBP;
 }
 
-
 FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	UWidgetBlueprint* WBP,
 	FDesign2UMGGenerationOutput* GenerationOutput,
@@ -571,7 +568,6 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 
 	Result.AssetPath = WBP->GetPathName();
 	Result.Memory = EDesign2UMGMemoryState::Modified;
-
 
 	const bool bWasNewlyCreated = WBP->GetOutermost()->HasAnyPackageFlags(PKG_NewlyCreated);
 	const auto DiscardFailedAsset = [&]()
@@ -698,7 +694,7 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	// material reference alive without the transient roots, and later consumers (preview
 	// refresh, reimport, reload) regenerate or reload from disk instead of assuming a rooted
 	// in-memory object - so the per-import root ledgers can be dropped here. Failed saves
-	// return above and keep the roots (old behavior).
+	// return above and keep the transient roots alive.
 	FProceduralShapeGenerator::ReleaseTransientTextures();
 
 	UE_LOG(LogDesign2UMG, Log, TEXT("Saved Widget Blueprint at %s"), *FullPath);

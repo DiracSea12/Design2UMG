@@ -11,7 +11,7 @@
 #include "UMGTextStyleApplication.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/RichTextBlock.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DataTable.h"
@@ -190,27 +190,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanonicalImageInputBoundaryTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCanonicalImageInputBoundaryTest::RunTest(const FString&)
 {
-	AddExpectedMessagePlain(TEXT("Brush.TexturePath conflicts with Brush.Image.TexturePath"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	const FString Input = TEXT(R"({"RootWidget":{"Type":"Overlay","Name":"Root","Children":[
-		{"Type":"Image","Name":"BothOwners","Brush":{"TexturePath":"/Game/Legacy","Image":{"TexturePath":"","Mode":"Tile","Transform":".5,0,.25,0,.75,.1"}},"WidgetStyle":{"WidthOverride":120,"ImageMode":"Crop","ImageTransform":"1,0,0,0,1,0"}},
-		{"Type":"Image","Name":"ValidAlias","Brush":{"Image":{"Transform":"invalid"}},"WidgetStyle":{"ImageMode":"Crop","ImageTransform":".2,0,0,0,.4,0"}}
+		{"Type":"Image","Name":"Canonical","Brush":{"Image":{"TexturePath":"/Game/Tex","Mode":"Tile","Transform":".5,0,.25,0,.75,.1"}},"WidgetStyle":{"WidthOverride":120}},
+		{"Type":"Image","Name":"RejectedCanonical","Brush":{"Image":{"Transform":"invalid"}}},
+		{"Type":"Image","Name":"RemovedAliases","Brush":{"TexturePath":"/Game/Legacy"},"WidgetStyle":{"ImageMode":"Crop","ImageTransform":"1,0,0,0,1,0"}}
 	]}})");
 	FUMGWidgetData Data;
-	if (!TestTrue(TEXT("Nested existing input forms parse"), FUMGJsonParser::ParseJson(Input, Data))) return false;
-	const auto& Image = Data.RootWidget.Children[0].Brush.Image;
-	TestTrue(TEXT("Explicit empty canonical path beats a nonempty root alias"), Image.TexturePath.IsSet() && Image.TexturePath->IsEmpty());
-	TestEqual(TEXT("Existing style-mode precedence is normalized at input"), Image.Mode.Get(FString()), FString(TEXT("Crop")));
-	TestTrue(TEXT("Canonical transform keeps its established precedence"), Image.Transform.IsSet() && Image.Transform->A == 0.5f);
-	TestTrue(TEXT("A valid alias replaces a rejected canonical input"), Data.RootWidget.Children[1].Brush.Image.Transform.IsSet() && Data.RootWidget.Children[1].Brush.Image.Transform->A == 0.2f);
+	if (!TestTrue(TEXT("Canonical nested image input parses"), FUMGJsonParser::ParseJson(Input, Data))) return false;
+	const auto& Canonical = Data.RootWidget.Children[0].Brush.Image;
+	TestTrue(TEXT("Canonical texture path is typed"), Canonical.TexturePath.IsSet() && Canonical.TexturePath->Equals(TEXT("/Game/Tex")));
+	TestEqual(TEXT("Canonical mode is typed"), Canonical.Mode.Get(FString()), FString(TEXT("Tile")));
+	TestTrue(TEXT("Canonical transform is typed"), Canonical.Transform.IsSet() && Canonical.Transform->A == 0.5f);
+	const auto& Rejected = Data.RootWidget.Children[1].Brush.Image;
+	TestFalse(TEXT("Invalid canonical transform stays unset"), Rejected.Transform.IsSet());
+	const auto& Removed = Data.RootWidget.Children[2].Brush.Image;
+	TestFalse(TEXT("Removed root texture alias is not read"), Removed.TexturePath.IsSet());
+	TestFalse(TEXT("Removed style image-mode alias is not read"), Removed.Mode.IsSet());
+	TestFalse(TEXT("Removed style image-transform alias is not read"), Removed.Transform.IsSet());
 	const auto Serialized = FUMGJsonSerializer::SerializeWidgetNode(Data.RootWidget.Children[0]);
-	TestFalse(TEXT("Output brush has no duplicate texture owner"), Serialized->GetObjectField(TEXT("Brush"))->HasField(TEXT("TexturePath")));
+	TestFalse(TEXT("Output brush has a single texture owner"), Serialized->GetObjectField(TEXT("Brush"))->HasField(TEXT("TexturePath")));
 	const auto Style = Serialized->GetObjectField(TEXT("WidgetStyle"));
-	TestFalse(TEXT("Output style has no duplicate image mode"), Style->HasField(TEXT("ImageMode")));
+	TestFalse(TEXT("Output style has no image mode"), Style->HasField(TEXT("ImageMode")));
 	TestFalse(TEXT("Output style has no string transform owner"), Style->HasField(TEXT("ImageTransform")));
 	FUMGWidgetData SerializationCycle;
-	TestTrue(TEXT("Canonical output parses again without aliases or diagnostics"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), SerializationCycle));
-	TestTrue(TEXT("Transform remains typed across the boundary"), SerializationCycle.RootWidget.Children[0].Brush.Image.Transform.IsSet() && SerializationCycle.RootWidget.Children[0].Brush.Image.Transform->A == Image.Transform->A);
+	TestTrue(TEXT("Canonical output parses again without diagnostics"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), SerializationCycle));
+	TestTrue(TEXT("Transform remains typed across the boundary"), SerializationCycle.RootWidget.Children[0].Brush.Image.Transform.IsSet() && SerializationCycle.RootWidget.Children[0].Brush.Image.Transform->A == Canonical.Transform->A);
 	return true;
 }
 
@@ -247,7 +252,7 @@ bool FTypedRichTextRowsBoundaryTest::RunTest(const FString&)
 	FTextBlockStyle Default = FTextBlockStyle::GetDefault();
 	Default.Font.Size = 17.0f;
 	Widget->SetDefaultTextStyle(Default);
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 	UDataTable* Table = Widget->GetTextStyleSet();
 	if (!TestNotNull(TEXT("Typed rows materialize a style table"), Table)) return false;
 	const FRichTextStyleRow* Applied = Table->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("TypedRows"));
@@ -257,11 +262,11 @@ bool FTypedRichTextRowsBoundaryTest::RunTest(const FString&)
 	TestTrue(TEXT("Strikethrough remains independent"), Applied->TextStyle.StrikeBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
 	const FUMGWidgetNode Invalid = ParseRows(TEXT("not-json"));
 	TestFalse(TEXT("Invalid external JSON is not carried through the IR"), Invalid.Text.RichTextStyleRows.IsSet());
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Invalid);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Invalid);
 	TestEqual(TEXT("Invalid input does not clear an existing style table"), Table->GetRowMap().Num(), 1);
 	const FUMGWidgetNode Empty = ParseRows(TEXT("{}"));
 	TestTrue(TEXT("Explicit empty rows remain distinct from absence"), Empty.Text.RichTextStyleRows.IsSet() && Empty.Text.RichTextStyleRows->IsEmpty());
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Empty);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Empty);
 	TestEqual(TEXT("Explicit empty rows clear the table"), Table->GetRowMap().Num(), 0);
 	TestTrue(TEXT("Reused table retains its schema and owner"), Table->RowStruct == FRichTextStyleRow::StaticStruct() && Table->GetOuter() == Widget);
 	return true;

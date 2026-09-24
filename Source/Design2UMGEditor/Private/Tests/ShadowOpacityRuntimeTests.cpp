@@ -3,7 +3,7 @@
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "WidgetBlueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "ImageUtils.h"
@@ -46,7 +46,7 @@ bool FShadowOpacityRuntimeTest::RunTest(const FString&)
 		TArray<uint8> Png;
 		FIntPoint Size;
 		FString Error;
-		if (!TestTrue(TEXT("Render compiled widget"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
+		if (!TestTrue(TEXT("Render compiled widget"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 		FImage Image;
 		if (!TestTrue(TEXT("Decode rendered PNG"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 		if (!TestTrue(TEXT("Expected pixel surface"), Image.Format == ERawImageFormat::BGRA8 && Image.SizeX >= 220 && Image.SizeY >= 160)) return false;

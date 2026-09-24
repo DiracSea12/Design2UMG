@@ -15,7 +15,7 @@
 #include "FigmaParser.h"
 #include "DesignLocalFontImport.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "UMGJsonSerializer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Blueprint/UserWidget.h"
@@ -40,7 +40,7 @@ namespace
 
 	FName SlotName(const FString& Path)
 	{
-		return FUMGWidgetUtils::SanitizeWidgetName(TEXT("D2U_Content_") + Path, TEXT("NamedSlot"));
+		return FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("D2U_Content_") + Path, TEXT("NamedSlot"));
 	}
 
 	void ExposeContent(FUMGWidgetNode& Node, const FString& Path,
@@ -160,7 +160,6 @@ namespace
 		return Error.IsEmpty();
 	}
 
-
 	bool FindExisting(const FUMGWidgetData& Data, const FString& Folder,
 		UWidgetBlueprint*& Blueprint, FString& Error, bool bWholeAssetOwned = true)
 	{
@@ -228,7 +227,7 @@ bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, 
 			Content.Slot = FUMGSlotData();
 			FDesign2UMGComponentMappingBuildState Mapping(Settings.ComponentMapping);
 			Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(Content, Settings.ComponentMapping, Component->Data, Mapping);
-			UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(OwnerTree, Content, nullptr, Textures, DesignSize, &Mapping, nullptr, &Settings, Budget);
+			UWidget* Widget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(OwnerTree, Content, nullptr, Textures, DesignSize, &Mapping, nullptr, &Settings, Budget);
 			if (!Widget) return false;
 			if (Ownership) Ownership->IncludeInstanceContent(Mapping);
 			Instance->SetContentForSlot(SlotName(Path), Widget);

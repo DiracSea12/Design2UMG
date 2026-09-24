@@ -3,7 +3,7 @@
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "ImageUtils.h"
 #include "ImageCore.h"
 #include "Misc/ScopeExit.h"
@@ -61,7 +61,7 @@ bool FFigmaNestedStretchPaddingRuntimeTest::RunTest(const FString&)
  TArray<uint8> Png;
  FIntPoint Size;
  FString Error;
- if (!TestTrue(TEXT("Generated widget renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
+ if (!TestTrue(TEXT("Generated widget renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
  FImage Image;
  if (!TestTrue(TEXT("Decode runtime render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
  if (!TestTrue(TEXT("BGRA8 runtime pixels"), Image.Format == ERawImageFormat::BGRA8)) return false;

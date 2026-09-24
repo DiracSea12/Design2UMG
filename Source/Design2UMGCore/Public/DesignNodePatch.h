@@ -6,7 +6,13 @@
 
 struct FDesignNode;
 
-/** Authored partial state: unset preserves the base; present empty strings/arrays clear it. */
+/**
+ * Authored partial state: unset preserves the base; present empty strings/arrays clear it.
+ *
+ * Field contract: every field listed here must be handled by both RefExpander.cpp merge
+ * points — MergePatch (patch-on-patch) and ApplyPatch (patch-on-node). Adding a field
+ * without updating both leaves it silently dropped during reference-instance expansion.
+ */
 struct FDesignNodePatch
 {
 	TOptional<FString> Name;

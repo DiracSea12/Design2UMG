@@ -21,7 +21,6 @@
 
 using namespace Design2UMGCoreTests;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextWidgetBuilderRichTextMarkupContractTest,
 	"Design2UMG.TextWidgetBuilder.RichTextMarkupContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -304,4 +303,3 @@ bool FTextWidgetBuilderMultilineMarkupTest::RunTest(const FString&)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

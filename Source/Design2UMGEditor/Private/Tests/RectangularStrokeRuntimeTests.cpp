@@ -3,7 +3,7 @@
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "WidgetBlueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "ImageUtils.h"
@@ -140,7 +140,7 @@ bool FSingleFlowPositionElisionTest::RunTest(const FString&)
 			TArray<uint8> Png;
 			FIntPoint Size;
 			FString Error;
-			if (!TestTrue(TEXT("Render single flow blueprint"), FUMGWidgetUtils::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
+			if (!TestTrue(TEXT("Render single flow blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 			FImage& Image = Images.AddDefaulted_GetRef();
 			if (!TestTrue(TEXT("Decode single flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 		}
@@ -218,7 +218,7 @@ bool FSingleAutoFlowPositionElisionTest::RunTest(const FString&)
 			TArray<uint8> Png;
 			FIntPoint Size;
 			FString Error;
-			if (!TestTrue(TEXT("Render fixed-child flow blueprint"), FUMGWidgetUtils::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
+			if (!TestTrue(TEXT("Render fixed-child flow blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 			FImage& Image = Images.AddDefaulted_GetRef();
 			if (!TestTrue(TEXT("Decode fixed-child flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 		}
@@ -349,7 +349,7 @@ bool FStrokeSizeConstraintPromotionTest::RunTest(const FString&)
 		TArray<uint8> Png;
 		FIntPoint Size;
 		FString Error;
-		if (!TestTrue(TEXT("Render constrained stroke blueprint"), FUMGWidgetUtils::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
+		if (!TestTrue(TEXT("Render constrained stroke blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 		FImage& Image = Images.AddDefaulted_GetRef();
 		if (!TestTrue(TEXT("Decode constrained stroke render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 	}
@@ -480,7 +480,7 @@ bool FCompactRectangularStrokeTest::RunTest(const FString&)
 			TArray<uint8> Png;
 			FIntPoint Size;
 			FString Error;
-			return TestTrue(TEXT("Render stroke"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error))
+			return TestTrue(TEXT("Render stroke"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))
 			&& TestTrue(TEXT("Decode stroke"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image));
 		};
 		FImage Actual, Expected;
@@ -546,7 +546,7 @@ bool FRectangularStrokeRuntimeTest::RunTest(const FString&)
 		TArray<uint8> Png;
 		FIntPoint Size;
 		FString Error;
-		if (!TestTrue(TEXT("Compiled widget renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
+		if (!TestTrue(TEXT("Compiled widget renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 		FImage Image;
 		if (!TestTrue(TEXT("Decode runtime pixels"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 		if (!TestTrue(TEXT("Expected BGRA8 image"), Image.Format == ERawImageFormat::BGRA8)) return false;

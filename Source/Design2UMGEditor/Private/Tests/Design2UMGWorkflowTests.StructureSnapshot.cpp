@@ -3,7 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
@@ -249,7 +249,7 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 	HostNode.Children.Add(BodySecondaryNode);
 	RootNode.Children.Add(HostNode);
 
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(Blueprint->WidgetTree, RootNode);
+	UWidget* RootWidget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(Blueprint->WidgetTree, RootNode);
 	TestNotNull(TEXT("Root widget created"), RootWidget);
 	if (!RootWidget)
 	{

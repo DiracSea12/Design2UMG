@@ -40,4 +40,3 @@ namespace Design2UMGTextWidgetBuilder
 		const TSharedPtr<FDesignNode>& Node,
 		const FIconFontBuildArgs& Args = FIconFontBuildArgs());
 }
-

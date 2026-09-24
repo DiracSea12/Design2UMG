@@ -7,7 +7,7 @@
 #include "UMGSchema.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/TextBlock.h"
 #include "UObject/Package.h"
 
@@ -62,19 +62,19 @@ bool FImageTransformJsonValidationTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* Inputs[] = { TEXT("1,0,0,0,1,0"), TEXT("bad,0,0,0,1,0"), TEXT("1,0,0,0,1,NaN"), TEXT("1,0,1e39,0,1,0"), TEXT("1,,0,0,0,1,0"), TEXT("1,0,0,0,1,0junk") };
 	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(Inputs) - 1);
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 2 * (UE_ARRAY_COUNT(Inputs) - 1));
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Inputs); ++Index)
 	{
 		const bool bValid = Index == 0;
 
-		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"NumericInput","Brush":{"Image":{"Transform":"%s"}},"WidgetStyle":{"ImageTransform":"%s"}}})"), Inputs[Index], Inputs[Index]);
+		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"NumericInput","Brush":{"Image":{"Transform":"%s"}}}})"), Inputs[Index]);
 		FUMGWidgetData Data;
 		TestTrue(TEXT("Malformed optional transform does not reject the widget"), FUMGJsonParser::ParseJson(Json, Data));
 		TestEqual(TEXT("Typed transform presence reflects successful parsing"), Data.RootWidget.Brush.Image.Transform.IsSet(), bValid);
+
 		FUMGWidgetData AliasData;
-		TestTrue(TEXT("Alias-only widget parses"), FUMGJsonParser::ParseJson(
+		TestTrue(TEXT("Removed alias-only widget still parses"), FUMGJsonParser::ParseJson(
 			FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"AliasInput","WidgetStyle":{"ImageTransform":"%s"}}})"), Inputs[Index]), AliasData));
-		TestEqual(TEXT("String alias reaches only the validated canonical owner"), AliasData.RootWidget.Brush.Image.Transform.IsSet(), bValid);
+		TestFalse(TEXT("Removed style alias is not read for any input"), AliasData.RootWidget.Brush.Image.Transform.IsSet());
 	}
 	return true;
 }
@@ -164,12 +164,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageCropStrictParsingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImageCropStrictParsingTest::RunTest(const FString& Parameters)
 {
-	const auto ParseCropNode = [this](const FString& Transform, const FString& Brush = TEXT("{}"))
+	const auto ParseCropNode = [this](const FString& Transform)
 	{
 		FUMGWidgetData Data;
 		TestTrue(TEXT("Crop input parses"), FUMGJsonParser::ParseJson(FString::Printf(
-			TEXT(R"({"RootWidget":{"Type":"Image","Name":"CropInput","Brush":%s,"WidgetStyle":{"ImageMode":"Crop","WidthOverride":120,"HeightOverride":80,"ImageTransform":"%s"}}})"),
-			*Brush, *Transform), Data));
+			TEXT(R"({"RootWidget":{"Type":"Image","Name":"CropInput","Brush":{"Image":{"Mode":"Crop","Transform":"%s"}},"WidgetStyle":{"WidthOverride":120,"HeightOverride":80}}})"),
+			*Transform), Data));
 		return Data.RootWidget;
 	};
 	FUMGWidgetNode Node;
@@ -182,16 +182,16 @@ bool FImageCropStrictParsingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Crop height is preserved"), Request.OutputHeight, 80);
 	const FString Previous = Design2UMGWidgetNodeAccess::SerializeImageTransform(Request.Transform);
 	const TCHAR* InvalidInputs[] = { TEXT("1,0,0,0,1,junk"), TEXT("1,0,0,0,1,NaN"), TEXT("1,0,0,0,1,1e39"), TEXT("1,,0,0,0,1,0") };
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidInputs) + 1);
+	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidInputs));
 	for (const TCHAR* Input : InvalidInputs)
 	{
 		Node = ParseCropNode(Input);
 		TestFalse(TEXT("Malformed input cannot reach cropping"), UMGImageCropUtils::TryBuildCropRequest(Node, Request));
 		TestEqual(TEXT("Rejected transform leaves the previous request untouched"), Design2UMGWidgetNodeAccess::SerializeImageTransform(Request.Transform), Previous);
 	}
-	Node = ParseCropNode(InvalidInputs[0], TEXT(R"({"Image":{"Transform":"1,0,0,0,1,0"}})"));
-	TestTrue(TEXT("Canonical transform takes precedence over an invalid alias"), UMGImageCropUtils::TryBuildCropRequest(Node, Request));
-	TestTrue(TEXT("Typed identity reaches the crop request unchanged"), Request.Transform.IsIdentity());
+	Node = ParseCropNode(TEXT("1,0,0,0,1,0"));
+	TestTrue(TEXT("Typed identity reaches the crop request unchanged"), UMGImageCropUtils::TryBuildCropRequest(Node, Request));
+	TestTrue(TEXT("Identity transform is preserved"), Request.Transform.IsIdentity());
 	return true;
 }
 
@@ -239,7 +239,7 @@ bool FVectorJsonFailurePresenceTest::RunTest(const FString& Parameters)
 		UTextBlock* Widget = NewObject<UTextBlock>(GetTransientPackage());
 		const FVector2D ExistingScale(3, 4);
 		Widget->SetRenderScale(ExistingScale);
-		FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 		TestTrue(TEXT("Invalid scale does not change the real widget; explicit zero still applies"), Widget->GetRenderTransform().Scale.Equals(Case.Expected.Get(ExistingScale)));
 	}
 	return true;
@@ -253,18 +253,18 @@ bool FNumericJsonWrongTypeTest::RunTest(const FString& Parameters)
 	FUMGWidgetData Empty;
 	TestTrue(TEXT("Missing numeric fields are allowed without warnings"), FUMGJsonParser::ParseJson(TEXT(R"({"RootWidget":{"Type":"Image","Name":"NoFields"}})"), Empty));
 	const TCHAR* InvalidValues[] = { TEXT("null"), TEXT("[1,2,3,4]"), TEXT("{}"), TEXT("false"), TEXT("123"), TEXT("\"\"") };
-	for (const TCHAR* Field : { TEXT("WidgetStyle.ImageTransform"), TEXT("Brush.Image.Transform"), TEXT("Brush.CornerRadii"), TEXT("Effect.GeometryMaskCornerRadii") })
+	for (const TCHAR* Field : { TEXT("Brush.Image.Transform"), TEXT("Brush.CornerRadii"), TEXT("Effect.GeometryMaskCornerRadii") })
 	{
 		AddExpectedMessagePlain(FString::Printf(TEXT("FUMGJsonParser: Invalid %s"), Field), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidValues));
 	}
 	for (const TCHAR* Value : InvalidValues)
 	{
 		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"WrongType",
-			"WidgetStyle":{"ImageTransform":%s},"Brush":{"Image":{"Transform":%s},"CornerRadii":%s},
-			"Effect":{"GeometryMaskCornerRadii":%s}}})"), Value, Value, Value, Value);
+			"Brush":{"Image":{"Transform":%s},"CornerRadii":%s},
+			"Effect":{"GeometryMaskCornerRadii":%s}}})"), Value, Value, Value);
 		FUMGWidgetData Data;
 		TestTrue(TEXT("Bad optional field is diagnosed without losing the widget"), FUMGJsonParser::ParseJson(Json, Data));
-		TestFalse(TEXT("Invalid canonical and alias transforms stay absent"), Data.RootWidget.Brush.Image.Transform.IsSet());
+		TestFalse(TEXT("Invalid canonical transform stays absent"), Data.RootWidget.Brush.Image.Transform.IsSet());
 		TestFalse(TEXT("Invalid brush radii stay absent"), Data.RootWidget.Brush.CornerRadii.IsSet());
 		TestFalse(TEXT("Invalid mask radii stay absent"), Data.RootWidget.Effect.GeometryMaskCornerRadii.IsSet());
 	}

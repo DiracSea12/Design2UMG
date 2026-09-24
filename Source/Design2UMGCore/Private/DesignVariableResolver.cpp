@@ -198,6 +198,3 @@ FDesignCornerRadius FDesignVariableResolver::ResolveCornerRadius(const TSharedPt
 
 	return Result;
 }
-
-
-

@@ -13,7 +13,7 @@
 #include "UMGGenerator.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
@@ -2033,8 +2033,8 @@ bool FFigmaPrototypeOverlayRuntimeSmokeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Overlay-target page is parented under the host"), HostTemplate->GetChildrenCount(), 1);
 	UWidget* HostedPageTemplate = HostTemplate->GetChildAt(0);
 	TestTrue(TEXT("Hosted page is the overlay target (2:1)"),
-		HostedPageTemplate && FUMGWidgetUtils::MatchesWidgetBaseName(
-			HostedPageTemplate->GetName(), FUMGWidgetUtils::SanitizeWidgetName(TEXT("2:1"), TEXT("CanvasPanel")).ToString()));
+		HostedPageTemplate && FUMGWidgetTreeBuilder::MatchesWidgetBaseName(
+			HostedPageTemplate->GetName(), FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("2:1"), TEXT("CanvasPanel")).ToString()));
 	TestEqual(TEXT("Hosted page defaults to collapsed"), HostedPageTemplate->GetVisibility(), ESlateVisibility::Collapsed);
 	TestEqual(TEXT("Switcher keeps only the non-overlay flow page"), SwitcherTemplate->GetChildrenCount(), 1);
 
@@ -2225,9 +2225,9 @@ bool FFigmaPrototypeDualTargetOverlayMirrorRuntimeSmokeTest::RunTest(const FStri
 
 	// Manifest ownership: the mirror widgets are D2U-owned regenerated chrome, recorded by their
 	// constructed (sanitized) names.
-	const FString MirrorPageWidgetName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString MirrorPageWidgetName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		FString(TEXT("2:1")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("CanvasPanel")).ToString();
-	const FString MirrorBackButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString MirrorBackButtonName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		FString(TEXT("back_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
 	TestTrue(TEXT("Mirror page name lands in the manifest D2U-owned set"),
 		GenerationOutput.Manifest.D2UOwnedNames.Contains(MirrorPageWidgetName));
@@ -2252,7 +2252,7 @@ bool FFigmaPrototypeDualTargetOverlayMirrorRuntimeSmokeTest::RunTest(const FStri
 	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
 	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("overlay_button"))) : nullptr;
 	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
-	const FString MirrorNavButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString MirrorNavButtonName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		FString(TEXT("mirror_nav_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
 	UButton* MirrorBackButton = WidgetInstance->WidgetTree
 		? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(FName(*MirrorBackButtonName))) : nullptr;
@@ -2379,9 +2379,9 @@ bool FFigmaPrototypeInitialPageOverlayMirrorRuntimeSmokeTest::RunTest(const FStr
 	UButton* NavButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("nav_button"))) : nullptr;
 	UButton* OverlayButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("open_overlay_button"))) : nullptr;
 	UButton* BackButton = WidgetInstance->WidgetTree ? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("back_button"))) : nullptr;
-	const FString MirrorPageWidgetName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString MirrorPageWidgetName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		FString(TEXT("1:1")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("CanvasPanel")).ToString();
-	const FString MirrorNavButtonName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString MirrorNavButtonName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		FString(TEXT("nav_button")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("Button")).ToString();
 	UButton* MirrorNavButton = WidgetInstance->WidgetTree
 		? Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(FName(*MirrorNavButtonName))) : nullptr;
@@ -2415,9 +2415,9 @@ bool FFigmaPrototypeInitialPageOverlayMirrorRuntimeSmokeTest::RunTest(const FStr
 	TestEqual(TEXT("Host carries only the mirror copy"), Host->GetChildrenCount(), 1);
 	TestEqual(TEXT("Startup active index is unchanged"), Switcher->GetActiveWidgetIndex(), 0);
 	TestTrue(TEXT("Startup page shown is the initial page"),
-		Switcher->GetActiveWidget() && FUMGWidgetUtils::MatchesWidgetBaseName(
+		Switcher->GetActiveWidget() && FUMGWidgetTreeBuilder::MatchesWidgetBaseName(
 			Switcher->GetActiveWidget()->GetName(),
-			FUMGWidgetUtils::SanitizeWidgetName(TEXT("1:1"), TEXT("CanvasPanel")).ToString()));
+			FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("1:1"), TEXT("CanvasPanel")).ToString()));
 	TestEqual(TEXT("Mirror starts collapsed"), MirrorPage->GetVisibility(), ESlateVisibility::Collapsed);
 	TestEqual(TEXT("History starts empty"), HistoryNum(), 0);
 

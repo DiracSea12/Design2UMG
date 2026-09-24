@@ -38,4 +38,3 @@ public:
 	 */
 	static FUMGWidgetData Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings);
 };
-

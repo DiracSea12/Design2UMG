@@ -14,7 +14,6 @@
 
 using namespace Design2UMGCoreTests;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperWrapWithBorderDirectTest,
 	"Design2UMG.VisualMapper.WrapWithBorderDirect",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

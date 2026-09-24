@@ -8,7 +8,7 @@
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/Border.h"
 #include "Components/Image.h"
 #include "TextureResource.h"
@@ -238,12 +238,12 @@ bool FPropertyApplierExplicitEmptyMaterialRefBlocksTextureFallback::RunTest(cons
 	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineMaterials/DefaultDiffuse");
 
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 	TestTrue(TEXT("Image explicit empty MaterialRef blocks TexturePath fallback"),
 		ImageWidget->GetBrush().GetResourceObject() == nullptr);
 
 	UBorder* BorderWidget = NewObject<UBorder>();
-	FUMGWidgetUtils::ApplyWidgetProperties(BorderWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(BorderWidget, Node);
 	TestTrue(TEXT("Border explicit empty MaterialRef blocks TexturePath fallback"),
 		BorderWidget->Background.GetResourceObject() == nullptr);
 
@@ -264,7 +264,7 @@ bool FPropertyApplierBorderBrushColorSurvivesBrushMutation::RunTest(const FStrin
 	Node.Brush.DrawAs = ESlateBrushDrawType::Image;
 
 	UBorder* BorderWidget = NewObject<UBorder>();
-	FUMGWidgetUtils::ApplyWidgetProperties(BorderWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(BorderWidget, Node);
 
 	TestTrue(TEXT("Border brush color survives final brush assignment"),
 		BorderWidget->GetBrushColor().Equals(ExpectedColor, 0.0001f));
@@ -285,7 +285,7 @@ bool FPropertyApplierUsesSharedAxisAlignedCropSemantics::RunTest(const FString& 
 	Node.Brush.Image.Mode = TEXT("Crop");
 	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 0.5f, 0.0f, 0.25f, 0.0f, 0.75f, 0.1f };
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
 	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
 	TestTrue(TEXT("Property applier axis crop preserves UV min X"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.25f, 0.0001f));
@@ -314,7 +314,7 @@ bool FPropertyApplierNormalizesTypedAxisAlignedCropTransform::RunTest(const FStr
 	Transform.TY = 0.10000049f;
 	Node.Brush.Image.Transform = Transform;
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
 	// Compute UV bounds directly from payload floats: (TX, TY) to (TX + A, TY + D).
 	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
@@ -340,7 +340,7 @@ bool FPropertyApplierUsesSharedAffineCropSemantics::RunTest(const FString& Param
 	Node.WidgetStyle.HeightOverride = 6.0f;
 
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
 	UTexture2D* BoundTexture = Cast<UTexture2D>(ImageWidget->GetBrush().GetResourceObject());
 	if (!TestNotNull(TEXT("Property applier affine crop produces a texture"), BoundTexture))
@@ -377,7 +377,7 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	Node.WidgetStyle.HeightOverride = 6.0f;
 
 	UImage* ImageWidget = NewObject<UImage>();
-	FUMGWidgetUtils::ApplyWidgetProperties(ImageWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
 	TMap<FString, UTexture2D*> TextureMap;
 	TextureMap.Add(TextureKey, SourceTexture);

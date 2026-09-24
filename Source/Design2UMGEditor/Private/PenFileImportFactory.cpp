@@ -108,6 +108,3 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 }
 
 #undef LOCTEXT_NAMESPACE
-
-
-

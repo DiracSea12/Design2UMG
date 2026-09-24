@@ -50,7 +50,6 @@ public:
 
 	bool IsConnected() const { return Session.IsValid() && !Session->SessionId.IsEmpty(); }
 
-
 private:
 	/** Shared delivered-flag for the in-flight request's cancel-failure path. */
 	struct FInFlightCancelState

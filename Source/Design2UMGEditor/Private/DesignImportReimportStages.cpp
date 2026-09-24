@@ -3,7 +3,7 @@
 #include "DesignImportReimportInternal.h"
 
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/ContentWidget.h"
@@ -253,9 +253,9 @@ namespace DesignImportPipeline
 			{
 				return false;
 			}
-			const FString ParentBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+			const FString ParentBaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 				ParentNode.Name, ParentNode.Type).ToString();
-			return FUMGWidgetUtils::MatchesWidgetBaseName(
+			return FUMGWidgetTreeBuilder::MatchesWidgetBaseName(
 				Widget->GetParent()->GetFName().ToString(), ParentBaseName);
 		}
 

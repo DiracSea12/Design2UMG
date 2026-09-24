@@ -251,5 +251,3 @@ void FFigmaImageExporter::ExportVectorNodes(
 			if (OnComplete) OnComplete(true, IdToUrl);
 		});
 }
-
-

@@ -123,4 +123,3 @@ void FDesign2UMGNotification::Info(const FText& Message)
 
 	LogNotificationFallback(ENotificationFallbackVerbosity::Info, TEXT("Info: "), Message);
 }
-

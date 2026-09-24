@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportPlanning.h"
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
 #include "Design2UMGNotifications.h"
 #include "PencilConnector.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
@@ -204,7 +204,7 @@ bool FGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
 	{
 		FScopedNotificationCapture Notifications;
 		FCancelAfterProgressPollFeedbackContext Cancellation(2);
-		UWidgetBlueprint* CancelledBlueprint = DesignImportUtils::GenerateBlueprint(
+		UWidgetBlueprint* CancelledBlueprint = DesignImportGeneration::GenerateBlueprint(
 			MakeCancelBoundaryWidgetData(TEXT("WBP_GenerationCancelBeforeMutation")),
 			OutputDir,
 			nullptr,
@@ -223,7 +223,7 @@ bool FGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
 	{
 		FScopedNotificationCapture Notifications;
 		FCancelAfterProgressPollFeedbackContext Cancellation(6);
-		UWidgetBlueprint* CompletedBlueprint = DesignImportUtils::GenerateBlueprint(
+		UWidgetBlueprint* CompletedBlueprint = DesignImportGeneration::GenerateBlueprint(
 			MakeCancelBoundaryWidgetData(TEXT("WBP_GenerationCancelAfterMutation")),
 			OutputDir,
 			nullptr,
@@ -245,7 +245,7 @@ bool FGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
 
 	{
 		FScopedNotificationCapture Notifications;
-		UWidgetBlueprint* CompletedBlueprint = DesignImportUtils::GenerateBlueprint(
+		UWidgetBlueprint* CompletedBlueprint = DesignImportGeneration::GenerateBlueprint(
 			MakeCancelBoundaryWidgetData(TEXT("WBP_UncancelledGeneration")),
 			OutputDir);
 

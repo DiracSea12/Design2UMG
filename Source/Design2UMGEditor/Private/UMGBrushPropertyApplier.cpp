@@ -91,7 +91,6 @@ namespace UMGBrushPropertyApplier
 			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
 		}
 
-
 		FSlateBrush Brush = Image->GetBrush();
 		bool bBrushModified = false;
 		if (Node.WidgetStyle.WidthOverride.IsSet())

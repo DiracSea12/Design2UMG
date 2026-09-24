@@ -3,7 +3,7 @@
 #include "DesignImportReimportInternal.h"
 
 #include "Design2UMGComponentBlueprints.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelSlot.h"
@@ -49,7 +49,7 @@ namespace DesignImportPipeline
 
 			UWidget* Create(const FUMGWidgetNode& Node)
 			{
-				UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(Shared.WidgetTree, Node, nullptr,
+				UWidget* Widget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(Shared.WidgetTree, Node, nullptr,
 					nullptr, &Shared.DesignSize, &State, nullptr, Shared.GenerationSettings, Shared.Budget);
 				if (!Widget)
 				{

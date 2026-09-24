@@ -69,7 +69,6 @@ namespace
 
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLuminosityImageOverlayTest,
 	"Design2UMG.FigmaParser.LuminosityImageOverlay",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -261,4 +260,3 @@ bool FFigmaLuminosityIdentityTransformOverlayTest::RunTest(const FString& Parame
 }
 
 #endif
-

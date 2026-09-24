@@ -12,7 +12,7 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Design2UMGTestNodes.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/BackgroundBlur.h"
@@ -209,7 +209,7 @@ bool FWidgetClassOverrideDefaultSnapshotTest::RunTest(const FString& Parameters)
 	}
 
 	const FDesign2UMGGenerationSettingsSnapshot EmptySnapshot;
-	UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(
+	UWidget* Widget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(
 		WidgetTree,
 		MakeSimpleTextNode(TEXT("DefaultClassNode")),
 		nullptr,
@@ -240,7 +240,7 @@ bool FWidgetClassOverrideCustomSnapshotTest::RunTest(const FString& Parameters)
 	OverrideRule.NamePattern = TEXT("OverrideNode");
 	OverrideRule.WidgetClass = UBorder::StaticClass();
 
-	UWidget* Widget = FUMGWidgetUtils::CreateWidgetRecursive(
+	UWidget* Widget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(
 		WidgetTree,
 		MakeSimpleTextNode(TEXT("OverrideNode_Content")),
 		nullptr,
@@ -636,34 +636,34 @@ bool FGeneratedWidgetSuffixContractTest::RunTest(const FString&)
 	const FString Base = TEXT("TooltipText");
 
 	// Accepted generated shapes.
-	TestTrue(TEXT("bare base name matches"), FUMGWidgetUtils::MatchesWidgetBaseName(Base, Base));
-	TestTrue(TEXT("numeric dedup tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_1"), Base));
-	TestTrue(TEXT("high numeric dedup tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_42"), Base));
-	TestTrue(TEXT("property-collision tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w1"), Base));
-	TestTrue(TEXT("uppercase W tail matches"), FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_W2"), Base));
+	TestTrue(TEXT("bare base name matches"), FUMGWidgetTreeBuilder::MatchesWidgetBaseName(Base, Base));
+	TestTrue(TEXT("numeric dedup tail matches"), FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_1"), Base));
+	TestTrue(TEXT("high numeric dedup tail matches"), FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_42"), Base));
+	TestTrue(TEXT("property-collision tail matches"), FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_w1"), Base));
+	TestTrue(TEXT("uppercase W tail matches"), FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_W2"), Base));
 
 	// Rejected: mirror suffix, zero ordinals, non-numeric tails, other bases.
 	TestFalse(TEXT("overlay mirror suffix never matches a base name"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText__d2u_ov"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText__d2u_ov"), Base));
 	TestFalse(TEXT("zero numeric ordinal is rejected"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_0"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_0"), Base));
 	TestFalse(TEXT("zero w-ordinal is rejected"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w0"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_w0"), Base));
 	TestFalse(TEXT("bare w with no digits is rejected"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_w"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_w"), Base));
 	TestFalse(TEXT("word tail starting with w is rejected"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText_widget"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText_widget"), Base));
 	TestFalse(TEXT("different base does not match"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipTextX_1"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipTextX_1"), Base));
 	TestFalse(TEXT("missing separator does not match"),
-		FUMGWidgetUtils::MatchesWidgetBaseName(TEXT("TooltipText1"), Base));
+		FUMGWidgetTreeBuilder::MatchesWidgetBaseName(TEXT("TooltipText1"), Base));
 
-	const int32 RankBase = FUMGWidgetUtils::GetWidgetNameSuffixRank(Base, Base);
-	const int32 RankNumeric1 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_1"), Base);
-	const int32 RankProperty1 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_w1"), Base);
-	const int32 RankNumeric2 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_2"), Base);
-	const int32 RankProperty2 = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText_w2"), Base);
-	const int32 RankUnmatched = FUMGWidgetUtils::GetWidgetNameSuffixRank(TEXT("TooltipText__d2u_ov"), Base);
+	const int32 RankBase = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(Base, Base);
+	const int32 RankNumeric1 = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(TEXT("TooltipText_1"), Base);
+	const int32 RankProperty1 = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(TEXT("TooltipText_w1"), Base);
+	const int32 RankNumeric2 = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(TEXT("TooltipText_2"), Base);
+	const int32 RankProperty2 = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(TEXT("TooltipText_w2"), Base);
+	const int32 RankUnmatched = FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(TEXT("TooltipText__d2u_ov"), Base);
 
 	TestEqual(TEXT("base name ranks first"), RankBase, 0);
 	TestEqual(TEXT("non-generated names rank last"), RankUnmatched, MAX_int32);

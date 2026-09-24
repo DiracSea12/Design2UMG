@@ -5,7 +5,7 @@
 #include "DesignImportReimportInternal.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/CanvasPanel.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"

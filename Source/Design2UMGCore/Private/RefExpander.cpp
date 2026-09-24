@@ -482,7 +482,6 @@ namespace
 			MarkExpandedRefInstanceRecursive(Result.ExpandedNode);
 		}
 
-
 		RefChain.Remove(RefTargetId);
 		return Result;
 	}
@@ -524,6 +523,7 @@ FDesignReferenceExpansionResult RefExpander::ExpandRef(
 	const FString EntryNodeId = RefNode.IsValid() ? RefNode->Id : FString();
 	return ExpandRefInternal(RefNode, ReusableNodesById, RefChain, EntryNodeId);
 }
+
 void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override)
 {
 	if (!Node.IsValid())

@@ -66,7 +66,6 @@ public:
 		FDesign2UMGGenerationOutput* GenerationOutput = nullptr,
 		const FUMGPrototypeNavigationData* PrototypeNavigation = nullptr);
 
-
 	/** Failure cleanup for component batches whose existing assets passed the clean/owned preflight. */
 	static EDesign2UMGMemoryState RestoreUnsavedComponentBulk(const TArray<UWidgetBlueprint*>& Assets, FDesign2UMGGenerationOutput* Output);
 private:
@@ -75,4 +74,3 @@ private:
 	static FDesign2UMGCommitResult SaveSingleWidgetBlueprint(UWidgetBlueprint* WBP, FDesign2UMGGenerationOutput* GenerationOutput,
 		const FUMGPrototypeNavigationData* PrototypeNavigation);
 };
-

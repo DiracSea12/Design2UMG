@@ -1175,7 +1175,6 @@ bool FPreviewWindowHarnessCancelTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewGenerationFailureKeepsWindowTest,
 	"Design2UMG.PreviewWindow.GenerationFailureKeepsWindow",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1216,7 +1215,6 @@ bool FPreviewGenerationFailureKeepsWindowTest::RunTest(const FString& Parameters
 	}
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewUnboundConfirmationTest,
     "Design2UMG.PreviewWindow.UnboundConfirmation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1274,7 +1272,7 @@ bool FPreviewPipelineGenerationRetryTest::RunTest(const FString& Parameters)
     if (!TestTrue(TEXT("Create metadata obstruction"), IFileManager::Get().MakeDirectory(*ManifestPath, true))) return false;
     AddExpectedError(TEXT("GenerationManifest: failed to finalize manifest"), EAutomationExpectedErrorFlags::Contains, 1);
     AddExpectedError(TEXT("LogFileManager: Error moving file"), EAutomationExpectedErrorFlags::Contains, 1);
-    AddExpectedError(TEXT("DesignImportUtils: Widget Blueprint compile or save failed"), EAutomationExpectedErrorFlags::Contains, 1);
+    AddExpectedError(TEXT("DesignImportGeneration: Widget Blueprint compile or save failed"), EAutomationExpectedErrorFlags::Contains, 1);
     FDesign2UMGPreviewWindowTestAccess::Confirm(*Preview);
     Pump.PumpSlate(6);
     TestFalse(TEXT("Actual metadata failure retains window"), bClosed);
@@ -1290,7 +1288,6 @@ bool FPreviewPipelineGenerationRetryTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Actual success closes window"), bClosed);
     return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewDegradedSuccessTest,
     "Design2UMG.PreviewWindow.DegradedSuccess", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

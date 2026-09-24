@@ -483,8 +483,6 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 	return true;
 }
 
-
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFitContentMinimumExpandsToContentTest,
 	"Design2UMG.Converter.FitContentMinimumExpandsToContent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

@@ -14,7 +14,7 @@
 #include "PreviewUserWidget.h"
 #include "UMGSchema.h"
 #include "UMGWidgetTypes.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Misc/ScopeExit.h"
 #include "Templates/UnrealTemplate.h"
 
@@ -62,7 +62,7 @@ namespace
 		return Node;
 	}
 
-	/** A non-empty but unbuildable widget type: UMGWidgetUtils returns nullptr for it. */
+	/** A non-empty but unbuildable widget type: FUMGWidgetTreeBuilder returns nullptr for it. */
 	FUMGWidgetNode MakeUnbuildableNode(const FString& Id)
 	{
 		FUMGWidgetNode Node;
@@ -436,7 +436,7 @@ bool FPreviewImageAllocatesOnceTest::RunTest(const FString& Parameters)
 		}
 		TStrongObjectPtr<UPreviewUserWidget> Owner(NewObject<UPreviewUserWidget>());
 		Owner->WidgetTree = NewObject<UWidgetTree>(Owner.Get());
-		UImage* Image = Cast<UImage>(FUMGWidgetUtils::CreateWidgetRecursive(Owner->WidgetTree, Node, nullptr, &Textures));
+		UImage* Image = Cast<UImage>(FUMGWidgetTreeBuilder::CreateWidgetRecursive(Owner->WidgetTree, Node, nullptr, &Textures));
 		TestNotNull(TEXT("Image builds"), Image);
 		TArray<UTexture2D*> Created;
 		for (UTexture2D* Texture : FProceduralShapeGenerator::GetRootedTextureSnapshot())

@@ -266,7 +266,6 @@ bool FPenOverrideReplacementIsolationTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOverridePaintPrecedenceTest,
 	"Design2UMG.Unit.PenParser.Override.PaintPrecedence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -292,7 +291,6 @@ bool FPenOverridePaintPrecedenceTest::RunTest(const FString&)
 	TestTrue(TEXT("Authored stroke paint survives fill clear in same patch"), ExplicitStroke->Visual.Stroke.Fill.IsSet());
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOverrideStrokePartsTest,
 	"Design2UMG.Unit.PenParser.Override.StrokeParts",
@@ -387,7 +385,6 @@ bool FPenOverrideChildrenPaddingPolicyTest::RunTest(const FString&)
 	}
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOverrideReplacementScopeTest,
 	"Design2UMG.Unit.PenParser.Override.ReplacementScope",

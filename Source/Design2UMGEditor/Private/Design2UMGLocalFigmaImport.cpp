@@ -8,7 +8,6 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
 #include "FigmaParser.h"
 #include "FigmaComponentDependencies.h"
 #include "DesignJsonUtils.h"

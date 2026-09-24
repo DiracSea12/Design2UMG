@@ -17,6 +17,13 @@ class DESIGN2UMGEDITOR_API FDesignRemoteImageImporter
 {
 public:
 	/**
+	 * True when the string starts with an http:// or https:// scheme prefix
+	 * (case-insensitive). Single shared predicate for the importer, pipeline,
+	 * and diagnostic-report URL checks so the scheme set cannot drift between them.
+	 */
+	static bool IsHttpUrl(const FString& Value);
+
+	/**
 	 * Resolve remote images and rewrite TexturePath to UE asset object paths.
 	 * Returns false when one or more URL images failed to import.
 	 */

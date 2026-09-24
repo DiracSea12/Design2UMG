@@ -12,7 +12,7 @@
 #include "UMGJsonSerializer.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "MaterialShared.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -26,7 +26,6 @@
 
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FForegroundBlurRetainerWrapperTest,
 	"Design2UMG.Converter.ForegroundBlurRetainerWrapper",
@@ -353,7 +352,7 @@ bool FRetainerEffectMaterialApplicationTest::RunTest(const FString& Parameters)
 	Node.Effect.EffectMaterial = TEXT("d2u.retainer.foreground_blur");
 	Node.Effect.TextureParameter = TEXT("Texture");
 	Node.Effect.EffectBlurUVStep = FVector2D(0.01f, 0.02f);
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("RetainerBox dynamic effect material created"), DynamicEffect != nullptr);
@@ -389,7 +388,7 @@ bool FGeometryMaskRetainerMaterialApplicationTest::RunTest(const FString& Parame
 	Node.Effect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
 	Node.Effect.GeometryMaskSize = FVector2D(100.0f, 80.0f);
 	Node.Effect.GeometryMaskCornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("Geometry mask dynamic material created"), DynamicEffect != nullptr);
@@ -459,7 +458,7 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(PayloadWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
 	UMaterialInstanceDynamic* PayloadEffect = PayloadWidget->GetEffectMaterial();
 	TestTrue(TEXT("Typed payload dynamic effect material created"), PayloadEffect != nullptr);
 	if (!PayloadEffect)
@@ -471,7 +470,7 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("Typed payload inner shadow color follows normalized typed payload color"),
 		PayloadInnerShadowColor.Equals(NormalizedEffectColor, 0.0001f));
 
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("Inner shadow dynamic effect material created"), DynamicEffect != nullptr);
@@ -525,14 +524,14 @@ bool FRetainerTypedPayloadExplicitFalseAndRenderingPhaseTest::RunTest(const FStr
 
 	TypedWidget->SetRetainRendering(true);
 	TypedWidget->SetRenderingPhase(0, 1);
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
 	TestFalse(TEXT("Typed retainer widget applies explicit false RetainRendering"), TypedWidget->IsRetainRendering());
 	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase"), TypedWidget->GetPhase(), 3);
 	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase count"), TypedWidget->GetPhaseCount(), 5);
 
 	PayloadWidget->SetRetainRendering(true);
 	PayloadWidget->SetRenderingPhase(0, 1);
-	FUMGWidgetUtils::ApplyWidgetProperties(PayloadWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
 	TestFalse(TEXT("Payload retainer widget applies explicit false RetainRendering"), PayloadWidget->IsRetainRendering());
 	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase"), PayloadWidget->GetPhase(), 3);
 	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase count"), PayloadWidget->GetPhaseCount(), 5);
@@ -617,4 +616,3 @@ bool FInnerShadowEffectJsonSerializationCycleTest::RunTest(const FString& Parame
 }
 
 #endif
-

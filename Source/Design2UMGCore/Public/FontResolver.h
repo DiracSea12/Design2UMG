@@ -115,5 +115,3 @@ struct DESIGN2UMGCORE_API FFontResolver
 		const TMap<FString, FString>& Glyphs,
 		const TMap<FString, FString>& IconNames);
 };
-
-

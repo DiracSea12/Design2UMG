@@ -275,7 +275,6 @@ namespace DesignImportPipeline
 		// Discover move candidates after additions and removals; refresh consumes them before leftover reporting.
 		TArray<UWidget*> NestedMoveCandidates = CollectNestedMoveCandidates(PreparedScopeRoot, Shared);
 
-
 		if (!ApplyMatchedPlanEntries(Plan, Shared, GenerationSettings, NestedMoveCandidates, NewlyCreatedWidgets))
 		{
 			return FailApply();

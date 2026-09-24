@@ -85,13 +85,12 @@ Byte-color and established raster-parameter precision are preserved without stri
 
 ## Input Aliases And Open Parameters
 
-`FUMGJsonParser::ParseBrushPayload` is the only normalization point for the existing image aliases:
+`FUMGJsonParser::ParseBrushPayload` is the only normalization point for image input:
 
-- `Brush.Image.TexturePath` wins over the root `Brush.TexturePath`, including an explicit empty canonical value. A conflicting nonempty root value retains its warning.
-- `WidgetStyle.ImageMode` keeps its established precedence over `Brush.Image.Mode`.
-- A valid `Brush.Image.Transform` wins; an existing `WidgetStyle.ImageTransform` string is used only when no valid canonical transform was supplied. Invalid transforms are diagnosed at input.
+- `Brush.Image.TexturePath`, including an explicit empty value, is the sole image source; the root-level `Brush.TexturePath` alias is not read.
+- `Brush.Image.Mode` and `Brush.Image.Transform` are the only sources for tiling and transform; `WidgetStyle.ImageMode` and `WidgetStyle.ImageTransform` strings are not read. Invalid canonical transforms are diagnosed at input.
 
-The IR and serialized output contain only `Brush.Image`; downstream code does not carry or resolve duplicate owners. These are retained input forms, not permission to add another compatibility path.
+The IR and serialized output contain only `Brush.Image`; downstream code does not carry or resolve duplicate owners. Inputs carrying only the legacy alias forms produce an unset image by design — do not reintroduce alias reading.
 
 `MaterialParams` remains opaque string/JSON input for explicit user parameters and the existing external material-input interface. Its external parser is retained; internal shape and gradient producers do not generate it. Text markup, vector geometry, and interchange/log serialization remain their existing domain formats rather than being replaced by a generic schema or property framework.
 

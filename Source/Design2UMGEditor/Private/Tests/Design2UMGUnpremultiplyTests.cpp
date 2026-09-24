@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -18,7 +18,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 		TArray<FColor> Pixels;
 		Pixels.Add(FColor(1, 127, 254, 255));
 		Pixels.Add(FColor(255, 255, 255, 255));
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 
 		TestEqual(TEXT("opaque pixel 1 R unchanged"), Pixels[0].R, 1);
 		TestEqual(TEXT("opaque pixel 1 G unchanged"), Pixels[0].G, 127);
@@ -34,7 +34,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 	{
 		TArray<FColor> Pixels;
 		Pixels.Add(FColor(242, 242, 242, 242));
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 
 		TestEqual(TEXT("#fffffff2 R restored to 255"), Pixels[0].R, 255);
 		TestEqual(TEXT("#fffffff2 G restored to 255"), Pixels[0].G, 255);
@@ -46,7 +46,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 	{
 		TArray<FColor> Pixels;
 		Pixels.Add(FColor(100, 150, 200, 0));
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 
 		TestEqual(TEXT("transparent R zeroed"), Pixels[0].R, 0);
 		TestEqual(TEXT("transparent G zeroed"), Pixels[0].G, 0);
@@ -59,7 +59,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 	{
 		TArray<FColor> Pixels;
 		Pixels.Add(FColor(200, 200, 200, 128)); // 200 * 255 / 128 = 398 -> clamp 255
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 
 		TestEqual(TEXT("clamped R at 255"), Pixels[0].R, 255);
 		TestEqual(TEXT("clamped G at 255"), Pixels[0].G, 255);
@@ -71,7 +71,7 @@ bool FDesign2UMGUnpremultiplyPixelsTest::RunTest(const FString& Parameters)
 	{
 		TArray<FColor> Pixels;
 		Pixels.Add(FColor(128, 64, 32, 128));
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 
 		TestEqual(TEXT("mid-alpha R exact"), Pixels[0].R, 255);
 		TestEqual(TEXT("mid-alpha G exact"), Pixels[0].G, 128);

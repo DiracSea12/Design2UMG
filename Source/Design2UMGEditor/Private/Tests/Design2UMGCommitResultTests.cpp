@@ -4,7 +4,6 @@
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
 #include "GeneratedAssetLifecycle.h"
 #include "Tests/Design2UMGReimportTestFixtures.h"
 #include "Components/TextBlock.h"

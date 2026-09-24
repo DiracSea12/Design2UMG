@@ -518,7 +518,6 @@ bool FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
 		TryBuildImageTransformTextureMaterializationPlan, CreateImageTransformTexture, Budget, OutError);
 }
 
-
 bool FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 	const FUMGWidgetNode& Root,
 	FString& OutError)

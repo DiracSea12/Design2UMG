@@ -529,7 +529,6 @@ bool FComponentMappingManifestWriteFailureTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextMappedGenerationTest,
 	"Design2UMG.PreviewContext.MappedGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPreviewContextMappedGenerationTest::RunTest(const FString& Parameters)

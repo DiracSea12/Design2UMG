@@ -291,4 +291,3 @@ bool FPlaceholderSurfacePaletteTracksRefContextTest::RunTest(const FString& Para
 }
 
 #endif
-

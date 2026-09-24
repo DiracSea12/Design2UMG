@@ -17,7 +17,6 @@
 
 using namespace Design2UMGTestUtils;
 
-
 using Design2UMGTestUtils::BuildProceduralRequestForTest;
 using Design2UMGTestUtils::ReadTexturePixel;
 
@@ -196,4 +195,3 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 }
 
 #endif
-

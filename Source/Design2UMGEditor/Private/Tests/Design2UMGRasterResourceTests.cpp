@@ -292,7 +292,6 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeneratedTextureSaveFailureTest,
 	"Design2UMG.Resources.Rasterization.GeneratedTextureSaveFailure",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -418,7 +417,6 @@ bool FDesignTypedGradientRasterParityTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeneratedRasterAllocationLimitsTest,
 	"Design2UMG.Resources.Rasterization.GeneratedRasterAllocationLimits",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -535,7 +533,6 @@ bool FGeneratedTextureCreationFailureTest::RunTest(const FString&)
 	}
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPathCacheRequestIdentityTest,
 	"Design2UMG.Resources.Rasterization.PathCacheRequestIdentity",

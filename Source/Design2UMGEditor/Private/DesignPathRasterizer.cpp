@@ -999,8 +999,6 @@ void FDesignPathRasterizer::ClearCache()
 	bHasPendingTextureUpdates = false;
 }
 
-
-
 int64 FDesignPathRasterizer::GetCachedPixelCount()
 {
 	int64 Pixels = 0;

@@ -32,7 +32,6 @@ namespace
 
 // Mirrors the converter wrapping predicate to check explicit-empty property presence.
 
-
 	bool ShouldWrapChildWithSizeBoxCurrentTruth(
 		const TSharedPtr<FDesignNode>& ParentNode,
 		const TSharedPtr<FDesignNode>& ChildNode,
@@ -83,7 +82,6 @@ namespace
 		return Fill;
 	}
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterExplicitEmptyBrushPresenceSizeBoxElisionTest,
 	"Design2UMG.Converter.ExplicitEmptyBrushPresenceSizeBoxElision",
@@ -532,7 +530,6 @@ bool FProceduralResourceAccessExplicitRefEquivalenceTest::RunTest(const FString&
 		GradientRequest.MaterialRef, FString(TEXT("radialgradient")));
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FillTransferPathRasterTintGuardTest,
 	"Design2UMG.FillTransfer.PathRasterTintGuard",

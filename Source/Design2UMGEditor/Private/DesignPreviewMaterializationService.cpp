@@ -3,7 +3,7 @@
 #include "DesignPreviewMaterializationService.h"
 
 #include "Design2UMGGenerationSettingsSnapshot.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "DesignRemoteImageImporter.h"
 #include "DesignImageResourceLimits.h"
 #include "PreBuildResourceNormalizer.h"
@@ -173,7 +173,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 	// One explicit budget covers every allocation in this preview tree.
 	DesignImageResources::FImageOperationBudget PreviewBudget(DesignImageResources::GetGeneratedTextureLimits());
 
-	UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
+	UWidget* RootWidget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(
 		TempWidget->WidgetTree,
 		FixedRoot,
 		nullptr,

@@ -562,4 +562,3 @@ FString FUMGJsonSerializer::Serialize(const FUMGWidgetData& Data)
 	FJsonSerializer::Serialize(Root, Writer);
 	return Output;
 }
-

@@ -6,7 +6,7 @@
 #include "FigmaComponentDependencies.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
@@ -158,7 +158,7 @@ bool FPenMcpImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PenMCP");
-	const bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
 	TestTrue(TEXT("Render Pen MCP import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -200,7 +200,7 @@ bool FFigmaLocalFileImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/LocalFigma");
-	const bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
 	TestTrue(TEXT("Render local Figma import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -242,7 +242,7 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaSource");
-	const bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, OutputPath);
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
 	TestTrue(TEXT("Render figma source import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -297,7 +297,7 @@ bool FPenWelcomeBulkImportTest::RunTest(const FString& Parameters)
 			continue;
 		}
 		const FString FrameOutputPath = OutputPath / ObjectTools::SanitizeObjectName(Data.WidgetName);
-		const bool bPng = DesignImportUtils::GenerateBlueprintAndPng(Data, FrameOutputPath);
+		const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, FrameOutputPath);
 		TestTrue(*FString::Printf(TEXT("Render %s"), *Frame.Name), bPng);
 		GeneratedAssetPaths.Add(FrameOutputPath);
 	}

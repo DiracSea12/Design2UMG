@@ -33,7 +33,6 @@ namespace
 	}
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperMultiFillIntegrationTest,
 	"Design2UMG.VisualMapper.MultiFillSmoke",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -412,4 +411,3 @@ bool FVisualMapperStrokeBrushSelectionTest::RunTest(const FString&)
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

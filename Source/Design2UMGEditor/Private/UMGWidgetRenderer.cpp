@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -41,7 +41,7 @@ namespace
 {
 	void DumpOwnedTextBlockFontState(const TCHAR* Stage, UWidgetTree* WidgetTree, const FString& OwnerName)
 	{
-		FUMGWidgetUtils::DumpTextBlockFontStates(ELogVerbosity::Log, Stage, WidgetTree, TEXT("owner"), OwnerName);
+		FUMGWidgetRenderer::DumpTextBlockFontStates(ELogVerbosity::Log, Stage, WidgetTree, TEXT("owner"), OwnerName);
 	}
 
 	const TCHAR* BrushDrawTypeToString(ESlateBrushDrawType::Type DrawType)
@@ -257,7 +257,7 @@ namespace
 
 	FVector2D GetBlueprintDesignSize(UWidgetBlueprint* WidgetBP)
 	{
-		return FUMGWidgetUtils::GetBlueprintDesignTimeSize(WidgetBP).Get(FVector2D::ZeroVector);
+		return FUMGWidgetRenderer::GetBlueprintDesignTimeSize(WidgetBP).Get(FVector2D::ZeroVector);
 	}
 
 	// Slate renders with premultiplied alpha: RGB bytes read back from the render
@@ -354,7 +354,23 @@ namespace
 	}
 }
 
-void FUMGWidgetUtils::UnpremultiplyPixels(TArray<FColor>& Pixels)
+TOptional<FVector2D> FUMGWidgetRenderer::GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
+{
+	if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
+	{
+		if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
+		{
+			if (CDO->DesignTimeSize.X > 0.0f && CDO->DesignTimeSize.Y > 0.0f)
+			{
+				return CDO->DesignTimeSize;
+			}
+		}
+	}
+
+	return TOptional<FVector2D>();
+}
+
+void FUMGWidgetRenderer::UnpremultiplyPixels(TArray<FColor>& Pixels)
 {
 	for (FColor& Pixel : Pixels)
 	{
@@ -365,7 +381,7 @@ void FUMGWidgetUtils::UnpremultiplyPixels(TArray<FColor>& Pixels)
 	}
 }
 
-void FUMGWidgetUtils::DumpTextBlockFontStates(
+void FUMGWidgetRenderer::DumpTextBlockFontStates(
 	const ELogVerbosity::Type Verbosity,
 	const TCHAR* Stage,
 	UWidgetTree* WidgetTree,
@@ -407,7 +423,7 @@ void FUMGWidgetUtils::DumpTextBlockFontStates(
 	});
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(
+bool FUMGWidgetRenderer::RenderWidgetToPng(
 	UWidgetBlueprint* WidgetBP,
 	TArray<uint8>& OutPngData,
 	FIntPoint& OutSize,
@@ -584,7 +600,7 @@ bool FUMGWidgetUtils::RenderWidgetToPng(
 
 	TArray<FColor> Pixels;
 	Resource->ReadPixels(Pixels);
-	FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+	FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 	RT->ReleaseResource();
 	RT->MarkAsGarbage();
 	Widget->RemoveFromRoot();
@@ -667,7 +683,7 @@ namespace
 
 		TArray<FColor> Pixels;
 		Resource->ReadPixels(Pixels);
-		FUMGWidgetUtils::UnpremultiplyPixels(Pixels);
+		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 		RT->ReleaseResource();
 		RT->MarkAsGarbage();
 
@@ -684,7 +700,7 @@ namespace
 	}
 }
 
-bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
 {
 	if (!WidgetBP || !WidgetBP->WidgetTree || !WidgetBP->WidgetTree->RootWidget)
 	{

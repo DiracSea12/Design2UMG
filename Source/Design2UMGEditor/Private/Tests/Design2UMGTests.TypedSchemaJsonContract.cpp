@@ -7,7 +7,7 @@
 #include "UMGJsonSerializer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParsing.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Design2UMGTestUtils.h"
 #include "Components/EditableTextBox.h"
 #include "UObject/UObjectGlobals.h"
@@ -33,7 +33,7 @@ bool FTypedNodeEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 	FUMGWidgetNode Node;
 	Node.Text.Text = FString();
 	Node.Text.HintText = FString();
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	TestTrue(TEXT("Explicit empty Text still clears widget text"), Widget->GetText().ToString().IsEmpty());
 	TestTrue(TEXT("Explicit empty HintText still clears widget hint"), Widget->GetHintText().ToString().IsEmpty());

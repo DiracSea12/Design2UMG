@@ -5,7 +5,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 
 #include "Animation/MovieScene2DTransformSection.h"
 #include "Animation/MovieScene2DTransformTrack.h"
@@ -381,9 +381,9 @@ void GenerateNavigationAnimations(
 
 	// The animated widget is the switcher, resolved from the built tree (final tree name) with the
 	// same unique-match contract the graph wiring uses; the slide offset needs the IR switcher bounds.
-	const FString SwitcherBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString SwitcherBaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		NavigationData.SwitcherWidgetName, TEXT("WidgetSwitcher")).ToString();
-	UWidgetSwitcher* AnimatedWidget = FUMGWidgetUtils::FindUniqueTreeWidget<UWidgetSwitcher>(
+	UWidgetSwitcher* AnimatedWidget = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UWidgetSwitcher>(
 		WidgetBlueprint->WidgetTree, SwitcherBaseName);
 	const FUMGWidgetNode* SwitcherNode = FindWidgetNodeById(RootNode, NavigationData.SwitcherWidgetId);
 	if (!SwitcherNode || !AnimatedWidget)

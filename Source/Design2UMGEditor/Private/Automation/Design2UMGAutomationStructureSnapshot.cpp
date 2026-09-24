@@ -7,7 +7,7 @@
 #include "DesignTreeBudget.h"
 #include "FontResolver.h"
 #include "DesignReferenceExpansion.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -338,7 +338,7 @@ namespace Design2UMGAutomationStructureSnapshot
 			// converter's own fallback uses the widget type string, which only
 			// diverges for names that sanitize to nothing.
 			const FString NodeTypeLabel = StaticEnum<EDesignNodeType>()->GetNameStringByValue(static_cast<int64>(EffectiveNode->Type));
-			const FString SanitizedName = FUMGWidgetUtils::SanitizeWidgetName(EffectiveNode->Name, NodeTypeLabel).ToString();
+			const FString SanitizedName = FUMGWidgetTreeBuilder::SanitizeWidgetName(EffectiveNode->Name, NodeTypeLabel).ToString();
 			Stats.NodeNames.Add(SanitizedName);
 
 			const FString Kind = ClassifyDesignNodeKindForStructure(EffectiveNode);

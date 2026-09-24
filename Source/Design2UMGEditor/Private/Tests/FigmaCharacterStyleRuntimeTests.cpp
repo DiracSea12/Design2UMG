@@ -5,7 +5,7 @@
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "WidgetBlueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "ImageUtils.h"
@@ -47,7 +47,7 @@ bool FFigmaCharacterColorRuntimeTest::RunTest(const FString&)
 	TArray<uint8> Png;
 	FIntPoint Size;
 	FString Error;
-	if (!TestTrue(TEXT("Compiled widget renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error)))
+	if (!TestTrue(TEXT("Compiled widget renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error)))
 	{
 		AddError(Error);
 		return false;

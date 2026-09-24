@@ -5,7 +5,7 @@
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/UserWidget.h"
@@ -132,7 +132,7 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 	TArray<uint8> Png;
 	FIntPoint Size;
 	FString Error;
-	if (!TestTrue(TEXT("Compiled group renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error)))
+	if (!TestTrue(TEXT("Compiled group renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error)))
 	{
 		AddError(Error);
 		return false;
@@ -237,7 +237,7 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 	TArray<uint8> RepeatedPng;
 	FIntPoint RepeatedSize;
 	if (!TestTrue(TEXT("Repeated rendering succeeds"),
-		FUMGWidgetUtils::RenderWidgetToPng(Blueprint, RepeatedPng, RepeatedSize, &Error)))
+		FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, RepeatedPng, RepeatedSize, &Error)))
 	{
 		AddError(Error);
 		return false;

@@ -223,7 +223,7 @@ bool RenderNativeTextProbeAsset(UWidgetBlueprint* Blueprint, TArray<FColor>& Pix
     TStrongObjectPtr<UUserWidget> Instance(NewObject<UUserWidget>(GetTransientPackage(), Blueprint->GeneratedClass));
     if (!Instance->Initialize()) return false;
     const TSharedRef<SWidget> SlateWidget = Instance->TakeWidget();
-    // Match UMGRenderUtils' existing offscreen resource preparation. Loading an
+    // Match UMGWidgetRenderer's existing offscreen resource preparation. Loading an
     // asset does not synchronously prepare its dynamic material's uniforms.
     if (URetainerBox* Retainer = Cast<URetainerBox>(Instance->WidgetTree->RootWidget))
     {
@@ -418,6 +418,5 @@ bool FNativeRichTextRunIsolationTest::RunTest(const FString&)
     }
     return true;
 }
-
 
 #endif

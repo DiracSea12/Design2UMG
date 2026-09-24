@@ -9,7 +9,7 @@
 #include "UMGPropertyKeys.h"
 #include "UMGTextStyleApplication.h"
 #include "UMGValueParsing.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -235,7 +235,6 @@ namespace
 	}
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockSourceShadowExtentTest,
 	"Design2UMG.PropertyApplier.TextBlockSourceShadowExtent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -246,11 +245,11 @@ bool FTextBlockSourceShadowExtentTest::RunTest(const FString&)
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("TextBlock");
 	Node.Text.Text = TEXT("Source label");
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 	TestEqual(TEXT("No source shadow contributes no invisible layout extent"), Widget->GetShadowOffset(), FVector2D::ZeroVector);
 	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
 	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 	TestEqual(TEXT("Authored shadow offset is preserved"), Widget->GetShadowOffset(), FVector2D(2.0f, 3.0f));
 	TestEqual(TEXT("Authored shadow opacity is preserved"), Widget->GetShadowColorAndOpacity().A, 0.5f);
 	return true;
@@ -289,8 +288,8 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
 	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.9f, 0.1f, 0.2f, 0.5f);
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedWidget, Node);
 
 	FTextLayoutProperties LayoutProperties;
 	if (!FindTextLayoutProperties(*this, LayoutProperties))
@@ -382,8 +381,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedTextBox, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedTextBox, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedTextBox, Node);
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	AssertTextFamilyParity(*this, TEXT("EditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/false,
 		ReadEditableTextBoxState(TypedTextBox), ReadEditableTextBoxState(SerializedTextBox), ExpectedTextColor);
@@ -395,8 +394,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedEditableText, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedEditableText, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedEditableText, Node);
 	AssertTextFamilyParity(*this, TEXT("EditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/false,
 		ReadEditableTextState(TypedEditableText), ReadEditableTextState(SerializedEditableText), ExpectedTextColor);
 
@@ -407,8 +406,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedBehaviorTextBox, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedBehaviorEditableText, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedBehaviorTextBox, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedBehaviorEditableText, Node);
 
 	TestTrue(TEXT("Typed editable text box applies MinimumDesiredWidth"),
 		FMath::IsNearlyEqual(
@@ -442,8 +441,8 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	EmptyTypedEditableText->SetText(FText::FromString(TEXT("Existing Text")));
 	EmptyTypedEditableText->SetHintText(FText::FromString(TEXT("Existing Hint")));
 
-	FUMGWidgetUtils::ApplyWidgetProperties(EmptyTypedTextBox, EmptyTypedNode);
-	FUMGWidgetUtils::ApplyWidgetProperties(EmptyTypedEditableText, EmptyTypedNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(EmptyTypedTextBox, EmptyTypedNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(EmptyTypedEditableText, EmptyTypedNode);
 
 	TestTrue(TEXT("Typed empty text clears EditableTextBox text"), EmptyTypedTextBox->GetText().ToString().IsEmpty());
 	TestTrue(TEXT("Typed empty hint clears EditableTextBox hint"), EmptyTypedTextBox->GetHintText().ToString().IsEmpty());
@@ -480,11 +479,11 @@ bool FTextTypedPayloadExplicitFalseFormattingFlagsTest::RunTest(const FString& P
 	}
 
 	TypedWidget->SetAutoWrapText(true);
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
 	TestFalse(TEXT("Typed text widget applies explicit false AutoWrapText"), TypedWidget->GetAutoWrapText());
 
 	PayloadWidget->SetAutoWrapText(true);
-	FUMGWidgetUtils::ApplyWidgetProperties(PayloadWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
 	TestFalse(TEXT("Payload text widget applies explicit false AutoWrapText"), PayloadWidget->GetAutoWrapText());
 	return true;
 }
@@ -524,8 +523,8 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedTextBox, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedTextBox, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedTextBox, Node);
 	AssertTextFamilyParity(*this, TEXT("MultiLineEditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/true,
 		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), ReadMultiLineTextBoxState(LayoutProperties, SerializedTextBox), ExpectedTextColor);
 
@@ -536,8 +535,8 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedEditableText, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedEditableText, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedEditableText, Node);
 	AssertTextFamilyParity(*this, TEXT("MultiLineEditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/true,
 		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), ReadMultiLineEditableTextState(LayoutProperties, SerializedEditableText), ExpectedTextColor);
 	return true;
@@ -587,7 +586,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	Node.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
 	Node.WidgetStyle.ToolTipText = TEXT("https://docs.example.com");
 
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	TestEqual(TEXT("Rich text source text applied"), Widget->GetText().ToString(), TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>"));
 	TestEqual(TEXT("Rich text tooltip applied"), Widget->GetToolTipText().ToString(), TEXT("https://docs.example.com"));
@@ -669,7 +668,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	SerializedWidget->SetDefaultTextStyle(PreconfiguredStyle);
-	FUMGWidgetUtils::ApplyWidgetProperties(SerializedWidget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedWidget, Node);
 
 	TestEqual(TEXT("Typed and serialized rich text markup match"),
 		Widget->GetText().ToString(),
@@ -805,8 +804,8 @@ bool FTextFamilyTypedJsonSerializationCycleTest::RunTest(const FString& Paramete
 		return false;
 	}
 
-	FUMGWidgetUtils::ApplyWidgetProperties(SourceWidget, SourceNode);
-	FUMGWidgetUtils::ApplyWidgetProperties(ParsedWidget, *ParsedNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SourceWidget, SourceNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ParsedWidget, *ParsedNode);
 
 	FMargin SourceMargin;
 	FMargin ParsedMargin;
@@ -960,7 +959,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		FSlateFontInfo FontInfo = ExplicitZeroWidget->GetFont();
 		FontInfo.LetterSpacing = 321;
 		ExplicitZeroWidget->SetFont(FontInfo);
-		FUMGWidgetUtils::ApplyWidgetProperties(ExplicitZeroWidget, ExplicitZeroNode);
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(ExplicitZeroWidget, ExplicitZeroNode);
 		TestEqual(TEXT("Explicit zero letter spacing applies"), ExplicitZeroWidget->GetFont().LetterSpacing, 0);
 	}
 
@@ -979,7 +978,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	UTextBlock* NonZeroWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Non-zero widget created"));
 	if (NonZeroWidget && ParsedNonZeroNode)
 	{
-		FUMGWidgetUtils::ApplyWidgetProperties(NonZeroWidget, *ParsedNonZeroNode);
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(NonZeroWidget, *ParsedNonZeroNode);
 		TestEqual(TEXT("Pixel letter spacing converts to Slate tracking"), NonZeroWidget->GetFont().LetterSpacing, 63);
 	}
 
@@ -990,7 +989,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	UTextBlock* ScaledNegativeWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Scaled negative-spacing widget created"));
 	if (ScaledNegativeWidget)
 	{
-		FUMGWidgetUtils::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
 		// SlateTextShaper applies tracking * FontInfo.Size / 1000 and truncates to pixels.
 		// The source's 20px declaration must not replace the applied 12pt size here.
 		TestEqual(TEXT("Applied point size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -105);
@@ -1036,7 +1035,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		FSlateFontInfo FontInfo = UnsetWidget->GetFont();
 		FontInfo.LetterSpacing = 321;
 		UnsetWidget->SetFont(FontInfo);
-		FUMGWidgetUtils::ApplyWidgetProperties(UnsetWidget, UnsetNode);
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(UnsetWidget, UnsetNode);
 		TestEqual(TEXT("Unset letter spacing does not apply"), UnsetWidget->GetFont().LetterSpacing, 321);
 	}
 
@@ -1154,8 +1153,8 @@ bool FRichTextTypedJsonSerializationCycleTest::RunTest(const FString& Parameters
 	SourceWidget->SetDefaultTextStyle(PreconfiguredStyle);
 	ParsedWidget->SetDefaultTextStyle(PreconfiguredStyle);
 
-	FUMGWidgetUtils::ApplyWidgetProperties(SourceWidget, SourceNode);
-	FUMGWidgetUtils::ApplyWidgetProperties(ParsedWidget, *ParsedNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SourceWidget, SourceNode);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ParsedWidget, *ParsedNode);
 
 	TestEqual(TEXT("Serialization rich text markup matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
 	TestTrue(TEXT("Serialization rich text wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));

@@ -645,8 +645,6 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		{
 			OutBrush.MaterialParams = Str;
 		}
-		FString FlatTexturePath;
-		TryGetStrictStringField(*BrushObject, UMGPropertyKeys::TexturePath, FlatTexturePath);
 		if (const TSharedPtr<FJsonValue> RadiiValue = DesignJsonUtils::TryGetField(*BrushObject, UMGPropertyKeys::CornerRadii); RadiiValue.IsValid())
 		{
 			FVector4 Radii;
@@ -686,17 +684,6 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 					UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Brush.Image.Transform; ignoring value."));
 				}
 			}
-		}
-		// Existing root alias is accepted only here. The IR has one texture owner.
-		if (!OutBrush.Image.TexturePath.IsSet())
-		{
-			if (!FlatTexturePath.IsEmpty()) OutBrush.Image.TexturePath = FlatTexturePath;
-		}
-		else if (!FlatTexturePath.IsEmpty() && FlatTexturePath != OutBrush.Image.TexturePath.GetValue())
-		{
-			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("FUMGJsonParser: Brush.TexturePath conflicts with Brush.Image.TexturePath; using Brush.Image.TexturePath ('%s') instead of legacy/root '%s'."),
-				*OutBrush.Image.TexturePath.GetValue(), *FlatTexturePath);
 		}
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
@@ -748,29 +735,6 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			}
 		}
 	}
-	// Preserve the existing input precedence, without carrying two owners downstream.
-	const TSharedPtr<FJsonObject>* WidgetStyleObject = nullptr;
-	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("WidgetStyle"), WidgetStyleObject))
-	{
-		FString Str;
-		if (TryGetStrictStringField(*WidgetStyleObject, UMGPropertyKeys::ImageMode, Str))
-		{
-			OutBrush.Image.Mode = Str;
-		}
-		if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*WidgetStyleObject, UMGPropertyKeys::ImageTransform); TransformValue.IsValid())
-		{
-			FUMGVisualBrushData::FImageTransformData Transform;
-			if (TransformValue->Type == EJson::String && Design2UMGWidgetNodeAccess::TryParseImageTransform(TransformValue->AsString(), Transform))
-			{
-				if (!OutBrush.Image.Transform.IsSet()) OutBrush.Image.Transform = Transform;
-			}
-			else
-			{
-				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid WidgetStyle.ImageTransform; ignoring value."));
-			}
-		}
-	}
-
 }
 
 void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObject, FUMGEffectData& OutEffect)

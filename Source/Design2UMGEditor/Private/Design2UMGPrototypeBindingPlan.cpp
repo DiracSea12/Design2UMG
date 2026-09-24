@@ -3,7 +3,7 @@
 #include "Design2UMGPrototypeGraphWiringInternal.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/Overlay.h"
@@ -81,7 +81,7 @@ namespace
 		for (int32 ChildIndex = 0; ChildIndex < Switcher->GetChildrenCount(); ++ChildIndex)
 		{
 			const UWidget* Child = Switcher->GetChildAt(ChildIndex);
-			if (Child && FUMGWidgetUtils::MatchesWidgetBaseName(Child->GetName(), PageBaseName))
+			if (Child && FUMGWidgetTreeBuilder::MatchesWidgetBaseName(Child->GetName(), PageBaseName))
 			{
 				++MatchCount;
 				MatchedIndex = ChildIndex;
@@ -107,7 +107,7 @@ namespace
 		for (int32 ChildIndex = 0; ChildIndex < OverlayHost->GetChildrenCount(); ++ChildIndex)
 		{
 			UWidget* Child = OverlayHost->GetChildAt(ChildIndex);
-			if (Child && FUMGWidgetUtils::MatchesWidgetBaseName(Child->GetName(), PageBaseName))
+			if (Child && FUMGWidgetTreeBuilder::MatchesWidgetBaseName(Child->GetName(), PageBaseName))
 			{
 				++MatchCount;
 				Matched = Child;
@@ -117,19 +117,18 @@ namespace
 	}
 }
 
-
 FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
 	TArray<FString>& OutWarnings)
 {
 	// Shared tree resolution: tree widgets are stable across the skeleton refresh below, so they are
 	// resolved once; class properties are read after any refresh instead of cached across it.
-	const FString SwitcherBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+	const FString SwitcherBaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 		NavigationData.SwitcherWidgetName, TEXT("WidgetSwitcher")).ToString();
-	UWidgetSwitcher* Switcher = FUMGWidgetUtils::FindUniqueTreeWidget<UWidgetSwitcher>(
+	UWidgetSwitcher* Switcher = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UWidgetSwitcher>(
 		WBP->WidgetTree, SwitcherBaseName);
-	UOverlay* OverlayHost = FUMGWidgetUtils::FindUniqueTreeWidget<UOverlay>(
-		WBP->WidgetTree, FUMGWidgetUtils::SanitizeWidgetName(
+	UOverlay* OverlayHost = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UOverlay>(
+		WBP->WidgetTree, FUMGWidgetTreeBuilder::SanitizeWidgetName(
 			NavigationData.OverlayHostWidgetName, TEXT("Overlay")).ToString());
 
 	// Pass 1 - resolve every candidate binding without touching the blueprint, so the (potentially
@@ -165,7 +164,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 				continue;
 			}
 			Resolved.TargetPageIndex = FindSwitcherPageIndex(Switcher,
-				FUMGWidgetUtils::SanitizeWidgetName(Step.TargetPageId, TEXT("CanvasPanel")).ToString());
+				FUMGWidgetTreeBuilder::SanitizeWidgetName(Step.TargetPageId, TEXT("CanvasPanel")).ToString());
 			if (Resolved.TargetPageIndex == INDEX_NONE || !Functions.SetActiveWidgetIndex)
 			{
 				SkipBinding(OutWarnings, FString::Printf(
@@ -195,13 +194,13 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 			// name + OverlayMirrorSuffix (deterministic by construction). Try the base name first,
 			// then the mirrored name; the suffix is non-numeric, so the two lookups cannot both hit,
 			// and FindOverlayHostPage requires exactly one match either way.
-			const FString PageBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+			const FString PageBaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 				Step.TargetPageId, TEXT("CanvasPanel")).ToString();
 			const UWidget* OverlayPage = FindOverlayHostPage(OverlayHost, PageBaseName);
 			if (!OverlayPage)
 			{
 				OverlayPage = FindOverlayHostPage(OverlayHost,
-					FUMGWidgetUtils::SanitizeWidgetName(
+					FUMGWidgetTreeBuilder::SanitizeWidgetName(
 						Step.TargetPageId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
 						TEXT("CanvasPanel")).ToString());
 			}
@@ -219,8 +218,8 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 		{
 			// Resolve the trigger button in the built tree; node params must come from the built
 			// tree, never from the IR names, to stay immune to name drift.
-			UButton* TriggerButton = FUMGWidgetUtils::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
-				FUMGWidgetUtils::SanitizeWidgetName(Binding.TriggerWidgetId, TEXT("Button")).ToString());
+			UButton* TriggerButton = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
+				FUMGWidgetTreeBuilder::SanitizeWidgetName(Binding.TriggerWidgetId, TEXT("Button")).ToString());
 			if (!TriggerButton)
 			{
 				SkipBinding(OutWarnings, FString::Printf(
@@ -257,8 +256,8 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 
 			// Wire visible overlay mirrors as separate triggers with overlay-context behavior.
 			// Missing mirrors, missing class properties and user-bound events leave the original binding intact.
-			UButton* MirrorTriggerButton = FUMGWidgetUtils::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
-				FUMGWidgetUtils::SanitizeWidgetName(
+			UButton* MirrorTriggerButton = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UButton>(WBP->WidgetTree,
+				FUMGWidgetTreeBuilder::SanitizeWidgetName(
 					Binding.TriggerWidgetId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
 					TEXT("Button")).ToString());
 			if (MirrorTriggerButton
@@ -319,7 +318,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 			Resolved.SourcePageId = Binding.SourcePageId;
 			if (!Binding.SourcePageId.IsEmpty())
 			{
-				const FString SourcePageBaseName = FUMGWidgetUtils::SanitizeWidgetName(
+				const FString SourcePageBaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 					Binding.SourcePageId, TEXT("CanvasPanel")).ToString();
 				if (Switcher)
 				{
@@ -331,7 +330,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 					if (!HostedPage)
 					{
 						HostedPage = FindOverlayHostPage(OverlayHost,
-							FUMGWidgetUtils::SanitizeWidgetName(
+							FUMGWidgetTreeBuilder::SanitizeWidgetName(
 								Binding.SourcePageId + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
 								TEXT("CanvasPanel")).ToString());
 					}

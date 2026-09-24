@@ -6,7 +6,6 @@
 #include "Interfaces/IHttpRequest.h"
 #include "HttpModule.h"
 
-
 /**
  * One active HTTP request per client. Replacement cancels the previous request;
  * the cancellation watermark suppresses late completions. Caller serializes access.

@@ -14,7 +14,6 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaTransformGroupPreservedTest,
 	"Design2UMG.FigmaParser.TransformGroupPreserved",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

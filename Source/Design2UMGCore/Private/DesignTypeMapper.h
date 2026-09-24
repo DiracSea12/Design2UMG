@@ -23,6 +23,3 @@ namespace DesignTypeMapper
 	/** Map alignItems to vertical alignment for horizontal layouts. */
 	EVerticalAlignment MapAlignItemsV(EDesignAlignItems Align);
 }
-
-
-

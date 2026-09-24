@@ -11,7 +11,6 @@
 
 using namespace Design2UMGTestUtils;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterTextAlignVerticalDoesNotMoveSlotTest,
 	"Design2UMG.Converter.TextAlignVerticalDoesNotMoveSlot",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -160,4 +159,3 @@ bool FConverterNonUniformStrokePaddingTest::RunTest(const FString& Parameters)
 }
 
 #endif
-

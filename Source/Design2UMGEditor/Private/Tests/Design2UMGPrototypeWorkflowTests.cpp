@@ -168,7 +168,6 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextPrototypeGenerationTest,
     "Design2UMG.PreviewContext.PrototypeGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPreviewContextPrototypeGenerationTest::RunTest(const FString& Parameters)

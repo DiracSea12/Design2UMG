@@ -53,7 +53,6 @@ namespace
 	}
 }
 
-
 bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
 	const FBindingPlan& Plan, const FBindingGraphTargets& Targets, TArray<FString>& OutWarnings)

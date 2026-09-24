@@ -13,11 +13,9 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-
 namespace
 {
 	constexpr int32 ManifestSchemaVersion = 1;
-
 
 	TSharedRef<FJsonObject> BuildMappedInstanceObject(const FDesign2UMGMappedInstanceRecord& Record)
 	{
@@ -136,7 +134,6 @@ namespace Design2UMGGenerationManifest
 		UE_LOG(LogDesign2UMG, Log, TEXT("GenerationManifest: wrote %s"), *SidecarPath);
 		return EDesign2UMGFileState::Saved;
 	}
-
 
 	bool TryLoadSidecarForAsset(
 		const FString& AssetPackageName,

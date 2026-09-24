@@ -51,7 +51,6 @@ namespace
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
 
-
 	bool SaveGeometryMaskAsset(UObject* Asset, const FString& FileName)
 	{
 		UPackage* Package = Asset->GetOutermost();
@@ -68,7 +67,6 @@ namespace
 		Package->SetDirtyFlag(false);
 		return false;
 	}
-
 
 	// Fallback UV step for the retainer blur when no node size can be resolved at bind time.
 	// Same value and provenance as InvalidNodeBlurUVStepComponent in VisualMapper.cpp.
@@ -621,7 +619,6 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 
 	return Instance.Get();
 }
-
 
 bool Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(
 	FUMGWidgetNode& Root, TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError)

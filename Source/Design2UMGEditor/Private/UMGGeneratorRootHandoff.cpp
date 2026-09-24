@@ -6,7 +6,7 @@
 #include "Design2UMGLog.h"
 #include "PreBuildResourceNormalizer.h"
 #include "Design2UMGEffectMaterialBuilder.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Blueprint/WidgetTree.h"
 #include "WidgetBlueprint.h"
 
@@ -68,7 +68,7 @@ namespace UMGGeneratorRootHandoff
 			ComponentMappingState->BeginRootBuild();
 		}
 
-		UWidget* RootWidget = FUMGWidgetUtils::CreateWidgetRecursive(
+		UWidget* RootWidget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(
 			WidgetBlueprint->WidgetTree,
 			PreparedRoot.Root,
 			nullptr,

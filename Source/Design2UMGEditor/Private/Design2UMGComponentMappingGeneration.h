@@ -168,7 +168,6 @@ public:
 		bHasDegradation |= Other.HasDegradation();
 	}
 
-
 	const TArray<FDesign2UMGMappedInstanceRecord>& GetMappedInstances() const { return MappedInstances; }
 	const TArray<FDesign2UMGGeneratedInstanceRecord>& GetTopLevelGenerated() const { return TopLevelGenerated; }
 	const TArray<FDesign2UMGMappingDiagnostic>& GetDiagnostics() const { return Diagnostics; }

@@ -136,5 +136,3 @@ UClass* UDesign2UMGSettings::ResolveClassOverride(
 	}
 	return Resolved;
 }
-
-

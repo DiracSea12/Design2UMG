@@ -7,7 +7,7 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
 #include "UMGWidgetTypes.h"
 #include "Design2UMGEditorImportServices.h"
 #include "Design2UMGLocalFigmaImport.h"
@@ -23,7 +23,8 @@
 #include "UMGJsonSerializer.h"
 #include "GeneratedAssetLifecycle.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
+#include "UMGWidgetRenderer.h"
 #include "Tests/Design2UMGComponentInputTestWidget.h"
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Blueprint/UserWidget.h"
@@ -96,7 +97,7 @@ bool FComponentDefinitionWarningsTest::RunTest(const FString&)
 	TestFalse(TEXT("Selected page does not carry the definition-only warning"), Data.Warnings.ContainsByPredicate(
 		[](const FString& Warning) { return Warning.Contains(TEXT("D2UMissingDefinitionFace")); }));
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::BuildWidgetBlueprint(Data,
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::BuildWidgetBlueprint(Data,
 		TEXT("/Game/Design2UMG/Automation/DefinitionWarnings_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), nullptr, &Output);
 	if (!TestNotNull(TEXT("Missing local face is reported without losing successful component generation"), Blueprint)) return false;
 	TestTrue(TEXT("Dependency-only warning degrades the batch output"), Output.bHasDegradation);
@@ -120,7 +121,7 @@ bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Parse first page"), FFigmaParser::ParseDocument(Source, Document))) return false;
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Initial;
-	UWidgetBlueprint* First = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* First = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Initial);
 	if (!TestNotNull(TEXT("First component batch saved"), First)) return false;
 	TestEqual(TEXT("Fresh complete batch is ordinary success"), Initial.Commit.Status, EDesign2UMGCommitStatus::Succeeded);
@@ -131,7 +132,7 @@ bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
 		Source.Replace(TEXT("\"id\":\"root\""), TEXT("\"id\":\"second-root\"")), SecondDocument))) return false;
 	FDesign2UMGGenerationOutput Output;
 	FUMGPrototypeNavigationData Navigation;
-	UWidgetBlueprint* Second = DesignImportUtils::BuildWidgetBlueprint(
+	UWidgetBlueprint* Second = DesignImportGeneration::BuildWidgetBlueprint(
 		FDesign2UMGConverter::Convert(SecondDocument, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output, &Navigation);
 	if (!TestNotNull(TEXT("New page built"), Second)
 		|| !TestEqual(TEXT("One shared dependency"), Output.Components.Num(), 1)) return false;
@@ -190,7 +191,7 @@ bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/OverrideInput_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Skipped override input does not fail generation"), Blueprint)) return false;
 	UDesign2UMGComponentInputTestWidget* Mapped = nullptr;
@@ -216,7 +217,7 @@ bool FComponentBuildOptionalOutputTest::RunTest(const FString&)
 	FDesignDocument Document;
 	if (!TestTrue(TEXT("Parse component source"), FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")), Document))) return false;
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	UWidgetBlueprint* Blueprint = DesignImportUtils::BuildWidgetBlueprint(Data,
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::BuildWidgetBlueprint(Data,
 		TEXT("/Game/Design2UMG/Automation/OptionalOutput_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
 	if (!TestNotNull(TEXT("Build accepts omitted optional output for component data"), Blueprint)) return false;
 	const auto Instances = FindInstances(Blueprint->WidgetTree);
@@ -236,7 +237,7 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/ComponentBlueprints_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Parent blueprint generated"), Blueprint)) return false;
 	const auto Templates = FindInstances(Blueprint->WidgetTree);
 	const auto Snapshot = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(Blueprint->WidgetTree);
@@ -253,7 +254,7 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 		for (FName Slot : Slots) if (Template->GetContentForSlot(Slot)) ++OverrideCount;
 		TestTrue(TEXT("Saved template retains instance override bindings"), OverrideCount > 0);
 		TestNull(TEXT("Text-only differences keep the shared component layout, not a full root replacement"),
-			Template->GetContentForSlot(FUMGWidgetUtils::SanitizeWidgetName(TEXT("D2U_Content_0"), TEXT("NamedSlot"))));
+			Template->GetContentForSlot(FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("D2U_Content_0"), TEXT("NamedSlot"))));
 	}
 	TestTrue(TEXT("Component class uses native UUserWidget, not a plugin runtime class"), Templates[0]->GetClass()->GetSuperClass() == UUserWidget::StaticClass());
 	UUserWidget* Runtime = NewObject<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass);
@@ -271,7 +272,7 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 	FDesignDocument UpdatedDocument;
 	FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Updated")), UpdatedDocument);
 	Data = FDesign2UMGConverter::Convert(UpdatedDocument, FDesign2UMGConversionSettings::Defaults());
-	UWidgetBlueprint* Updated = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+	UWidgetBlueprint* Updated = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Repeated import updates the asset"), Updated)) return false;
 	TestEqual(TEXT("Repeated import keeps the parent asset path"), Updated->GetPathName(), AssetPath);
 	UUserWidget* UpdatedRuntime = NewObject<UUserWidget>(GEditor->GetEditorWorldContext().World(), Updated->GeneratedClass);
@@ -285,7 +286,7 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 	TArray<uint8> Png;
 	FIntPoint RenderedSize;
 	FString RenderError;
-	if (TestTrue(TEXT("Nested asset renders"), FUMGWidgetUtils::RenderWidgetToPng(Updated, Png, RenderedSize, &RenderError)))
+	if (TestTrue(TEXT("Nested asset renders"), FUMGWidgetRenderer::RenderWidgetToPng(Updated, Png, RenderedSize, &RenderError)))
 	{
 		TestEqual(TEXT("Parent render preserves design dimensions"), RenderedSize, FIntPoint(300, 100));
 		TestTrue(TEXT("Save functional render"), FFileHelper::SaveArrayToFile(Png,
@@ -310,14 +311,14 @@ bool FComponentBlueprintLocalAppearanceContractTest::RunTest(const FString&)
 			return static_cast<UWidgetBlueprint*>(nullptr);
 		}
 		FDesign2UMGGenerationOutput Output;
-		return DesignImportUtils::GenerateWidgetBlueprint(
+		return DesignImportGeneration::GenerateWidgetBlueprint(
 			FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
 			Folder, nullptr, &Output);
 	};
 	auto CountRootOverrides = [](UWidgetBlueprint* Blueprint)
 	{
 		int32 Count = 0;
-		const FName RootSlot = FUMGWidgetUtils::SanitizeWidgetName(TEXT("D2U_Content_0"), TEXT("NamedSlot"));
+		const FName RootSlot = FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("D2U_Content_0"), TEXT("NamedSlot"));
 		for (UUserWidget* Instance : FindInstances(Blueprint->WidgetTree))
 		{
 			Count += Instance->GetContentForSlot(RootSlot) != nullptr ? 1 : 0;
@@ -433,7 +434,7 @@ bool FComponentBlueprintNestedTest::RunTest(const FString&)
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/Nested_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Nested parent generated"), Blueprint)) return false;
 	TestEqual(TEXT("Same-named distinct components produce two assets"), Output.Components.Num(), 2);
 	if (Output.Components.Num() == 2)
@@ -470,7 +471,7 @@ bool FComponentReadOnlyBulkSaveTest::RunTest(const FString&)
 	Settings.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/ReadOnlyBulk_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Root = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Root = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &Output);
 	if (!TestNotNull(TEXT("Initial batch saved"), Root) || !TestEqual(TEXT("One dependency saved"), Output.Components.Num(), 1)) return false;
 	const FString RootPackage = Root->GetOutermost()->GetName();
@@ -484,7 +485,7 @@ bool FComponentReadOnlyBulkSaveTest::RunTest(const FString&)
 	if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("After")), UpdatedDocument)) return false;
 	const int32 UndoEntriesBefore = GEditor->Trans->GetQueueLength() - GEditor->Trans->GetUndoCount();
 	FDesign2UMGGenerationOutput UpdatedOutput;
-	TestNull(TEXT("Read-only dependency prevents batch save"), DesignImportUtils::GenerateWidgetBlueprint(
+	TestNull(TEXT("Read-only dependency prevents batch save"), DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(UpdatedDocument, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &UpdatedOutput));
 	TestTrue(TEXT("Bulk preflight identifies the read-only dependency file"), UpdatedOutput.MappingDiagnostics.ContainsByPredicate(
 		[&](const FDesign2UMGMappingDiagnostic& Diagnostic)
@@ -511,7 +512,7 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings);
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/ReimportComponents_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
 	if (!TestNotNull(TEXT("Initial component batch generated"), Blueprint)) return false;
 	FDesignDocument UpdatedDocument;
 	FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Reimported")), UpdatedDocument);
@@ -632,7 +633,7 @@ bool FComponentBlueprintReimportTest::RunTest(const FString&)
 	FFigmaParser::ParseDocument(MissingSource, MissingDocument);
 	Data = FDesign2UMGConverter::Convert(MissingDocument, Settings.ConversionSettings);
 	AddExpectedError(TEXT("Component import failed:"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("Missing dependency fails rather than flattening"), DesignImportUtils::GenerateWidgetBlueprint(Data, Folder / TEXT("Missing"), &Settings.GenerationSettings, &Output));
+	TestNull(TEXT("Missing dependency fails rather than flattening"), DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder / TEXT("Missing"), &Settings.GenerationSettings, &Output));
 	TestTrue(TEXT("Missing dependency diagnostic identifies the component and reason"),
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
@@ -661,7 +662,7 @@ bool FComponentResourceDiagnosticTest::RunTest(const FString&)
 	FDesign2UMGGenerationOutput Output;
 	AddExpectedError(TEXT("uses spread, which is not yet represented"), EAutomationExpectedErrorFlags::Contains, 1);
 	AddExpectedError(TEXT("Component import failed:"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("A child resource failure fails the whole import"), DesignImportUtils::GenerateWidgetBlueprint(Data,
+	TestNull(TEXT("A child resource failure fails the whole import"), DesignImportGeneration::GenerateWidgetBlueprint(Data,
 		TEXT("/Game/Design2UMG/Automation/ComponentResourceFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), &Settings, &Output));
 	TestTrue(TEXT("Child resource report retains component identity and actual cause"),
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
@@ -684,7 +685,7 @@ bool FComponentBlueprintBuildFailureTest::RunTest(const FString&)
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings);
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/BuildFailureComponents_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
 	if (!TestNotNull(TEXT("Original batch saved"), Blueprint)) return false;
 	const FString SavedPath = Blueprint->GetPathName();
 	const FString SavedPackage = Blueprint->GetOutermost()->GetName();
@@ -693,7 +694,7 @@ bool FComponentBlueprintBuildFailureTest::RunTest(const FString&)
 	AddExpectedError(TEXT("Component import failed"), EAutomationExpectedErrorFlags::Contains, 1);
 	FDesign2UMGGenerationOutput FailedOutput;
 	TestNull(TEXT("Invalid root fails after dependencies were built"),
-		DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &FailedOutput));
+		DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &FailedOutput));
 	TestTrue(TEXT("Invalid root report retains the source node and concrete reason"),
 		FailedOutput.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
@@ -733,7 +734,7 @@ bool FComponentBlueprintNewSaveFailureTest::RunTest(const FString&)
 	Design2UMGEditorTests::FScopedFileFailures FileFailures;
 	FileFailures.RejectWrite = [](const FString& Path) { return Path.EndsWith(TEXT(".d2u.json.tmp")); };
 	AddExpectedError(TEXT("GenerationManifest: failed to write temp manifest"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("Failed new batch is not returned as success"), DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output));
+	TestNull(TEXT("Failed new batch is not returned as success"), DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output));
 	TArray<FAssetData> Assets;
 	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get().GetAssetsByPath(FName(*Folder), Assets, true);
 	TestTrue(TEXT("Failed new batch leaves no phantom asset registry entries"), Assets.IsEmpty());
@@ -777,7 +778,7 @@ bool FComponentBlueprintVariantsTest::RunTest(const FString&)
 		FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
 		FDesignDocument Document;
 		if (!FFigmaParser::ParseDocument(Source, Document)) return nullptr;
-		return DesignImportUtils::GenerateWidgetBlueprint(FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
+		return DesignImportGeneration::GenerateWidgetBlueprint(FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	};
 	UWidgetBlueprint* Blueprint = Generate();
 	if (!TestNotNull(TEXT("Variant batch generated"), Blueprint)) return false;
@@ -911,7 +912,7 @@ bool FComponentBlueprintRestTest::RunTest(const FString&)
 	TestEqual(TEXT("Unrelated page produces no missing dependency diagnostic"), Catalog.Errors.Num(), 0);
 	FDesign2UMGGenerationOutput Output;
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/RestComponents_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings.GenerationSettings, &Output);
 	if (!TestNotNull(TEXT("Resolved REST data generates component batch"), Blueprint)) return false;
 	TestEqual(TEXT("Remote definition reused once"), Output.Components.Num(), 1);
 	TestEqual(TEXT("REST instances reference child blueprints"), FindInstances(Blueprint->WidgetTree).Num(), 2);
@@ -980,7 +981,7 @@ bool FComponentLayoutCarrierIdentityTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Auto-layout source parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
 		TEXT("/Game/Design2UMG/Automation/ComponentCarriers_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), &Settings, &Output);
 	if (!TestNotNull(TEXT("Auto-layout parent generates"), Blueprint)) return false;
@@ -1027,14 +1028,14 @@ bool FComponentDefinitionSourceBoundsTest::RunTest(const FString&)
 		if (!TestTrue(TEXT("Definition source parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
 		FDesign2UMGGenerationSettingsSnapshot Settings;
 		FDesign2UMGGenerationOutput Output;
-		UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+		UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 			FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
 			TEXT("/Game/Design2UMG/Automation/DefinitionBounds_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), &Settings, &Output);
 		if (!TestNotNull(bHiddenLibraryDefinition ? TEXT("Hidden library definition supports visible instances") : TEXT("One-pixel component generates"), Blueprint)) continue;
 		TestEqual(TEXT("Independent asset generated"), Output.Components.Num(), 1);
 		if (Output.Components.Num() == 1)
 		{
-			const auto Size = FUMGWidgetUtils::GetBlueprintDesignTimeSize(Output.Components[0].Blueprint);
+			const auto Size = FUMGWidgetRenderer::GetBlueprintDesignTimeSize(Output.Components[0].Blueprint);
 			TestTrue(TEXT("Source dimensions are preserved"), Size.IsSet() && Size.GetValue().Equals(ExpectedSize));
 		}
 		UUserWidget* Runtime = NewObject<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass);
@@ -1069,14 +1070,14 @@ bool FEmptyComponentDefinitionTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Empty main definition parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
 		TEXT("/Game/Design2UMG/Automation/EmptyDefinition_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), &Settings, &Output);
 	if (!TestNotNull(TEXT("Empty reusable template can receive instance content"), Blueprint)) return false;
 	TestEqual(TEXT("Independent empty template asset is generated"), Output.Components.Num(), 1);
 	if (Output.Components.Num() == 1)
 	{
-		const auto Size = FUMGWidgetUtils::GetBlueprintDesignTimeSize(Output.Components[0].Blueprint);
+		const auto Size = FUMGWidgetRenderer::GetBlueprintDesignTimeSize(Output.Components[0].Blueprint);
 		TestTrue(TEXT("Empty template retains its declared 100 by 40 layout bounds"),
 			Size.IsSet() && Size.GetValue().Equals(FVector2D(100, 40)));
 	}
@@ -1094,7 +1095,7 @@ bool FEmptyComponentDefinitionTest::RunTest(const FString&)
 	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
 	Document = FDesignDocument();
 	if (!TestTrue(TEXT("Empty absolute-layout definition parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
-	Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
 		TEXT("/Game/Design2UMG/Automation/EmptyAbsoluteDefinition_") + FGuid::NewGuid().ToString(EGuidFormats::Digits), &Settings, &Output);
 	TestNotNull(TEXT("Empty absolute-layout component remains an independent asset"), Blueprint);
@@ -1127,12 +1128,12 @@ bool FComponentBlueprintRealDesignTest::RunTest(const FString&)
 		FDesign2UMGGenerationSettingsSnapshot Settings;
 		FDesign2UMGGenerationOutput Output;
 		const FString Folder = TEXT("/Game/Design2UMG/Automation/RealComponents_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-		UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+		UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 		if (!TestNotNull(TEXT("Real design generates independent components"), Blueprint)) return false;
 		TestTrue(TEXT("Real dependency assets were generated"), Output.Components.Num() > 0);
 		TArray<uint8> NestedPng;
 		FIntPoint NestedSize;
-		if (!TestTrue(TEXT("Real nested asset renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, NestedPng, NestedSize, &Error))) return false;
+		if (!TestTrue(TEXT("Real nested asset renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, NestedPng, NestedSize, &Error))) return false;
 		FFileHelper::SaveArrayToFile(NestedPng, *(FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (Name + TEXT("-nested-render.png"))));
 		// Compare against the existing flat generation path using the same parsed source and conversion settings.
 		// Explicitly construct a non-component control, rather than treating missing
@@ -1145,11 +1146,11 @@ bool FComponentBlueprintRealDesignTest::RunTest(const FString&)
 		};
 		FlattenControl(Data.RootWidget);
 		Data.MutableSourceDocument().ComponentDependenciesJson.Reset();
-		UWidgetBlueprint* Flat = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder / TEXT("FlatControl"), &Settings);
+		UWidgetBlueprint* Flat = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder / TEXT("FlatControl"), &Settings);
 		if (!TestNotNull(TEXT("Flat control asset generated"), Flat)) return false;
 		TArray<uint8> FlatPng;
 		FIntPoint FlatSize;
-		if (!TestTrue(TEXT("Flat control renders"), FUMGWidgetUtils::RenderWidgetToPng(Flat, FlatPng, FlatSize, &Error))) return false;
+		if (!TestTrue(TEXT("Flat control renders"), FUMGWidgetRenderer::RenderWidgetToPng(Flat, FlatPng, FlatSize, &Error))) return false;
 		TestEqual(TEXT("Nesting retains the real design output dimensions"), NestedSize, FlatSize);
 		FImage NestedImage, FlatImage;
 		if (TestTrue(TEXT("Decode generated renders"), FImageUtils::DecompressImage(NestedPng.GetData(), NestedPng.Num(), NestedImage)
@@ -1233,13 +1234,13 @@ bool FComponentRichTextSaveTest::RunTest(const FString&)
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
 	const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, TEXT("/Game/Design2UMG/Automation/RichTextPersistence_") + Id, &Settings, &Output);
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, TEXT("/Game/Design2UMG/Automation/RichTextPersistence_") + Id, &Settings, &Output);
 	if (!TestNotNull(TEXT("Save parent and shared rich-style child"), Blueprint)) return false;
 	if (!CheckPersistedRichTextInstances(*this, Blueprint)) return false;
 	TArray<uint8> Png;
 	FIntPoint Size;
 	FString Error;
-	if (!TestTrue(TEXT("Saved mixed-style parent renders"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
+	if (!TestTrue(TEXT("Saved mixed-style parent renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 	FImage Rendered;
 	if (!TestTrue(TEXT("Decode mixed-style runtime image"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Rendered)) ||
 		!TestTrue(TEXT("Runtime image uses BGRA8"), Rendered.Format == ERawImageFormat::BGRA8)) return false;
@@ -1283,7 +1284,7 @@ bool FComponentRichTextReloadTest::RunTest(const FString&)
 	FIntPoint Size;
 	FString Error;
 	if (!TestTrue(TEXT("Read pre-reload pixels"), FFileHelper::LoadFileToArray(BeforePng, *Manifest->GetStringField(TEXT("png")))) ||
-		!TestTrue(TEXT("Reloaded assets render"), FUMGWidgetUtils::RenderWidgetToPng(Blueprint, AfterPng, Size, &Error))) return false;
+		!TestTrue(TEXT("Reloaded assets render"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, AfterPng, Size, &Error))) return false;
 	FImage Before, After;
 	if (!TestTrue(TEXT("Decode both renders"), FImageUtils::DecompressImage(BeforePng.GetData(), BeforePng.Num(), Before)
 		&& FImageUtils::DecompressImage(AfterPng.GetData(), AfterPng.Num(), After))) return false;
@@ -1305,8 +1306,8 @@ bool FEmptyComponentBundleImportTest::RunTest(const FString&)
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/EmptyBundle_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput FirstOutput, SecondOutput;
-	UWidgetBlueprint* First = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &FirstOutput);
-	UWidgetBlueprint* Second = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &SecondOutput);
+	UWidgetBlueprint* First = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &FirstOutput);
+	UWidgetBlueprint* Second = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &SecondOutput);
 	if (!TestNotNull(TEXT("First ordinary import"), First) || !TestNotNull(TEXT("Second ordinary import"), Second)) return false;
 	TestTrue(TEXT("Ordinary import creates separate assets"), First != Second && First->GetPathName() != Second->GetPathName());
 	TestFalse(TEXT("Ordinary page is not wholly generator-owned"), FirstOutput.Manifest.bWholeAssetOwned);
@@ -1317,16 +1318,16 @@ bool FEmptyComponentBundleImportTest::RunTest(const FString&)
 		TJsonWriterFactory<>::Create(&NonEmptyBundle));
 	Data.MutableSourceDocument().ComponentDependenciesJson = NonEmptyBundle;
 	FDesign2UMGGenerationOutput UnrelatedOutput;
-	UWidgetBlueprint* Third = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
+	UWidgetBlueprint* Third = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
 	if (!TestNotNull(TEXT("Ordinary page imports with unrelated component definitions"), Third)) return false;
 	TestFalse(TEXT("Unrelated definitions do not switch page ownership"), UnrelatedOutput.Manifest.bComponentBulkRoot);
 	TestTrue(TEXT("Ordinary page retains its authored asset name"), Third->GetName().StartsWith(Data.WidgetName));
-	UWidgetBlueprint* Fourth = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
+	UWidgetBlueprint* Fourth = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &UnrelatedOutput);
 	TestTrue(TEXT("Unrelated definitions preserve ordinary repeated-import behavior"), Fourth && Fourth != Third);
 	Data.MutableSourceDocument().ComponentDependenciesJson = TEXT("{\"schemaVersion\":2}");
 	FDesign2UMGGenerationOutput InvalidOutput;
 	AddExpectedError(TEXT("Component import failed"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("Invalid bundle is reported rather than treated as empty"), DesignImportUtils::BuildWidgetBlueprint(Data, Folder, &Settings, &InvalidOutput));
+	TestNull(TEXT("Invalid bundle is reported rather than treated as empty"), DesignImportGeneration::BuildWidgetBlueprint(Data, Folder, &Settings, &InvalidOutput));
 	TestTrue(TEXT("Invalid bundle has diagnostic"), InvalidOutput.MappingDiagnostics.Num() > 0);
 	return true;
 }
@@ -1369,7 +1370,7 @@ bool FMissingComponentBundleImportTest::RunTest(const FString&)
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
 	AddExpectedError(TEXT("Component import failed"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("Missing bundle does not silently flatten instances"), DesignImportUtils::BuildWidgetBlueprint(
+	TestNull(TEXT("Missing bundle does not silently flatten instances"), DesignImportGeneration::BuildWidgetBlueprint(
 		Data, TEXT("/Game/Design2UMG/Automation/MissingBundle"), &Settings, &Output));
 	TestTrue(TEXT("Diagnostic identifies missing dependency data and affected component"),
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
@@ -1433,7 +1434,7 @@ bool FComponentPageUserContentTest::RunTest(const FString&)
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/UserPage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Initial page"), Blueprint)) return false;
 	UPanelWidget* Panel = Cast<UPanelWidget>(Blueprint->WidgetTree->RootWidget);
@@ -1456,7 +1457,7 @@ bool FComponentPageUserContentTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Save user changes independently of generator manifest"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
 	FDesignDocument Updated;
 	FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("AfterUserEdit")), Updated);
-	UWidgetBlueprint* Result = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Result = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Updated, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Repeated import updates saved user page"), Result)) return false;
 	TestTrue(TEXT("Same page asset"), Result == Blueprint);
@@ -1487,14 +1488,14 @@ bool FComponentUnicodeIdentityTest::RunTest(const FString&)
 		if (!FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")).Replace(TEXT("component-blueprint-test"), *Scope), Document)) return false;
 		const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 		FDesign2UMGGenerationOutput Output;
-		UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+		UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 		if (!TestNotNull(TEXT("Unicode scope generates"), Blueprint) || !TestEqual(TEXT("One shared component"), Output.Components.Num(), 1)) return false;
 		const FString RootPath = Blueprint->GetPathName();
 		const FString ChildPath = Output.Components[0].Blueprint->GetPathName();
 		TestFalse(TEXT("Different scopes have distinct roots"), Paths.Contains(RootPath));
 		TestFalse(TEXT("Different scopes have distinct components"), Paths.Contains(ChildPath));
 		Paths.Append({RootPath, ChildPath});
-		Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
+		Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output);
 		if (!TestNotNull(TEXT("Unicode scope reimports"), Blueprint) || Output.Components.Num() != 1) return false;
 		TestEqual(TEXT("Root identity stable"), Blueprint->GetPathName(), RootPath);
 		TestEqual(TEXT("Component identity stable"), Output.Components[0].Blueprint->GetPathName(), ChildPath);
@@ -1542,7 +1543,7 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	Override.WidgetClass = UDesign2UMGComponentInputTestWidget::StaticClass();
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/MappingFallback_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Unavailable explicit mapping uses ordinary conversion"), Blueprint)) return false;
 	TestTrue(TEXT("Unavailable active mapping explicitly degrades generation"), Output.bHasDegradation);
@@ -1567,7 +1568,7 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	FDesignDocument Updated;
 	FFigmaParser::ParseDocument(MakeSource(TEXT("Updated fallback")), Updated);
 	AddExpectedError(TEXT("Page ownership merge failed"), EAutomationExpectedErrorFlags::Contains, 1);
-	UWidgetBlueprint* Reimported = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Reimported = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Updated, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	TestNull(TEXT("Invalid mapped target fails the component batch reimport"), Reimported);
 	TestTrue(TEXT("Class failure reaches batch diagnostics"), Output.MappingDiagnostics.ContainsByPredicate(
@@ -1614,14 +1615,14 @@ bool FComponentRemovedSlotUserContentTest::RunTest(const FString&)
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/RemovedSlot_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationSettingsSnapshot Settings;
 	FDesign2UMGGenerationOutput Output;
-	UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Initial page"), Blueprint) || Output.Components.Num() != 1) return false;
 	const auto Instances = FindInstances(Blueprint->WidgetTree);
 	if (Instances.IsEmpty()) return false;
 	TArray<FName> Slots;
 	Instances[0]->GetSlotNames(Slots);
-	const FName RemovedSlot = FUMGWidgetUtils::SanitizeWidgetName(TEXT("D2U_Content_0_1"), TEXT("NamedSlot"));
+	const FName RemovedSlot = FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("D2U_Content_0_1"), TEXT("NamedSlot"));
 	if (!TestTrue(TEXT("Second child exposes removable slot"), Slots.Contains(RemovedSlot))) return false;
 	UTextBlock* Manual = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ManualSlotContent"));
 	Manual->SetText(FText::FromString(TEXT("Keep this user content")));
@@ -1642,7 +1643,7 @@ bool FComponentRemovedSlotUserContentTest::RunTest(const FString&)
 	FDesignDocument Updated;
 	if (!FFigmaParser::ParseDocument(UpdatedJson, Updated)) return false;
 	AddExpectedError(TEXT("contains user changes:"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("Removed slot with user content blocks batch"), DesignImportUtils::GenerateWidgetBlueprint(
+	TestNull(TEXT("Removed slot with user content blocks batch"), DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Updated, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output));
 	TestTrue(TEXT("Conflict identifies slot"), Output.MappingDiagnostics.ContainsByPredicate(
 		[](const FDesign2UMGMappingDiagnostic& D) { return D.Kind == TEXT("component_asset_conflict") && D.Message.Contains(TEXT("slot")); }));
@@ -1685,7 +1686,6 @@ bool FComponentSlotConflictReloadTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBulkIncompleteRecoveryTest,
 	"Design2UMG.CommitResult.BulkIncompleteRecovery", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FComponentBulkIncompleteRecoveryTest::RunTest(const FString&)
@@ -1702,7 +1702,7 @@ bool FComponentBulkIncompleteRecoveryTest::RunTest(const FString&)
 		FDesign2UMGImportSettingsSnapshot Settings;
 		Settings.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
 		FDesign2UMGGenerationOutput Output;
-		UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(
+		UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 			FDesign2UMGConverter::Convert(Document, Settings.ConversionSettings), Folder, &Settings.GenerationSettings, &Output);
 		if (!TestNotNull(TEXT("Initial batch imported"), Blueprint) || !TestEqual(TEXT("One dependency"), Output.Components.Num(), 1)) return false;
 		const FString RootPackage = Blueprint->GetOutermost()->GetName();
@@ -1756,7 +1756,6 @@ bool FComponentBulkIncompleteRecoveryTest::RunTest(const FString&)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextDependencyGenerationTest,
 	"Design2UMG.PreviewContext.DependencyGeneration", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPreviewContextDependencyGenerationTest::RunTest(const FString& Parameters)
@@ -1781,14 +1780,13 @@ bool FPreviewContextDependencyGenerationTest::RunTest(const FString& Parameters)
 		const FString Folder = TEXT("/Game/Design2UMG/Automation/PreviewDependencies_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
 		FDesign2UMGGenerationOutput Output;
-		UWidgetBlueprint* Blueprint = DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output);
+		UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output);
 		if (!TestNotNull(TEXT("Direct and preview paths generate"), Blueprint)) continue;
 		TestEqual(TEXT("Shared component dependency is generated"), Output.Components.Num(), 1);
 		TestEqual(TEXT("Both component instances are retained"), FindInstances(Blueprint->WidgetTree).Num(), 2);
 	}
 	return true;
 }
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBulkSharesGeneratedTextureBudgetTest,
 	"Design2UMG.ComponentBlueprints.SharedGeneratedTextureBudget",
@@ -1873,7 +1871,7 @@ bool FComponentBulkSharesGeneratedTextureBudgetTest::RunTest(const FString&)
 		EAutomationExpectedErrorFlags::Contains,
 		1);
 	TestNull(TEXT("Component and parent builds share one generated-texture budget"),
-		DesignImportUtils::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output));
+		DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, nullptr, &Output));
 	TestTrue(TEXT("The parent allocation reports the cumulative operation limit"),
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{

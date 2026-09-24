@@ -63,7 +63,6 @@ static void SetJsonFieldIfPresent(const TSharedPtr<FJsonObject>& Obj, const TCHA
 	}
 }
 
-
 static void AppendUniqueSkippedDesignerNode(
 	TArray<FDesignSkippedNodeReport>& Reports,
 	const FString& NodeId,

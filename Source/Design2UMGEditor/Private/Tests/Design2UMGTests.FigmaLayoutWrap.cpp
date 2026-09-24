@@ -13,7 +13,6 @@
 using namespace Design2UMGTestUtils;
 using namespace Design2UMGCoreTests;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaGridWrapMetadataTest,
 	"Design2UMG.FigmaParser.GridWrapMetadata",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -406,4 +405,3 @@ bool FFigmaTopLevelInstanceUniformStretchPaddingUsesBorderWrapperTest::RunTest(c
 }
 
 #endif
-

@@ -85,6 +85,3 @@ EVerticalAlignment DesignTypeMapper::MapAlignItemsV(EDesignAlignItems Align)
 		return VAlign_Top;
 	}
 }
-
-
-

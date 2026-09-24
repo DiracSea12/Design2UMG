@@ -13,7 +13,6 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaVectorRasterFallbackTest,
 	"Design2UMG.FigmaParser.VectorRasterFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -268,4 +267,3 @@ bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
 }
 
 #endif
-

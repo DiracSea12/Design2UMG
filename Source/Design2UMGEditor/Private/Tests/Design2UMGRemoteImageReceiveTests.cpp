@@ -184,7 +184,6 @@ namespace
 		/** How many requests the server has answered so far. */
 		int32 GetRequestCount() const { return RequestCounter.Load(); }
 
-
 		FString MakeUrl(const int32 RouteId) const
 		{
 			return FString::Printf(TEXT("http://127.0.0.1:%d/%d"), Port, RouteId);
@@ -1478,7 +1477,6 @@ bool FRemoteImageReceivePreviewEntryEnforcesReceiveBudgetTest::RunTest(const FSt
 	TestEqual(TEXT("Releasing the preview textures empties the map"), TextureMap.Num(), 0);
 	return true;
 }
-
 
 // Timeout and user-cancellation cases above are the lifecycle contract: each
 // holds a real receive callback in flight, ends it through production code, then

@@ -3,7 +3,7 @@
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "WidgetBlueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -88,7 +88,7 @@ bool FSingleChildSizeBoxRuntimeTest::RunTest(const FString&)
 				TArray<uint8> Png;
 				FIntPoint Size;
 				FString Error;
-				if (!TestTrue(TEXT("Render single-child sizing blueprint"), FUMGWidgetUtils::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
+				if (!TestTrue(TEXT("Render single-child sizing blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 				FImage& Image = Images.AddDefaulted_GetRef();
 				if (!TestTrue(TEXT("Decode sizing render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
 				TStrongObjectPtr<UUserWidget> Instance(NewObject<UUserWidget>(GetTransientPackage(), BP->GeneratedClass));

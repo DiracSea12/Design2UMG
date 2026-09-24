@@ -121,7 +121,6 @@ namespace
 			|| Node->Type == EDesignNodeType::Polygon;
 	}
 
-
 	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
 	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
 

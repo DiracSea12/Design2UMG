@@ -209,7 +209,6 @@ bool Design2UMGWidgetNodeAccess::TryParseDrawAs(const FString& Value, ESlateBrus
 	return false;
 }
 
-
 namespace
 {
 	void AppendTextStyleVerboseDump(FString& Dump, const FUMGTextStyleData& TextStyle)

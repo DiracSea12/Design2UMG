@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "WidgetTreeChildBuilder.h"
 
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Design2UMGLog.h"
 #include "WidgetLayoutAdapter.h"
 
@@ -171,7 +171,7 @@ namespace
 		UPanelWidget* ParentWidget,
 		const FWidgetTreeChildBuildContext& Context)
 	{
-		return FUMGWidgetUtils::CreateWidgetRecursive(
+		return FUMGWidgetTreeBuilder::CreateWidgetRecursive(
 			WidgetTree,
 			ChildNode,
 			ParentWidget,
@@ -272,17 +272,17 @@ namespace
 			{
 				UPanelSlot* NewSlot = Panel->AddChild(ChildWidget);
 				if (!NewSlot) return false;
-				FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
+				FUMGWidgetTreeBuilder::ApplySlotProperties(NewSlot, ChildNode.Slot);
 				return true;
 			}
 
-			const FName WrapName = FUMGWidgetUtils::SanitizeWidgetName(
+			const FName WrapName = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 				HostNode.Name + TEXT("_SlotWrap_") + SlotName.ToString(), TEXT("SlotWrap"));
 			UVerticalBox* WrapBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), WrapName);
 			if (!WrapBox || !WrapBox->AddChild(Existing)) return false;
 			UPanelSlot* NewSlot = WrapBox->AddChild(ChildWidget);
 			if (!NewSlot) return false;
-			FUMGWidgetUtils::ApplySlotProperties(NewSlot, ChildNode.Slot);
+			FUMGWidgetTreeBuilder::ApplySlotProperties(NewSlot, ChildNode.Slot);
 			Content = WrapBox;
 		}
 		NamedSlotHost->SetContentForSlot(SlotName, Content);

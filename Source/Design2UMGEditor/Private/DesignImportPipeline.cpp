@@ -2,11 +2,12 @@
 
 #include "DesignImportPipeline.h"
 #include "DesignImportDiagnosticReport.h"
+#include "DesignImportGeneration.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
-#include "DesignImportUtils.h"
 #include "DesignJsonUtils.h"
+#include "DesignRemoteImageImporter.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "ExternalServices/PencilExtensionResources.h"
@@ -50,6 +51,25 @@ namespace DesignImportPipeline
 		FDesign2UMGImportSettingsSnapshot BuildFallbackImportSettingsSnapshot()
 		{
 			return FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+		}
+
+		// Single settings-resolution rule shared by every Execute path: the analysis
+		// snapshot wins over the request snapshot; both fall back to a settings-CDO snapshot.
+		const FDesign2UMGGenerationSettingsSnapshot& ResolveEffectiveGenerationSettings(
+			const FDesignImportRequest& Request,
+			const TOptional<FDesign2UMGImportSettingsSnapshot>& AnalysisSnapshot,
+			FDesign2UMGImportSettingsSnapshot& OutFallback)
+		{
+			if (AnalysisSnapshot.IsSet())
+			{
+				return AnalysisSnapshot->GenerationSettings;
+			}
+			if (Request.SettingsSnapshot.IsSet())
+			{
+				return Request.SettingsSnapshot->GenerationSettings;
+			}
+			OutFallback = BuildFallbackImportSettingsSnapshot();
+			return OutFallback.GenerationSettings;
 		}
 
 		FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
@@ -109,7 +129,7 @@ namespace DesignImportPipeline
 			case EDesignBlueprintGenerationMode::BlueprintOnly:
 			{
 				UWidgetBlueprint* GeneratedBlueprint =
-					DesignImportUtils::GenerateBlueprint(
+					DesignImportGeneration::GenerateBlueprint(
 						Data,
 						Request.OutputPath,
 						GenerationSettings,
@@ -129,7 +149,7 @@ namespace DesignImportPipeline
 			}
 
 			case EDesignBlueprintGenerationMode::BlueprintAndPng:
-				Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndPng(
+				Result.bSucceeded = DesignImportGeneration::GenerateBlueprintAndPng(
 					Data,
 					Request.OutputPath,
 					&Result.GeneratedAssetPath,
@@ -140,7 +160,7 @@ namespace DesignImportPipeline
 				break;
 
 			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
-				Result.bSucceeded = DesignImportUtils::GenerateBlueprintAndCompiledPng(
+				Result.bSucceeded = DesignImportGeneration::GenerateBlueprintAndCompiledPng(
 					Data,
 					Request.OutputPath,
 					Request.Generation.CompiledPngFilePath,
@@ -149,12 +169,12 @@ namespace DesignImportPipeline
 					GenerationSettings,
 					&GenerationOutput,
 					&Result.ErrorMessage,
-				Request.Generation.RenderPreparation.IsSet()
-					? &Request.Generation.RenderPreparation.GetValue()
-					: nullptr,
-				Request.Generation.bPersistIconFontMappingChanges,
-				&Result.RenderedWidget,
-				&Result.RenderedSlateWidget);
+					Request.Generation.RenderPreparation.IsSet()
+						? &Request.Generation.RenderPreparation.GetValue()
+						: nullptr,
+					Request.Generation.bPersistIconFontMappingChanges,
+					&Result.RenderedWidget,
+					&Result.RenderedSlateWidget);
 				if (Result.bSucceeded)
 				{
 					Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
@@ -240,21 +260,9 @@ namespace DesignImportPipeline
 				Result.ErrorMessage = AnalysisResult.ErrorMessage;
 				return Result;
 			}
-			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr;
 			FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot;
-			if (AnalysisResult.SettingsSnapshot.IsSet())
-			{
-				GenerationSettings = &AnalysisResult.SettingsSnapshot->GenerationSettings;
-			}
-			else if (Request.SettingsSnapshot.IsSet())
-			{
-				GenerationSettings = &Request.SettingsSnapshot->GenerationSettings;
-			}
-			else
-			{
-				FallbackSettingsSnapshot = BuildFallbackImportSettingsSnapshot();
-				GenerationSettings = &FallbackSettingsSnapshot.GenerationSettings;
-			}
+			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = &ResolveEffectiveGenerationSettings(
+				Request, AnalysisResult.SettingsSnapshot, FallbackSettingsSnapshot);
 
 			if (Request.bUsePreview
 				&& DesignImportDialogs::OpenPreviewWindow(
@@ -293,18 +301,18 @@ namespace DesignImportPipeline
 			}
 
 			FArtifactGenerationRuntimeResult RuntimeResult;
-	FArtifactGenerationResult GenerationResult =
+			FArtifactGenerationResult GenerationResult =
 				GenerateArtifactsInternal(Data, GenerationRequest, GenerationSettings, &RuntimeResult);
 			Result.Commit = GenerationResult.Commit;
 			Result.bSucceeded = GenerationResult.bSucceeded;
 			Result.ErrorMessage = GenerationResult.ErrorMessage;
 			Result.GeneratedBlueprint = RuntimeResult.GeneratedBlueprint;
-		Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
-	Result.RenderPngPath = GenerationResult.RenderPngPath;
-	Result.RenderedSize = GenerationResult.RenderedSize;
-	Result.RenderedWidget = MoveTemp(GenerationResult.RenderedWidget);
-	Result.RenderedSlateWidget = MoveTemp(GenerationResult.RenderedSlateWidget);
-	return Result;
+			Result.GeneratedAssetPath = GenerationResult.GeneratedAssetPath;
+			Result.RenderPngPath = GenerationResult.RenderPngPath;
+			Result.RenderedSize = GenerationResult.RenderedSize;
+			Result.RenderedWidget = MoveTemp(GenerationResult.RenderedWidget);
+			Result.RenderedSlateWidget = MoveTemp(GenerationResult.RenderedSlateWidget);
+			return Result;
 		}
 	}
 
@@ -397,6 +405,8 @@ namespace DesignImportPipeline
 			? AnalysisResult->Data
 			: MoveTemp(OwnedAnalysisResult.Data);
 		FDesignImportRequest FinalRequest = Request;
+		// The analysis snapshot rides on the request so the async preview-confirmed
+		// handler keeps it; ExecuteWithAnalysis applies the same resolution rule.
 		if (!FinalRequest.SettingsSnapshot.IsSet() && AnalysisResult->SettingsSnapshot.IsSet())
 		{
 			FinalRequest.SettingsSnapshot = AnalysisResult->SettingsSnapshot;
@@ -492,7 +502,7 @@ namespace DesignImportPipeline
 		void AnchorRelativeImageFillUrl(FDesignFill& Fill, const FString& PenDirectory)
 		{
 			FString& Url = Fill.Image.Url;
-			if (!Fill.IsImage() || Url.IsEmpty() || DesignImportUtils::IsHttpUrl(Url) || !FPaths::IsRelative(Url)) return;
+			if (!Fill.IsImage() || Url.IsEmpty() || FDesignRemoteImageImporter::IsHttpUrl(Url) || !FPaths::IsRelative(Url)) return;
 			const FString Anchored = FPaths::ConvertRelativePathToFull(FPaths::Combine(PenDirectory, Url));
 			if (FPaths::FileExists(Anchored)) Url = Anchored;
 		}

@@ -8,7 +8,7 @@
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
 #include "UMGWidgetNodeAccess.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Materials/Material.h"
 #include "Serialization/JsonSerializer.h"
 #include "Components/TextBlock.h"
@@ -19,7 +19,6 @@
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
-
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetSwitcherUsesTypedStateTest,
 	"Design2UMG.PropertyApplier.WidgetSwitcherUsesTypedState",
@@ -41,7 +40,7 @@ bool FWidgetSwitcherUsesTypedStateTest::RunTest(const FString& Parameters)
 	Node.Type = TEXT("WidgetSwitcher");
 	Node.WidgetState.ActiveWidgetIndex = 2;
 
-	FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 	TestEqual(TEXT("Typed widget state applies active index"), Widget->GetActiveWidgetIndex(), 2);
 	return true;
 }
@@ -129,29 +128,26 @@ bool FScrollBoxJsonSerializationCycleTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushFlatTexturePathNormalizationTest,
-	"Design2UMG.WidgetNodeAccess.BrushFlatTexturePathNormalization",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushFlatTexturePathIgnoredTest,
+	"Design2UMG.WidgetNodeAccess.BrushFlatTexturePathIgnored",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushFlatTexturePathNormalizationTest::RunTest(const FString& Parameters)
+bool FBrushFlatTexturePathIgnoredTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData Data;
-	TestTrue(TEXT("Existing root texture input parses"), FUMGJsonParser::ParseJson(
+	TestTrue(TEXT("JSON carrying the removed root texture alias parses"), FUMGJsonParser::ParseJson(
 		TEXT(R"({"RootWidget":{"Type":"Image","Name":"RootTexture","Brush":{"TexturePath":"/Game/UI/T_JsonBrush.T_JsonBrush"}}})"), Data));
-	TestTrue(TEXT("Root input is normalized into the only image owner"),
-		Data.RootWidget.Brush.Image.TexturePath.IsSet()
-		&& Data.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_JsonBrush.T_JsonBrush"));
+	TestFalse(TEXT("Removed root alias does not populate the image owner"),
+		Data.RootWidget.Brush.Image.TexturePath.IsSet());
 	const auto SerializedBrush = FUMGJsonSerializer::SerializeWidgetNode(Data.RootWidget)->GetObjectField(TEXT("Brush"));
 	TestFalse(TEXT("Serialization never emits the root alias"), SerializedBrush->HasField(TEXT("TexturePath")));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushTexturePathConflictNormalizationJsonTest,
-	"Design2UMG.UMGJson.BrushTexturePathConflictNormalization",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBrushRootTexturePathIgnoredJsonTest,
+	"Design2UMG.UMGJson.BrushRootTexturePathIgnored",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FBrushTexturePathConflictNormalizationJsonTest::RunTest(const FString& Parameters)
+bool FBrushRootTexturePathIgnoredJsonTest::RunTest(const FString& Parameters)
 {
-	AddExpectedError(TEXT("Brush.TexturePath conflicts with Brush.Image.TexturePath"), EAutomationExpectedErrorFlags::Contains, 1);
-
 	const FString Json = TEXT(R"({
 		"RootWidget": {
 			"Type": "Image",
@@ -171,21 +167,21 @@ bool FBrushTexturePathConflictNormalizationJsonTest::RunTest(const FString& Para
 
 	FUMGWidgetData ParsedData;
 	FString ParseError;
-	TestTrue(TEXT("Conflict JSON parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
+	TestTrue(TEXT("JSON carrying the removed root alias parses"), FUMGJsonParser::ParseJson(Json, ParsedData, &ParseError));
 	if (!ParseError.IsEmpty())
 	{
 		AddInfo(ParseError);
 	}
 
-	TestTrue(TEXT("Parser normalizes texture path into canonical image owner"),
+	TestTrue(TEXT("Removed root alias does not reach the canonical image owner's texture path"),
 		ParsedData.RootWidget.Brush.Image.TexturePath.IsSet()
 		&& ParsedData.RootWidget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/UI/T_CanonicalBrush.T_CanonicalBrush"));
-	TestFalse(TEXT("Normalized output has no duplicate root owner"),
+	TestFalse(TEXT("Serialized output has no duplicate root owner"),
 		FUMGJsonSerializer::SerializeWidgetNode(ParsedData.RootWidget)->GetObjectField(TEXT("Brush"))->HasField(TEXT("TexturePath")));
 	TestEqual(TEXT("Typed accessor exposes canonical image texture path"),
 		GetWidgetProperty(ParsedData.RootWidget, TEXT("TexturePath")),
 		FString(TEXT("/Game/UI/T_CanonicalBrush.T_CanonicalBrush")));
-	TestTrue(TEXT("Conflict JSON preserves parsed crop transform"),
+	TestTrue(TEXT("Canonical crop transform survives the ignored alias"),
 		ParsedData.RootWidget.Brush.Image.Transform.IsSet()
 		&& FMath::IsNearlyEqual(ParsedData.RootWidget.Brush.Image.Transform.GetValue().A, 0.5f, 0.0001f));
 	return true;
@@ -316,4 +312,3 @@ bool FTypedBrushImageGradientJsonSerializationCycleTest::RunTest(const FString& 
 }
 
 #endif
-

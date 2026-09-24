@@ -3,7 +3,7 @@
 #include "DesignPreviewContext.h"
 
 #include "UMGSchemaSourceExtensions.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/Button.h"
 #include "Components/Overlay.h"
 #include "Components/WidgetSwitcher.h"
@@ -75,7 +75,7 @@ namespace
 		}
 
 		const FString CandidateBase = Address.Left(SeparatorIndex);
-		if (FUMGWidgetUtils::MatchesWidgetBaseName(Address, CandidateBase))
+		if (FUMGWidgetTreeBuilder::MatchesWidgetBaseName(Address, CandidateBase))
 		{
 			++Counts.FindOrAdd(CandidateBase);
 		}
@@ -83,8 +83,8 @@ namespace
 
 	void IndexRuntimeAddresses(const FUMGWidgetNode& Node, FPreviewRuntimeAddressIndex& Index)
 	{
-		const FString Address = FUMGWidgetUtils::SanitizeWidgetName(Node.Name, Node.Type).ToString();
-		if (UClass* WidgetClass = FUMGWidgetUtils::ResolveWidgetClass(Node.Type))
+		const FString Address = FUMGWidgetTreeBuilder::SanitizeWidgetName(Node.Name, Node.Type).ToString();
+		if (UClass* WidgetClass = FUMGWidgetTreeBuilder::ResolveWidgetClass(Node.Type))
 		{
 			if (WidgetClass->IsChildOf(UButton::StaticClass()))
 			{
@@ -126,7 +126,7 @@ namespace
 
 	bool NodeHasRole(const FUMGWidgetNode& Node, const EPreviewRuntimeRole Role)
 	{
-		const UClass* WidgetClass = FUMGWidgetUtils::ResolveWidgetClass(Node.Type);
+		const UClass* WidgetClass = FUMGWidgetTreeBuilder::ResolveWidgetClass(Node.Type);
 		if (!WidgetClass)
 		{
 			return false;
@@ -186,7 +186,7 @@ namespace
 				Result.ChildrenById.Add(Child.Id, &Child);
 			}
 			AddGeneratedAddressAliases(
-				FUMGWidgetUtils::SanitizeWidgetName(Child.Name, Child.Type).ToString(),
+				FUMGWidgetTreeBuilder::SanitizeWidgetName(Child.Name, Child.Type).ToString(),
 				Result.AddressCounts);
 		}
 		return Result;
@@ -257,10 +257,10 @@ namespace
 				return nullptr;
 			}
 
-			const FString Address = FUMGWidgetUtils::SanitizeWidgetName(RuntimeName, FallbackType).ToString();
-			const FString NodeAddress = FUMGWidgetUtils::SanitizeWidgetName(Node->Name, Node->Type).ToString();
+			const FString Address = FUMGWidgetTreeBuilder::SanitizeWidgetName(RuntimeName, FallbackType).ToString();
+			const FString NodeAddress = FUMGWidgetTreeBuilder::SanitizeWidgetName(Node->Name, Node->Type).ToString();
 			if (!NodeHasRole(*Node, Role)
-				|| !FUMGWidgetUtils::MatchesWidgetBaseName(NodeAddress, Address)
+				|| !FUMGWidgetTreeBuilder::MatchesWidgetBaseName(NodeAddress, Address)
 				|| AddressCount(AddressesForRole(RuntimeAddresses, Role), Address) != 1)
 			{
 				Error = FString::Printf(
@@ -368,24 +368,24 @@ namespace
 			Index = *PageIndex;
 
 			const FPageHostIndex& HostPages = bOverlay ? OverlayPages : SwitcherPages;
-			const FString Address = FUMGWidgetUtils::SanitizeWidgetName(Id, TEXT("CanvasPanel")).ToString();
+			const FString Address = FUMGWidgetTreeBuilder::SanitizeWidgetName(Id, TEXT("CanvasPanel")).ToString();
 			const FString MirrorId = Id + Design2UMGPrototypeTokens::OverlayMirrorSuffix();
-			const FString MirrorAddress = FUMGWidgetUtils::SanitizeWidgetName(
+			const FString MirrorAddress = FUMGWidgetTreeBuilder::SanitizeWidgetName(
 				MirrorId,
 				TEXT("CanvasPanel")).ToString();
 
 			const FUMGWidgetNode* const* BaseTargetNode = HostPages.ChildrenById.Find(Id);
 			const bool bBaseTarget = BaseTargetNode
-				&& FUMGWidgetUtils::MatchesWidgetBaseName(
-					FUMGWidgetUtils::SanitizeWidgetName((*BaseTargetNode)->Name, (*BaseTargetNode)->Type).ToString(),
+				&& FUMGWidgetTreeBuilder::MatchesWidgetBaseName(
+					FUMGWidgetTreeBuilder::SanitizeWidgetName((*BaseTargetNode)->Name, (*BaseTargetNode)->Type).ToString(),
 					Address)
 				&& AddressCount(HostPages.AddressCounts, Address) == 1;
 			const FUMGWidgetNode* const* MirrorTargetNode = HostPages.ChildrenById.Find(MirrorId);
 			const bool bMirrorTarget = bOverlay
 				&& !bBaseTarget
 				&& MirrorTargetNode
-				&& FUMGWidgetUtils::MatchesWidgetBaseName(
-					FUMGWidgetUtils::SanitizeWidgetName((*MirrorTargetNode)->Name, (*MirrorTargetNode)->Type).ToString(),
+				&& FUMGWidgetTreeBuilder::MatchesWidgetBaseName(
+					FUMGWidgetTreeBuilder::SanitizeWidgetName((*MirrorTargetNode)->Name, (*MirrorTargetNode)->Type).ToString(),
 					MirrorAddress)
 				&& AddressCount(HostPages.AddressCounts, MirrorAddress) == 1;
 			if (!bBaseTarget && !bMirrorTarget)

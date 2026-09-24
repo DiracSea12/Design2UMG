@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
 #include "UMGGenerator.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
@@ -106,7 +106,7 @@ bool FDesign2UMGRenderCanvasOverflowBackgroundTest::RunTest(const FString& Param
 		const FString PngPath = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2UCanvasOverflow"), TEXT(".png"));
 		FIntPoint RenderedSize = FIntPoint::ZeroValue;
 		FString Error;
-		const bool bRendered = DesignImportUtils::RenderCompiledBlueprintToPngFile(WidgetBP, PngPath, &RenderedSize, &Error, Override);
+		const bool bRendered = DesignImportGeneration::RenderCompiledBlueprintToPngFile(WidgetBP, PngPath, &RenderedSize, &Error, Override);
 		const bool bRead = bRendered && ReadPngPixels(PngPath, OutPixels, OutW, OutH);
 		if (!bRead)
 		{

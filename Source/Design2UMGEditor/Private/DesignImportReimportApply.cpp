@@ -7,7 +7,7 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParsing.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "WidgetLayoutAdapter.h"
 
 #include "Blueprint/UserWidget.h"
@@ -40,7 +40,7 @@ namespace DesignImportPipeline
 			Widget->Slot->Modify();
 			const FUMGSlotData SlotData = FWidgetLayoutAdapter::Resolve(
 				Node, ParentPanel, Shared.WidgetTree, Shared.DesignSize, false);
-			FUMGWidgetUtils::ApplySlotProperties(Widget->Slot, SlotData);
+			FUMGWidgetTreeBuilder::ApplySlotProperties(Widget->Slot, SlotData);
 		}
 	}
 
@@ -295,20 +295,20 @@ namespace DesignImportPipeline
 			TArray<UWidget*>& OwnedChildren,
 			FNestedChildrenMatch& Out)
 		{
-			const FString BaseName = FUMGWidgetUtils::SanitizeWidgetName(Child.Name, Child.Type).ToString();
+			const FString BaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(Child.Name, Child.Type).ToString();
 
 			TArray<UWidget*> Candidates;
 			for (UWidget* OwnedChild : OwnedChildren)
 			{
-				if (FUMGWidgetUtils::MatchesWidgetBaseName(OwnedChild->GetFName().ToString(), BaseName))
+				if (FUMGWidgetTreeBuilder::MatchesWidgetBaseName(OwnedChild->GetFName().ToString(), BaseName))
 				{
 					Candidates.Add(OwnedChild);
 				}
 			}
 			Candidates.Sort([&BaseName](const UWidget& A, const UWidget& B)
 			{
-				return FUMGWidgetUtils::GetWidgetNameSuffixRank(A.GetFName().ToString(), BaseName)
-					< FUMGWidgetUtils::GetWidgetNameSuffixRank(B.GetFName().ToString(), BaseName);
+				return FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(A.GetFName().ToString(), BaseName)
+					< FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(B.GetFName().ToString(), BaseName);
 			});
 
 			if (!Candidates.IsEmpty())
@@ -438,7 +438,7 @@ namespace DesignImportPipeline
 				for (int32 Index = 0; Index < NestedMoveCandidates.Num(); ++Index)
 				{
 					UWidget* Candidate = NestedMoveCandidates[Index];
-					if (FUMGWidgetUtils::MatchesWidgetBaseName(Candidate->GetFName().ToString(), BaseName))
+					if (FUMGWidgetTreeBuilder::MatchesWidgetBaseName(Candidate->GetFName().ToString(), BaseName))
 					{
 						MoveSource = Candidate;
 						NestedMoveCandidates.RemoveAt(Index);
@@ -526,7 +526,7 @@ namespace DesignImportPipeline
 
 			for (const FUMGWidgetNode* Child : Match.UnmatchedDesignChildren)
 			{
-				const FString BaseName = FUMGWidgetUtils::SanitizeWidgetName(Child->Name, Child->Type).ToString();
+				const FString BaseName = FUMGWidgetTreeBuilder::SanitizeWidgetName(Child->Name, Child->Type).ToString();
 				const TOptional<bool> Moved = TryNestedMoveChild(
 					*Child, BaseName, Panel, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets);
 				if (Moved.IsSet())
@@ -577,7 +577,7 @@ namespace DesignImportPipeline
 		}
 		Widget->Modify();
 		ApplySlotForNode(Widget, Node, Shared);
-		if (AutomaticKey.IsEmpty()) FUMGWidgetUtils::ApplyWidgetProperties(Widget, Node, nullptr, Shared.Budget);
+		if (AutomaticKey.IsEmpty()) FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node, nullptr, Shared.Budget);
 		if (AutomaticKey.IsEmpty()
 			&& !RefreshChildWidgets(Node, Widget, Shared, NestedMoveCandidates, NewlyCreatedWidgets)) return false;
 

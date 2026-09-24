@@ -22,7 +22,6 @@ namespace GeneratedAssetLifecycle
 		return GEditor->UndoTransaction(false);
 	}
 
-
 	bool IsFileWritableForSave(const FString& InPath, bool bAllowWriteProbe, FString& OutReason)
 	{
 		if (!IFileManager::Get().FileExists(*InPath))

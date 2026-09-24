@@ -444,7 +444,6 @@ bool FFigmaGridSlotSemanticsConverterTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeKeysIndependentOfRawJsonTest,
 	"Design2UMG.TypedPayload.PrototypeKeysIndependentOfRawJson",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

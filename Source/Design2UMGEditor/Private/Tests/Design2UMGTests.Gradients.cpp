@@ -20,7 +20,6 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
-
 using Design2UMGTestUtils::BuildProceduralRequestForTest;
 using Design2UMGTestUtils::ReadTexturePixel;
 
@@ -247,4 +246,3 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 }
 
 #endif
-

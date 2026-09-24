@@ -10,13 +10,14 @@
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
+#include "DesignBlueprintRenderPreparation.h"
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "UMGSchema.h"
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetRenderer.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UserWidget.h"
@@ -454,7 +455,7 @@ namespace
 
 	FIntPoint ResolveBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
 	{
-		const TOptional<FVector2D> DesignTimeSize = FUMGWidgetUtils::GetBlueprintDesignTimeSize(WidgetBlueprint);
+		const TOptional<FVector2D> DesignTimeSize = FUMGWidgetRenderer::GetBlueprintDesignTimeSize(WidgetBlueprint);
 		if (DesignTimeSize.IsSet())
 		{
 			return FIntPoint(
@@ -574,7 +575,7 @@ namespace
 			RenderPreparation.ImportedFontPackagePath = ImportedFontPackagePath;
 			RenderPreparation.bRefreshGeneratedTextures = Spec.bForceReloadPackage;
 			RenderPreparation.bResetTransientRenderState = true;
-			WidgetBlueprint = DesignImportUtils::PrepareWidgetBlueprintForRender(
+			WidgetBlueprint = DesignBlueprintRenderPreparation::PrepareWidgetBlueprintForRender(
 				Spec.SourcePath,
 				RenderPreparation,
 				Spec.bForceReloadPackage,
@@ -624,7 +625,7 @@ namespace
 		OutResult.bRenderSizeOverridden = EffectiveRenderSizeOverride.IsSet();
 		TStrongObjectPtr<UUserWidget> RenderedWidget;
 		TSharedPtr<SWidget> RenderedSlateWidget;
-		if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
+		if (!DesignImportGeneration::RenderCompiledBlueprintToPngFile(
 			WidgetBlueprint,
 			Spec.RenderPngPath,
 			&OutResult.RenderSize,
@@ -947,7 +948,7 @@ namespace Design2UMGAutomationRender
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: spec loaded successfully"));
-		DesignImportUtils::ResetTransientRenderState();
+		DesignBlueprintRenderPreparation::ResetTransientRenderState();
 		const bool bOk = RunAutomationRender(Spec, Result);
 		WriteAutomationRenderResult(Spec, Result);
 
@@ -972,7 +973,6 @@ namespace Design2UMGAutomationRender
 	}
 }
 
-
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesign2UMGFontResetSynchronousTest,
 	"Design2UMG.Automation.FontResetCompletesSynchronously",
@@ -982,7 +982,7 @@ bool FDesign2UMGFontResetSynchronousTest::RunTest(const FString&)
 {
 	FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
 	Renderer->FlushFontCache(TEXT("Font reset regression test"));
-	DesignImportUtils::ResetTransientRenderState();
+	DesignBlueprintRenderPreparation::ResetTransientRenderState();
 	return TestFalse(TEXT("No pending font flush remains before parsing the next case"),
 		Renderer->GetFontCache()->ConditionalFlushCache());
 }

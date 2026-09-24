@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
+#include "DesignBlueprintRenderPreparation.h"
 #include "UMGGenerator.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
@@ -145,7 +146,7 @@ bool FDesign2UMGInvalidGenerationClearsArtifactOutputsTest::RunTest(const FStrin
 	FString RenderPngPath = TEXT("stale-render-path");
 	TestFalse(
 		TEXT("Invalid source data fails Blueprint and PNG generation"),
-		DesignImportUtils::GenerateBlueprintAndPng(
+		DesignImportGeneration::GenerateBlueprintAndPng(
 			InvalidData,
 			TEXT("/Game/Design2UMG/Automation/SaveSemantics"),
 			&GeneratedAssetPath,
@@ -158,7 +159,7 @@ bool FDesign2UMGInvalidGenerationClearsArtifactOutputsTest::RunTest(const FStrin
 	FIntPoint RenderedSize(321, 654);
 	TestFalse(
 		TEXT("Invalid source data fails compiled PNG generation"),
-		DesignImportUtils::GenerateBlueprintAndCompiledPng(
+		DesignImportGeneration::GenerateBlueprintAndCompiledPng(
 			InvalidData,
 			TEXT("/Game/Design2UMG/Automation/SaveSemantics"),
 			TEXT("G:/invalid/not-written.png"),
@@ -241,7 +242,7 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 		EAutomationExpectedMessageFlags::Contains,
 		1);
 	const TWeakObjectPtr<UImage> UnreferencedObject(NewObject<UImage>(GetTransientPackage()));
-	UWidgetBlueprint* Kept = DesignImportUtils::ReloadWidgetBlueprintForRender(Loaded);
+	UWidgetBlueprint* Kept = DesignBlueprintRenderPreparation::ReloadWidgetBlueprintForRender(Loaded);
 	TestTrue(TEXT("Absent preparation does not collect transient objects for a dirty blueprint"), UnreferencedObject.IsValid());
 	TestTrue(TEXT("Dirty package skips the reload and keeps the in-memory instance"), Kept == Loaded);
 	TestTrue(TEXT("Dirty package stays dirty after the skipped reload"), Package->IsDirty());
@@ -261,7 +262,7 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
-	UWidgetBlueprint* Reloaded = DesignImportUtils::ReloadWidgetBlueprintForRender(Loaded);
+	UWidgetBlueprint* Reloaded = DesignBlueprintRenderPreparation::ReloadWidgetBlueprintForRender(Loaded);
 	if (!TestNotNull(TEXT("Clean package reloads the blueprint"), Reloaded))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
@@ -366,7 +367,7 @@ bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
 	Preparation.bRefreshGeneratedTextures = !bFailPreparation;
 	Preparation.ImportedFontPackagePath = bFailPreparation ? FPaths::GetPath(TexturePackageName) : FString();
 	FString PreparationError;
-	UWidgetBlueprint* Prepared = DesignImportUtils::ReloadWidgetBlueprintForRender(Blueprint, &Preparation, &PreparationError);
+	UWidgetBlueprint* Prepared = DesignBlueprintRenderPreparation::ReloadWidgetBlueprintForRender(Blueprint, &Preparation, &PreparationError);
 	TestFalse(TEXT("Resource preparation collects unreferenced transient objects"), UnreferencedObject.IsValid());
 	if (bFailPreparation)
 	{
@@ -431,7 +432,7 @@ bool FDesign2UMGGenerationLeavesNoUndoTransactionTest::RunTest(const FString& Pa
 
 	FUMGWidgetData Data = MakeSaveSemanticsWidgetData(TEXT("WBP_GenerationNoUndo"));
 	const int32 UndoCountBefore = Transactor->GetUndoCount();
-	UWidgetBlueprint* Generated = DesignImportUtils::GenerateBlueprint(Data, OutputPath);
+	UWidgetBlueprint* Generated = DesignImportGeneration::GenerateBlueprint(Data, OutputPath);
 	if (!TestNotNull(TEXT("Blueprint generation succeeds"), Generated))
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);

@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "UMGValueParsing.h"
 #include "WidgetLayoutAdapter.h"
 #include "Design2UMGLog.h"
@@ -204,7 +204,7 @@ namespace
 	}
 }
 
-void FUMGWidgetUtils::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& S)
+void FUMGWidgetTreeBuilder::ApplySlotProperties(UPanelSlot* Slot, const FUMGSlotData& S)
 {
 	if (!Slot) return;
 	const FWidgetLayoutAdapter::FNonDefaultGroups NonDefault = FWidgetLayoutAdapter::GetNonDefaultSlotGroups(S);

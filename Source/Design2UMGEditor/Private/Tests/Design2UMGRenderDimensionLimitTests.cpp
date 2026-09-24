@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "DesignImportUtils.h"
+#include "DesignImportGeneration.h"
 #include "UMGGenerator.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
@@ -58,7 +58,7 @@ bool FDesign2UMGRenderDimensionLimitTest::RunTest(const FString& Parameters)
 	const FString PngPath = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2URenderLimit"), TEXT(".png"));
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
 	FString Error;
-	const bool bRendered = DesignImportUtils::RenderCompiledBlueprintToPngFile(WidgetBP, PngPath, &RenderedSize, &Error);
+	const bool bRendered = DesignImportGeneration::RenderCompiledBlueprintToPngFile(WidgetBP, PngPath, &RenderedSize, &Error);
 	TestFalse(TEXT("Oversized render target is rejected before RHI submission"), bRendered);
 	TestTrue(
 		TEXT("Rejection carries the structured dimension-limit error message"),

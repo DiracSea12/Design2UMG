@@ -45,4 +45,3 @@ private:
 
 	void SendGet(const FString& Url, FOnComplete OnComplete);
 };
-

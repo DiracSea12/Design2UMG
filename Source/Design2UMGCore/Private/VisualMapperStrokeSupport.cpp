@@ -418,7 +418,6 @@ namespace VisualMapperStrokeSupport
 			Overlay.Children.Add(MoveTemp(Border));
 		}
 
-
 		const float TopThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Top);
 		const float BottomThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Bottom);
 		const bool bCombineHorizontalSides = TopThickness >= 1.0f

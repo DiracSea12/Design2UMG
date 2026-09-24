@@ -16,7 +16,6 @@ namespace Design2UMGManifestKinds
 	constexpr const TCHAR* ManifestWriteFailedDiagnostic = TEXT("manifest_write_failed");
 }
 
-
 /**
  * Records source identity, generated instances, ownership and input declarations.
  * Written to <AssetName>.d2u.json after a successful asset save.
@@ -80,7 +79,6 @@ namespace Design2UMGGenerationManifest
 	FString ComputeSavedAssetHash(const FString& AssetPackageName);
 	/** Manifest sidecar file name suffix (<AssetName>.d2u.json). */
 	FString BuildSidecarPathForAsset(const FString& AssetPackageName);
-
 
 	/**
 	 * Write via a temp file, then replace the sidecar. Failures before replacement leave it Unchanged;

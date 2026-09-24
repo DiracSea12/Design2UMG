@@ -15,7 +15,6 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenOfficialFieldParityTest,
 	"Design2UMG.Parity.PenOfficialFields",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -299,4 +298,3 @@ TestTrue(TEXT("figma instance isExposedInstance preserved"), InstanceNode->Metad
 }
 
 #endif
-

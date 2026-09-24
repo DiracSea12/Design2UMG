@@ -5,7 +5,6 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
-#include "DesignImportUtils.h"
 #include "GeneratedAssetLifecycle.h"
 
 #include "Engine/Texture.h"
@@ -58,7 +57,7 @@ namespace
 	FString TryNormalizeRemoteUrl(const FString& InTexturePath)
 	{
 		const FString Trimmed = InTexturePath.TrimStartAndEnd();
-		return DesignImportUtils::IsHttpUrl(Trimmed) ? NormalizeUrl(Trimmed) : FString();
+		return FDesignRemoteImageImporter::IsHttpUrl(Trimmed) ? NormalizeUrl(Trimmed) : FString();
 	}
 
 	FString MakeUrlHash(const FString& InUrl)
@@ -613,7 +612,7 @@ namespace
 		}
 
 		// Local file path: read directly and create a texture asset.
-		if (!DesignImportUtils::IsHttpUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
+		if (!FDesignRemoteImageImporter::IsHttpUrl(InOutTexturePath) && FPaths::FileExists(InOutTexturePath))
 		{
 			const FString LocalPath = InOutTexturePath;
 			const FString LocalKey = BuildSourceKeyForLocal(LocalPath);
@@ -719,7 +718,7 @@ namespace
 			return true;
 		}
 
-		if (!DesignImportUtils::IsHttpUrl(InOutTexturePath))
+		if (!FDesignRemoteImageImporter::IsHttpUrl(InOutTexturePath))
 		{
 			const FString Message = FString::Printf(TEXT("Skipped non-asset path for '%s': %s"), *WidgetName, *InOutTexturePath);
 			Context.Report.AddDiagnostic(
@@ -923,6 +922,12 @@ namespace
 // Partial-success contract: imported textures stay saved even when other
 // resources fail. The result records every outcome so generation can continue
 // for unaffected images while callers surface the degradation.
+bool FDesignRemoteImageImporter::IsHttpUrl(const FString& Value)
+{
+	return Value.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase)
+		|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+}
+
 FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();

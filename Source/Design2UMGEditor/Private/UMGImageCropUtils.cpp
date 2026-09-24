@@ -86,4 +86,3 @@ bool UMGImageCropUtils::TryApplyCropToBrush(
 
 	return false;
 }
-

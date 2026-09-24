@@ -441,4 +441,3 @@ bool FSafeReimportMappedOwnAttrDivergenceTest::RunTest(const FString&)
 }
 
 #endif
-

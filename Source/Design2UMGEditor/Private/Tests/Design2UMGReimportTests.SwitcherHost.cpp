@@ -54,7 +54,6 @@ namespace
 	}
 }
 
-
 // ---------------------------------------------------------------------------
 // a multi-page prototype document going from two to three pages. The switcher
 // host root id is the page-set content fingerprint, so adding a page necessarily rewrites it: after host
@@ -335,4 +334,3 @@ bool FSafeReimportSwitcherHostDegradeToSinglePageTest::RunTest(const FString&)
 }
 
 #endif
-

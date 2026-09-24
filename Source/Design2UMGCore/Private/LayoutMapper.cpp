@@ -401,4 +401,3 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	}
 	return SizeBox;
 }
-

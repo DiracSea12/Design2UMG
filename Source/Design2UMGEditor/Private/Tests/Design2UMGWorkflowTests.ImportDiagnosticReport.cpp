@@ -465,7 +465,7 @@ bool FImportDiagnosticReportGenerationFailureTest::RunTest(const FString&)
 		AddExpectedError(TEXT("has no valid capture size"), EAutomationExpectedErrorFlags::Contains, 1);
 		if (Mode != EDesignBlueprintGenerationMode::BlueprintAndCompiledPng)
 		{
-			AddExpectedError(TEXT("DesignImportUtils: Widget Blueprint build failed"), EAutomationExpectedErrorFlags::Contains, 1);
+			AddExpectedError(TEXT("DesignImportGeneration: Widget Blueprint build failed"), EAutomationExpectedErrorFlags::Contains, 1);
 		}
 		const FArtifactGenerationResult Result = DesignImportPipeline::GenerateArtifacts(Data, Request);
 		TestFalse(TEXT("Generation fails"), Result.bSucceeded);

@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "UMGWidgetUtils.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -184,7 +184,7 @@ namespace
 
 }
 
-UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
+UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -344,7 +344,7 @@ UWidget* FUMGWidgetUtils::BuildWidgetTree(UWidgetTree* WidgetTree, const FUMGWid
 	return NewWidget;
 }
 
-UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
+UWidget* FUMGWidgetTreeBuilder::CreateWidgetRecursive(UWidgetTree* WidgetTree, const FUMGWidgetNode& Node, UPanelWidget* ParentWidget, const TMap<FString, UTexture2D*>* TextureMap, const FIntPoint* ExplicitDesignSize, FDesign2UMGComponentMappingBuildState* ComponentMappingState, TMap<FString, UClass*>* ClassOverrideCache, const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings, DesignImageResources::FImageOperationBudget* Budget)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -407,7 +407,7 @@ UWidget* FUMGWidgetUtils::CreateWidgetRecursive(UWidgetTree* WidgetTree, const F
 	return NewWidget;
 }
 
-UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
+UClass* FUMGWidgetTreeBuilder::ResolveWidgetClass(const FString& TypeName)
 {
 	if (UClass* const* Found = GetWidgetClassMap().Find(TypeName))
 	{
@@ -436,23 +436,7 @@ UClass* FUMGWidgetUtils::ResolveWidgetClass(const FString& TypeName)
 	return nullptr;
 }
 
-TOptional<FVector2D> FUMGWidgetUtils::GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
-{
-	if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
-	{
-		if (const UUserWidget* CDO = Cast<UUserWidget>(WidgetBlueprint->GeneratedClass->GetDefaultObject()))
-		{
-			if (CDO->DesignTimeSize.X > 0.0f && CDO->DesignTimeSize.Y > 0.0f)
-			{
-				return CDO->DesignTimeSize;
-			}
-		}
-	}
-
-	return TOptional<FVector2D>();
-}
-
-void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, DesignImageResources::FImageOperationBudget* Budget)
+void FUMGWidgetTreeBuilder::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, const TMap<FString, UTexture2D*>* TextureMap, DesignImageResources::FImageOperationBudget* Budget)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -468,7 +452,7 @@ void FUMGWidgetUtils::ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNod
 	}
 }
 
-FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)
+FName FUMGWidgetTreeBuilder::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)
 {
 	FString Sanitized = SlugStringForValidName(InName);
 
@@ -487,15 +471,14 @@ FName FUMGWidgetUtils::SanitizeWidgetName(const FString& InName, const FString& 
 	return FName(*Sanitized);
 }
 
-bool FUMGWidgetUtils::MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName)
+bool FUMGWidgetTreeBuilder::MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName)
 {
 	int32 Rank = 0;
 	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank);
 }
 
-int32 FUMGWidgetUtils::GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName)
+int32 FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName)
 {
 	int32 Rank = 0;
 	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank) ? Rank : MAX_int32;
 }
-
