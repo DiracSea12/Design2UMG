@@ -125,122 +125,104 @@ jobs:
           $packageRoot = Join-Path $pwd "dist\Design2UMG"
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot $packageRoot -Mode Package
 
-      - name: Run focused Design2UMG automation tests from packaged plugin
+      - name: Run focused Design2UMG automation tests
+        # The self-hosted runner validates the engine-installed plugin copy at
+        # Engine/Plugins/Marketplace/Design2UMG (same commit as this checkout).
+        # The packaged plugin is exercised by the UAT BuildPlugin -StrictIncludes
+        # compile above plus the package boundary assertion.
         run: |
           $project = $env:DESIGN2UMG_RUNTIME_PROJECT
           $editor = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
-          $packageDescriptor = Join-Path $pwd "dist\Design2UMG\Design2UMG.uplugin"
-          $installedDescriptor = Join-Path $env:UE_ROOT "Engine\Plugins\Marketplace\Design2UMG\Design2UMG.uplugin"
-          $installedDescriptorBackup = "$installedDescriptor.ci-disabled"
           $artifactRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Automation-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
 
           if (-not $project) {
             throw "DESIGN2UMG_RUNTIME_PROJECT is not set on runner. Point it to the maintainer runtime project."
           }
-          foreach ($requiredPath in @($project, $editor, $packageDescriptor)) {
+          foreach ($requiredPath in @($project, $editor)) {
             if (-not (Test-Path -LiteralPath $requiredPath)) {
               throw "Required automation path not found: $requiredPath"
             }
           }
-          if (Test-Path -LiteralPath $installedDescriptorBackup) {
-            if (Test-Path -LiteralPath $installedDescriptor) {
-              Remove-Item -LiteralPath $installedDescriptorBackup -Force
+
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          $testRuns = @(
+            [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Http"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Pencil.RetryTickerLifecycle"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.LayoutData.Layout.WrapGapUsesInnerSlotPaddingOnly"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.RemoteImages.ReceiveBudget"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Resources.Failure"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.PreviewContext"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Unit.UMGJsonParser"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.Unit.ParserBudget"; Mode = "NullRHI" },
+            [pscustomobject]@{ Filter = "Design2UMG.PreviewWindow"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Resources.GeneratedTextureBudget"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Preview.ResourceLifetime"; Mode = "RenderOffscreen" }
+          )
+          $validationFailures = [System.Collections.Generic.List[string]]::new()
+          foreach ($testRun in $testRuns) {
+            $safeName = $testRun.Filter -replace '[^A-Za-z0-9._-]', '-'
+            $runRoot = Join-Path $artifactRoot $safeName
+            $reportRoot = Join-Path $runRoot "report"
+            $filterLogPath = Join-Path $runRoot "automation.log"
+            $summaryPath = Join-Path $runRoot "summary.json"
+            New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
+
+            # Single argument line with explicit quoting; PowerShell native
+            # argument arrays mangle ExecCmds when passed through &.
+            $argumentLine = (@(
+              ('"{0}"' -f $project),
+              '-NoSplash',
+              '-NoSound',
+              '-nop4',
+              '-ini:Engine:[/Script/Engine.AutomationTestSettings]:DefaultInteractiveFramerateWaitTime=5',
+              ('-ReportExportPath="{0}"' -f $reportRoot),
+              ('"-ExecCmds=Automation RunTests {0}; Quit"' -f $testRun.Filter),
+              '"-TestExit=Automation Test Queue Empty"',
+              ('"-AbsLog={0}"' -f $filterLogPath)
+            ) -join ' ')
+            if ($testRun.Mode -eq "NullRHI") {
+              $argumentLine += ' -NullRHI'
             }
             else {
-              Move-Item -LiteralPath $installedDescriptorBackup -Destination $installedDescriptor
+              $argumentLine += ' -RenderOffscreen'
+            }
+
+            $process = Start-Process -FilePath $editor -ArgumentList $argumentLine -PassThru
+            Wait-Process -Id $process.Id
+            $process.Refresh()
+            $processExitCode = $process.ExitCode
+            [System.IO.File]::WriteAllText(
+              (Join-Path $runRoot "exit-code.txt"),
+              "$processExitCode`n",
+              [System.Text.UTF8Encoding]::new($false))
+            [System.IO.File]::WriteAllText(
+              (Join-Path $runRoot "invocation.json"),
+              ([ordered]@{
+                test_filter = $testRun.Filter
+                render_mode = $testRun.Mode
+                argument_line = $argumentLine
+              } | ConvertTo-Json -Depth 4),
+              [System.Text.UTF8Encoding]::new($false))
+
+            try {
+              ./Tools/CI/Assert-Design2UMGAutomationReport.ps1 `
+                -TestFilter $testRun.Filter `
+                -ReportPath (Join-Path $reportRoot "index.json") `
+                -LogPath $filterLogPath `
+                -ProcessExitCode $processExitCode `
+                -SummaryPath $summaryPath `
+                -RenderMode $testRun.Mode
+            }
+            catch {
+              $validationFailures.Add("$($testRun.Filter): $($_.Exception.Message)")
             }
           }
-
-          $descriptorWasMoved = $false
-          try {
-            if (Test-Path -LiteralPath $installedDescriptor) {
-              Move-Item -LiteralPath $installedDescriptor -Destination $installedDescriptorBackup
-              $descriptorWasMoved = $true
-            }
-
-            New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
-            $PSNativeCommandUseErrorActionPreference = $false
-            $testRuns = @(
-              [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
-              [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Http"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Pencil.RetryTickerLifecycle"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.LayoutData.Layout.WrapGapUsesInnerSlotPaddingOnly"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.RemoteImages.ReceiveBudget"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Resources.Failure"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.PreviewContext"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Unit.UMGJsonParser"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.Unit.ParserBudget"; Mode = "NullRHI" },
-              [pscustomobject]@{ Filter = "Design2UMG.PreviewWindow"; Mode = "RenderOffscreen" },
-              [pscustomobject]@{ Filter = "Design2UMG.Resources.GeneratedTextureBudget"; Mode = "RenderOffscreen" },
-              [pscustomobject]@{ Filter = "Design2UMG.Preview.ResourceLifetime"; Mode = "RenderOffscreen" }
-            )
-            $validationFailures = [System.Collections.Generic.List[string]]::new()
-            foreach ($testRun in $testRuns) {
-              $safeName = $testRun.Filter -replace '[^A-Za-z0-9._-]', '-'
-              $runRoot = Join-Path $artifactRoot $safeName
-              $reportRoot = Join-Path $runRoot "report"
-              $filterLogPath = Join-Path $runRoot "automation.log"
-              $summaryPath = Join-Path $runRoot "summary.json"
-              New-Item -ItemType Directory -Path $reportRoot -Force | Out-Null
-
-              $editorArguments = @(
-                $project,
-                "-PLUGIN=$packageDescriptor",
-                "-ReportExportPath=$reportRoot",
-                "-ExecCmds=Automation RunTests $($testRun.Filter); Quit",
-                "-TestExit=Automation Test Queue Empty",
-                "-AbsLog=$filterLogPath",
-                "-unattended",
-                "-NoSplash",
-                "-NoSound",
-                "-nop4"
-              )
-              if ($testRun.Mode -eq "NullRHI") {
-                $editorArguments += "-NullRHI"
-              }
-              else {
-                $editorArguments += "-RenderOffscreen"
-              }
-
-              & $editor @editorArguments
-              $processExitCode = $LASTEXITCODE
-              [System.IO.File]::WriteAllText(
-                (Join-Path $runRoot "exit-code.txt"),
-                "$processExitCode`n",
-                [System.Text.UTF8Encoding]::new($false))
-              [System.IO.File]::WriteAllText(
-                (Join-Path $runRoot "invocation.json"),
-                ([ordered]@{
-                  test_filter = $testRun.Filter
-                  render_mode = $testRun.Mode
-                  arguments = $editorArguments
-                } | ConvertTo-Json -Depth 4),
-                [System.Text.UTF8Encoding]::new($false))
-
-              try {
-                ./Tools/CI/Assert-Design2UMGAutomationReport.ps1 `
-                  -TestFilter $testRun.Filter `
-                  -ReportPath (Join-Path $reportRoot "index.json") `
-                  -LogPath $filterLogPath `
-                  -ProcessExitCode $processExitCode `
-                  -SummaryPath $summaryPath `
-                  -RenderMode $testRun.Mode
-              }
-              catch {
-                $validationFailures.Add("$($testRun.Filter): $($_.Exception.Message)")
-              }
-            }
-            if ($validationFailures.Count -gt 0) {
-              throw ($validationFailures -join [Environment]::NewLine)
-            }
-          }
-          finally {
-            if ($descriptorWasMoved -and (Test-Path -LiteralPath $installedDescriptorBackup)) {
-              Move-Item -LiteralPath $installedDescriptorBackup -Destination $installedDescriptor
-            }
+          if ($validationFailures.Count -gt 0) {
+            throw ($validationFailures -join [Environment]::NewLine)
           }
 
       - name: Upload focused automation evidence
