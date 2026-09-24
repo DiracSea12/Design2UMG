@@ -113,6 +113,7 @@ FUMGWidgetData::FUMGWidgetData(const FUMGWidgetData& Other)
 	: WidgetName(Other.WidgetName)
 	, RootWidget(Other.RootWidget)
 	, Warnings(Other.Warnings)
+	, ConversionError(Other.ConversionError)
 	, IconFontMappingChanges(Other.IconFontMappingChanges)
 {
 	if (Other.SourceDocumentData)
@@ -136,6 +137,7 @@ FUMGWidgetData& FUMGWidgetData::operator=(const FUMGWidgetData& Other)
 	WidgetName = Other.WidgetName;
 	RootWidget = Other.RootWidget;
 	Warnings = Other.Warnings;
+	ConversionError = Other.ConversionError;
 	IconFontMappingChanges = Other.IconFontMappingChanges;
 	SourceDocumentData = Other.SourceDocumentData
 		? MakeUnique<FUMGSourceDocumentData>(*Other.SourceDocumentData)

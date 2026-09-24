@@ -18,7 +18,7 @@ namespace
 			: FString::Printf(TEXT("{\"version\":\"2.14\",\"children\":[%s,{\"id\":\"instance\",\"type\":\"ref\",\"ref\":\"target\"%s%s}]}"), *Target, Patch.IsEmpty() ? TEXT("") : TEXT(","), *Patch);
 		FDesignDocument Doc;
 		if (!Test.TestTrue(TEXT("Patch fixture parses"), FPenParser::ParseDocument(Json, Doc))) return nullptr;
-		TSharedPtr<FDesignNode> Result = RefExpander::ExpandRef(Doc.Children.Last(), Doc);
+		TSharedPtr<FDesignNode> Result = RefExpander::ExpandRef(Doc.Children.Last(), Doc).ExpandedNode;
 		if (!Test.TestTrue(TEXT("Patch fixture expands"), Result.IsValid())) return nullptr;
 		return bDescendant ? Result->Children[0] : Result;
 	}
@@ -186,7 +186,7 @@ bool FPenOverrideNestedPrecedenceTest::RunTest(const FString&)
 	]})JSON");
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Nested fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-	const TSharedPtr<FDesignNode> Node = RefExpander::ExpandRef(Doc.Children[2], Doc);
+	const TSharedPtr<FDesignNode> Node = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Nested ref expands"), Node.IsValid())) return false;
 	TestEqual(TEXT("Outer gap wins including zero"), Node->LayoutData.ExplicitGap.Get(-1.0f), 0.0f);
 	TestFalse(TEXT("Outer false clip wins"), Node->LayoutData.ExplicitClip.Get(true));
@@ -220,9 +220,9 @@ bool FPenOverrideDeferredRefTest::RunTest(const FString&)
 	]})JSON");
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Deferred fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-	const TSharedPtr<FDesignNode> Wrapper = RefExpander::ExpandRef(Doc.Children[2], Doc);
+	const TSharedPtr<FDesignNode> Wrapper = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Wrapper expands"), Wrapper.IsValid())) return false;
-	const TSharedPtr<FDesignNode> Nested = RefExpander::ExpandRef(Wrapper->Children[0], Doc);
+	const TSharedPtr<FDesignNode> Nested = RefExpander::ExpandRef(Wrapper->Children[0], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Nested ref expands"), Nested.IsValid())) return false;
 	TestEqual(TEXT("Patch on ref root survives later expansion"), Nested->LayoutData.ExplicitGap.Get(-1.0f), 0.0f);
 	TestTrue(TEXT("Ref root can be re-enabled"), Nested->Transform.bEnabled);
@@ -250,13 +250,13 @@ bool FPenOverrideReplacementIsolationTest::RunTest(const FString&)
 	]})JSON");
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Replacement fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-	const TSharedPtr<FDesignNode> First = RefExpander::ExpandRef(Doc.Children[2], Doc);
+	const TSharedPtr<FDesignNode> First = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Replacement expands"), First.IsValid())) return false;
 	TestEqual(TEXT("Typed descendant performs full replacement"), First->Children[0]->Id, FString(TEXT("replacement")));
 	TestEqual(TEXT("Outer partial patch applies on replacement"), First->Children[0]->LayoutData.ExplicitGap.Get(-1.0f), 0.0f);
 	TestEqual(TEXT("Outer children replace inner children"), First->Children[0]->Children[0]->Id, FString(TEXT("fresh")));
 	First->Children[0]->Children[0]->Text.Content = TEXT("Mutated");
-	const TSharedPtr<FDesignNode> Second = RefExpander::ExpandRef(Doc.Children[2], Doc);
+	const TSharedPtr<FDesignNode> Second = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Second instance expands"), Second.IsValid())) return false;
 	TestEqual(TEXT("Instances do not share patched children"), Second->Children[0]->Children[0]->Text.Content, FString(TEXT("New")));
 	TestEqual(TEXT("Source replacement is unchanged"), Doc.Children[1]->Descendants.FindChecked(TEXT("slot")).Replacement->Children[0]->Text.Content, FString(TEXT("Old")));
@@ -282,9 +282,9 @@ bool FPenOverridePaintPrecedenceTest::RunTest(const FString&)
 	]})JSON");
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Paint fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-	const TSharedPtr<FDesignNode> Clear = RefExpander::ExpandRef(Doc.Children[2], Doc);
-	const TSharedPtr<FDesignNode> Repaint = RefExpander::ExpandRef(Doc.Children[3], Doc);
-	const TSharedPtr<FDesignNode> ExplicitStroke = RefExpander::ExpandRef(Doc.Children[4], Doc);
+	const TSharedPtr<FDesignNode> Clear = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
+	const TSharedPtr<FDesignNode> Repaint = RefExpander::ExpandRef(Doc.Children[3], Doc).ExpandedNode;
+	const TSharedPtr<FDesignNode> ExplicitStroke = RefExpander::ExpandRef(Doc.Children[4], Doc).ExpandedNode;
 	if (!Clear.IsValid() || !Repaint.IsValid() || !ExplicitStroke.IsValid()) return false;
 	TestFalse(TEXT("Outer fill clear removes inner stroke paint"), Clear->Visual.Stroke.Fill.IsSet());
 	TestFalse(TEXT("Later fill does not resurrect previously cleared stroke"), Repaint->Visual.Stroke.Fill.IsSet());
@@ -333,7 +333,7 @@ bool FPenOverrideParentChildPrecedenceTest::RunTest(const FString&)
 		]})JSON"), *MiddleDescendants, *OuterDescendants);
 		FDesignDocument Doc;
 		if (!TestTrue(TEXT("Precedence fixture parses"), FPenParser::ParseDocument(Json, Doc))) return FString();
-		const TSharedPtr<FDesignNode> Node = RefExpander::ExpandRef(Doc.Children.Last(), Doc);
+		const TSharedPtr<FDesignNode> Node = RefExpander::ExpandRef(Doc.Children.Last(), Doc).ExpandedNode;
 		if (!TestTrue(TEXT("Precedence fixture expands"), Node.IsValid())
 			|| !Node.IsValid() || Node->Children.IsEmpty() || Node->Children[0]->Children.IsEmpty())
 		{
@@ -406,7 +406,7 @@ bool FPenOverrideReplacementScopeTest::RunTest(const FString&)
 			{"id":"outer","type":"ref","ref":"middle",%s}]})JSON"), *Outer);
 		FDesignDocument Doc;
 		if (!TestTrue(TEXT("Replacement scope parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-		const auto Expanded = RefExpander::ExpandRef(Doc.Children.Last(), Doc);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children.Last(), Doc).ExpandedNode;
 		if (!TestTrue(TEXT("Replacement scope expands"), Expanded.IsValid())) return false;
 		const auto& Label = *Expanded->Children[0]->Children[0];
 		TestEqual(TEXT("New outer descendant patch still applies"), Label.Text.Content, FString(TEXT("FINAL")));
@@ -431,9 +431,9 @@ bool FPenOverrideDeferredSubtreeTest::RunTest(const FString&)
 	]})JSON");
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Deferred subtree parses"), FPenParser::ParseDocument(Json, Doc))) return false;
-	const auto Wrapper = RefExpander::ExpandRef(Doc.Children.Last(), Doc);
+	const TSharedPtr<FDesignNode> Wrapper = RefExpander::ExpandRef(Doc.Children.Last(), Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Outer wrapper expands"), Wrapper.IsValid())) return false;
-	const auto Nested = RefExpander::ExpandRef(Wrapper->Children[0], Doc);
+	const TSharedPtr<FDesignNode> Nested = RefExpander::ExpandRef(Wrapper->Children[0], Doc).ExpandedNode;
 	if (!TestTrue(TEXT("Nested ref expands"), Nested.IsValid())) return false;
 	const auto& Label = *Nested->Children[0]->Children[0];
 	TestEqual(TEXT("Deferred replacement discards old content patch"), Label.Text.Content, FString(TEXT("OUTER")));

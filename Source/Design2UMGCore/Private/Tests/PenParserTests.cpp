@@ -251,7 +251,7 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 
 	FDesignDocument EmptyDoc;
 	const FVector2D TextSize = SizeEstimator::PromoteFitContentSizes(TextNode, EmptyDoc,
-		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
+		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc).ExpandedNode; });
 	TestTrue(TEXT("Text fit width grows beyond its declared minimum"), TextSize.X > 4.0f);
 	TestTrue(TEXT("Text fit height grows beyond its declared minimum"), TextSize.Y > 4.0f);
 	TestTrue(TEXT("Text node stores the grown fit width"), TextNode->Transform.Width.Value > 4.0f);
@@ -268,7 +268,7 @@ bool FSizeEstimatorFitContentLeafMinimumGrowthTest::RunTest(const FString&)
 	IconNode->Transform.Height = FDesignSize::Fit(4.0f);
 
 	const FVector2D IconSize = SizeEstimator::PromoteFitContentSizes(IconNode, EmptyDoc,
-		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc); });
+		[&EmptyDoc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, EmptyDoc).ExpandedNode; });
 	TestEqual(TEXT("Icon fit width grows to its measured content"), IconSize.X, 32.0);
 	TestEqual(TEXT("Icon fit height grows to its measured content"), IconSize.Y, 32.0);
 	TestEqual(TEXT("Icon node stores the grown fit width"), IconNode->Transform.Width.Value, 32.0f);
@@ -445,8 +445,9 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		TestTrue(TEXT("Circular-ref document parses"), FPenParser::ParseDocument(CircularRefJson, Doc));
 		TestEqual(TEXT("Circular-ref roots parsed"), Doc.Children.Num(), 3);
 		AddExpectedError(TEXT("circular ref detected"), EAutomationExpectedErrorFlags::Contains, 1);
-		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[2], Doc);
-		TestFalse(TEXT("Circular ref expansion returns null"), Expanded.IsValid());
+		const FDesignReferenceExpansionResult Expansion = RefExpander::ExpandRef(Doc.Children[2], Doc);
+		TestEqual(TEXT("Circular ref expansion reports its status"), Expansion.Status, EDesignReferenceExpansionStatus::CircularReference);
+		TestFalse(TEXT("Circular ref expansion returns no node"), Expansion.ExpandedNode.IsValid());
 	}
 
 	// A ref instance that omits height must keep the reusable component's authored fit-content minimum.
@@ -463,7 +464,7 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		FDesignDocument Doc;
 		TestTrue(TEXT("Default-fit ref document parses"), FPenParser::ParseDocument(RefDefaultFitSizeJson, Doc));
 		TestEqual(TEXT("Default-fit ref roots parsed"), Doc.Children.Num(), 2);
-		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc).ExpandedNode;
 		TestTrue(TEXT("Default-fit ref expansion returns node"), Expanded.IsValid());
 		if (Expanded.IsValid())
 		{
@@ -485,7 +486,7 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		FDesignDocument Doc;
 		TestTrue(TEXT("Ref padding policy document parses"), FPenParser::ParseDocument(RefPaddingPolicyJson, Doc));
 		TestEqual(TEXT("Ref padding policy roots parsed"), Doc.Children.Num(), 3);
-		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc);
+		const TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc).ExpandedNode;
 		TestTrue(TEXT("Ref padding policy expansion returns node"), Expanded.IsValid());
 		if (Expanded.IsValid())
 		{
@@ -494,7 +495,7 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 			TestFalse(TEXT("Instance padding already baked into explicit child coordinates"), Expanded->LayoutData.PaddingRequiresRuntimeWrap.GetValue());
 		}
 
-		const TSharedPtr<FDesignNode> DescendantExpanded = RefExpander::ExpandRef(Doc.Children[2], Doc);
+		const TSharedPtr<FDesignNode> DescendantExpanded = RefExpander::ExpandRef(Doc.Children[2], Doc).ExpandedNode;
 		TestTrue(TEXT("Descendant padding policy expansion returns node"), DescendantExpanded.IsValid());
 		if (DescendantExpanded.IsValid())
 		{
@@ -554,7 +555,7 @@ bool FPenParserRefFitHeightPropagationTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode> Root = Doc.Children[3];
 	const TSharedPtr<FDesignNode> TableRef = Root->Children[0];
 	const FVector2D Precomputed = SizeEstimator::PromoteFitContentSizes(Root, Doc,
-		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc); });
+		[&Doc](const TSharedPtr<FDesignNode>& RefNode) { return RefExpander::ExpandRef(RefNode, Doc).ExpandedNode; });
 	TestEqual(TEXT("Precompute sees the expanded table height"), Precomputed.Y, 268.0);
 	TestEqual(TEXT("Ref instance keeps the expanded table height"), TableRef->Transform.Height.Value, 268.0f);
 
@@ -844,6 +845,184 @@ bool FPenParserImportedVariablesTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 // Sticky nodes: prompt/note synthesize the Pencil sticky-card subtree
 // ---------------------------------------------------------------------------
+namespace
+{
+	struct FStickyContractExpectation
+	{
+		const TCHAR* NodeId;
+		const TCHAR* HeaderText;
+		const TCHAR* BodyText;
+		const TCHAR* HeaderColor;
+		const TCHAR* BackgroundColor;
+		const TCHAR* OutlineColor;
+		const TCHAR* TextColor;
+		EDesignSizeMode WidthMode;
+		float WidthValue;
+		float ContentMinHeight;
+		bool bHasFooter;
+	};
+
+	void ExpectStickyPadding(FAutomationTestBase& Test, const FString& Label,
+		const FDesignLayoutNodeData& Layout, const float Top, const float Right, const float Bottom,
+		const float Left)
+	{
+		Test.TestTrue(Label + TEXT(" padding present"), Layout.ExplicitPadding.IsSet());
+		if (!Layout.ExplicitPadding.IsSet())
+		{
+			return;
+		}
+
+		const FDesignPadding& Padding = Layout.ExplicitPadding.GetValue();
+		Test.TestEqual(Label + TEXT(" padding top"), Padding.Top, Top);
+		Test.TestEqual(Label + TEXT(" padding right"), Padding.Right, Right);
+		Test.TestEqual(Label + TEXT(" padding bottom"), Padding.Bottom, Bottom);
+		Test.TestEqual(Label + TEXT(" padding left"), Padding.Left, Left);
+	}
+
+	bool ExpectStickyContract(FAutomationTestBase& Test, const TSharedPtr<FDesignNode>& Card,
+		const FStickyContractExpectation& Expected)
+	{
+		const FString Prefix(Expected.HeaderText);
+		if (!Card.IsValid())
+		{
+			Test.AddError(Prefix + TEXT(" card is missing"));
+			return false;
+		}
+
+		Test.TestEqual(Prefix + TEXT(" id"), Card->Id, FString(Expected.NodeId));
+		Test.TestEqual(Prefix + TEXT(" card type"), Card->Type, EDesignNodeType::Frame);
+		Test.TestEqual(Prefix + TEXT(" card layout"), Card->LayoutData.Layout, EDesignLayout::Vertical);
+		Test.TestEqual(Prefix + TEXT(" card width mode"), Card->Transform.Width.Mode, Expected.WidthMode);
+		if (Expected.WidthMode == EDesignSizeMode::Fixed)
+		{
+			Test.TestEqual(Prefix + TEXT(" card width"), Card->Transform.Width.Value, Expected.WidthValue);
+		}
+		ExpectKeywordFallbackSize(Test, *(Prefix + TEXT(" card height")), Card->Transform.Height,
+			EDesignSizeMode::FitContent);
+		Test.TestTrue(Prefix + TEXT(" card clips content"),
+			Card->LayoutData.ExplicitClip.IsSet() && Card->LayoutData.ExplicitClip.GetValue());
+		Test.TestEqual(Prefix + TEXT(" card fill"), Card->Visual.TopmostFill().SolidColor,
+			FString(Expected.BackgroundColor));
+		Test.TestTrue(Prefix + TEXT(" outline present"), Card->Visual.Stroke.Fill.IsSet());
+		if (Card->Visual.Stroke.Fill.IsSet())
+		{
+			Test.TestEqual(Prefix + TEXT(" outline"), Card->Visual.Stroke.Fill->SolidColor,
+				FString(Expected.OutlineColor));
+		}
+		Test.TestEqual(Prefix + TEXT(" outline thickness"), Card->Visual.Stroke.Thickness.Uniform, 1.0f);
+		Test.TestEqual(Prefix + TEXT(" corner radius"), Card->Visual.CornerRadius.Uniform, 8.0f);
+		Test.TestTrue(Prefix + TEXT(" source text moved into body"), Card->Text.Content.IsEmpty());
+
+		const int32 ExpectedChildCount = Expected.bHasFooter ? 3 : 2;
+		Test.TestEqual(Prefix + TEXT(" card child count"), Card->Children.Num(), ExpectedChildCount);
+		if (Card->Children.Num() != ExpectedChildCount
+			|| !Card->Children[0].IsValid()
+			|| !Card->Children[1].IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FDesignNode>& Header = Card->Children[0];
+		Test.TestEqual(Prefix + TEXT(" header type"), Header->Type, EDesignNodeType::Frame);
+		ExpectSize(Test, *(Prefix + TEXT(" header width")), Header->Transform.Width,
+			EDesignSizeMode::FillContainer, 0.0f);
+		ExpectSize(Test, *(Prefix + TEXT(" header height")), Header->Transform.Height,
+			EDesignSizeMode::Fixed, 45.0f);
+		Test.TestEqual(Prefix + TEXT(" header layout"), Header->LayoutData.Layout, EDesignLayout::Horizontal);
+		Test.TestEqual(Prefix + TEXT(" header alignment"), Header->LayoutData.AlignItems, EDesignAlignItems::Center);
+		Test.TestTrue(Prefix + TEXT(" header gap present"), Header->LayoutData.ExplicitGap.IsSet());
+		if (Header->LayoutData.ExplicitGap.IsSet())
+		{
+			Test.TestEqual(Prefix + TEXT(" header gap"), Header->LayoutData.ExplicitGap.GetValue(), 2.0f);
+		}
+		ExpectStickyPadding(Test, Prefix + TEXT(" header"), Header->LayoutData, 12.0f, 12.0f, 12.0f, 12.0f);
+		Test.TestEqual(Prefix + TEXT(" header fill"), Header->Visual.TopmostFill().SolidColor,
+			FString(Expected.HeaderColor));
+		Test.TestEqual(Prefix + TEXT(" header child count"), Header->Children.Num(), 2);
+		if (Header->Children.Num() != 2 || !Header->Children[0].IsValid() || !Header->Children[1].IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FDesignNode>& HeaderLabel = Header->Children[0];
+		const TSharedPtr<FDesignNode>& Chevron = Header->Children[1];
+		Test.TestEqual(Prefix + TEXT(" header label"), HeaderLabel->Text.Content, FString(Expected.HeaderText));
+		Test.TestEqual(Prefix + TEXT(" header label color"), HeaderLabel->Visual.TopmostFill().SolidColor,
+			FString(Expected.TextColor));
+		Test.TestEqual(Prefix + TEXT(" chevron type"), Chevron->Type, EDesignNodeType::IconFont);
+		Test.TestEqual(Prefix + TEXT(" chevron icon"), Chevron->Text.IconFontName, FString(TEXT("chevron-down")));
+		Test.TestEqual(Prefix + TEXT(" chevron color"), Chevron->Visual.TopmostFill().SolidColor,
+			FString(Expected.TextColor));
+		Test.TestEqual(Prefix + TEXT(" header dash count"), Header->Visual.Stroke.DashPattern.Num(), 2);
+		if (Header->Visual.Stroke.DashPattern.Num() == 2)
+		{
+			Test.TestEqual(Prefix + TEXT(" header dash length"), Header->Visual.Stroke.DashPattern[0], 4.0f);
+			Test.TestEqual(Prefix + TEXT(" header dash gap"), Header->Visual.Stroke.DashPattern[1], 4.0f);
+		}
+
+		const TSharedPtr<FDesignNode>& Body = Card->Children[1];
+		Test.TestEqual(Prefix + TEXT(" body type"), Body->Type, EDesignNodeType::Frame);
+		ExpectSize(Test, *(Prefix + TEXT(" body width")), Body->Transform.Width,
+			EDesignSizeMode::FillContainer, 0.0f);
+		ExpectKeywordFallbackSize(Test, *(Prefix + TEXT(" body height")), Body->Transform.Height,
+			EDesignSizeMode::FitContent);
+		ExpectStickyPadding(Test, Prefix + TEXT(" body"), Body->LayoutData, 12.0f, 12.0f, 12.0f, 12.0f);
+		Test.TestEqual(Prefix + TEXT(" body child count"), Body->Children.Num(), 1);
+		if (Body->Children.Num() != 1 || !Body->Children[0].IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FDesignNode>& Content = Body->Children[0];
+		Test.TestEqual(Prefix + TEXT(" body text"), Content->Text.Content, FString(Expected.BodyText));
+		Test.TestEqual(Prefix + TEXT(" body text color"), Content->Visual.TopmostFill().SolidColor,
+			FString(Expected.TextColor));
+		Test.TestEqual(Prefix + TEXT(" body text growth"), Content->Text.TextGrowth, EDesignTextGrowth::FixedWidth);
+		ExpectSize(Test, *(Prefix + TEXT(" content height")), Content->Transform.Height,
+			EDesignSizeMode::FitContent, Expected.ContentMinHeight);
+
+		if (!Expected.bHasFooter)
+		{
+			return true;
+		}
+
+		const TSharedPtr<FDesignNode>& Footer = Card->Children[2];
+		if (!Footer.IsValid())
+		{
+			Test.AddError(Prefix + TEXT(" footer is missing"));
+			return false;
+		}
+		Test.TestEqual(Prefix + TEXT(" footer layout"), Footer->LayoutData.Layout, EDesignLayout::Horizontal);
+		Test.TestTrue(Prefix + TEXT(" footer gap present"), Footer->LayoutData.ExplicitGap.IsSet());
+		if (Footer->LayoutData.ExplicitGap.IsSet())
+		{
+			Test.TestEqual(Prefix + TEXT(" footer gap"), Footer->LayoutData.ExplicitGap.GetValue(), 8.0f);
+		}
+		ExpectStickyPadding(Test, Prefix + TEXT(" footer"), Footer->LayoutData, 8.0f, 0.0f, 0.0f, 0.0f);
+		Test.TestEqual(Prefix + TEXT(" footer child count"), Footer->Children.Num(), 2);
+		if (Footer->Children.Num() != 2 || !Footer->Children[0].IsValid() || !Footer->Children[1].IsValid())
+		{
+			return false;
+		}
+
+		const TSharedPtr<FDesignNode>& Spacer = Footer->Children[0];
+		const TSharedPtr<FDesignNode>& CopyButton = Footer->Children[1];
+		ExpectSize(Test, *(Prefix + TEXT(" footer spacer width")), Spacer->Transform.Width,
+			EDesignSizeMode::FillContainer, 0.0f);
+		Test.TestEqual(Prefix + TEXT(" copy button fill"), CopyButton->Visual.TopmostFill().SolidColor,
+			FString(Expected.TextColor));
+		Test.TestEqual(Prefix + TEXT(" copy button child count"), CopyButton->Children.Num(), 1);
+		if (CopyButton->Children.Num() != 1 || !CopyButton->Children[0].IsValid())
+		{
+			return false;
+		}
+		Test.TestEqual(Prefix + TEXT(" copy label"), CopyButton->Children[0]->Text.Content, FString(TEXT("Copy")));
+		Test.TestEqual(Prefix + TEXT(" copy label color"),
+			CopyButton->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#FFFFFF")));
+		return true;
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FPenParserStickyNodesTest,
 	"Design2UMG.Unit.PenParser.StickyNodes",
@@ -855,66 +1034,49 @@ bool FPenParserStickyNodesTest::RunTest(const FString&)
 	if (!LoadPenFixture(*this, TEXT("sticky_nodes.json"), Doc))
 		return false;
 
+	TestEqual(TEXT("One sticky fixture root"), Doc.Children.Num(), 1);
+	if (Doc.Children.Num() != 1 || !Doc.Children[0].IsValid())
+	{
+		return false;
+	}
+
 	const TSharedPtr<FDesignNode>& Wrap = Doc.Children[0];
-	TestEqual(TEXT("Wrap has 3 sticky children"), Wrap->Children.Num(), 3);
+	TestEqual(TEXT("Wrap has sticky cards and plain node"), Wrap->Children.Num(), 4);
+	if (Wrap->Children.Num() != 4)
+	{
+		return false;
+	}
 
-	const TSharedPtr<FDesignNode>& Prompt = Wrap->Children[0];
-	TestEqual(TEXT("Prompt becomes a card frame"), Prompt->Type, EDesignNodeType::Frame);
-	TestEqual(TEXT("Prompt card layout"), Prompt->LayoutData.Layout, EDesignLayout::Vertical);
-	TestEqual(TEXT("Prompt card fill"), Prompt->Visual.TopmostFill().SolidColor, FString(TEXT("#E8F6FF")));
-	TestEqual(TEXT("Prompt card outline"), Prompt->Visual.Stroke.Fill->SolidColor, FString(TEXT("#009DFF")));
-	TestEqual(TEXT("Prompt card corner radius"), Prompt->Visual.CornerRadius.Uniform, 8.0f);
-	// Declared height is editor chrome state; the card always fits its content.
-	ExpectKeywordFallbackSize(*this, TEXT("Prompt card height"), Prompt->Transform.Height, EDesignSizeMode::FitContent);
-	TestTrue(TEXT("Prompt card keeps fill width"), Prompt->Transform.Width.IsFill());
-	TestEqual(TEXT("Prompt card has header/body/footer"), Prompt->Children.Num(), 3);
+	const FStickyContractExpectation Expectations[] = {
+		{TEXT("prompt-1"), TEXT("Prompt"), TEXT("Line one of the prompt.\nLine two of the prompt."),
+			TEXT("#C3E8FF"), TEXT("#E8F6FF"), TEXT("#009DFF"), TEXT("#006CAF"),
+			EDesignSizeMode::FillContainer, 0.0f, 116.0f, true},
+		{TEXT("note-1"), TEXT("Note"), TEXT("A short note body."), TEXT("#FFF1D6"), TEXT("#FFF7E5"),
+			TEXT("#8B6311"), TEXT("#664500"), EDesignSizeMode::Fixed, 250.0f, 150.0f, false},
+		{TEXT("context-1"), TEXT("Context"), TEXT("Context body text."), TEXT("#FFFFFF"), TEXT("#F0F0F0"),
+			TEXT("#767676"), TEXT("#2C2C2C"), EDesignSizeMode::FillContainer, 0.0f, 150.0f, false}};
 
-	const TSharedPtr<FDesignNode>& Header = Prompt->Children[0];
-	TestEqual(TEXT("Header height"), Header->Transform.Height.Mode, EDesignSizeMode::Fixed);
-	TestEqual(TEXT("Header height value"), Header->Transform.Height.Value, 45.0f);
-	TestEqual(TEXT("Header fill"), Header->Visual.TopmostFill().SolidColor, FString(TEXT("#C3E8FF")));
-	TestEqual(TEXT("Header dash pattern"), Header->Visual.Stroke.DashPattern.Num(), 2);
-	const TSharedPtr<FDesignNode>& HeaderLabel = Header->Children[0];
-	TestEqual(TEXT("Header label text"), HeaderLabel->Text.Content, FString(TEXT("Prompt")));
-	TestEqual(TEXT("Header label color"), HeaderLabel->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
+	bool bContractsWellFormed = true;
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Expectations); ++Index)
+	{
+		bContractsWellFormed &= ExpectStickyContract(*this, Wrap->Children[Index], Expectations[Index]);
+	}
 
-	const TSharedPtr<FDesignNode>& Body = Prompt->Children[1];
-	const TSharedPtr<FDesignNode>& ContentText = Body->Children[0];
-	TestEqual(TEXT("Sticky content preserved"), ContentText->Text.Content, FString(TEXT("Line one of the prompt.\nLine two of the prompt.")));
-	TestEqual(TEXT("Content text color"), ContentText->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
-	TestEqual(TEXT("Content text growth"), ContentText->Text.TextGrowth, EDesignTextGrowth::FixedWidth);
-	TestEqual(TEXT("Content min height"), ContentText->Transform.Height.Value, 116.0f);
+	const TSharedPtr<FDesignNode>& PlainRectangle = Wrap->Children[3];
+	TestTrue(TEXT("Plain rectangle remains valid"), PlainRectangle.IsValid());
+	if (PlainRectangle.IsValid())
+	{
+		TestEqual(TEXT("Plain rectangle id remains unchanged"), PlainRectangle->Id, FString(TEXT("plain-rectangle")));
+		TestEqual(TEXT("Plain rectangle type remains unchanged"), PlainRectangle->Type, EDesignNodeType::Rectangle);
+		ExpectSize(*this, TEXT("Plain rectangle width"), PlainRectangle->Transform.Width, EDesignSizeMode::Fixed, 123.0f);
+		ExpectSize(*this, TEXT("Plain rectangle height"), PlainRectangle->Transform.Height, EDesignSizeMode::Fixed, 45.0f);
+		TestEqual(TEXT("Plain rectangle fill remains unchanged"), PlainRectangle->Visual.TopmostFill().SolidColor,
+			FString(TEXT("#13579B")));
+		TestEqual(TEXT("Plain rectangle gains no synthesized children"), PlainRectangle->Children.Num(), 0);
+	}
 
-	const TSharedPtr<FDesignNode>& Footer = Prompt->Children[2];
-	TestEqual(TEXT("Footer has spacer and copy button"), Footer->Children.Num(), 2);
-	const TSharedPtr<FDesignNode>& CopyButton = Footer->Children[1];
-	TestEqual(TEXT("Copy button fill"), CopyButton->Visual.TopmostFill().SolidColor, FString(TEXT("#006CAF")));
-	TestEqual(TEXT("Copy label text"), CopyButton->Children[0]->Text.Content, FString(TEXT("Copy")));
-	TestEqual(TEXT("Copy label color"), CopyButton->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#FFFFFF")));
-
-	const TSharedPtr<FDesignNode>& Note = Wrap->Children[1];
-	TestEqual(TEXT("Note becomes a card frame"), Note->Type, EDesignNodeType::Frame);
-	TestEqual(TEXT("Note card fill"), Note->Visual.TopmostFill().SolidColor, FString(TEXT("#FFF7E5")));
-	// Fixed widths below the sticky minimum are clamped up to it.
-	TestEqual(TEXT("Note card width mode"), Note->Transform.Width.Mode, EDesignSizeMode::Fixed);
-	TestEqual(TEXT("Note card clamped width"), Note->Transform.Width.Value, 250.0f);
-	TestEqual(TEXT("Note card has header/body only"), Note->Children.Num(), 2);
-	TestEqual(TEXT("Note content min height"), Note->Children[1]->Children[0]->Transform.Height.Value, 150.0f);
-
-	const TSharedPtr<FDesignNode>& Context = Wrap->Children[2];
-	TestEqual(TEXT("Context becomes a card frame"), Context->Type, EDesignNodeType::Frame);
-	TestEqual(TEXT("Context card fill"), Context->Visual.TopmostFill().SolidColor, FString(TEXT("#F0F0F0")));
-	TestEqual(TEXT("Context card outline"), Context->Visual.Stroke.Fill->SolidColor, FString(TEXT("#767676")));
-	TestEqual(TEXT("Context header fill"), Context->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#FFFFFF")));
-	TestEqual(TEXT("Context header label"), Context->Children[0]->Children[0]->Text.Content, FString(TEXT("Context")));
-	TestEqual(TEXT("Context label color"), Context->Children[0]->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#2C2C2C")));
-	TestTrue(TEXT("Context card keeps fill width"), Context->Transform.Width.IsFill());
-	TestEqual(TEXT("Context content min height"), Context->Children[1]->Children[0]->Transform.Height.Value, 150.0f);
-	TestEqual(TEXT("Context body text preserved"), Context->Children[1]->Children[0]->Text.Content, FString(TEXT("Context body text.")));
-
-	return true;
+	return bContractsWellFormed;
 }
-
 // ---------------------------------------------------------------------------
 // Unresolvable paint literals: Pencil drops them instead of painting
 // ---------------------------------------------------------------------------
@@ -1047,7 +1209,7 @@ bool FSizeEstimatorFlowFallbackTest::RunTest(const FString&)
 		const auto Node = Document.Children[0];
 		const FVector2D Expected = bVertical ? FVector2D(32, 60) : FVector2D(60, 32);
 		TestEqual(TEXT("Read-only estimate uses children rather than fallback minimum"), SizeEstimator::EstimateNodeSize(Node), Expected);
-		auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document); };
+		auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document).ExpandedNode; };
 		TestEqual(TEXT("Promotion stores actual flow content dimensions"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve), Expected);
 		Node->Children.RemoveAt(1);
 		TestEqual(TEXT("A subsequent smaller content measurement can shrink"), SizeEstimator::PromoteFitContentSizes(Node, Document, Resolve), FVector2D(32, 32));
@@ -1064,7 +1226,7 @@ bool FSizeEstimatorFlowFallbackTest::RunTest(const FString&)
 		{"id":"slot","type":"frame","reusable":true,"layout":"vertical","width":80,"height":"fit_content(120)","padding":6},
 		{"id":"instance","type":"ref","ref":"slot","height":"fit_content(120)","children":[
 		{"id":"row","type":"rectangle","width":20,"height":20,"fill":"#ff0000"}]}]})JSON"), Document))) return false;
-	auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document); };
+	auto Resolve = [&Document](const TSharedPtr<FDesignNode>& Ref) { return RefExpander::ExpandRef(Ref, Document).ExpandedNode; };
 	TestEqual(TEXT("Empty slot retains its fallback height"), SizeEstimator::PromoteFitContentSizes(Document.Children[0], Document, Resolve).Y, 120.0);
 	TestEqual(TEXT("Populated ref measures its replacement children"), SizeEstimator::PromoteFitContentSizes(Document.Children[1], Document, Resolve).Y, 32.0);
 	TestEqual(TEXT("Instance cached height is updated when content shrinks"), Document.Children[1]->Transform.Height.Value, 32.0f);

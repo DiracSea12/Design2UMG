@@ -322,7 +322,14 @@ namespace
 		}
 
 		const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(ParentNode, Child, 0.0f);
-		const TSharedPtr<FDesignNode> EstimateChild = PreResolutionResolver.ResolveExpandedChild(Child, false);
+		TSharedPtr<FDesignNode> EstimateChild = Child;
+		const TSharedPtr<FDesignNode> Snapshot = PreResolutionResolver.ExpandRef(Child);
+		if (Snapshot.IsValid() && Snapshot != Child)
+		{
+			// Estimation only reads descendants; isolate the root's current instance dimensions.
+			EstimateChild = MakeShared<FDesignNode>(*Snapshot);
+			ApplyLatestInstanceSizeOverrides(Child, EstimateChild);
+		}
 		const FVector2D Estimate = SizeEstimator::EstimateNodeSize(EstimateChild, ChildContentWidth, PreResolutionResolver.GetFontMappings());
 		SizeEstimator::PromoteFitNodeDimension(Child, true, Estimate.X);
 		SizeEstimator::PromoteFitNodeDimension(Child, false, Estimate.Y);
@@ -336,6 +343,37 @@ namespace
 
 namespace Design2UMGConverterInternal
 {
+	namespace
+	{
+		void PropagateExpansionOutcome(
+			const FDesignReferenceExpansionResult& Result,
+			FRefExpansionCache& Cache)
+		{
+			if (Result.IsSuccess() || Result.Message.IsEmpty())
+			{
+				return;
+			}
+
+			if (Result.IsFatal())
+			{
+				if (Cache.FatalError && Cache.FatalError->IsEmpty())
+				{
+					*Cache.FatalError = Result.Message;
+				}
+				return;
+			}
+
+			if (Cache.Warnings)
+			{
+				const int32* Index = Cache.WarningIndices.Find(Result.Message);
+				if (!Index || !Cache.Warnings->IsValidIndex(*Index) || (*Cache.Warnings)[*Index] != Result.Message)
+				{
+					Cache.WarningIndices.Add(Result.Message, Cache.Warnings->Add(Result.Message));
+				}
+			}
+		}
+	}
+
 	FFlowChildPreResolutionResolver::FFlowChildPreResolutionResolver(
 		const FDesignDocument& InDocument,
 		const TMap<FString, FString>& InThemeContext,
@@ -359,16 +397,18 @@ namespace Design2UMGConverterInternal
 		const FRefExpansionCacheKey CacheKey{ CacheNode, BuildThemeSignature(ThemeContext) };
 		if (FRefExpansionCacheEntry* Cached = ExpansionCache->Entries.Find(CacheKey))
 		{
-			return Cached->bResolved ? Cached->Expanded : nullptr;
+			PropagateExpansionOutcome(Cached->Result, *ExpansionCache);
+			return Cached->Result.ExpandedNode;
 		}
 
 		FRefExpansionCacheEntry& CacheEntry = ExpansionCache->Entries.Add(CacheKey);
-		TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, ExpansionCache->ReusableNodesById);
-		if (!Expanded.IsValid())
+		CacheEntry.Result = RefExpander::ExpandRef(Node, ExpansionCache->ReusableNodesById);
+		PropagateExpansionOutcome(CacheEntry.Result, *ExpansionCache);
+		if (!CacheEntry.Result.IsSuccess())
 		{
-			CacheEntry.bResolved = true;
 			return nullptr;
 		}
+		TSharedPtr<FDesignNode>& Expanded = CacheEntry.Result.ExpandedNode;
 
 		if (ThemeContext.Num() > 0)
 		{
@@ -377,8 +417,6 @@ namespace Design2UMGConverterInternal
 			RefExpander::ReThemeNode(Expanded, Resolver);
 		}
 
-		CacheEntry.Expanded = Expanded;
-		CacheEntry.bResolved = true;
 		return Expanded;
 	}
 
@@ -418,7 +456,12 @@ namespace Design2UMGConverterInternal
 			// available parent width), so reuse the Expanded snapshot but let
 			// each caller measure it for its own context.
 			TSharedPtr<FDesignNode> WorkingExpanded = MakeWorkingCopy(Child);
-			SizeEstimator::PromoteFitContentSizes(WorkingExpanded, Document, RefResolver, FontMappings);
+			SizeEstimator::PromoteFitContentSizes(
+				WorkingExpanded,
+				Document,
+				RefResolver,
+				FontMappings,
+				ExpansionCache->FatalError);
 			return WorkingExpanded;
 		}
 

@@ -19,7 +19,8 @@ namespace DesignImportDialogs
 		FOnPreviewConfirmed OnConfirmed,
 		FOnPreviewCancelled OnCancelled = FOnPreviewCancelled(),
 		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot =
-			TOptional<FDesignPreviewMaterializationSettingsSnapshot>());
+			TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
+		const FDesignImageImportResult& InitialImageResult = FDesignImageImportResult());
 
 	void ShowFrameSelector(
 		const TArray<FDesignFrameInfo>& Frames,

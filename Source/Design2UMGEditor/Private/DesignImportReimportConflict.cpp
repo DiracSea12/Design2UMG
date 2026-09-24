@@ -180,6 +180,8 @@ namespace DesignImportPipeline
 	{
 		FDesignReimportResult Result;
 		Result.Commit.AssetPath = Session.Request.TargetAssetPath;
+		if (Session.ImageResult) Result.ImageResult = *Session.ImageResult;
+		Result.bHasDegradation = Result.ImageResult.HasFailures();
 		Result.Diagnostics = MoveTemp(PriorDiagnostics);
 		// Include ini validation diagnostics in the early-exit report so a configuration error remains visible
 		// when it coincides with an asset-level conflict.
@@ -199,7 +201,7 @@ namespace DesignImportPipeline
 		if (!Session.Request.bGenerateResolutionCopy)
 		{
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 			return Result;
 		}
 
@@ -215,7 +217,7 @@ namespace DesignImportPipeline
 					TEXT("Resolution copy skipped: %s already exists"),
 					*(PackageDir / CopyName)));
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 			return Result;
 		}
 
@@ -224,6 +226,8 @@ namespace DesignImportPipeline
 		DesignImportUtils::GenerateWidgetBlueprint(
 			Session.Data, PackageDir, &Session.GenerationSettings, &GenerationOutput);
 		Result.ResolutionCopyCommit = GenerationOutput.Commit;
+		if (Result.ResolutionCopyCommit->Status == EDesign2UMGCommitStatus::Succeeded && Result.bHasDegradation)
+			Result.ResolutionCopyCommit->Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
 		if (GenerationOutput.Commit.Asset == EDesign2UMGFileState::Saved)
 		{
 			Result.ResolutionCopyPath = GenerationOutput.Commit.AssetPath;
@@ -246,7 +250,7 @@ namespace DesignImportPipeline
 		// The copy-generation chain's mapping diagnostics (ini validation, hits, the copy's own sidecar write failure) land in the report.
 		Result.ComponentMappingDiagnostics.Append(GenerationOutput.MappingDiagnostics);
 		if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+			*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 		return Result;
 	}
 }

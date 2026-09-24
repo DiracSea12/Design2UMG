@@ -4,6 +4,7 @@
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "DesignTreeBudget.h"
 #include "UMGJsonSerializer.h"
 #include "../Design2UMGTestNodes.h"
 #include "Blueprint/WidgetTree.h"
@@ -275,6 +276,78 @@ namespace
 		}
 		return nullptr;
 	}
+
+	TSharedPtr<FDesignNode> MakeSnapshotReferenceNode(
+		const FString& Id,
+		const FString& TargetId,
+		const bool bReusable)
+	{
+		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
+		Node->Id = Id;
+		Node->Name = Id;
+		Node->Type = EDesignNodeType::Ref;
+		Node->Ref = TargetId;
+		Node->bReusable = bReusable;
+		return Node;
+	}
+
+	FDesignDocument BuildSnapshotNestedReferenceChain(const int32 ReferenceCount)
+	{
+		FDesignDocument Document;
+		Document.Children.Reserve(ReferenceCount + 2);
+		for (int32 Index = 0; Index <= ReferenceCount; ++Index)
+		{
+			const FString ComponentId = FString::Printf(TEXT("snapshot-component-%d"), Index);
+			TSharedPtr<FDesignNode> Component = MakeShared<FDesignNode>();
+			Component->Id = ComponentId;
+			Component->Name = ComponentId;
+			Component->Type = EDesignNodeType::Frame;
+			Component->bReusable = true;
+			if (Index < ReferenceCount)
+			{
+				Component->Children.Add(MakeSnapshotReferenceNode(
+					FString::Printf(TEXT("snapshot-ref-%d"), Index),
+					FString::Printf(TEXT("snapshot-component-%d"), Index + 1),
+					false));
+			}
+			Document.Children.Add(MoveTemp(Component));
+		}
+		Document.Children.Add(MakeSnapshotReferenceNode(
+			TEXT("snapshot-entry"),
+			TEXT("snapshot-component-0"),
+			false));
+		return Document;
+	}
+
+	FDesignDocument BuildSnapshotNestedReferenceCycle()
+	{
+		FDesignDocument Document;
+		TSharedPtr<FDesignNode> ComponentA = MakeShared<FDesignNode>();
+		ComponentA->Id = TEXT("snapshot-cycle-a");
+		ComponentA->Name = ComponentA->Id;
+		ComponentA->Type = EDesignNodeType::Frame;
+		ComponentA->bReusable = true;
+		ComponentA->Children.Add(MakeSnapshotReferenceNode(
+			TEXT("snapshot-cycle-a-to-b"),
+			TEXT("snapshot-cycle-b"),
+			false));
+
+		TSharedPtr<FDesignNode> ComponentB = MakeShared<FDesignNode>();
+		ComponentB->Id = TEXT("snapshot-cycle-b");
+		ComponentB->Name = ComponentB->Id;
+		ComponentB->Type = EDesignNodeType::Frame;
+		ComponentB->bReusable = true;
+		ComponentB->Children.Add(MakeSnapshotReferenceNode(
+			TEXT("snapshot-cycle-b-to-a"),
+			TEXT("snapshot-cycle-a"),
+			false));
+
+		Document.Children = {
+			MoveTemp(ComponentA),
+			MoveTemp(ComponentB),
+			MakeSnapshotReferenceNode(TEXT("snapshot-cycle-entry"), TEXT("snapshot-cycle-a"), false)};
+		return Document;
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStructureSnapshotCarrierResponsibilityTest,
@@ -541,6 +614,37 @@ bool FDesignIdentityVariantConversionParityTest::RunTest(const FString& Paramete
 			JsonObjectsEqual(BaselineStructureSnapshot, VariantStructureSnapshot));
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStructureSnapshotReferenceTerminationTest,
+	"Design2UMG.Automation.StructureSnapshotReferenceTermination",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FStructureSnapshotReferenceTerminationTest::RunTest(const FString&)
+{
+	FDesignDocument Document = BuildSnapshotNestedReferenceChain(DesignTreeLimits::MaxNodeDepth + 1);
+	const TSharedPtr<FJsonObject> Snapshot =
+		Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(Document, TEXT("snapshot-entry"));
+	if (!TestTrue(TEXT("Nested reference snapshot exists"), Snapshot.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Nested reference snapshot stays within the shared tree-depth limit"),
+		Snapshot->GetIntegerField(TEXT("max_depth")) < DesignTreeLimits::MaxNodeDepth);
+
+	FDesignDocument CycleDocument = BuildSnapshotNestedReferenceCycle();
+	const TSharedPtr<FJsonObject> CycleSnapshot =
+		Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+			CycleDocument,
+			TEXT("snapshot-cycle-entry"));
+	if (!TestTrue(TEXT("Nested reference cycle snapshot terminates"), CycleSnapshot.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(
+		TEXT("Nested reference cycle snapshot is bounded by the shared tree-depth limit"),
+		CycleSnapshot->GetIntegerField(TEXT("max_depth")) < DesignTreeLimits::MaxNodeDepth);
 	return true;
 }
 

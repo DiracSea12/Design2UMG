@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetUtils.h"
-#include "Automation/Design2UMGAutomationGeometryDump.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
@@ -408,8 +407,24 @@ void FUMGWidgetUtils::DumpTextBlockFontStates(
 	});
 }
 
-bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError, const TOptional<FVector2D>& RenderSizeOverride, const TOptional<FVector2D>& RootExportOffset)
+bool FUMGWidgetUtils::RenderWidgetToPng(
+	UWidgetBlueprint* WidgetBP,
+	TArray<uint8>& OutPngData,
+	FIntPoint& OutSize,
+	FString* OutError,
+	const TOptional<FVector2D>& RenderSizeOverride,
+	const TOptional<FVector2D>& RootExportOffset,
+	TStrongObjectPtr<UUserWidget>* OutRenderedWidget,
+	TSharedPtr<SWidget>* OutRenderedSlateWidget)
 {
+	if (OutRenderedWidget)
+	{
+		OutRenderedWidget->Reset();
+	}
+	if (OutRenderedSlateWidget)
+	{
+		OutRenderedSlateWidget->Reset();
+	}
 	if (OutError)
 	{
 		OutError->Reset();
@@ -557,7 +572,6 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	if (!GUsingNullRHI) { FlushRenderingCommands(); }
 	Widget->ForceLayoutPrepass();
 	DumpWidgetVisualState(TEXT("compiled-after-draw"), Widget->WidgetTree, WidgetBP->GetPathName());
-	Design2UMGAutomationGeometryDump::MaybeWriteGeometryDump(Widget->WidgetTree);
 
 	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 	if (!Resource)
@@ -584,7 +598,16 @@ bool FUMGWidgetUtils::RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8
 	Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), EffectiveSize.X, EffectiveSize.Y, ERGBFormat::BGRA, 8);
 	OutPngData = Wrapper->GetCompressed();
 	OutSize = EffectiveSize;
-	return OutPngData.Num() > 0;
+	const bool bRendered = OutPngData.Num() > 0;
+	if (bRendered && OutRenderedWidget)
+	{
+		OutRenderedWidget->Reset(Widget);
+	}
+	if (bRendered && OutRenderedSlateWidget)
+	{
+		*OutRenderedSlateWidget = SlateWidget;
+	}
+	return bRendered;
 }
 
 // ============================================================================
@@ -702,5 +725,3 @@ bool FUMGWidgetUtils::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<u
 		LayoutPixelSize.X, LayoutPixelSize.Y);
 	return RenderSlateWidgetToPngData(SlateWidget.ToSharedRef(), LayoutPixelSize, OutPngData, OutSize);
 }
-
-

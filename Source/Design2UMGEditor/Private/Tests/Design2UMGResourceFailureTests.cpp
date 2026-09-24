@@ -6,6 +6,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "DesignImportPipeline.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGSettings.h"
 #include "DesignImageResourceLimits.h"
@@ -15,6 +16,7 @@
 #include "FigmaParser.h"
 #include "PreBuildResourceNormalizer.h"
 #include "UMGSchema.h"
+#include "UMGJsonSerializer.h"
 #include "UMGWidgetTypes.h"
 
 #include "Tests/Design2UMGHttpTestTransport.h"
@@ -26,7 +28,7 @@ using Design2UMGEditorTests::FScopedHttpTestTransport;
 namespace
 {
 	// ---------------------------------------------------------------------------
-	// a: ResolveImages must push remote-image failure into Data.Warnings.
+	// Remote-image failures are returned as typed diagnostics.
 	// ---------------------------------------------------------------------------
 
 	struct FScopedRemoteImageImportSettings
@@ -117,10 +119,10 @@ namespace
 	}
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureRemoteImageFailureEntersDataWarningsTest,
-	"Design2UMG.Resources.Failure.RemoteImageFailureEntersDataWarnings",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureRemoteImageFailureEntersTypedResultTest,
+	"Design2UMG.Resources.Failure.RemoteImageFailureEntersTypedResult",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FResourceFailureRemoteImageFailureEntersDataWarningsTest::RunTest(const FString& Parameters)
+bool FResourceFailureRemoteImageFailureEntersTypedResultTest::RunTest(const FString& Parameters)
 {
 	FScopedRemoteImageImportSettings ScopedSettings;
 	if (!ScopedSettings.Settings)
@@ -134,16 +136,15 @@ bool FResourceFailureRemoteImageFailureEntersDataWarningsTest::RunTest(const FSt
 	Data.RootWidget = MakeResourceFailureImageNode(TEXT("ResourceFailure_RemoteImage"), GUnresolvableRemoteUrl);
 	TestEqual(TEXT("Input data starts without warnings"), Data.Warnings.Num(), 0);
 
-	FString Report;
-	DesignImportPlanning::ResolveImages(Data, &Report);
+	const FDesignImageImportResult ImageResult = DesignImportPlanning::ResolveImages(Data);
+	const FString& Report = ImageResult.DisplaySummary;
 
 	TestTrue(TEXT("Failure report is produced"), !Report.IsEmpty());
 	TestTrue(TEXT("Report records one failed image"), Report.Contains(TEXT("failed=1")));
 	TestTrue(TEXT("Report names the failed URL"), Report.Contains(TEXT("resource_failure_missing.png")));
 
-	TestEqual(TEXT("Exactly one degradation warning is added"), Data.Warnings.Num(), 1);
-	TestTrue(TEXT("The warning carries the real failure report"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0] == Report);
+	TestEqual(TEXT("The typed result records one image failure"), ImageResult.FailedCount, 1);
+	TestEqual(TEXT("Image failures do not enter general warnings"), Data.Warnings.Num(), 0);
 	return true;
 }
 
@@ -165,8 +166,8 @@ bool FResourceFailureNoRemoteImageKeepsDataCleanTest::RunTest(const FString& Par
 	Data.WidgetName = TEXT("WBP_ResourceFailure_NoRemote");
 	Data.RootWidget = MakeResourceFailureImageNode(TEXT("ResourceFailure_Local"), TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure"));
 
-	FString Report;
-	DesignImportPlanning::ResolveImages(Data, &Report);
+	const FDesignImageImportResult ImageResult = DesignImportPlanning::ResolveImages(Data);
+	const FString& Report = ImageResult.DisplaySummary;
 
 	TestTrue(TEXT("A summary is still produced for a clean run"), !Report.IsEmpty());
 	TestTrue(TEXT("Clean run reports zero failures"), Report.Contains(TEXT("failed=0")));
@@ -174,71 +175,220 @@ bool FResourceFailureNoRemoteImageKeepsDataCleanTest::RunTest(const FString& Par
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureImageResolutionFailureEntersDataWarningsTest,
-	"Design2UMG.Resources.Failure.ImageResolutionFailureEntersDataWarnings",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureImageResolutionFailureEntersTypedResultTest,
+	"Design2UMG.Resources.Failure.ImageResolutionFailureEntersTypedResult",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FResourceFailureImageResolutionFailureEntersDataWarningsTest::RunTest(const FString& Parameters)
+bool FResourceFailureImageResolutionFailureEntersTypedResultTest::RunTest(const FString& Parameters)
 {
-	// an image-resolution failure that did not happen inside ResolveImages (the
-	// Figma image-ref export) must still land in Data.Warnings - that is the channel the
-	// commit status reads - instead of only producing a log line or a notification.
-	FUMGWidgetData Data;
-	Data.WidgetName = TEXT("WBP_ResourceFailure_RefFailure");
-	Data.RootWidget = MakeResourceFailureImageNode(TEXT("ResourceFailure_Local"), TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure"));
-	TestEqual(TEXT("Input data starts without warnings"), Data.Warnings.Num(), 0);
+	FDesignImageImportResult ImageResult;
+	DesignImportPlanning::RecordImageResolutionFailure(ImageResult);
 
-	DesignImportPlanning::RecordImageResolutionFailure(Data);
+	TestEqual(TEXT("The failure is recorded exactly once"), ImageResult.FailedCount, 1);
+	if (TestEqual(TEXT("The diagnostic is recorded exactly once"), ImageResult.Diagnostics.Num(), 1))
+	{
+		TestEqual(
+			TEXT("The diagnostic category identifies an unresolved reference"),
+			static_cast<uint8>(ImageResult.Diagnostics[0].Category),
+			static_cast<uint8>(EDesignImageDiagnosticCategory::UnresolvedReference));
+	}
 
-	TestEqual(TEXT("The failure is recorded exactly once"), Data.Warnings.Num(), 1);
-	TestTrue(TEXT("The recorded warning is the resource-resolution warning"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0].StartsWith(TEXT("Figma image refs:")));
-	TestTrue(TEXT("The recorded warning names the failure"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0].Contains(TEXT("could not be resolved")));
-
-	// Recording twice must not pile up duplicate warnings.
-	DesignImportPlanning::RecordImageResolutionFailure(Data);
-	TestEqual(TEXT("Repeated recording does not duplicate the warning"), Data.Warnings.Num(), 1);
-	const TArray<FString> UnresolvedRefs = Data.Warnings;
-	Data.RootWidget.Brush.Image.TexturePath.Reset();
-	DesignImportPlanning::ResolveImages(Data);
-	TestTrue(TEXT("No downloadable URL does not prove the missing Figma refs recovered"), Data.Warnings == UnresolvedRefs);
+	DesignImportPlanning::RecordImageResolutionFailure(ImageResult);
+	TestEqual(TEXT("Repeated recording does not duplicate the diagnostic"), ImageResult.Diagnostics.Num(), 1);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureResolvedRetryClearsTransientImageWarningsTest,
-	"Design2UMG.Resources.Failure.ResolvedRetryClearsTransientImageWarnings",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureRetryPreservesSourceFailuresTest,
+	"Design2UMG.Resources.Failure.RetryPreservesSourceFailures",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FResourceFailureResolvedRetryClearsTransientImageWarningsTest::RunTest(const FString& Parameters)
+bool FResourceFailureRetryPreservesSourceFailuresTest::RunTest(const FString& Parameters)
 {
 	FScopedRemoteImageImportSettings ScopedSettings;
 	if (!ScopedSettings.Settings)
 	{
-		AddError(TEXT("Design2UMG settings are unavailable"));
+		AddError(TEXT("Design2UMG settings unavailable"));
 		return false;
 	}
 
-	// the same FUMGWidgetData reused for a retry. The previous attempt failed and
-	// left a transient image-resolution warning behind; once the images really resolve,
-	// that warning must be retracted instead of keeping every later run degraded.
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_ResourceFailure_Retry");
-	Data.RootWidget = MakeResourceFailureImageNode(TEXT("ResourceFailure_Local"), TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure"));
-	const FString StaleWarning =
-		TEXT("Remote image import: imported=0 reused=0 repaired=0 failed=1 path=/Game/Design2UMG/ImportedImages");
+	Data.RootWidget = MakeResourceFailureImageNode(
+		TEXT("ResourceFailure_RemoteImage"),
+		GUnresolvableRemoteUrl);
+	const FString SummaryLikeWarning = TEXT("Remote image import: an unrelated author warning");
 	const FString UnrelatedWarning = TEXT("Design2UMG: font family 'NotARealFont' was substituted");
-	Data.Warnings.Add(StaleWarning);
-	Data.Warnings.Add(UnrelatedWarning);
-	TestEqual(TEXT("The retry starts from the degraded state"), Data.Warnings.Num(), 2);
+	Data.Warnings = { SummaryLikeWarning, UnrelatedWarning };
 
-	FString Report;
-	DesignImportPlanning::ResolveImages(Data, &Report);
+	FDesignImageImportResult ImageResult;
+	DesignImportPlanning::RecordImageResolutionFailure(ImageResult);
+	FDesignImageDiagnostic DownloadFailure;
+	DownloadFailure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	DownloadFailure.Category = EDesignImageDiagnosticCategory::Download;
+	DownloadFailure.NodeId = Data.RootWidget.Id;
+	DownloadFailure.NodeName = Data.RootWidget.Name;
+	DownloadFailure.Resource = GUnresolvableRemoteUrl;
+	DownloadFailure.Reason = TEXT("Previous download failed");
+	DownloadFailure.Message = TEXT("Previous remote image download failed");
+	ImageResult.AddDiagnostic(MoveTemp(DownloadFailure));
+	ImageResult.RefreshDisplaySummary();
+	TestEqual(TEXT("The retry starts with source and download failures"), ImageResult.FailedCount, 2);
 
-	TestTrue(TEXT("The retry resolves without failures"), Report.Contains(TEXT("failed=0")));
-	TestEqual(TEXT("Only the unrelated warning survives the successful retry"), Data.Warnings.Num(), 1);
-	TestTrue(TEXT("The surviving warning is the unrelated one"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0] == UnrelatedWarning);
-	TestFalse(TEXT("The stale image-resolution warning is gone"),
-		Data.Warnings.Contains(StaleWarning));
+	const FDesignImageImportResult PreviousImageResult = ImageResult;
+	ScopedSettings.Settings->bEnableRemoteImageImport = false;
+	ImageResult = DesignImportPlanning::ResolveImages(Data, &PreviousImageResult);
+	TestEqual(TEXT("A skipped retry keeps the same source failure"), ImageResult.FailedCount, 2);
+	TestEqual(TEXT("The skipped source is recorded once"), ImageResult.SkippedCount, 1);
+	TestEqual(TEXT("Global, skipped, and untried failure facts remain"), ImageResult.Diagnostics.Num(), 3);
+
+	Data.RootWidget.Brush.Image.TexturePath = TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure");
+	const FDesignImageImportResult BeforeSourceChange = ImageResult;
+	ImageResult = DesignImportPlanning::ResolveImages(Data, &BeforeSourceChange);
+	TestEqual(TEXT("Replacing the URL source retires its old failure"), ImageResult.FailedCount, 1);
+	if (TestEqual(TEXT("Only the independent source-resolution failure remains"), ImageResult.Diagnostics.Num(), 1))
+	{
+		TestEqual(
+			TEXT("The remaining diagnostic is the source-resolution failure"),
+			static_cast<uint8>(ImageResult.Diagnostics[0].Category),
+			static_cast<uint8>(EDesignImageDiagnosticCategory::UnresolvedReference));
+	}
+	TestEqual(TEXT("The retry keeps unrelated warnings"), Data.Warnings.Num(), 2);
+	TestTrue(TEXT("Summary-like unrelated warning is not parsed or removed"), Data.Warnings.Contains(SummaryLikeWarning));
+	TestTrue(TEXT("General warning remains"), Data.Warnings.Contains(UnrelatedWarning));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureDirectExecuteDegradesCommitTest,
+	"Design2UMG.Resources.Failure.DirectExecuteDegradesCommit",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FResourceFailureDirectExecuteDegradesCommitTest::RunTest(const FString& Parameters)
+{
+	FScopedRemoteImageImportSettings ScopedSettings;
+	if (!ScopedSettings.Settings)
+	{
+		AddError(TEXT("Design2UMG settings unavailable"));
+		return false;
+	}
+
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ImageFailureDirectExecute_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(OutputPath); };
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_ImageFailureDirectExecute");
+	Data.RootWidget = MakeResourceFailureCanvas(TEXT("ImageFailureDirectExecuteRoot"));
+	Data.RootWidget.Children.Add(MakeResourceFailureImageNode(
+		TEXT("ImageFailureDirectExecuteImage"),
+		GUnresolvableRemoteUrl));
+
+	FDesignImportRequest Request;
+	Request.OutputPath = OutputPath;
+	Request.bUsePreview = false;
+	Request.bResolveImages = true;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	const FDesignImportExecutionResult Result = DesignImportPipeline::Execute(Data, Request);
+
+	TestTrue(TEXT("Direct execution still produces the usable asset"), Result.bSucceeded);
+	TestEqual(
+		TEXT("A real image failure degrades the direct execution commit"),
+		Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureApprovedPreviewGenerationPreservesSourceFailureTest,
+	"Design2UMG.Resources.Failure.ApprovedPreviewGenerationPreservesSourceFailure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FResourceFailureApprovedPreviewGenerationPreservesSourceFailureTest::RunTest(const FString& Parameters)
+{
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ImageFailurePreviewGenerate_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(OutputPath); };
+
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_ImageFailurePreviewGenerate");
+	Data.RootWidget = MakeResourceFailureImageNode(
+		TEXT("ImageFailurePreviewLocal"),
+		TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure"));
+
+	FDesignImageImportResult InitialImageResult;
+	DesignImportPlanning::RecordImageResolutionFailure(InitialImageResult);
+	FPreviewRefreshInput RefreshInput;
+	RefreshInput.RequestId = 42;
+	RefreshInput.OriginalData = MakeShared<FUMGWidgetData>(Data);
+	RefreshInput.EditedJson = FUMGJsonSerializer::Serialize(Data);
+	RefreshInput.InitialImageResult = InitialImageResult;
+	RefreshInput.bResolveImages = false;
+	const FPreviewRefreshResult RefreshResult = DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
+	if (!TestTrue(TEXT("Preview refresh succeeds"), RefreshResult.bSucceeded))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Preview refresh keeps the unresolved source failure"), RefreshResult.ImageResult.FailedCount, 1);
+
+	FPreviewApprovedSnapshot ApprovedSnapshot;
+	ApprovedSnapshot.RequestId = RefreshResult.RequestId;
+	ApprovedSnapshot.EditedJson = RefreshResult.EditedJson;
+	ApprovedSnapshot.Data = RefreshResult.Data;
+	ApprovedSnapshot.ImageResult = RefreshResult.ImageResult;
+	const FString ApprovedDataBeforeGeneration = FUMGJsonSerializer::Serialize(ApprovedSnapshot.Data);
+
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = OutputPath;
+	Request.bResolveImages = true;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	const FArtifactGenerationResult Result = DesignImportPipeline::GenerateArtifacts(ApprovedSnapshot, Request);
+
+	TestTrue(TEXT("Approved preview generation still produces the usable asset"), Result.bSucceeded);
+	TestEqual(
+		TEXT("The unresolved source failure survives URL resolution and degrades the commit"),
+		Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestTrue(TEXT("The degradation exposes a human-facing image summary"),
+		Result.Warnings.ContainsByPredicate([](const FString& Warning)
+		{
+			return Warning.Contains(TEXT("unresolved_reference=1"));
+		}));
+	TestEqual(
+		TEXT("Generation keeps the approved preview snapshot immutable"),
+		FUMGJsonSerializer::Serialize(ApprovedSnapshot.Data),
+		ApprovedDataBeforeGeneration);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureStructuredRuntimeResultIsAuthoritativeTest,
+	"Design2UMG.Resources.Failure.StructuredRuntimeResultIsAuthoritative",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FResourceFailureStructuredRuntimeResultIsAuthoritativeTest::RunTest(const FString& Parameters)
+{
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/ImageFailureRuntimeAuthority_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(OutputPath); };
+
+	FPreviewApprovedSnapshot ApprovedSnapshot;
+	ApprovedSnapshot.RequestId = 77;
+	ApprovedSnapshot.Data.WidgetName = TEXT("WBP_ImageFailureRuntimeAuthority");
+	ApprovedSnapshot.Data.RootWidget = MakeResourceFailureCanvas(TEXT("ImageFailureRuntimeAuthorityRoot"));
+
+	FDesignImageImportResult RuntimeImageResult;
+	FDesignImageDiagnostic Failure;
+	Failure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	Failure.Category = EDesignImageDiagnosticCategory::Download;
+	Failure.Resource = TEXT("https://example.invalid/runtime.png");
+	Failure.Reason = TEXT("Runtime download failed");
+	RuntimeImageResult.AddDiagnostic(MoveTemp(Failure));
+	TestTrue(TEXT("The structured result intentionally has no display text"),
+		RuntimeImageResult.DisplaySummary.IsEmpty());
+
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = OutputPath;
+	Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintOnly;
+	Request.RuntimeImageResult = RuntimeImageResult;
+	const FArtifactGenerationResult Result = DesignImportPipeline::GenerateArtifacts(ApprovedSnapshot, Request);
+
+	TestTrue(TEXT("Generation succeeds with a structured runtime failure"), Result.bSucceeded);
+	TestEqual(
+		TEXT("Structured facts remain authoritative when display text is empty"),
+		Result.Commit.Status,
+		EDesign2UMGCommitStatus::SucceededWithDegradation);
 	return true;
 }
 
@@ -250,19 +400,11 @@ bool FResourceFailureUrlLimitFailureClearsWithLocalImagesTest::RunTest(const FSt
 	FScopedRemoteImageImportSettings ScopedSettings;
 	if (!ScopedSettings.Settings)
 	{
-		AddError(TEXT("Design2UMG settings are unavailable"));
+		AddError(TEXT("Design2UMG settings unavailable"));
 		return false;
 	}
 
-	// A real entry failure rather than a hand-written warning: more unique remote URLs
-	// than one operation allows. The limit error does not read like the resolve report,
-	// which is exactly why the retraction has to recognise a canonical marker instead of
-	// a prefix that only some producers happen to use.
-	// The production rejection and its downstream degradation notice are exactly what this
-	// test drives, so they are expected log lines rather than surprises.
-	AddExpectedErrorPlain(TEXT("Too many unique remote images"), EAutomationExpectedErrorFlags::Contains, 1);
-	AddExpectedErrorPlain(TEXT("Unresolved remote images"), EAutomationExpectedErrorFlags::Contains, 1);
-
+	AddExpectedErrorPlain(TEXT("Too many unique remote images"), EAutomationExpectedErrorFlags::Contains, 2);
 	const int32 UrlLimit = DesignImageResources::FImageResourceLimits::DefaultMaxUrlsPerOperation;
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_ResourceFailure_UrlLimit");
@@ -274,28 +416,25 @@ bool FResourceFailureUrlLimitFailureClearsWithLocalImagesTest::RunTest(const FSt
 			FString::Printf(TEXT("https://cdn.example/resource_failure_%d.png"), Index)));
 	}
 
-	FString Report;
-	DesignImportPlanning::ResolveImages(Data, &Report);
+	FDesignImageImportResult ImageResult = DesignImportPlanning::ResolveImages(Data);
+	TestTrue(TEXT("The URL-count limit ends the run"), ImageResult.HasFailures());
+	if (TestEqual(TEXT("The limit records one diagnostic"), ImageResult.Diagnostics.Num(), 1))
+	{
+		TestEqual(TEXT("The limit has a typed budget category"),
+			static_cast<uint8>(ImageResult.Diagnostics[0].Category),
+			static_cast<uint8>(EDesignImageDiagnosticCategory::Budget));
+		TestTrue(TEXT("The typed reason names the real limit"),
+			ImageResult.Diagnostics[0].Reason.Contains(TEXT("Too many unique remote images")));
+	}
+	TestEqual(TEXT("The failure does not enter general warnings"), Data.Warnings.Num(), 0);
 
-	TestTrue(TEXT("The URL-count limit error is what ends the run"),
-		Report.Contains(TEXT("Too many unique remote images")));
-	TestEqual(TEXT("The failure lands in Data.Warnings"), Data.Warnings.Num(), 1);
-	TestTrue(TEXT("The warning carries the canonical resource-resolution marker"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0].StartsWith(TEXT("Remote image import:")));
-	TestTrue(TEXT("The warning still names the real limit error"),
-		Data.Warnings.Num() == 1 && Data.Warnings[0].Contains(TEXT("Too many unique remote images")));
-
-	// The user fixes the input: the same FUMGWidgetData now references local assets only.
 	Data.RootWidget.Children.Reset();
-	Data.RootWidget.Children.Add(
-		MakeResourceFailureImageNode(TEXT("ResourceFailure_Local"), TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure")));
-
-	FString RetryReport;
-	DesignImportPlanning::ResolveImages(Data, &RetryReport);
-
-	TestTrue(TEXT("The retry resolves without failures"), RetryReport.Contains(TEXT("failed=0")));
-	TestEqual(TEXT("The stale limit warning is retracted after the input is fixed"),
-		Data.Warnings.Num(), 0);
+	Data.RootWidget.Children.Add(MakeResourceFailureImageNode(
+		TEXT("ResourceFailure_Local"),
+		TEXT("/Game/Design2UMG/Test/T_ResourceFailure.T_ResourceFailure")));
+	ImageResult = DesignImportPlanning::ResolveImages(Data);
+	TestFalse(TEXT("The retry clears the prior typed limit failure"), ImageResult.HasFailures());
+	TestEqual(TEXT("General warnings remain clean"), Data.Warnings.Num(), 0);
 	return true;
 }
 

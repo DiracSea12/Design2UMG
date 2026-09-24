@@ -421,30 +421,33 @@ bool FPreviewImportCompletionClassificationTest::RunTest(const FString& Paramete
 	using namespace Design2UMGEditorImportServices;
 
 	FUMGWidgetData Data;
+	FDesignImageImportResult ImageResult;
 	TestEqual(
 		TEXT("No warning is a clean completion"),
-		static_cast<uint8>(ClassifyFigmaImportCompletion(Data)),
+		static_cast<uint8>(ClassifyFigmaImportCompletion(Data, ImageResult)),
 		static_cast<uint8>(EFigmaImportCompletionKind::Success));
 
 	Data.Warnings.Add(TEXT("Unsupported blend mode was approximated"));
 	TestEqual(
 		TEXT("A general conversion warning is not reported as an image failure"),
-		static_cast<uint8>(ClassifyFigmaImportCompletion(Data)),
+		static_cast<uint8>(ClassifyFigmaImportCompletion(Data, ImageResult)),
 		static_cast<uint8>(EFigmaImportCompletionKind::Warnings));
 
-	Data.Warnings = {
-		DesignImportPlanning::MakeResourceResolutionWarning(TEXT("download failed"))
-	};
-	TestEqual(
-		TEXT("A remote image warning is classified as an image failure"),
-		static_cast<uint8>(ClassifyFigmaImportCompletion(Data)),
-		static_cast<uint8>(EFigmaImportCompletionKind::ImageFailure));
-
 	Data.Warnings.Reset();
-	DesignImportPlanning::RecordImageResolutionFailure(Data);
+	FDesignImageDiagnostic SuccessfulDiagnostic;
+	SuccessfulDiagnostic.Outcome = EDesignImageDiagnosticOutcome::Imported;
+	SuccessfulDiagnostic.Resource = TEXT("/Game/Textures/T_failed_but_successful");
+	SuccessfulDiagnostic.Message = TEXT("Imported texture: /Game/Textures/T_failed_but_successful");
+	ImageResult.AddDiagnostic(MoveTemp(SuccessfulDiagnostic));
+	TestEqual(
+		TEXT("A successful resource name containing failed stays successful"),
+		static_cast<uint8>(ClassifyFigmaImportCompletion(Data, ImageResult)),
+		static_cast<uint8>(EFigmaImportCompletionKind::Success));
+
+	DesignImportPlanning::RecordImageResolutionFailure(ImageResult);
 	TestEqual(
 		TEXT("An unresolved Figma image ref is classified as an image failure"),
-		static_cast<uint8>(ClassifyFigmaImportCompletion(Data)),
+		static_cast<uint8>(ClassifyFigmaImportCompletion(Data, ImageResult)),
 		static_cast<uint8>(EFigmaImportCompletionKind::ImageFailure));
 
 	return true;

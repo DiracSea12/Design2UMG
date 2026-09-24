@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UMGSchema.h"
+#include "UObject/StrongObjectPtr.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
@@ -13,7 +14,9 @@ namespace DesignImageResources { class FImageOperationBudget; }
 class UPanelSlot;
 class UPanelWidget;
 class UTexture2D;
+class UUserWidget;
 class UWidgetBlueprint;
+class SWidget;
 class FDesign2UMGComponentMappingBuildState;
 struct FDesign2UMGGenerationSettingsSnapshot;
 
@@ -34,7 +37,7 @@ public:
 	 */
 	static TOptional<FVector2D> GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint);
 
-	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(), const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>());
+	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(), const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>(), TStrongObjectPtr<UUserWidget>* OutRenderedWidget = nullptr, TSharedPtr<SWidget>* OutRenderedSlateWidget = nullptr);
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize);
 
 	/**
@@ -93,4 +96,3 @@ public:
 	}
 
 };
-

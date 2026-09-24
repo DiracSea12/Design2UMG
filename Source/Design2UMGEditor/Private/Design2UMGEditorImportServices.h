@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "DesignImportPipeline.h"
 #include "FigmaHttpClient.h"
+#include "DesignImageDiagnostics.h"
 #include "HAL/PlatformAtomics.h"
 #include "HAL/ThreadSafeCounter.h"
 #include "PencilConnector.h"
@@ -21,7 +22,9 @@ namespace Design2UMGEditorImportServices
 		ImageFailure
 	};
 
-	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(const FUMGWidgetData& Data);
+	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(
+		const FUMGWidgetData& Data,
+		const FDesignImageImportResult& ImageResult);
 
 	class FFigmaImportService;
 

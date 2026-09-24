@@ -8,11 +8,14 @@
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingConfig.h"
 #include "DesignPreviewContracts.h"
+#include "Blueprint/UserWidget.h"
+#include "UObject/StrongObjectPtr.h"
 #include "DesignImportTypes.h"
 #include "UMGSchema.h"
 
 class UWidgetBlueprint;
 class UDesign2UMGSettings;
+class SWidget;
 
 /**
  * Immutable import/generation settings captured for one import.
@@ -34,12 +37,18 @@ struct FImportAnalysisInput
 	const FDesign2UMGImportSettingsSnapshot* SettingsSnapshot = nullptr;
 };
 
-struct FImportAnalysisResult
+/** Metadata produced while analyzing widget data in place. */
+struct FImportInPlaceAnalysisResult
+{
+	FString ErrorMessage;
+	FDesignImageImportResult ImageResult;
+	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
+};
+
+/** Document analysis owns the converted widget tree it produces. */
+struct FImportAnalysisResult : FImportInPlaceAnalysisResult
 {
 	FUMGWidgetData Data;
-	FString ErrorMessage;
-	FString ImageReport;
-	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
 };
 
 struct FArtifactGenerationResult
@@ -54,6 +63,10 @@ struct FArtifactGenerationResult
 	FString GeneratedAssetPath;
 	FString RenderPngPath;
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
+	/** Actual compiled widget instance used for the render, retained for immediate caller-side inspection. */
+	TStrongObjectPtr<UUserWidget> RenderedWidget;
+	/** Keeps that render's Slate tree alive so its cached geometry remains inspectable. */
+	TSharedPtr<SWidget> RenderedSlateWidget;
 
 	/** Component Mapping diagnostics (ini validation + hit/fallback/inputs/Prototype boundaries), going into the import diagnostic report. */
 	TArray<FDesign2UMGMappingDiagnostic> ComponentMappingDiagnostics;
@@ -68,7 +81,7 @@ struct FDesignImportRequest
 	FBlueprintGenerationOptions Generation;
 	TOptional<FDesign2UMGImportSettingsSnapshot> SettingsSnapshot;
 	TOptional<FDesignDocument> DiagnosticDocument;
-	FString DiagnosticImageReport;
+	TOptional<FDesignImageImportResult> DiagnosticImageResult;
 };
 
 struct FDesignImportExecutionResult
@@ -83,6 +96,10 @@ struct FDesignImportExecutionResult
 	FString GeneratedAssetPath;
 	FString RenderPngPath;
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
+	/** Actual compiled widget instance used for the render, retained for immediate caller-side inspection. */
+	TStrongObjectPtr<UUserWidget> RenderedWidget;
+	/** Keeps that render's Slate tree alive so its cached geometry remains inspectable. */
+	TSharedPtr<SWidget> RenderedSlateWidget;
 };
 
 /** Reimport request: target WBP asset + new source data (the new source is passed via Reimport's Document parameter). */
@@ -99,6 +116,7 @@ struct FDesignReimportRequest
 struct FDesignReimportResult
 {
 	FDesign2UMGCommitResult Commit;
+	FDesignImageImportResult ImageResult;
 	/** Final Reimport maps to Commit.IsSuccess(); unsaved ApplyPreparedReimport reports apply success only. */
 	bool bSucceeded = false;
 	/** True when reimport intentionally preserved/skipped some design state while continuing successfully. */
@@ -117,7 +135,7 @@ struct FDesignReimportResult
 
 namespace DesignImportPipeline
 {
-	FImportAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input = FImportAnalysisInput());
+	FImportInPlaceAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input = FImportAnalysisInput());
 	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input = FImportAnalysisInput());
 	FPreviewRefreshResult AnalyzePreviewRefresh(
 		const FPreviewRefreshInput& Input,
@@ -149,7 +167,7 @@ namespace DesignImportPipeline
 	void WriteImportDiagnosticReport(
 		const FDesignDocument& Document,
 		const FUMGWidgetData& Data,
-		const FString& ImageReport = FString(),
+		const FDesignImageImportResult& ImageResult = FDesignImageImportResult(),
 		const FString& RequestedOutputPath = FString(),
 		const FString& RequestedRenderPngPath = FString(),
 		const FString& GeneratedAssetPath = FString(),

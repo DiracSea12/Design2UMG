@@ -126,19 +126,21 @@ namespace DesignImportPipeline
 			Request.SettingsSnapshot.IsSet()
 				? Request.SettingsSnapshot.GetValue()
 				: FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
-		const FReimportSession Session{ &Document, Request, Data, SettingsSnapshot.GenerationSettings };
+		const FReimportSession Session{ &Document, Request, Data, SettingsSnapshot.GenerationSettings, nullptr, &Result.ImageResult };
 
 		// Re-parse images and convert the source into the current intermediate representation.
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
 		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		Result.ImageResult = AnalysisResult.ImageResult;
+		Result.bHasDegradation = Result.ImageResult.HasFailures();
 		if (!AnalysisResult.ErrorMessage.IsEmpty())
 		{
 			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_font_preparation_failed"), AnalysisResult.ErrorMessage);
 			Result.ComponentMappingDiagnostics = SettingsSnapshot.GenerationSettings.ComponentMapping.ValidationDiagnostics;
 			DesignImportDiagnosticReport::WriteReimport(Document, Data,
-				FPackageName::ObjectPathToPackageName(Request.TargetAssetPath), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+				FPackageName::ObjectPathToPackageName(Request.TargetAssetPath), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 			return Result;
 		}
 		Data = AnalysisResult.Data;
@@ -589,7 +591,7 @@ namespace DesignImportPipeline
 		const auto WriteReport = [&]()
 		{
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(
-				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+				*Session.Document, Session.Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 		};
 		const auto FailSaveWithRollback = [&](const FString& Reason)
 		{
@@ -657,7 +659,7 @@ namespace DesignImportPipeline
 		}
 
 		Result.Commit = FUMGGenerator::SaveWidgetBlueprint(WBP, &GenerationOutput, &PrototypeNavigation);
-		Result.bHasDegradation |= GenerationOutput.bHasDegradation || !Session.Data.Warnings.IsEmpty();
+		Result.bHasDegradation |= GenerationOutput.bHasDegradation || !Session.Data.Warnings.IsEmpty() || Result.ImageResult.HasFailures();
 		if (Result.Commit.Status == EDesign2UMGCommitStatus::Succeeded && Result.bHasDegradation)
 			Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
 		Result.Diagnostics.Append(GenerationOutput.MappingDiagnostics);

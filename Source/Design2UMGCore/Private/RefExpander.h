@@ -10,9 +10,10 @@ struct FDesignNodeOverride;
 
 namespace RefExpander
 {
-	TSharedPtr<FDesignNode> ExpandRef(
+	FDesignReferenceExpansionResult ExpandRef(
 		const TSharedPtr<FDesignNode>& RefNode,
 		const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById);
+
 	void ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 	void ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override);
 }

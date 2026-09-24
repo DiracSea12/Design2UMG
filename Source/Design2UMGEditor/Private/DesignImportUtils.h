@@ -4,28 +4,20 @@
 
 #include "CoreMinimal.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
+#include "DesignPreviewContracts.h"
 #include "UMGGenerator.h"
 #include "DesignImportTypes.h"
-#include "Misc/AutomationTest.h"
+#include "UObject/StrongObjectPtr.h"
 
 struct FUMGWidgetData;
+class UUserWidget;
 class UWidgetBlueprint;
+class FFeedbackContext;
+class SWidget;
 
 namespace DesignImportUtils
 {
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-	enum class EAutomationGenerationCancelPoint : uint8
-	{
-		None,
-		BeforeBuild,
-		AfterBuildBeforeSave,
-	};
-
-	void SetAutomationGenerationCancelPoint(EAutomationGenerationCancelPoint CancelPoint);
-	void ResetAutomationGenerationCancelPoint();
-#endif
-
-	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data);
+	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data, bool bPersistChanges = true);
 
 	/**
 	 * True when the string starts with an http:// or https:// scheme prefix
@@ -34,17 +26,24 @@ namespace DesignImportUtils
 	 */
 	bool IsHttpUrl(const FString& Value);
 
-	/**
-	 * Identify per-case automation font assets; the shared ImportedFonts package is reusable.
-	 */
-	bool IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath);
+	/** Clear transient renderer, font, raster, and procedural texture state synchronously. */
+	void ResetTransientRenderState();
 
-	// Reloads the blueprint's package from disk for rendering. Skips the reload
-	// (and renders the in-memory version instead) when the package has unsaved
-	// changes, so a reload can never discard them. Exposed for direct testing.
+	// Prepares and reloads the blueprint package for rendering. Explicit options
+	// keep callers' font/resource lifetime policy out of global state. A dirty
+	// blueprint package is rendered in memory instead of discarding unsaved edits;
+	// explicit resource preparation still runs and reports failures.
 	UWidgetBlueprint* ReloadWidgetBlueprintForRender(
 		UWidgetBlueprint* WidgetBlueprint,
-		FString* OutAutomationPreparationError = nullptr);
+		const FBlueprintRenderPreparationOptions* Preparation = nullptr,
+		FString* OutPreparationError = nullptr);
+
+	/** Prepare a blueprint by asset path and optionally reload its package before rendering. */
+	UWidgetBlueprint* PrepareWidgetBlueprintForRender(
+		const FString& WidgetBlueprintAssetPath,
+		const FBlueprintRenderPreparationOptions& Preparation,
+		bool bReloadPackage,
+		FString* OutPreparationError = nullptr);
 	/** Assemble an unsaved import, including source component dependencies when present. */
 	UWidgetBlueprint* BuildWidgetBlueprint(
 		const FUMGWidgetData& WidgetData,
@@ -64,14 +63,17 @@ namespace DesignImportUtils
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
+		FFeedbackContext* ProgressFeedback = nullptr,
+		bool bPersistIconFontMappingChanges = true);
 	bool GenerateBlueprintAndPng(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
 		FString* OutGeneratedAssetPath = nullptr,
 		FString* OutRenderPngPath = nullptr,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr);
+		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
+		bool bPersistIconFontMappingChanges = true);
 	bool GenerateBlueprintAndCompiledPng(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
@@ -80,13 +82,19 @@ namespace DesignImportUtils
 		FIntPoint* OutRenderedSize = nullptr,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
-		FString* OutError = nullptr);
+		FString* OutError = nullptr,
+		const FBlueprintRenderPreparationOptions* RenderPreparation = nullptr,
+		bool bPersistIconFontMappingChanges = true,
+		TStrongObjectPtr<UUserWidget>* OutRenderedWidget = nullptr,
+		TSharedPtr<SWidget>* OutRenderedSlateWidget = nullptr);
 	bool RenderCompiledBlueprintToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,
 		FIntPoint* OutRenderedSize = nullptr,
 		FString* OutError = nullptr,
 		const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(),
-		const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>());
+		const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>(),
+		TStrongObjectPtr<UUserWidget>* OutRenderedWidget = nullptr,
+		TSharedPtr<SWidget>* OutRenderedSlateWidget = nullptr);
 }
 

@@ -3,6 +3,7 @@
 #include "RefExpander.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "DesignTreeLimits.h"
 #include "Design2UMGLog.h"
 
 namespace
@@ -20,7 +21,9 @@ namespace
 		TArray<TSharedPtr<FDesignNode>> Copy;
 		Copy.Reserve(Children.Num());
 		for (const TSharedPtr<FDesignNode>& Child : Children)
+		{
 			Copy.Add(RefExpander::DeepCopyNode(Child));
+		}
 		return Copy;
 	}
 
@@ -218,10 +221,33 @@ namespace
 		const TMap<FString, FDesignNodeOverride>& Outer)
 	{
 		// Discard the old subtree's patches before adding any patches from the outer layer.
+		TSet<FString> ReplacedPaths;
 		for (const auto& Pair : Outer)
-			DiscardReplacedDescendantPatches(Target, Pair.Key, Pair.Value);
+		{
+			if (ReplacesSubtree(Pair.Value)) ReplacedPaths.Add(Pair.Key);
+		}
+		if (!ReplacedPaths.IsEmpty())
+		{
+			for (auto It = Target.CreateIterator(); It; ++It)
+			{
+				const FString& Path = It.Key();
+				for (int32 Index = 0; Index < Path.Len(); ++Index)
+				{
+					if (Path[Index] != TCHAR('/')) continue;
+					const FString Ancestor = Path.Left(Index);
+					const FString* ReplacedPath = ReplacedPaths.Find(Ancestor);
+					if (ReplacedPath && Ancestor.Equals(*ReplacedPath, ESearchCase::CaseSensitive))
+					{
+						It.RemoveCurrent();
+						break;
+					}
+				}
+			}
+		}
 		for (const auto& Pair : Outer)
+		{
 			MergeOverride(Target.FindOrAdd(Pair.Key), Pair.Value);
+		}
 	}
 
 	void ApplyDescendants(TSharedPtr<FDesignNode>& Node, const TMap<FString, FDesignNodeOverride>& Descendants)
@@ -241,7 +267,9 @@ namespace
 			return bAStructural != bBStructural ? bAStructural : A.Compare(B, ESearchCase::CaseSensitive) < 0;
 		});
 		for (const FString& Path : Paths)
+		{
 			RefExpander::ApplyDescendantOverride(Node, Path, Descendants.FindChecked(Path));
+		}
 	}
 
 	bool ApplyOverrideToDirectChild(
@@ -260,7 +288,7 @@ namespace
 
 			if (Override.Replacement.IsValid())
 				Child = RefExpander::DeepCopyNode(Override.Replacement);
-			ApplyPatch(*Child, Override.Patch);
+			if (Child.IsValid()) ApplyPatch(*Child, Override.Patch);
 			return true;
 		}
 
@@ -339,20 +367,68 @@ namespace
 		}
 	}
 
-	TSharedPtr<FDesignNode> ExpandRefInternal(
+	FDesignReferenceExpansionResult MakeExpansionFailure(
+		const EDesignReferenceExpansionStatus Status,
+		const FString& NodeId,
+		const FString& ReferencedNodeId,
+		FString Message)
+	{
+		FDesignReferenceExpansionResult Result;
+		Result.Status = Status;
+		Result.NodeId = NodeId;
+		Result.ReferencedNodeId = ReferencedNodeId;
+		Result.Message = MoveTemp(Message);
+		return Result;
+	}
+
+	FDesignReferenceExpansionResult ExpandRefInternal(
 		const TSharedPtr<FDesignNode>& RefNode,
 		const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById,
-		TSet<FString>& RefChain)
+		TSet<FString>& RefChain,
+		const FString& EntryNodeId)
 	{
 		if (!RefNode.IsValid() || RefNode->Ref.IsEmpty())
-			return nullptr;
+		{
+			return MakeExpansionFailure(
+				EDesignReferenceExpansionStatus::InvalidReference,
+				EntryNodeId,
+				FString(),
+				FString::Printf(TEXT("Reference expansion skipped node '%s': a valid target id is required."), *EntryNodeId));
+		}
 
 		const FString RefTargetId = RefNode->Ref;
 		if (RefChain.Contains(RefTargetId))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("ExpandRef: circular ref detected at '%s' -> '%s'"),
 				*RefNode->Id, *RefTargetId);
-			return nullptr;
+			return MakeExpansionFailure(
+				EDesignReferenceExpansionStatus::CircularReference,
+				EntryNodeId,
+				RefTargetId,
+				FString::Printf(
+					TEXT("Reference expansion failed for node '%s': circular reference reaches '%s'."),
+					*EntryNodeId,
+					*RefTargetId));
+		}
+
+		if (RefChain.Num() >= DesignTreeLimits::MaxReferenceChainDepth)
+		{
+			UE_LOG(
+				LogDesign2UMG,
+				Error,
+				TEXT("ExpandRef: reference chain limit %d exceeded at '%s' -> '%s'"),
+				DesignTreeLimits::MaxReferenceChainDepth,
+				*RefNode->Id,
+				*RefTargetId);
+			return MakeExpansionFailure(
+				EDesignReferenceExpansionStatus::ChainLimitExceeded,
+				EntryNodeId,
+				RefTargetId,
+				FString::Printf(
+					TEXT("Reference expansion failed for node '%s': reference chain exceeds %d targets at '%s'."),
+					*EntryNodeId,
+					DesignTreeLimits::MaxReferenceChainDepth,
+					*RefTargetId));
 		}
 
 		RefChain.Add(RefTargetId);
@@ -362,32 +438,50 @@ namespace
 		{
 			UE_LOG(LogDesign2UMG, Warning, TEXT("ExpandRef: ref '%s' -> '%s' NOT FOUND"), *RefNode->Id, *RefTargetId);
 			RefChain.Remove(RefTargetId);
-			return nullptr;
+			return MakeExpansionFailure(
+				EDesignReferenceExpansionStatus::MissingTarget,
+				EntryNodeId,
+				RefTargetId,
+				FString::Printf(
+					TEXT("Reference expansion skipped node '%s': target '%s' was not found."),
+					*EntryNodeId,
+					*RefTargetId));
 		}
 
 		auto Expanded = RefExpander::DeepCopyNode(*SourceNode);
 		if (!Expanded.IsValid())
 		{
 			RefChain.Remove(RefTargetId);
-			return nullptr;
+			return MakeExpansionFailure(
+				EDesignReferenceExpansionStatus::InvalidReference,
+				EntryNodeId,
+				RefTargetId,
+				FString::Printf(
+					TEXT("Reference expansion skipped node '%s': target '%s' could not be copied."),
+					*EntryNodeId,
+					*RefTargetId));
 		}
 		ApplyInstanceOverrides(Expanded, RefNode);
 		MergeDescendants(Expanded->Descendants, RefNode->Descendants);
 
-		TSharedPtr<FDesignNode> Result = Expanded;
+		FDesignReferenceExpansionResult Result;
 		if (Expanded->Type == EDesignNodeType::Ref && !Expanded->Ref.IsEmpty())
 		{
-			Result = ExpandRefInternal(Expanded, ReusableNodesById, RefChain);
+			Result = ExpandRefInternal(Expanded, ReusableNodesById, RefChain, EntryNodeId);
 		}
 		else
 		{
-			ApplyDescendants(Result, Expanded->Descendants);
+			ApplyDescendants(Expanded, Expanded->Descendants);
+			Result.ExpandedNode = MoveTemp(Expanded);
+			Result.Status = EDesignReferenceExpansionStatus::Succeeded;
+			Result.NodeId = EntryNodeId;
 		}
 
-		if (Result.IsValid() && !RefNode->bReusable)
+		if (Result.IsSuccess() && !RefNode->bReusable)
 		{
-			MarkExpandedRefInstanceRecursive(Result);
+			MarkExpandedRefInstanceRecursive(Result.ExpandedNode);
 		}
+
 
 		RefChain.Remove(RefTargetId);
 		return Result;
@@ -406,26 +500,30 @@ TSharedPtr<FDesignNode> RefExpander::DeepCopyNode(const TSharedPtr<FDesignNode>&
 	if (Source->RefOverrides.IsValid())
 		Copy->RefOverrides = MakeShared<FDesignNodePatch>(CopyPatch(*Source->RefOverrides));
 	for (auto& Pair : Copy->Descendants)
+	{
 		Pair.Value = CopyOverride(Pair.Value);
+	}
 
 	return Copy;
 }
 
-TSharedPtr<FDesignNode> RefExpander::ExpandRef(const TSharedPtr<FDesignNode>& RefNode, const FDesignDocument& Doc)
+FDesignReferenceExpansionResult RefExpander::ExpandRef(
+	const TSharedPtr<FDesignNode>& RefNode,
+	const FDesignDocument& Doc)
 {
 	TMap<FString, TSharedPtr<FDesignNode>> ReusableNodesById;
 	Doc.BuildReusableNodeIndex(ReusableNodesById);
 	return ExpandRef(RefNode, ReusableNodesById);
 }
 
-TSharedPtr<FDesignNode> RefExpander::ExpandRef(
+FDesignReferenceExpansionResult RefExpander::ExpandRef(
 	const TSharedPtr<FDesignNode>& RefNode,
 	const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById)
 {
 	TSet<FString> RefChain;
-	return ExpandRefInternal(RefNode, ReusableNodesById, RefChain);
+	const FString EntryNodeId = RefNode.IsValid() ? RefNode->Id : FString();
+	return ExpandRefInternal(RefNode, ReusableNodesById, RefChain, EntryNodeId);
 }
-
 void RefExpander::ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override)
 {
 	if (!Node.IsValid())
@@ -485,6 +583,3 @@ void RefExpander::ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariab
 	for (auto& Child : Node->Children)
 		ReThemeNode(Child, Resolver);
 }
-
-
-

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Design2UMGSettings.h"
+#include "DesignImageDiagnostics.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -17,11 +18,25 @@ enum class EDesignBlueprintGenerationMode : uint8
 	BlueprintAndCompiledPng
 };
 
+/** Explicit preparation needed before a freshly saved Widget Blueprint is rendered. */
+struct FBlueprintRenderPreparationOptions
+{
+	/** Package directory containing imported font assets that must be reloaded before render. */
+	FString ImportedFontPackagePath;
+	/** Refresh generated texture resources referenced by the Widget Blueprint before render. */
+	bool bRefreshGeneratedTextures = false;
+	/** Clear render/font/resource caches before and after package preparation. */
+	bool bResetTransientRenderState = false;
+};
+
 /** Blueprint/PNG generation options for preview-approved snapshots. */
 struct FBlueprintGenerationOptions
 {
 	EDesignBlueprintGenerationMode Mode = EDesignBlueprintGenerationMode::BlueprintAndPng;
 	FString CompiledPngFilePath;
+	TOptional<FBlueprintRenderPreparationOptions> RenderPreparation;
+	/** Import callers may keep generated font mappings request-scoped instead of saving editor settings. */
+	bool bPersistIconFontMappingChanges = true;
 };
 
 // Preview materialization only needs the generation-domain subset that can
@@ -44,6 +59,8 @@ struct FPreviewRefreshInput
 	FString EditedJson;
 	/** Immutable import context; JSON edits never own source identity or interactions. */
 	TSharedPtr<const FUMGWidgetData> OriginalData;
+	/** Source-resolution facts collected before the preview opened. */
+	FDesignImageImportResult InitialImageResult;
 	bool bResolveImages = true;
 };
 
@@ -52,7 +69,7 @@ struct FPreviewApprovedSnapshot
 	uint64 RequestId = 0;
 	FString EditedJson;
 	FUMGWidgetData Data;
-	FString ImageReport;
+	FDesignImageImportResult ImageResult;
 	TOptional<FDesignPreviewMaterializationSettingsSnapshot> MaterializationSettingsSnapshot;
 };
 
@@ -62,7 +79,7 @@ struct FPreviewRefreshResult
 	uint64 RequestId = 0;
 	FString EditedJson;
 	FUMGWidgetData Data;
-	FString ImageReport;
+	FDesignImageImportResult ImageResult;
 	FString ParseError;
 };
 
@@ -73,8 +90,8 @@ struct FArtifactGenerationRequest
 	FBlueprintGenerationOptions Generation;
 	bool bResolveImages = false;
 	TOptional<FDesignDocument> DiagnosticDocument;
-	FString RuntimeImageReport;
-	FString DiagnosticImageReportOverride;
+	TOptional<FDesignImageImportResult> RuntimeImageResult;
+	TOptional<FDesignImageImportResult> DiagnosticImageResultOverride;
 };
 
 struct FPreviewGenerationRequest

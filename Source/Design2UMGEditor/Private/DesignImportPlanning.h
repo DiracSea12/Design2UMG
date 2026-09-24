@@ -3,19 +3,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImageDiagnostics.h"
 #include "DesignImportPipeline.h"
 
 namespace DesignImportPlanning
 {
-	/** Mark download-stage warnings so a successful download retry can retract them. */
-	FString MakeResourceResolutionWarning(const FString& Message);
-
-	void ResolveImages(FUMGWidgetData& Data, FString* OutReport = nullptr);
+	FDesignImageImportResult ResolveImages(
+		FUMGWidgetData& Data,
+		const FDesignImageImportResult* PreviousResult = nullptr);
 
 	/** Preserve unresolved Figma refs until the source is resolved and converted again. */
-	void RecordImageResolutionFailure(FUMGWidgetData& Data);
+	void RecordImageResolutionFailure(FDesignImageImportResult& InOutResult);
 
-	FImportAnalysisResult AnalyzeWidgetData(
+	FImportInPlaceAnalysisResult AnalyzeWidgetData(
 		FUMGWidgetData& Data,
 		const FImportAnalysisInput& Input);
 

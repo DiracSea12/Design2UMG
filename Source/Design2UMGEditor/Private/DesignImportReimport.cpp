@@ -47,14 +47,14 @@ namespace DesignImportPipeline
 		Result.Commit.AssetPath = WBP->GetPathName();
 		SettingsSnapshot.GenerationSettings.ComponentConversionSettings = SettingsSnapshot.ConversionSettings;
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings = SettingsSnapshot.GenerationSettings;
-		const FReimportSession Session{ &Document, Request, Data, GenerationSettings };
+		const FReimportSession Session{ &Document, Request, Data, GenerationSettings, nullptr, &Result.ImageResult };
 		if (!Manifest.bComponentBulkRoot && !Manifest.GeneratedAssetHash.IsEmpty())
 		{
 			Result.bFullConflict = true;
 			Result.Commit.Status = EDesign2UMGCommitStatus::Conflict;
 			AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_component_batch_root_required"),
 				TEXT("Select the parent WBP created by the original import to update this component and its dependencies together. This selected asset is a generated child WBP; its saved content was left unchanged."));
-			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, nullptr, &Result.Commit);
+			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, nullptr, &Result.Commit, &Result.ImageResult);
 			return Result;
 		}
 		if (Manifest.bComponentBulkRoot)
@@ -65,6 +65,7 @@ namespace DesignImportPipeline
 				Result.Commit.Status = EDesign2UMGCommitStatus::Conflict;
 				AddReimportDiagnostic(Result.Diagnostics, TEXT("reimport_component_dependencies_missing"),
 					TEXT("This asset owns a component batch; the new source is missing its dependency bundle"));
+				DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, nullptr, &Result.Commit, &Result.ImageResult);
 				return Result;
 			}
 			FDesign2UMGGenerationOutput Output;
@@ -72,7 +73,7 @@ namespace DesignImportPipeline
 			UWidgetBlueprint* Updated = FDesign2UMGComponentBlueprintContext::Build(Data,
 				FPackageName::GetLongPackagePath(TargetPackage), &GenerationSettings, &Output, &Navigation, WBP);
 			Result.Commit = Updated ? FUMGGenerator::SaveWidgetBlueprint(Updated, &Output, &Navigation) : Output.Commit;
-			Result.bHasDegradation = Output.bHasDegradation || !Data.Warnings.IsEmpty();
+			Result.bHasDegradation = Output.bHasDegradation || !Data.Warnings.IsEmpty() || Result.ImageResult.HasFailures();
 			if (Result.Commit.Status == EDesign2UMGCommitStatus::Succeeded && Result.bHasDegradation)
 				Result.Commit.Status = EDesign2UMGCommitStatus::SucceededWithDegradation;
 			Result.bSucceeded = Result.Commit.IsSuccess();
@@ -88,7 +89,7 @@ namespace DesignImportPipeline
 			Result.bFullConflict = Result.Commit.Status == EDesign2UMGCommitStatus::Conflict;
 			AddReimportDiagnostic(Result.Diagnostics, Result.bSucceeded ? TEXT("reimport_completed") : TEXT("reimport_component_batch_failed"),
 				FString::Printf(TEXT("Component batch update %s: %s"), Result.bSucceeded ? TEXT("completed") : TEXT("failed; see component diagnostics"), *TargetPackage));
-			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+			DesignImportDiagnosticReport::WriteReimport(Document, Data, TargetPackage, Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 			return Result;
 		}
 
@@ -109,6 +110,8 @@ namespace DesignImportPipeline
 	{
 		FDesignReimportResult Result;
 		Result.Commit.AssetPath = WBP->GetPathName();
+		if (Session.ImageResult) Result.ImageResult = *Session.ImageResult;
+		Result.bHasDegradation = Result.ImageResult.HasFailures();
 		const auto& Data = Session.Data;
 		const auto& GenerationSettings = Session.GenerationSettings;
 		// Match the document domain and prepare the active scope with its local mapping state.
@@ -172,7 +175,7 @@ namespace DesignImportPipeline
 			Result.ComponentMappingDiagnostics = GenerationSettings.ComponentMapping.ValidationDiagnostics;
 			Result.ComponentMappingDiagnostics.Append(MappingBuildState.GetDiagnostics());
 			if (Session.Document) DesignImportDiagnosticReport::WriteReimport(*Session.Document, Session.Data,
-				WBP->GetOutermost()->GetName(), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit);
+				WBP->GetOutermost()->GetName(), Result.Diagnostics, &Result.ComponentMappingDiagnostics, &Result.Commit, &Result.ImageResult);
 			return Result;
 		};
 		FString PrepareFailureReason;

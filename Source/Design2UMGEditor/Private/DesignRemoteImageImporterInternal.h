@@ -3,20 +3,24 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImageDiagnostics.h"
 #include "DesignImageResourceLimits.h"
 
 namespace DesignRemoteImageImporterInternal
 {
 	struct FResolveReport
 	{
-		int32 ImportedCount = 0;
-		int32 ReusedCount = 0;
-		int32 RefreshedCount = 0;
-		int32 FailedCount = 0;
-		TArray<FString> Messages;
+		FDesignImageImportResult Result;
 
-		void AddMessage(const FString& Message);
-		FString BuildSummary(const FString& ImportPath) const;
+		void AddDiagnostic(
+			EDesignImageDiagnosticOutcome Outcome,
+			EDesignImageDiagnosticCategory Category,
+			const FString& NodeId,
+			const FString& NodeName,
+			const FString& Resource,
+			const FString& Reason,
+			const FString& Message);
+		FDesignImageImportResult BuildResult(const FString& ImportPath);
 	};
 
 	struct FUrlDownloadResult
@@ -24,12 +28,19 @@ namespace DesignRemoteImageImporterInternal
 		bool bSuccess = false;
 		TArray<uint8> Data;
 		FString Error;
+		EDesignImageDiagnosticCategory FailureCategory = EDesignImageDiagnosticCategory::Download;
 
 		/** Transfers the body to its consumer so this cached result stops retaining it. */
 		TArray<uint8> TakePayload()
 		{
 			return MoveTemp(Data);
 		}
+	};
+
+	struct FImageProcessingFailure
+	{
+		EDesignImageDiagnosticCategory Category = EDesignImageDiagnosticCategory::Decode;
+		FString Reason;
 	};
 
 	struct FResolveContext
@@ -49,7 +60,7 @@ namespace DesignRemoteImageImporterInternal
 		// Processing failures are cached separately from transport results. This lets a
 		// repeated node report the same failure without retaining or re-decoding the
 		// compressed payload after the first attempt has consumed it.
-		TMap<FString, FString> UrlProcessingErrors;
+		TMap<FString, FImageProcessingFailure> UrlProcessingErrors;
 	};
 
 	class FImagePayloadIO
@@ -100,6 +111,7 @@ namespace DesignRemoteImageImporterInternal
 			int32& OutHeight,
 			TArray64<uint8>& OutRawData,
 			FString& OutError,
-			DesignImageResources::FImageOperationBudget* OperationBudget = nullptr);
+			DesignImageResources::FImageOperationBudget* OperationBudget = nullptr,
+			EDesignImageDiagnosticCategory* OutFailureCategory = nullptr);
 	};
 }

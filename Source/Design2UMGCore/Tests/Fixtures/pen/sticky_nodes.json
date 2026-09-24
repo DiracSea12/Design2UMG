@@ -30,6 +30,14 @@
           "type": "context",
           "width": "fill_container",
           "content": "Context body text."
+        },
+        {
+          "id": "plain-rectangle",
+          "name": "Plain Rectangle",
+          "type": "rectangle",
+          "width": 123,
+          "height": 45,
+          "fill": "#13579B"
         }
       ]
     }

@@ -463,37 +463,9 @@ void PenParserNodeExtensions::ParseNodeExtended(
 // user-configurable.
 namespace PenStickyChrome
 {
-	const TCHAR* const StickyFontFamily = TEXT("JetBrains Mono");
-	const TCHAR* const ChevronIconSet = TEXT("lucide");
-
-	const TCHAR* const NoteHeaderBackgroundHex = TEXT("#FFF1D6");
-	const TCHAR* const NoteBackgroundHex = TEXT("#FFF7E5");
-	const TCHAR* const NoteOutlineHex = TEXT("#8B6311");
-	const TCHAR* const NoteTextHex = TEXT("#664500");
-
-	const TCHAR* const ContextHeaderBackgroundHex = TEXT("#FFFFFF");
-	const TCHAR* const ContextBackgroundHex = TEXT("#F0F0F0");
-	const TCHAR* const ContextOutlineHex = TEXT("#767676");
-	const TCHAR* const ContextTextHex = TEXT("#2C2C2C");
-
-	const TCHAR* const PromptHeaderBackgroundHex = TEXT("#C3E8FF");
-	const TCHAR* const PromptBackgroundHex = TEXT("#E8F6FF");
-	const TCHAR* const PromptOutlineHex = TEXT("#009DFF");
-	const TCHAR* const PromptTextHex = TEXT("#006CAF");
-}
-
-void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>& Node)
-{
-	if (!Node.IsValid())
-	{
-		return;
-	}
-
-	// Sticky-card theme and geometry as rendered by the Pencil canvas for
-	// designer sticky nodes (StickyNode view): one header band with the type
-	// label, a monospace body, and a prompt-only copy footer.
 	struct FStickyTheme
 	{
+		EDesignNodeType Type;
 		const TCHAR* HeaderText;
 		const TCHAR* HeaderBackground;
 		const TCHAR* Background;
@@ -503,40 +475,40 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		bool bHasFooter;
 	};
 
-	const FStickyTheme* Theme = nullptr;
-	if (Node->Type == EDesignNodeType::Note)
-	{
-		static const FStickyTheme NoteTheme = { TEXT("Note"), PenStickyChrome::NoteHeaderBackgroundHex, PenStickyChrome::NoteBackgroundHex, PenStickyChrome::NoteOutlineHex, PenStickyChrome::NoteTextHex, 150.0f, false };
-		Theme = &NoteTheme;
-	}
-	else if (Node->Type == EDesignNodeType::Context)
-	{
-		static const FStickyTheme ContextTheme = { TEXT("Context"), PenStickyChrome::ContextHeaderBackgroundHex, PenStickyChrome::ContextBackgroundHex, PenStickyChrome::ContextOutlineHex, PenStickyChrome::ContextTextHex, 150.0f, false };
-		Theme = &ContextTheme;
-	}
-	else if (Node->Type == EDesignNodeType::Prompt)
-	{
-		static const FStickyTheme PromptTheme = { TEXT("Prompt"), PenStickyChrome::PromptHeaderBackgroundHex, PenStickyChrome::PromptBackgroundHex, PenStickyChrome::PromptOutlineHex, PenStickyChrome::PromptTextHex, 116.0f, true };
-		Theme = &PromptTheme;
-	}
-	if (!Theme)
-	{
-		return;
-	}
+	constexpr FStickyTheme StickyThemes[] = {
+		{EDesignNodeType::Note, TEXT("Note"), TEXT("#FFF1D6"), TEXT("#FFF7E5"), TEXT("#8B6311"),
+			TEXT("#664500"), 150.0f, false},
+		{EDesignNodeType::Context, TEXT("Context"), TEXT("#FFFFFF"), TEXT("#F0F0F0"), TEXT("#767676"),
+			TEXT("#2C2C2C"), 150.0f, false},
+		{EDesignNodeType::Prompt, TEXT("Prompt"), TEXT("#C3E8FF"), TEXT("#E8F6FF"), TEXT("#009DFF"),
+			TEXT("#006CAF"), 116.0f, true}};
 
-	const FString StickyTextContent = Node->Text.Content;
-	// Sticky-card geometry replicated from the Pencil canvas StickyNode view:
-	// 14px body text on a 1.5em line advance, a 45px header band with 12px inner
-	// padding and a 16px chevron, and a 1px dashed (4px on / 4px off) outline.
+	const TCHAR* const StickyFontFamily = TEXT("JetBrains Mono");
+	const TCHAR* const ChevronIconSet = TEXT("lucide");
 	constexpr float StickyFontSize = 14.0f;
 	constexpr float StickyLineHeight = 1.5f;
 	constexpr float HeaderHeight = 45.0f;
 	constexpr float StickyMinWidth = 250.0f;
-	constexpr float HeaderPaddingPx = 12.0f;
+	constexpr float ContentPaddingPx = 12.0f;
+	constexpr float ChromeStrokeThickness = 1.0f;
+	constexpr float HeaderDashLength = 4.0f;
+	constexpr float FooterSpacing = 8.0f;
 	constexpr float ChevronIconSize = 16.0f;
 
-	const auto MakeStyledText = [](const FString& InId, const FString& InName, const FString& InContent,
-		const TCHAR* InFontWeight, const float InFontSize, const TCHAR* InColorHex) -> TSharedPtr<FDesignNode>
+	const FStickyTheme* ResolveTheme(const EDesignNodeType Type)
+	{
+		for (const FStickyTheme& Theme : StickyThemes)
+		{
+			if (Theme.Type == Type)
+			{
+				return &Theme;
+			}
+		}
+		return nullptr;
+	}
+
+	TSharedPtr<FDesignNode> MakeStickyText(const FString& InId, const FString& InName, const FString& InContent,
+										   const TCHAR* InFontWeight, const float InFontSize, const TCHAR* InColorHex)
 	{
 		TSharedPtr<FDesignNode> Text = MakeShared<FDesignNode>();
 		Text->Id = InId;
@@ -549,12 +521,12 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Text->Text.LineHeight = StickyLineHeight;
 		Text->Visual.Fills.Add(FDesignFill::FromColor(InColorHex));
 		return Text;
-	};
+	}
 
-	const auto MakeHeader = [&Theme, &Node, &MakeStyledText]() -> TSharedPtr<FDesignNode>
+	TSharedPtr<FDesignNode> BuildStickyHeader(const FDesignNode& Node, const FStickyTheme& Theme)
 	{
 		TSharedPtr<FDesignNode> Header = MakeShared<FDesignNode>();
-		Header->Id = Node->Id + TEXT("-sticky-header");
+		Header->Id = Node.Id + TEXT("-sticky-header");
 		Header->Name = TEXT("Sticky Header");
 		Header->Type = EDesignNodeType::Frame;
 		Header->Transform.SetWidthValue(FDesignSize::Fill());
@@ -563,72 +535,72 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Header->LayoutData.AlignItems = EDesignAlignItems::Center;
 		Header->LayoutData.SetGap(2.0f);
 		FDesignPadding HeaderPadding;
-		HeaderPadding.Top = HeaderPadding.Right = HeaderPadding.Bottom = HeaderPadding.Left = HeaderPaddingPx;
+		HeaderPadding.Top = HeaderPadding.Right = HeaderPadding.Bottom = HeaderPadding.Left = ContentPaddingPx;
 		Header->LayoutData.SetPadding(HeaderPadding);
-		Header->Visual.Fills.Add(FDesignFill::FromColor(Theme->HeaderBackground));
+		Header->Visual.Fills.Add(FDesignFill::FromColor(Theme.HeaderBackground));
 		Header->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
 		Header->Visual.Stroke.Thickness.bUniform = true;
-		Header->Visual.Stroke.Thickness.Uniform = 1.0f;
-		Header->Visual.Stroke.Fill = FDesignFill::FromColor(Theme->OutlineColor);
-		Header->Visual.Stroke.DashPattern = { 4.0f, 4.0f };
+		Header->Visual.Stroke.Thickness.Uniform = ChromeStrokeThickness;
+		Header->Visual.Stroke.Fill = FDesignFill::FromColor(Theme.OutlineColor);
+		Header->Visual.Stroke.DashPattern = {HeaderDashLength, HeaderDashLength};
 
-		Header->Children.Add(MakeStyledText(
-			Node->Id + TEXT("-sticky-header-label"), TEXT("Sticky Header Label"),
-			Theme->HeaderText, TEXT("500"), StickyFontSize, Theme->TextColor));
+		Header->Children.Add(MakeStickyText(Node.Id + TEXT("-sticky-header-label"), TEXT("Sticky Header Label"),
+											Theme.HeaderText, TEXT("500"), StickyFontSize, Theme.TextColor));
 
 		TSharedPtr<FDesignNode> Chevron = MakeShared<FDesignNode>();
-		Chevron->Id = Node->Id + TEXT("-sticky-header-chevron");
+		Chevron->Id = Node.Id + TEXT("-sticky-header-chevron");
 		Chevron->Name = TEXT("Sticky Header Chevron");
 		Chevron->Type = EDesignNodeType::IconFont;
 		Chevron->Transform.SetWidthValue(FDesignSize::Fixed(ChevronIconSize));
 		Chevron->Transform.SetHeightValue(FDesignSize::Fixed(ChevronIconSize));
 		Chevron->Text.IconFontName = TEXT("chevron-down");
 		Chevron->Text.IconFontFamily = PenStickyChrome::ChevronIconSet;
-		Chevron->Visual.Fills.Add(FDesignFill::FromColor(Theme->TextColor));
+		Chevron->Visual.Fills.Add(FDesignFill::FromColor(Theme.TextColor));
 		Header->Children.Add(MoveTemp(Chevron));
 		return Header;
-	};
+	}
 
-	const auto MakeBody = [&Theme, &Node, &MakeStyledText, &StickyTextContent]() -> TSharedPtr<FDesignNode>
+	TSharedPtr<FDesignNode> BuildStickyBody(const FDesignNode& Node, const FStickyTheme& Theme,
+											const FString& StickyTextContent)
 	{
 		TSharedPtr<FDesignNode> Body = MakeShared<FDesignNode>();
-		Body->Id = Node->Id + TEXT("-sticky-body");
+		Body->Id = Node.Id + TEXT("-sticky-body");
 		Body->Name = TEXT("Sticky Body");
 		Body->Type = EDesignNodeType::Frame;
 		Body->Transform.SetWidthValue(FDesignSize::Fill());
 		Body->Transform.SetHeightValue(FDesignSize::Fit());
 		Body->LayoutData.Layout = EDesignLayout::Vertical;
 		FDesignPadding BodyPadding;
-		BodyPadding.Top = BodyPadding.Right = BodyPadding.Bottom = BodyPadding.Left = 12.0f;
+		BodyPadding.Top = BodyPadding.Right = BodyPadding.Bottom = BodyPadding.Left = ContentPaddingPx;
 		Body->LayoutData.SetPadding(BodyPadding);
 
-		TSharedPtr<FDesignNode> ContentText = MakeStyledText(
-			Node->Id + TEXT("-sticky-content"), TEXT("Sticky Content"),
-			StickyTextContent, TEXT("normal"), StickyFontSize, Theme->TextColor);
+		TSharedPtr<FDesignNode> ContentText =
+			MakeStickyText(Node.Id + TEXT("-sticky-content"), TEXT("Sticky Content"), StickyTextContent, TEXT("normal"),
+						   StickyFontSize, Theme.TextColor);
 		ContentText->Transform.SetWidthValue(FDesignSize::Fill());
-		ContentText->Transform.SetHeightValue(FDesignSize::Fit(Theme->ContentMinHeight));
+		ContentText->Transform.SetHeightValue(FDesignSize::Fit(Theme.ContentMinHeight));
 		ContentText->Text.TextGrowth = EDesignTextGrowth::FixedWidth;
 		Body->Children.Add(MoveTemp(ContentText));
 		return Body;
-	};
+	}
 
-	const auto MakeFooter = [&Theme, &Node, &MakeStyledText]() -> TSharedPtr<FDesignNode>
+	TSharedPtr<FDesignNode> BuildStickyFooter(const FDesignNode& Node, const FStickyTheme& Theme)
 	{
 		TSharedPtr<FDesignNode> Footer = MakeShared<FDesignNode>();
-		Footer->Id = Node->Id + TEXT("-sticky-footer");
+		Footer->Id = Node.Id + TEXT("-sticky-footer");
 		Footer->Name = TEXT("Sticky Footer");
 		Footer->Type = EDesignNodeType::Frame;
 		Footer->Transform.SetWidthValue(FDesignSize::Fill());
 		Footer->Transform.SetHeightValue(FDesignSize::Fit());
 		Footer->LayoutData.Layout = EDesignLayout::Horizontal;
 		Footer->LayoutData.AlignItems = EDesignAlignItems::Center;
-		Footer->LayoutData.SetGap(8.0f);
+		Footer->LayoutData.SetGap(FooterSpacing);
 		FDesignPadding FooterPadding;
-		FooterPadding.Top = 8.0f;
+		FooterPadding.Top = FooterSpacing;
 		Footer->LayoutData.SetPadding(FooterPadding);
 
 		TSharedPtr<FDesignNode> Spacer = MakeShared<FDesignNode>();
-		Spacer->Id = Node->Id + TEXT("-sticky-footer-spacer");
+		Spacer->Id = Node.Id + TEXT("-sticky-footer-spacer");
 		Spacer->Name = TEXT("Sticky Footer Spacer");
 		Spacer->Type = EDesignNodeType::Frame;
 		Spacer->Transform.SetWidthValue(FDesignSize::Fill());
@@ -636,7 +608,7 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		Footer->Children.Add(MoveTemp(Spacer));
 
 		TSharedPtr<FDesignNode> CopyButton = MakeShared<FDesignNode>();
-		CopyButton->Id = Node->Id + TEXT("-sticky-footer-copy");
+		CopyButton->Id = Node.Id + TEXT("-sticky-footer-copy");
 		CopyButton->Name = TEXT("Sticky Copy Button");
 		CopyButton->Type = EDesignNodeType::Frame;
 		CopyButton->Transform.SetHeightValue(FDesignSize::Fit());
@@ -652,47 +624,66 @@ void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>
 		CopyButton->LayoutData.SetPadding(ButtonPadding);
 		CopyButton->Visual.CornerRadius.bUniform = true;
 		CopyButton->Visual.CornerRadius.Uniform = 6.0f;
-		CopyButton->Visual.Fills.Add(FDesignFill::FromColor(Theme->TextColor));
+		CopyButton->Visual.Fills.Add(FDesignFill::FromColor(Theme.TextColor));
 
-		TSharedPtr<FDesignNode> CopyLabel = MakeStyledText(
-			Node->Id + TEXT("-sticky-footer-copy-label"), TEXT("Sticky Copy Label"),
-			TEXT("Copy"), TEXT("500"), 12.0f, TEXT("#FFFFFF"));
+		TSharedPtr<FDesignNode> CopyLabel =
+			MakeStickyText(Node.Id + TEXT("-sticky-footer-copy-label"), TEXT("Sticky Copy Label"), TEXT("Copy"),
+						   TEXT("500"), 12.0f, TEXT("#FFFFFF"));
 		CopyButton->Children.Add(MoveTemp(CopyLabel));
 		Footer->Children.Add(MoveTemp(CopyButton));
 		return Footer;
-	};
-
-	// The card itself reuses the sticky node: width keeps the declared sizing
-	// (clamped to the 250px sticky minimum for fixed widths), height is always
-	// content-fit because the declared sticky height is editor chrome state.
-	if (Node->Transform.Width.IsFixed())
-	{
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(FMath::Max(StickyMinWidth, Node->Transform.Width.Value)));
 	}
-	else if (!Node->Transform.Width.IsFill())
-	{
-		Node->Transform.SetWidthValue(FDesignSize::Fixed(StickyMinWidth));
-	}
-	Node->Transform.SetHeightValue(FDesignSize::Fit());
-	Node->Type = EDesignNodeType::Frame;
-	Node->LayoutData.Layout = EDesignLayout::Vertical;
-	Node->LayoutData.SetClipValue(true);
-	Node->Visual.Fills.Reset();
-	Node->Visual.Fills.Add(FDesignFill::FromColor(Theme->Background));
-	Node->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
-	Node->Visual.Stroke.Thickness.bUniform = true;
-	Node->Visual.Stroke.Thickness.Uniform = 1.0f;
-	Node->Visual.Stroke.Fill = FDesignFill::FromColor(Theme->OutlineColor);
-	Node->Visual.CornerRadius.bUniform = true;
-	Node->Visual.CornerRadius.Uniform = 8.0f;
-	Node->Visual.Effects.Reset();
-	Node->Children.Reset();
-	Node->Text = FDesignTextNodeData();
 
-	Node->Children.Add(MakeHeader());
-	Node->Children.Add(MakeBody());
+	void ApplyStickyCardAppearance(FDesignNode& Node, const FStickyTheme& Theme)
+	{
+		// The card itself reuses the sticky node: width keeps the declared sizing
+		// (clamped to the 250px sticky minimum for fixed widths), height is always
+		// content-fit because the declared sticky height is editor chrome state.
+		if (Node.Transform.Width.IsFixed())
+		{
+			Node.Transform.SetWidthValue(FDesignSize::Fixed(FMath::Max(StickyMinWidth, Node.Transform.Width.Value)));
+		}
+		else if (!Node.Transform.Width.IsFill())
+		{
+			Node.Transform.SetWidthValue(FDesignSize::Fixed(StickyMinWidth));
+		}
+		Node.Transform.SetHeightValue(FDesignSize::Fit());
+		Node.Type = EDesignNodeType::Frame;
+		Node.LayoutData.Layout = EDesignLayout::Vertical;
+		Node.LayoutData.SetClipValue(true);
+		Node.Visual.Fills.Reset();
+		Node.Visual.Fills.Add(FDesignFill::FromColor(Theme.Background));
+		Node.Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+		Node.Visual.Stroke.Thickness.bUniform = true;
+		Node.Visual.Stroke.Thickness.Uniform = ChromeStrokeThickness;
+		Node.Visual.Stroke.Fill = FDesignFill::FromColor(Theme.OutlineColor);
+		Node.Visual.CornerRadius.bUniform = true;
+		Node.Visual.CornerRadius.Uniform = 8.0f;
+		Node.Visual.Effects.Reset();
+		Node.Children.Reset();
+		Node.Text = FDesignTextNodeData();
+	}
+} // namespace PenStickyChrome
+
+void PenParserNodeExtensions::SynthesizeStickyCard(const TSharedPtr<FDesignNode>& Node)
+{
+	if (!Node.IsValid())
+	{
+		return;
+	}
+
+	const PenStickyChrome::FStickyTheme* Theme = PenStickyChrome::ResolveTheme(Node->Type);
+	if (!Theme)
+	{
+		return;
+	}
+
+	const FString StickyTextContent = Node->Text.Content;
+	PenStickyChrome::ApplyStickyCardAppearance(*Node, *Theme);
+	Node->Children.Add(PenStickyChrome::BuildStickyHeader(*Node, *Theme));
+	Node->Children.Add(PenStickyChrome::BuildStickyBody(*Node, *Theme, StickyTextContent));
 	if (Theme->bHasFooter)
 	{
-		Node->Children.Add(MakeFooter());
+		Node->Children.Add(PenStickyChrome::BuildStickyFooter(*Node, *Theme));
 	}
 }

@@ -65,6 +65,8 @@ namespace DesignImportPipeline
 		FUMGWidgetData& Data;
 		const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings;
 		DesignImageResources::FImageOperationBudget* Budget = nullptr;
+		/** Borrowed from the owning result; nested component sessions have no image pass. */
+		const FDesignImageImportResult* ImageResult = nullptr;
 	};
 
 	/**

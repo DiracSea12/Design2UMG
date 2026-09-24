@@ -6,18 +6,65 @@
 interface RestColor { r: number; g: number; b: number; a: number }
 interface RestRect { x: number; y: number; width: number; height: number }
 type RestTransform = [[number, number, number], [number, number, number]];
+interface RestGradientStop { color: RestColor; position: number }
+interface RestPaint {
+  type: Paint['type'];
+  visible?: boolean;
+  opacity?: number;
+  blendMode?: string;
+  boundVariables?: SolidPaint['boundVariables'];
+  color?: RestColor;
+  gradientTransform?: RestTransform;
+  gradientHandlePositions?: Array<{ x: number; y: number }>;
+  gradientStops?: RestGradientStop[];
+  imageRef?: string;
+  scaleMode?: ImagePaint['scaleMode'];
+  rotation?: number;
+  filters?: ImageFilters;
+  scalingFactor?: number;
+  imageTransform?: RestTransform;
+}
+interface RestEffect {
+  type: Effect['type'];
+  visible?: boolean;
+  blendMode?: string;
+  opacity?: number;
+  radius?: number;
+  offset?: Vector;
+  color?: RestColor;
+  spread?: number;
+  showShadowBehindNode?: boolean;
+  boundVariables?: DropShadowEffect['boundVariables'];
+}
+interface RestVectorPath { path: string; windingRule: VectorPath['windingRule'] }
+interface RestComponentPropertyReferences {
+  visible?: string;
+  characters?: string;
+  mainComponent?: string;
+}
+interface PaintExportFields {
+  readonly type: Paint['type'];
+  readonly boundVariables?: SolidPaint['boundVariables'];
+}
+interface EffectExportFields {
+  readonly type: Effect['type'];
+  readonly blendMode?: BlendMode;
+  readonly opacity?: number;
+  readonly showShadowBehindNode?: boolean;
+  readonly boundVariables?: DropShadowEffect['boundVariables'];
+}
 interface RestNode {
   id: string;
   name: string;
   type: string;
-  visible: boolean;
+  visible?: boolean;
   absoluteBoundingBox?: RestRect;
   absoluteRenderBounds?: RestRect | null;
   relativeTransform?: number[][];
   rotation?: number;
-  fills?: any[];
-  strokes?: any[];
-  effects?: any[];
+  fills?: RestPaint[];
+  strokes?: RestPaint[];
+  effects?: RestEffect[];
   gradientTransform?: RestTransform;
   imageTransform?: RestTransform;
   cornerRadius?: number;
@@ -68,9 +115,9 @@ interface RestNode {
   componentSetId?: string;
   componentSetKey?: string;
   mainComponentKey?: string;
-  componentProperties?: Record<string, any>;
-  variantProperties?: Record<string, any>;
-  overrides?: any[];
+  componentProperties?: ComponentProperties;
+  variantProperties?: NonNullable<InstanceNode['variantProperties']>;
+  overrides?: InstanceNode['overrides'];
   exposedInstances?: Array<{ id: string; name: string; type: string }>;
   isExposedInstance?: boolean;
   style?: Record<string, any>;
@@ -81,12 +128,12 @@ interface RestNode {
   children?: RestNode[];
   constraints?: { vertical: string; horizontal: string };
   size?: { x: number; y: number };
-  fillGeometry?: any[];
-  strokeGeometry?: any[];
+  fillGeometry?: RestVectorPath[];
+  strokeGeometry?: RestVectorPath[];
   isMask?: boolean;
   maskType?: string;
   boundVariables?: Record<string, any>;
-  componentPropertyReferences?: Record<string, any>;
+  componentPropertyReferences?: RestComponentPropertyReferences;
   explicitVariableModes?: Record<string, any>;
   resolvedVariableModes?: Record<string, any>;
   textTruncation?: string;
@@ -95,6 +142,12 @@ interface RestNode {
   design2umgRenderFallbackScope?: string;
   design2umgRenderFallbackSource?: string;
   design2umgRenderFallbackReason?: string;
+}
+
+interface RestExportNodeEnvelope { document?: RestNode | null }
+interface RestExportResponse {
+  document?: RestNode | null;
+  nodes?: Record<string, RestExportNodeEnvelope | null>;
 }
 
 // ── Helpers ──
@@ -167,14 +220,14 @@ function exposedInstancesToRest(instances: readonly BaseNode[] | undefined): Arr
   if (!instances || instances.length === 0) return undefined;
   return instances.map(instance => ({
     id: instance.id,
-    name: (instance as any).name || instance.id,
+    name: instance.name || instance.id,
     type: instance.type,
   }));
 }
 
-function setIfDefined<T extends object, K extends keyof any>(target: T, key: K, value: any): void {
+function setIfDefined<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | null | undefined): void {
   if (value !== undefined && value !== null) {
-    (target as any)[key] = value;
+    target[key] = value;
   }
 }
 
@@ -268,15 +321,15 @@ function attachRenderFallbackMetadata(restNode: RestNode | undefined, imageRef: 
 
 // ── Fill Serialization ──
 
-function serializePaint(paint: Paint): any {
-  const out: any = {
+function serializePaint(paint: Paint): RestPaint {
+  const out: RestPaint = {
     type: paint.type,
     visible: paint.visible !== false,
     opacity: paint.opacity ?? 1,
     blendMode: mapBlendMode(paint.blendMode || 'NORMAL'),
   };
 
-  setIfDefined(out, 'boundVariables', cloneJsonSafe((paint as any).boundVariables));
+  setIfDefined(out, 'boundVariables', cloneJsonSafe((paint as PaintExportFields).boundVariables));
 
   if (paint.type === 'SOLID' && 'color' in paint) {
     out.color = colorToRest(paint.color, paint.opacity);
@@ -284,7 +337,7 @@ function serializePaint(paint: Paint): any {
 
   if (paint.type === 'GRADIENT_LINEAR' || paint.type === 'GRADIENT_RADIAL' ||
       paint.type === 'GRADIENT_ANGULAR' || paint.type === 'GRADIENT_DIAMOND') {
-    const gp = paint as GradientPaint;
+    const gp = paint;
     const gradientTransform = toRestTransform(gp.gradientTransform);
     if (gradientTransform) {
       out.gradientTransform = gradientTransform;
@@ -300,13 +353,13 @@ function serializePaint(paint: Paint): any {
 
   if (paint.type === 'IMAGE' && 'imageHash' in paint) {
     // Plugin API: imageHash → REST API: imageRef
-    const imagePaint = paint as ImagePaint;
+    const imagePaint = paint;
     out.imageRef = imagePaint.imageHash || '';
     out.scaleMode = imagePaint.scaleMode || 'FILL';
-    setIfDefined(out, 'rotation', (imagePaint as any).rotation);
-    setIfDefined(out, 'filters', cloneJsonSafe((imagePaint as any).filters));
+    setIfDefined(out, 'rotation', imagePaint.rotation);
+    setIfDefined(out, 'filters', cloneJsonSafe(imagePaint.filters));
     if (out.scaleMode === 'TILE') {
-      setIfDefined(out, 'scalingFactor', (imagePaint as any).scalingFactor);
+      setIfDefined(out, 'scalingFactor', imagePaint.scalingFactor);
     }
     const imageTransform = toRestTransform(imagePaint.imageTransform);
     if (out.scaleMode === 'CROP' && imageTransform) {
@@ -319,19 +372,19 @@ function serializePaint(paint: Paint): any {
 
 // ── Effect Serialization ──
 
-function serializeEffect(effect: Effect): any {
-  const out: any = {
+function serializeEffect(effect: Effect): RestEffect {
+  const out: RestEffect = {
     type: effect.type,
     visible: effect.visible !== false,
   };
-  setIfDefined(out, 'blendMode', mapBlendMode((effect as any).blendMode || 'NORMAL'));
-  setIfDefined(out, 'opacity', (effect as any).opacity);
+  setIfDefined(out, 'blendMode', mapBlendMode((effect as EffectExportFields).blendMode || 'NORMAL'));
+  setIfDefined(out, 'opacity', (effect as EffectExportFields).opacity);
   if ('radius' in effect) out.radius = effect.radius;
   if ('offset' in effect) out.offset = effect.offset;
-  if ('color' in effect) out.color = colorToRest((effect as any).color);
-  if ('spread' in effect) out.spread = (effect as any).spread;
-  setIfDefined(out, 'showShadowBehindNode', (effect as any).showShadowBehindNode);
-  setIfDefined(out, 'boundVariables', cloneJsonSafe((effect as any).boundVariables));
+  if ('color' in effect) out.color = colorToRest(effect.color);
+  if ('spread' in effect) out.spread = effect.spread;
+  setIfDefined(out, 'showShadowBehindNode', (effect as EffectExportFields).showShadowBehindNode);
+  setIfDefined(out, 'boundVariables', cloneJsonSafe((effect as EffectExportFields).boundVariables));
   return out;
 }
 
@@ -411,10 +464,10 @@ function serializeNode(node: SceneNode): RestNode | null {
 
   // Fills & Strokes
   if ('fills' in node && node.fills !== figma.mixed) {
-    out.fills = (node.fills as readonly Paint[]).map(serializePaint);
+    out.fills = node.fills.map(serializePaint);
   }
   if ('strokes' in node) {
-    out.strokes = (node.strokes as readonly Paint[]).map(serializePaint);
+    out.strokes = node.strokes.map(serializePaint);
   }
 
   // Geometry paths (fillGeometry / strokeGeometry)
@@ -450,7 +503,7 @@ function serializeNode(node: SceneNode): RestNode | null {
 
   // Effects
   if ('effects' in node) {
-    out.effects = (node.effects as readonly Effect[]).map(serializeEffect);
+    out.effects = node.effects.map(serializeEffect);
   }
 
   // Corner radius
@@ -528,18 +581,18 @@ function serializeNode(node: SceneNode): RestNode | null {
     const instanceNode = node as InstanceNode;
     if (instanceNode.mainComponent) {
       out.componentId = instanceNode.mainComponent.id;
-      setIfDefined(out, 'mainComponentKey', (instanceNode.mainComponent as any).key);
+      setIfDefined(out, 'mainComponentKey', instanceNode.mainComponent.key);
       const componentSet = instanceNode.mainComponent.parent;
       if (componentSet && componentSet.type === 'COMPONENT_SET') {
         out.componentSetId = componentSet.id;
       out.componentSetKey = componentSet.key;
       }
     }
-    setIfDefined(out, 'componentProperties', cloneJsonSafe((instanceNode as any).componentProperties));
-    setIfDefined(out, 'variantProperties', cloneJsonSafe((instanceNode as any).variantProperties));
-    setIfDefined(out, 'overrides', cloneJsonSafe((instanceNode as any).overrides));
-    setIfDefined(out, 'exposedInstances', exposedInstancesToRest((instanceNode as any).exposedInstances));
-    setIfDefined(out, 'isExposedInstance', (instanceNode as any).isExposedInstance);
+    setIfDefined(out, 'componentProperties', cloneJsonSafe(instanceNode.componentProperties));
+    setIfDefined(out, 'variantProperties', cloneJsonSafe(instanceNode.variantProperties));
+    setIfDefined(out, 'overrides', cloneJsonSafe(instanceNode.overrides));
+    setIfDefined(out, 'exposedInstances', exposedInstancesToRest(instanceNode.exposedInstances));
+    setIfDefined(out, 'isExposedInstance', instanceNode.isExposedInstance);
   }
 
   // Text
@@ -599,10 +652,10 @@ function serializeNode(node: SceneNode): RestNode | null {
   return out;
 }
 
-function findNodeById(node: any, targetId: string): RestNode | null {
+function findNodeById(node: unknown, targetId: string): RestNode | null {
   if (!node || typeof node !== 'object') return null;
-  if (node.id === targetId) return node as RestNode;
-  const children = Array.isArray((node as any).children) ? (node as any).children : [];
+  if ((node as Partial<RestNode>).id === targetId) return node as RestNode;
+  const children = Array.isArray((node as Partial<RestNode>).children) ? (node as Partial<RestNode>).children! : [];
   for (const child of children) {
     const match = findNodeById(child, targetId);
     if (match) return match;
@@ -610,28 +663,28 @@ function findNodeById(node: any, targetId: string): RestNode | null {
   return null;
 }
 
-function unwrapRestExportResponse(response: any, targetId: string): RestNode | null {
+function unwrapRestExportResponse(response: unknown, targetId: string): RestNode | null {
   if (!response || typeof response !== 'object') return null;
 
-  const directDocument = (response as any).document;
+  const directDocument = (response as RestExportResponse).document;
   if (directDocument && typeof directDocument === 'object') {
     const directMatch = findNodeById(directDocument, targetId);
     return directMatch || (directDocument as RestNode);
   }
 
-  const nodes = (response as any).nodes;
+  const nodes = (response as RestExportResponse).nodes;
   if (nodes && typeof nodes === 'object') {
     const candidateKeys = [targetId, targetId.replace(/:/g, '-')];
     for (const key of candidateKeys) {
-      const entry = (nodes as any)[key];
-      if (entry && typeof entry === 'object' && (entry as any).document) {
-        return (entry as any).document as RestNode;
+      const entry = nodes[key];
+      if (entry && typeof entry === 'object' && entry.document) {
+        return entry.document;
       }
     }
 
-    for (const entry of Object.values(nodes as Record<string, any>)) {
-      if (entry && typeof entry === 'object' && (entry as any).document) {
-        const match = findNodeById((entry as any).document, targetId);
+    for (const entry of Object.values(nodes)) {
+      if (entry && typeof entry === 'object' && entry.document) {
+        const match = findNodeById(entry.document, targetId);
         if (match) return match;
       }
     }
@@ -655,13 +708,13 @@ async function exportOfficialRestNode(node: SceneNode): Promise<RestNode | null>
 
 interface ImageEntry { hash: string; bytes: Uint8Array }
 interface RestComponentMeta {
-  key?: string;
+  key: string;
   name: string;
   description: string;
   remote: boolean;
   componentSetId?: string;
-  componentPropertyDefinitions?: Record<string, any>;
-  variantGroupProperties?: Record<string, any>;
+  componentPropertyDefinitions?: ComponentPropertyDefinitions;
+  variantGroupProperties?: ComponentSetNode['variantGroupProperties'];
   documentationLinks?: Array<{ uri: string }>;
 }
 
@@ -669,11 +722,11 @@ function isVariantComponent(component: ComponentNode): boolean {
   return !!(component.parent && component.parent.type === 'COMPONENT_SET');
 }
 
-function getExportableComponentPropertyDefinitions(component: ComponentNode): Record<string, any> | undefined {
+function getExportableComponentPropertyDefinitions(component: ComponentNode): ComponentPropertyDefinitions | undefined {
   if (isVariantComponent(component)) {
     return undefined;
   }
-  return cloneJsonSafe((component as any).componentPropertyDefinitions);
+  return cloneJsonSafe(component.componentPropertyDefinitions);
 }
 
 function collectReferencedComponents(
@@ -683,25 +736,25 @@ function collectReferencedComponents(
 ): void {
   const registerComponent = (component: ComponentNode) => {
     components[component.id] = {
-      key: (component as any).key,
+      key: component.key,
       name: component.name,
       description: component.description || '',
-      remote: !!(component as any).remote,
+      remote: !!component.remote,
       componentSetId: component.parent && component.parent.type === 'COMPONENT_SET' ? component.parent.id : undefined,
       componentPropertyDefinitions: getExportableComponentPropertyDefinitions(component),
-      documentationLinks: documentationLinksToRest((component as any).documentationLinks),
+      documentationLinks: documentationLinksToRest(component.documentationLinks),
     };
 
     if (component.parent && component.parent.type === 'COMPONENT_SET') {
       const componentSet = component.parent;
       componentSets[componentSet.id] = {
-        key: (componentSet as any).key,
+        key: componentSet.key,
         name: componentSet.name,
         description: componentSet.description || '',
-        remote: !!(componentSet as any).remote,
-        componentPropertyDefinitions: cloneJsonSafe((componentSet as any).componentPropertyDefinitions),
-        variantGroupProperties: cloneJsonSafe((componentSet as any).variantGroupProperties),
-        documentationLinks: documentationLinksToRest((componentSet as any).documentationLinks),
+        remote: !!componentSet.remote,
+        componentPropertyDefinitions: cloneJsonSafe(componentSet.componentPropertyDefinitions),
+        variantGroupProperties: cloneJsonSafe(componentSet.variantGroupProperties),
+        documentationLinks: documentationLinksToRest(componentSet.documentationLinks),
       };
     }
   };
@@ -710,13 +763,13 @@ function collectReferencedComponents(
     registerComponent(node);
   } else if (node.type === 'COMPONENT_SET') {
     componentSets[node.id] = {
-      key: (node as any).key,
+      key: node.key,
       name: node.name,
       description: node.description || '',
-      remote: !!(node as any).remote,
-      componentPropertyDefinitions: cloneJsonSafe((node as any).componentPropertyDefinitions),
-      variantGroupProperties: cloneJsonSafe((node as any).variantGroupProperties),
-      documentationLinks: documentationLinksToRest((node as any).documentationLinks),
+      remote: !!node.remote,
+      componentPropertyDefinitions: cloneJsonSafe(node.componentPropertyDefinitions),
+      variantGroupProperties: cloneJsonSafe(node.variantGroupProperties),
+      documentationLinks: documentationLinksToRest(node.documentationLinks),
     };
   } else if (node.type === 'INSTANCE' && node.mainComponent) {
     registerComponent(node.mainComponent);
@@ -761,7 +814,7 @@ async function collectImages(
   if ('fills' in node && node.fills !== figma.mixed) {
     for (const fill of node.fills as readonly Paint[]) {
       if (fill.type === 'IMAGE' && 'imageHash' in fill) {
-        const hash = (fill as any).imageHash as string;
+        const hash = fill.imageHash;
         if (hash && !images.has(hash)) {
           try {
             const img = figma.getImageByHash(hash);
@@ -779,9 +832,9 @@ async function collectImages(
   }
 
   if ('strokes' in node) {
-    for (const stroke of ((node as any).strokes as readonly Paint[] | undefined) || []) {
+    for (const stroke of node.strokes || []) {
       if (stroke.type === 'IMAGE' && 'imageHash' in stroke) {
-        const hash = (stroke as any).imageHash as string;
+        const hash = stroke.imageHash;
         if (hash && !images.has(hash)) {
           try {
             const img = figma.getImageByHash(hash);
@@ -852,6 +905,35 @@ interface ComponentDependencyBundle {
   definitions: Array<ComponentDependencyIdentity & { document: RestNode }>;
   instances: Record<string, ComponentDependencyIdentity>;
   errors: Array<{ kind: string; nodeId: string; message: string }>;
+}
+
+interface RestDocumentNode {
+  id: string;
+  name: string;
+  type: 'DOCUMENT';
+  children: Array<{
+    id: string;
+    name: string;
+    type: 'CANVAS';
+    children: RestNode[];
+  }>;
+}
+
+interface ExportDocumentPayload {
+  document: RestDocumentNode;
+  name: string;
+  version: string;
+  schemaVersion: number;
+  fileKey?: string;
+  design2umgComponentDependencies: ComponentDependencyBundle;
+  components?: Record<string, RestComponentMeta>;
+  componentSets?: Record<string, RestComponentMeta>;
+}
+
+interface ExportRequestMessage {
+  type: string;
+  scale?: number;
+  exportPath?: string;
 }
 
 async function collectComponentDependencyImages(
@@ -970,7 +1052,7 @@ function applyComponentIdentities(node: RestNode, identities: Record<string, Com
 if (typeof figma !== 'undefined') {
   figma.showUI(__html__, { width: 360, height: 200 });
 
-  figma.ui.onmessage = async (msg: any) => {
+  figma.ui.onmessage = async (msg: ExportRequestMessage) => {
     if (msg.type !== 'export') return;
 
     const selection = figma.currentPage.selection;
@@ -1001,7 +1083,7 @@ if (typeof figma !== 'undefined') {
       const componentDependencies = await collectComponentDependencies(root);
       applyComponentIdentities(serialized, componentDependencies.instances);
 
-      const document: any = {
+      const document: ExportDocumentPayload = {
         document: {
           id: '0:0',
           name: figma.root.name,

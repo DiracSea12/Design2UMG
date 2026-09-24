@@ -3,18 +3,16 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImportDefaults.h"
 
 namespace Design2UMGEditorImportOrchestrator
 {
-	inline constexpr TCHAR DefaultPenOutputPath[] = TEXT("/Game/Design2UMG/PenConvert_Output");
-	inline constexpr TCHAR DefaultFigmaOutputPath[] = TEXT("/Game/Design2UMG/FigmaConvert_Output");
-
 	struct FPenConvertRequest
 	{
 		FString NodesPath;
 		FString VarsPath;
 		FString TargetNodeId;
-		FString OutputPath = DefaultPenOutputPath;
+		FString OutputPath = DesignImportDefaults::PenOutputPath;
 		bool bUsePreview = true;
 	};
 
@@ -22,7 +20,7 @@ namespace Design2UMGEditorImportOrchestrator
 	{
 		FString FilePath;
 		FString TargetNodeId;
-		FString OutputPath = DefaultPenOutputPath;
+		FString OutputPath = DesignImportDefaults::PenOutputPath;
 		bool bUsePreview = true;
 		bool bRenderPng = true;
 	};
@@ -31,7 +29,7 @@ namespace Design2UMGEditorImportOrchestrator
 	{
 		FName SourceId;
 		FString JsonPath;
-		FString OutputPath = DefaultPenOutputPath;
+		FString OutputPath = DesignImportDefaults::PenOutputPath;
 		bool bUsePreview = true;
 	};
 

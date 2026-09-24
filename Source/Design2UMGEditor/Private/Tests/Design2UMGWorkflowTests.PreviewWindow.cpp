@@ -124,6 +124,26 @@ namespace
 		return false;
 	}
 
+	bool WidgetTreeContainsTextFragment(const TSharedRef<SWidget>& Widget, const FString& Fragment)
+	{
+		if (Widget->GetType() == STextBlock::StaticWidgetClass().GetWidgetType()
+			&& StaticCastSharedRef<STextBlock>(Widget)->GetText().ToString().Contains(Fragment))
+		{
+			return true;
+		}
+		if (FChildren* Children = Widget->GetChildren())
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+			{
+				if (WidgetTreeContainsTextFragment(Children->GetChildAt(ChildIndex), Fragment))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	TSharedPtr<SButton> FindButtonByLabel(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
 	{
 		if (Widget->GetType() == SButton::StaticWidgetClass().GetWidgetType()
@@ -216,7 +236,7 @@ namespace
 
 			++InvocationSerial;
 			Result.Data = MakeInjectedPreviewAnalysisData(FString::Printf(TEXT("SpyAnalyzed-%d"), InvocationSerial));
-			Result.ImageReport = FString::Printf(TEXT("spy-image-report-%d"), InvocationSerial);
+			Result.ImageResult = NextImageResult.IsSet() ? NextImageResult.GetValue() : Input.InitialImageResult;
 			Result.bSucceeded = true;
 
 			LastAnalyzedWidgetName = Result.Data.WidgetName;
@@ -240,6 +260,10 @@ namespace
 		{
 			bFailNextRequest = true;
 			FailureMessage = InFailureMessage;
+		}
+		void SetNextImageResult(const FDesignImageImportResult& InResult)
+		{
+			NextImageResult = InResult;
 		}
 
 		int32 GetInvocationCount() const
@@ -274,6 +298,7 @@ namespace
 		bool bInjectedSeamObserved = false;
 		bool bFailNextRequest = false;
 		FString FailureMessage = TEXT("Injected preview failure");
+		TOptional<FDesignImageImportResult> NextImageResult;
 		FString LastAnalyzedJson;
 		FString LastAnalyzedWidgetName;
 	};
@@ -442,6 +467,7 @@ namespace
 			LastConfirmedJson = GenerationRequest.ApprovedSnapshot.EditedJson;
 			LastConfirmedOutputPath = GenerationRequest.GenerationRequest.OutputPath;
 			LastConfirmedWidgetName = GenerationRequest.ApprovedSnapshot.Data.WidgetName;
+			LastConfirmedImageResult = GenerationRequest.ApprovedSnapshot.ImageResult;
 		}
 
 		void ResetObservation()
@@ -451,6 +477,7 @@ namespace
 			LastConfirmedJson.Reset();
 			LastConfirmedOutputPath.Reset();
 			LastConfirmedWidgetName.Reset();
+			LastConfirmedImageResult = FDesignImageImportResult();
 		}
 
 		int32 GetInvocationCount() const
@@ -473,6 +500,11 @@ namespace
 			return LastConfirmedWidgetName;
 		}
 
+		const FDesignImageImportResult& GetLastConfirmedImageResult() const
+		{
+			return LastConfirmedImageResult;
+		}
+
 		uint64 GetLastApprovedRequestId() const
 		{
 			return LastApprovedRequestId;
@@ -484,6 +516,7 @@ namespace
 		FString LastConfirmedJson;
 		FString LastConfirmedOutputPath;
 		FString LastConfirmedWidgetName;
+		FDesignImageImportResult LastConfirmedImageResult;
 	};
 
 	class FPreviewCancelDelegateSpy final
@@ -545,7 +578,8 @@ namespace
 			const TArray<FString>& Warnings = TArray<FString>(),
 			const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot =
 				TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
-			const bool bPumpAfterOpen = true)
+			const bool bPumpAfterOpen = true,
+			const FDesignImageImportResult& InitialImageResult = FDesignImageImportResult())
 		{
 			if (!FSlateApplication::IsInitialized())
 			{
@@ -566,6 +600,7 @@ namespace
 			Window->SetContent(
 				SAssignNew(PreviewWindow, SDesign2UMGPreviewWindow)
 				.OriginalJson(OriginalJson)
+				.InitialImageResult(InitialImageResult)
 				.OutputPath(OutputPath)
 				.Warnings(Warnings)
 				.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)
@@ -835,6 +870,80 @@ bool FPreviewWindowHarnessRefreshConfirmTest::RunTest(const FString& Parameters)
 		Harness.AnalyzerSpy->GetLastAnalyzedRequestId());
 	TestTrue(TEXT("Preview window close is observed after confirm"), Harness.Telemetry->bPreviewWindowClosed);
 	TestFalse(TEXT("Preview window detaches after confirm"), Harness.IsWindowAttached());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowInitialImageDiagnosticsReachApprovedSnapshotTest,
+	"Design2UMG.PreviewWindow.InitialImageDiagnosticsReachApprovedSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowInitialImageDiagnosticsReachApprovedSnapshotTest::RunTest(const FString& Parameters)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return true;
+	}
+
+	FDesignImageImportResult InitialImageResult;
+	FDesignImageDiagnostic SourceFailure;
+	SourceFailure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	SourceFailure.Category = EDesignImageDiagnosticCategory::UnresolvedReference;
+	SourceFailure.Reason = TEXT("Source image reference was unresolved before preview");
+	SourceFailure.Message = TEXT("Source image A failed before preview");
+	InitialImageResult.AddDiagnostic(MoveTemp(SourceFailure));
+
+	FPreviewWindowHarness Harness;
+	TestTrue(TEXT("Preview harness opens with initial image diagnostics"),
+		Harness.Open(
+			MakePreviewHarnessJson(TEXT("Initial image failure")),
+			TEXT("/Game/Design2UMG/_TestOutput/PreviewInitialImageFailure"),
+			TArray<FString>{ TEXT("Unrelated conversion warning") },
+			TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
+			true,
+			InitialImageResult));
+	if (!Harness.PreviewWindow.IsValid())
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("Initial image failure appears in the warning area"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Source image A failed before preview")));
+	TestTrue(TEXT("Conversion warning remains separately visible"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Unrelated conversion warning")));
+
+	FDesignImageImportResult CurrentImageResult;
+	Harness.AnalyzerSpy->SetNextImageResult(CurrentImageResult);
+	TestTrue(TEXT("Refresh with no image failures completes"),
+		Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Image source changed"))));
+	TestFalse(TEXT("Retired failure disappears from the actual window"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Source image A failed before preview")));
+	TestTrue(TEXT("Conversion warning is unchanged after image refresh"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Unrelated conversion warning")));
+
+	FDesignImageDiagnostic NewFailure;
+	NewFailure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	NewFailure.Category = EDesignImageDiagnosticCategory::Download;
+	NewFailure.Message = TEXT("Source image B failed on refresh");
+	CurrentImageResult.AddDiagnostic(MoveTemp(NewFailure));
+	Harness.AnalyzerSpy->SetNextImageResult(CurrentImageResult);
+	TestTrue(TEXT("Refresh with a new image failure completes"),
+		Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("New image failure"))));
+	TestTrue(TEXT("Current failure appears in the actual window"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Source image B failed on refresh")));
+	TestFalse(TEXT("Old failure remains absent"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("Source image A failed before preview")));
+
+	TestTrue(TEXT("Confirmed preview dispatches the approved snapshot"), Harness.Confirm());
+	const FDesignImageImportResult& ConfirmedImageResult =
+		Harness.ConfirmDelegateSpy->GetLastConfirmedImageResult();
+	TestEqual(TEXT("The approved snapshot keeps the current source failure"), ConfirmedImageResult.FailedCount, 1);
+	if (TestEqual(TEXT("The approved snapshot keeps one image diagnostic"),
+		ConfirmedImageResult.Diagnostics.Num(), 1))
+	{
+		TestEqual(
+			TEXT("The approved diagnostic remains a source-resolution failure"),
+			static_cast<uint8>(ConfirmedImageResult.Diagnostics[0].Category),
+			static_cast<uint8>(EDesignImageDiagnosticCategory::Download));
+	}
 	return true;
 }
 

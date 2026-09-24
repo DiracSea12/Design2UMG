@@ -296,6 +296,69 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBlueprintLocalAppearanceContractTest,
+	"Design2UMG.ComponentBlueprints.LocalAppearanceContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FComponentBlueprintLocalAppearanceContractTest::RunTest(const FString&)
+{
+	auto Build = [this](const FString& Source, const FString& Folder)
+	{
+		FDesignDocument Document;
+		if (!TestTrue(TEXT("Local-appearance source parses"), FFigmaParser::ParseDocument(Source, Document)))
+		{
+			return static_cast<UWidgetBlueprint*>(nullptr);
+		}
+		FDesign2UMGGenerationOutput Output;
+		return DesignImportUtils::GenerateWidgetBlueprint(
+			FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()),
+			Folder, nullptr, &Output);
+	};
+	auto CountRootOverrides = [](UWidgetBlueprint* Blueprint)
+	{
+		int32 Count = 0;
+		const FName RootSlot = FUMGWidgetUtils::SanitizeWidgetName(TEXT("D2U_Content_0"), TEXT("NamedSlot"));
+		for (UUserWidget* Instance : FindInstances(Blueprint->WidgetTree))
+		{
+			Count += Instance->GetContentForSlot(RootSlot) != nullptr ? 1 : 0;
+		}
+		return Count;
+	};
+
+	FString SameAppearance = MakeComponentImportJson(TEXT("Default"));
+	SameAppearance.ReplaceInline(TEXT("\"characters\":\"Confirm\""), TEXT("\"characters\":\"Default\""));
+	const FString SameFolder = TEXT("/Game/Design2UMG/Automation/LocalAppearanceSame_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(SameFolder); };
+	UWidgetBlueprint* SameBlueprint = Build(SameAppearance, SameFolder);
+	if (!TestNotNull(TEXT("Same local appearance generates"), SameBlueprint))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Root page position and instance source metadata do not create root overrides"),
+		CountRootOverrides(SameBlueprint), 0);
+
+	FString ShiftedChild = SameAppearance;
+	const int32 Replacements = ShiftedChild.ReplaceInline(
+		TEXT("\"characters\":\"Default\",\"style\":{\"fontSize\":16,\"fontFamily\":\"Roboto\"},\"absoluteBoundingBox\":{\"x\":10"),
+		TEXT("\"characters\":\"Default\",\"style\":{\"fontSize\":16,\"fontFamily\":\"Roboto\"},\"absoluteBoundingBox\":{\"x\":15"));
+	if (!TestEqual(TEXT("Fixture shifts exactly one instance child"), Replacements, 1))
+	{
+		return false;
+	}
+	const FString ShiftedFolder = TEXT("/Game/Design2UMG/Automation/LocalAppearanceShifted_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(ShiftedFolder); };
+	UWidgetBlueprint* ShiftedBlueprint = Build(ShiftedChild, ShiftedFolder);
+	if (!TestNotNull(TEXT("Shifted child appearance generates"), ShiftedBlueprint))
+	{
+		return false;
+	}
+	TestEqual(TEXT("A child placement change creates exactly one root replacement"),
+		CountRootOverrides(ShiftedBlueprint), 1);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentBlueprintReloadTest,
 	"Design2UMG.ComponentBlueprintPersistence.Reload", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 

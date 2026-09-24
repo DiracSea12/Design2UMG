@@ -4,7 +4,7 @@
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
-#include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
 #include "DesignImportDialogs.h"
 #include "DesignImportPipeline.h"
 
@@ -77,7 +77,7 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 		return nullptr;
 	}
 
-	const FString OutputPath = InParent ? InParent->GetPathName() : FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath);
+	const FString OutputPath = InParent ? InParent->GetPathName() : FString(DesignImportDefaults::PenOutputPath);
 	const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 		FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 

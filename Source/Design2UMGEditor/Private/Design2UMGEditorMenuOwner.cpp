@@ -3,6 +3,7 @@
 #include "Design2UMGEditorMenuOwner.h"
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
 #include "Design2UMGLocalFigmaImport.h"
@@ -85,7 +86,7 @@ namespace
 
 		FLocalFigmaImportRequest Request;
 		Request.JsonFilePath = Files[0];
-		Request.OutputPath = DefaultFigmaOutputPath;
+		Request.OutputPath = DesignImportDefaults::FigmaOutputPath;
 		RunLocalFigmaImport(Request);
 	}
 

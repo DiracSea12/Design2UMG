@@ -49,7 +49,6 @@ namespace DesignRemoteImageImporterInternal
 		constexpr int64 Bgra8BytesPerPixel = 4;
 		constexpr float HttpWaitTickSeconds = 0.01f;
 		// Cap individual diagnostic lines to bound resource-resolution reports.
-		constexpr int32 MaxResolveReportMessages = 32;
 
 		bool ExtractUrlHost(const FString& Url, FString& OutHost)
 		{
@@ -79,29 +78,32 @@ namespace DesignRemoteImageImporterInternal
 
 	}
 
-	void FResolveReport::AddMessage(const FString& Message)
+	void FResolveReport::AddDiagnostic(
+		const EDesignImageDiagnosticOutcome Outcome,
+		const EDesignImageDiagnosticCategory Category,
+		const FString& NodeId,
+		const FString& NodeName,
+		const FString& Resource,
+		const FString& Reason,
+		const FString& Message)
 	{
-		if (Messages.Num() < MaxResolveReportMessages)
-		{
-			Messages.Add(Message);
-		}
+		FDesignImageDiagnostic Diagnostic;
+		Diagnostic.Outcome = Outcome;
+		Diagnostic.Category = Category;
+		Diagnostic.NodeId = NodeId;
+		Diagnostic.NodeName = NodeName;
+		Diagnostic.Resource = Resource;
+		Diagnostic.Reason = Reason;
+		Diagnostic.Message = Message;
+		Result.AddDiagnostic(MoveTemp(Diagnostic));
 	}
 
-	FString FResolveReport::BuildSummary(const FString& ImportPath) const
+	FDesignImageImportResult FResolveReport::BuildResult(const FString& ImportPath)
 	{
-		FString Summary = FString::Printf(
-			TEXT("Remote image import: imported=%d reused=%d refreshed=%d failed=%d path=%s"),
-			ImportedCount,
-			ReusedCount,
-			RefreshedCount,
-			FailedCount,
-			*ImportPath);
-		if (Messages.Num() > 0)
-		{
-			Summary += TEXT("\n");
-			Summary += FString::Join(Messages, TEXT("\n"));
-		}
-		return Summary;
+		Result.bWasExecuted = true;
+		Result.ImportPath = ImportPath;
+		Result.RefreshDisplaySummary();
+		return MoveTemp(Result);
 	}
 
 	bool FImagePayloadIO::ValidateCompressedByteCount(
@@ -272,8 +274,8 @@ namespace DesignRemoteImageImporterInternal
 	namespace
 	{
 		/** Shared per-download outcome state: written by the HTTP callbacks, polled by the wait loop. */
-		struct FDownloadState
-		{
+	struct FDownloadState
+	{
 			FCriticalSection Mutex;
 			TAtomic<bool> bDone{ false };
 			TAtomic<bool> bPayloadLimitExceeded{ false };
@@ -288,8 +290,15 @@ namespace DesignRemoteImageImporterInternal
 			/** Running count of bytes received for this single request (single-image budget guard). */
 			int64 ReceivedBytes = 0;
 			TArray<uint8> Downloaded;
-			FString ErrorString;
-		};
+		FString ErrorString;
+	};
+
+	EDesignImageDiagnosticCategory GetDownloadFailureCategory(const FDownloadState& State)
+	{
+		return State.bPayloadLimitExceeded || State.bBudgetRejected
+			? EDesignImageDiagnosticCategory::Budget
+			: EDesignImageDiagnosticCategory::Download;
+	}
 
 		/**
 		 * Finalize the HTTP outcome while holding the state mutex.
@@ -614,16 +623,18 @@ namespace DesignRemoteImageImporterInternal
 					{
 						// Every unfinished request was marked and given the cancel
 						// error above; its late HTTP callback keeps that error.
-						FScopeLock Lock(&Entry.State->Mutex);
-						Result.Error = Entry.State->ErrorString;
-						continue;
+					FScopeLock Lock(&Entry.State->Mutex);
+					Result.Error = Entry.State->ErrorString;
+					Result.FailureCategory = GetDownloadFailureCategory(*Entry.State);
+					continue;
 					}
 
 					// Late callbacks for cancelled requests are dropped by the
 					// State mutex/bDone guard, so no delegate unbinding is needed.
-					Entry.Request->CancelRequest();
-					Result.Error = TEXT("Network request timed out");
-					continue;
+				Entry.Request->CancelRequest();
+				Result.Error = TEXT("Network request timed out");
+				Result.FailureCategory = EDesignImageDiagnosticCategory::Download;
+				continue;
 				}
 
 				FScopeLock Lock(&Entry.State->Mutex);
@@ -634,10 +645,11 @@ namespace DesignRemoteImageImporterInternal
 				}
 				else
 				{
-					Result.Error = Entry.State->ErrorString.IsEmpty()
-						? FString::Printf(TEXT("Network request failed (HTTP %d)"), Entry.State->ResponseCode)
-						: Entry.State->ErrorString;
-				}
+				Result.Error = Entry.State->ErrorString.IsEmpty()
+					? FString::Printf(TEXT("Network request failed (HTTP %d)"), Entry.State->ResponseCode)
+					: Entry.State->ErrorString;
+				Result.FailureCategory = GetDownloadFailureCategory(*Entry.State);
+			}
 			}
 		}
 	}
@@ -736,10 +748,11 @@ namespace DesignRemoteImageImporterInternal
 			{
 				FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
 				Result = FUrlDownloadResult();
-				if (!FImagePayloadIO::ValidateRemoteUrl(Url, false, Result.Error))
-				{
-					continue;
-				}
+			if (!FImagePayloadIO::ValidateRemoteUrl(Url, false, Result.Error))
+			{
+				Result.FailureCategory = EDesignImageDiagnosticCategory::Validation;
+				continue;
+			}
 				auto Transfer = MakeUnique<FPublicImageTransfer>(Url, Budget, Limits.MaxCompressedBytes);
 				Transfer->Handle = Multi ? curl_easy_init() : nullptr;
 				CURL* Handle = Transfer->Handle;
@@ -807,9 +820,10 @@ namespace DesignRemoteImageImporterInternal
 						Result.Data = MoveTemp(Transfer->State->Downloaded);
 						Result.Error.Reset();
 					}
-					else
-					{
-						Result.Data.Reset();
+				else
+				{
+					Result.Data.Reset();
+					Result.FailureCategory = GetDownloadFailureCategory(*Transfer->State);
 						if (!Transfer->State->ErrorString.IsEmpty())
 						{
 							Result.Error = Transfer->State->ErrorString;
@@ -845,9 +859,10 @@ namespace DesignRemoteImageImporterInternal
 				if (!Transfer->State->bDone)
 				{
 					FUrlDownloadResult& Result = OutResults.FindChecked(Transfer->Url);
-					Result.bSuccess = false;
-					Result.Data.Reset();
-					Result.Error = !Transfer->State->ErrorString.IsEmpty() ? Transfer->State->ErrorString
+				Result.bSuccess = false;
+				Result.Data.Reset();
+				Result.FailureCategory = GetDownloadFailureCategory(*Transfer->State);
+				Result.Error = !Transfer->State->ErrorString.IsEmpty() ? Transfer->State->ErrorString
 						: bCancelled ? TEXT("cancelled by user") : TEXT("HTTPS transfer manager failed");
 				}
 			}
@@ -883,6 +898,7 @@ namespace DesignRemoteImageImporterInternal
 			Result.Error.Reset();
 			if (!ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, Result.Error))
 			{
+				Result.FailureCategory = EDesignImageDiagnosticCategory::Validation;
 				continue;
 			}
 
@@ -896,6 +912,7 @@ namespace DesignRemoteImageImporterInternal
 				// stream; fail the URL explicitly rather than silently falling back
 				// to the unlimited default response cache.
 				Result.Error = TEXT("Remote image import cannot enforce the receive-byte budget: the active HTTP backend does not support response-body streaming");
+				Result.FailureCategory = EDesignImageDiagnosticCategory::Configuration;
 				continue;
 			}
 
@@ -921,12 +938,17 @@ namespace DesignRemoteImageImporterInternal
 		int32& OutHeight,
 		TArray64<uint8>& OutRawData,
 		FString& OutError,
-		DesignImageResources::FImageOperationBudget* OperationBudget)
+		DesignImageResources::FImageOperationBudget* OperationBudget,
+		EDesignImageDiagnosticCategory* OutFailureCategory)
 	{
 		OutWidth = 0;
 		OutHeight = 0;
 		OutRawData.Reset();
 		OutError.Reset();
+		if (OutFailureCategory)
+		{
+			*OutFailureCategory = EDesignImageDiagnosticCategory::Decode;
+		}
 		if (CompressedData.Num() == 0)
 		{
 			OutError = TEXT("Image data is empty");
@@ -934,6 +956,10 @@ namespace DesignRemoteImageImporterInternal
 		}
 		if (!ValidateCompressedByteCount(static_cast<uint64>(CompressedData.Num()), Limits, OutError))
 		{
+			if (OutFailureCategory)
+			{
+				*OutFailureCategory = EDesignImageDiagnosticCategory::Budget;
+			}
 			return false;
 		}
 
@@ -956,11 +982,19 @@ namespace DesignRemoteImageImporterInternal
 		OutHeight = Wrapper->GetHeight();
 		if (!ValidateDimensions(OutWidth, OutHeight, Limits, OutError))
 		{
+			if (OutFailureCategory)
+			{
+				*OutFailureCategory = EDesignImageDiagnosticCategory::Budget;
+			}
 			return false;
 		}
 		if (OperationBudget
 			&& !OperationBudget->ConsumeDecodedPixels(static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight), OutError))
 		{
+			if (OutFailureCategory)
+			{
+				*OutFailureCategory = EDesignImageDiagnosticCategory::Budget;
+			}
 			return false;
 		}
 

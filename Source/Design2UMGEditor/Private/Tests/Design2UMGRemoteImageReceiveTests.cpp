@@ -1163,8 +1163,8 @@ bool FRemoteImageReceiveSharedInvalidUrlCachesProcessingFailureTest::RunTest(con
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_A"), SharedUrl));
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_B"), SharedUrl));
 
-	FString Report;
-	FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
+	const FDesignImageImportResult ImageResult = FDesignRemoteImageImporter::ResolveRemoteImages(Data);
+	const FString& Report = ImageResult.DisplaySummary;
 	TestEqual(TEXT("Two nodes still cause one transport request"), Server.GetRequestCount(), 1);
 	TestTrue(TEXT("Both nodes report the shared processing failure"), Report.Contains(TEXT("failed=2")));
 	TestTrue(TEXT("The repeated node uses the cached processing outcome"),
@@ -1404,14 +1404,21 @@ bool FRemoteImageReceiveImportEntryEnforcesReceiveBudgetTest::RunTest(const FStr
 	Data.RootWidget = MakeReceiveBudgetCanvas(TEXT("ReceiveBudget_ImportRoot"));
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Huge"), Server.MakeUrl(0)));
 
-	FString Report;
-	DesignImportPlanning::ResolveImages(Data, &Report);
+	const FDesignImageImportResult ImageResult = DesignImportPlanning::ResolveImages(Data);
+	const FString& Report = ImageResult.DisplaySummary;
 
 	TestTrue(TEXT("The formal import entry reports the failure"), Report.Contains(TEXT("failed=1")));
 	TestTrue(TEXT("The formal import entry is stopped by the receive byte budget"),
 		Report.Contains(TEXT("single-image byte limit")));
-	TestEqual(TEXT("The failure reaches Data.Warnings instead of staying a log line"),
-		Data.Warnings.Num(), 1);
+	TestEqual(TEXT("The typed result records one failure"), ImageResult.FailedCount, 1);
+	if (TestEqual(TEXT("The typed result records one diagnostic"), ImageResult.Diagnostics.Num(), 1))
+	{
+		TestEqual(
+			TEXT("The diagnostic identifies a budget failure"),
+			static_cast<uint8>(ImageResult.Diagnostics[0].Category),
+			static_cast<uint8>(EDesignImageDiagnosticCategory::Budget));
+	}
+	TestEqual(TEXT("Image failures do not enter general warnings"), Data.Warnings.Num(), 0);
 	return true;
 }
 

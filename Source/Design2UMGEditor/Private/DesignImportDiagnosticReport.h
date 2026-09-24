@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Design2UMGCommitResult.h"
+#include "DesignImageDiagnostics.h"
 
 struct FDesignDocument;
 struct FDesign2UMGMappingDiagnostic;
@@ -15,7 +16,7 @@ namespace DesignImportDiagnosticReport
 	struct FImportReportArtifacts
 	{
 		/** Image parsing report text (multi-line; source of image failure entries); optional. */
-		FString ImageReport;
+		FDesignImageImportResult ImageResult;
 		/** Request-side output location: import = requested output directory, reimport = target asset package path. */
 		FString RequestedOutputPath;
 		FString RequestedRenderPngPath;
@@ -44,5 +45,6 @@ namespace DesignImportDiagnosticReport
 		const FString& TargetAssetPath,
 		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
 		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics = nullptr,
-		const FDesign2UMGCommitResult* Commit = nullptr);
+		const FDesign2UMGCommitResult* Commit = nullptr,
+		const FDesignImageImportResult* ImageResult = nullptr);
 }

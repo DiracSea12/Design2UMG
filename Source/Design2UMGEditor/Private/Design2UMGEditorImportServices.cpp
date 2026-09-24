@@ -2,7 +2,7 @@
 
 #include "Design2UMGEditorImportServices.h"
 
-#include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
 #include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
@@ -25,16 +25,11 @@
 
 namespace Design2UMGEditorImportServices
 {
-	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(const FUMGWidgetData& Data)
+	EFigmaImportCompletionKind ClassifyFigmaImportCompletion(
+		const FUMGWidgetData& Data,
+		const FDesignImageImportResult& ImageResult)
 	{
-		// These prefixes are the two explicit image-warning channels produced by
-		// DesignImportPlanning; unrelated conversion warnings must stay out of this class.
-		const bool bHasImageFailure = Data.Warnings.ContainsByPredicate([](const FString& Warning)
-		{
-			return Warning.StartsWith(TEXT("Remote image import:"))
-				|| Warning.StartsWith(TEXT("Figma image refs:"));
-		});
-		if (bHasImageFailure)
+		if (ImageResult.HasFailures())
 		{
 			return EFigmaImportCompletionKind::ImageFailure;
 		}
@@ -323,7 +318,7 @@ namespace Design2UMGEditorImportServices
 			bool bImageResolutionFailed, const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 		{
 			FDesignImportRequest ImportRequest = Design2UMGEditorImportRequestSetup::MakeImportRequest(
-				Design2UMGEditorImportOrchestrator::DefaultFigmaOutputPath,
+				DesignImportDefaults::FigmaOutputPath,
 				LOCTEXT("FigmaPreviewTitle", "Design2UMG Figma Preview"),
 				!FApp::IsUnattended(),
 				EDesignBlueprintGenerationMode::BlueprintAndPng,
@@ -351,12 +346,14 @@ namespace Design2UMGEditorImportServices
 			// Unresolved image references contribute to the final commit warning state.
 			if (bImageResolutionFailed)
 			{
-				DesignImportPlanning::RecordImageResolutionFailure(AnalysisResult.Data);
+				DesignImportPlanning::RecordImageResolutionFailure(AnalysisResult.ImageResult);
 			}
 
 			// Keep the notification reason aligned with the actual warning source. A conversion
 			// warning remains visible, but it is not relabelled as an image failure.
-			const EFigmaImportCompletionKind CompletionKind = ClassifyFigmaImportCompletion(AnalysisResult.Data);
+			const EFigmaImportCompletionKind CompletionKind = ClassifyFigmaImportCompletion(
+				AnalysisResult.Data,
+				AnalysisResult.ImageResult);
 			FText NotificationText;
 			switch (CompletionKind)
 			{

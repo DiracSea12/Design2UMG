@@ -3,7 +3,7 @@
 #include "Design2UMGEditorMcpImportPayload.h"
 
 #include "Design2UMGEditorImportFrameSelection.h"
-#include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
 #include "Design2UMGLog.h"
@@ -89,7 +89,7 @@ namespace Design2UMGEditorMcpImportPayload
 			LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"),
 			[CapturedNodes = NodesJson, CapturedVars = VarsJson](const FString& FrameId)
 			{
-				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, Design2UMGEditorImportOrchestrator::DefaultPenOutputPath);
+				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, DesignImportDefaults::PenOutputPath);
 			});
 	}
 }

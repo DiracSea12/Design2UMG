@@ -5,7 +5,7 @@
 #include "Design2UMGLog.h"
 #include "SDesign2UMGPreviewWindow.h"
 #include "DesignImportTypes.h"
-#include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
 #include "UMGSchema.h"
 #include "UMGJsonSerializer.h"
 
@@ -19,7 +19,7 @@ namespace
 {
 	FString ResolveDialogOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(DesignImportDefaults::PenOutputPath) : OutputPath;
 	}
 }
 
@@ -31,7 +31,8 @@ namespace DesignImportDialogs
 		const FText& WindowTitle,
 		FOnPreviewConfirmed OnConfirmed,
 		FOnPreviewCancelled OnCancelled,
-		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot)
+		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot,
+		const FDesignImageImportResult& InitialImageResult)
 	{
 		if (!FSlateApplication::IsInitialized())
 		{
@@ -48,6 +49,7 @@ namespace DesignImportDialogs
 			SNew(SDesign2UMGPreviewWindow)
 			.OriginalJson(FUMGJsonSerializer::Serialize(Data))
 			.OriginalData(MakeShared<FUMGWidgetData>(Data))
+			.InitialImageResult(InitialImageResult)
 			.OutputPath(ResolveDialogOutputPath(OutputPath))
 			.Warnings(Data.Warnings)
 			.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)

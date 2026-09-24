@@ -16,18 +16,6 @@
 
 namespace
 {
-	// Mark retryable resource warnings so a successful resolution can remove them
-	// without depending on each diagnostic message.
-	const TCHAR* GResourceResolutionWarningMarker = TEXT("Remote image import:");
-
-	void RemoveResourceResolutionWarnings(FUMGWidgetData& Data)
-	{
-		Data.Warnings.RemoveAll([](const FString& Warning)
-		{
-			return Warning.StartsWith(GResourceResolutionWarningMarker);
-		});
-	}
-
 	FDesign2UMGConversionSettings BuildFallbackConversionSettings()
 	{
 		return FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get());
@@ -62,64 +50,135 @@ namespace
 	}
 }
 
+namespace
+{
+	using FImageSourcesByNode = TMap<FString, TSet<FString>>;
+
+	void CollectImageSources(const FUMGWidgetNode& Node, FImageSourcesByNode& OutSources)
+	{
+		const FString Source = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
+		if (!Source.IsEmpty())
+		{
+			OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Source);
+		}
+		for (const FUMGWidgetNode& Child : Node.Children)
+		{
+			CollectImageSources(Child, OutSources);
+		}
+	}
+
+	FDesignImageImportResult ReconcileImageResults(
+		const FImageSourcesByNode& ActiveSources,
+		FDesignImageImportResult Current,
+		const FDesignImageImportResult& Previous)
+	{
+		TMap<FString, TMap<FString, bool>> Attempts;
+		for (const FDesignImageDiagnostic& Diagnostic : Current.Diagnostics)
+		{
+			const FString& NodeIdentity = Diagnostic.NodeId.IsEmpty() ? Diagnostic.NodeName : Diagnostic.NodeId;
+			bool& bAttempted = Attempts.FindOrAdd(NodeIdentity).FindOrAdd(Diagnostic.Resource);
+			bAttempted |= Diagnostic.Outcome != EDesignImageDiagnosticOutcome::Skipped;
+		}
+
+		for (const FDesignImageDiagnostic& Diagnostic : Previous.Diagnostics)
+		{
+			// Source-reference resolution happens before image import and is not retried here.
+			if (Diagnostic.Category == EDesignImageDiagnosticCategory::UnresolvedReference)
+			{
+				Current.AddDiagnostic(Diagnostic);
+				continue;
+			}
+			const FString& NodeIdentity = Diagnostic.NodeId.IsEmpty() ? Diagnostic.NodeName : Diagnostic.NodeId;
+			if (NodeIdentity.IsEmpty() && Diagnostic.Resource.IsEmpty())
+			{
+				if (!Current.bWasExecuted)
+				{
+					Current.AddDiagnostic(Diagnostic);
+				}
+				continue;
+			}
+			const TSet<FString>* Sources = ActiveSources.Find(NodeIdentity);
+			if (!Sources || (!Sources->Contains(Diagnostic.Resource)
+				&& (Diagnostic.ResolvedAssetPath.IsEmpty()
+					|| !Sources->Contains(Diagnostic.ResolvedAssetPath))))
+			{
+				continue;
+			}
+			const TMap<FString, bool>* NodeAttempts = Attempts.Find(NodeIdentity);
+			const bool* bAttempted = NodeAttempts ? NodeAttempts->Find(Diagnostic.Resource) : nullptr;
+			if (!bAttempted || (!*bAttempted && Diagnostic.Outcome != EDesignImageDiagnosticOutcome::Skipped))
+			{
+				Current.AddDiagnostic(Diagnostic);
+			}
+		}
+		Current.RefreshDisplaySummary();
+		return Current;
+	}
+}
+
 namespace DesignImportPlanning
 {
-	FString MakeResourceResolutionWarning(const FString& Message)
+	FDesignImageImportResult ResolveImages(
+		FUMGWidgetData& Data,
+		const FDesignImageImportResult* PreviousResult)
 	{
-		// The resolve report already opens with the marker (DesignImportDiagnosticReport
-		// parses it); other producers reach here without it and get it attached.
-		return Message.StartsWith(GResourceResolutionWarningMarker)
-			? Message
-			: FString::Printf(TEXT("%s %s"), GResourceResolutionWarningMarker, *Message);
+		FImageSourcesByNode ActiveSources;
+		CollectImageSources(Data.RootWidget, ActiveSources);
+		FDesignImageImportResult Result = FDesignRemoteImageImporter::ResolveRemoteImages(Data);
+		if (PreviousResult)
+		{
+			Result = ReconcileImageResults(ActiveSources, MoveTemp(Result), *PreviousResult);
+		}
+		else
+		{
+			Result.RefreshDisplaySummary();
+		}
+		if (!Result.DisplaySummary.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Result.DisplaySummary);
+			if (Result.HasFailures())
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: image resolution completed with failures: %s"), *Result.DisplaySummary);
+				FDesign2UMGNotification::Warning(NSLOCTEXT("DesignImportPipeline", "ImageWarning", "Design2UMG: one or more images failed to resolve. See Output Log for details."));
+			}
+		}
+		return Result;
 	}
 
-	void ResolveImages(FUMGWidgetData& Data, FString* OutReport)
+	void RecordImageResolutionFailure(FDesignImageImportResult& InOutResult)
 	{
-		FString Report;
-		const bool bOk = FDesignRemoteImageImporter::ResolveRemoteImages(Data, &Report);
-		if (OutReport)
+		if (InOutResult.Diagnostics.ContainsByPredicate([](const FDesignImageDiagnostic& Diagnostic)
 		{
-			*OutReport = Report;
-		}
-		if (!Report.IsEmpty())
+			return Diagnostic.Outcome == EDesignImageDiagnosticOutcome::Failed
+				&& Diagnostic.Category == EDesignImageDiagnosticCategory::UnresolvedReference;
+		}))
 		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("%s"), *Report);
-		}
-		if (!bOk)
-		{
-			// Record partial image resolution in Data.Warnings so the commit reports degradation.
-			// The shared marker lets a successful retry remove this transient warning.
-			const FString Warning = MakeResourceResolutionWarning(
-				Report.IsEmpty() ? TEXT("Some remote images failed to resolve or download") : Report);
-			Data.Warnings.AddUnique(Warning);
-			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignImportPipeline: Unresolved remote images; generation will continue"));
-			FDesign2UMGNotification::Warning(NSLOCTEXT("DesignImportPipeline", "ImageWarning", "Design2UMG: Some images failed to download"));
 			return;
 		}
-
-		// Remove retryable resource warnings after successful resolution.
-		RemoveResourceResolutionWarnings(Data);
+		FDesignImageDiagnostic Diagnostic;
+		Diagnostic.Outcome = EDesignImageDiagnosticOutcome::Failed;
+		Diagnostic.Category = EDesignImageDiagnosticCategory::UnresolvedReference;
+		Diagnostic.Reason = TEXT("One or more source image references have no resolved resource");
+		Diagnostic.Message = TEXT("Figma image refs: some image refs could not be resolved; images may be missing");
+		InOutResult.AddDiagnostic(MoveTemp(Diagnostic));
+		InOutResult.RefreshDisplaySummary();
 	}
-
-	void RecordImageResolutionFailure(FUMGWidgetData& Data)
+	FImportInPlaceAnalysisResult AnalyzeWidgetData(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
 	{
-		// Record unresolved Figma references separately from retryable URL downloads.
-		// Downloading known URLs does not resolve references with no exported URL.
-		Data.Warnings.AddUnique(TEXT("Figma image refs: some image refs could not be resolved; images may be missing"));
-	}
-
-	FImportAnalysisResult AnalyzeWidgetData(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
-	{
-		FImportAnalysisResult Result;
+		FImportInPlaceAnalysisResult Result;
+		if (!Data.ConversionError.IsEmpty())
+		{
+			Result.ErrorMessage = Data.ConversionError;
+			return Result;
+		}
 		if (Input.SettingsSnapshot)
 		{
 			Result.SettingsSnapshot = *Input.SettingsSnapshot;
 		}
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Data, &Result.ImageReport);
+			Result.ImageResult = ResolveImages(Data);
 		}
-		Result.Data = Data;
 		return Result;
 	}
 
@@ -150,6 +209,11 @@ namespace DesignImportPlanning
 			return Result;
 		}
 		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings);
+		if (!Result.Data.ConversionError.IsEmpty())
+		{
+			Result.ErrorMessage = Result.Data.ConversionError;
+			return Result;
+		}
 		Result.Data.Warnings.Append(FontWarnings);
 		if (Result.SettingsSnapshot.IsSet())
 		{
@@ -157,7 +221,7 @@ namespace DesignImportPlanning
 		}
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Result.Data, &Result.ImageReport);
+			Result.ImageResult = ResolveImages(Result.Data);
 		}
 		return Result;
 	}
@@ -188,9 +252,21 @@ namespace DesignImportPlanning
 			Result.Data.IconFontMappingChanges = *MappingChanges;
 		}
 
+		FImageSourcesByNode ActiveSources;
+		CollectImageSources(Result.Data.RootWidget, ActiveSources);
 		if (Input.bResolveImages)
 		{
-			ResolveImages(Result.Data, &Result.ImageReport);
+			const FDesignImageImportResult RetainedFacts = ReconcileImageResults(
+				ActiveSources, FDesignImageImportResult(), Input.InitialImageResult);
+			Result.ImageResult = ResolveImages(Result.Data, &RetainedFacts);
+		}
+		else
+		{
+			Result.ImageResult = ReconcileImageResults(
+				ActiveSources, FDesignImageImportResult(), Input.InitialImageResult);
+			Result.ImageResult.ImportPath = Input.InitialImageResult.ImportPath;
+			Result.ImageResult.bWasExecuted = Input.InitialImageResult.bWasExecuted;
+			Result.ImageResult.RefreshDisplaySummary();
 		}
 
 		Result.bSucceeded = true;

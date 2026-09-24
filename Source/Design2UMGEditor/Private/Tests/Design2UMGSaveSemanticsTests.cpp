@@ -6,12 +6,18 @@
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Image.h"
+#include "Components/PanelWidget.h"
+#include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
 #include "WidgetBlueprint.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Misc/AutomationTest.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
+#include "UObject/SavePackage.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_CallFunction.h"
@@ -234,7 +240,9 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 		ELogVerbosity::Warning,
 		EAutomationExpectedMessageFlags::Contains,
 		1);
+	const TWeakObjectPtr<UImage> UnreferencedObject(NewObject<UImage>(GetTransientPackage()));
 	UWidgetBlueprint* Kept = DesignImportUtils::ReloadWidgetBlueprintForRender(Loaded);
+	TestTrue(TEXT("Absent preparation does not collect transient objects for a dirty blueprint"), UnreferencedObject.IsValid());
 	TestTrue(TEXT("Dirty package skips the reload and keeps the in-memory instance"), Kept == Loaded);
 	TestTrue(TEXT("Dirty package stays dirty after the skipped reload"), Package->IsDirty());
 	if (LoadedCDO)
@@ -268,6 +276,137 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 	}
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(
+	FDesign2UMGReloadRenderPreparationTest,
+	"Design2UMG.Generation.ReloadRenderPreparation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+void FDesign2UMGReloadRenderPreparationTest::GetTests(TArray<FString>& OutBeautifiedNames, TArray<FString>& OutTestCommands) const
+{
+	for (const TCHAR* Name : { TEXT("DirtyRefresh"), TEXT("CleanRefresh"), TEXT("DirtyReset"), TEXT("DirtyPreparationFailure"), TEXT("CleanPreparationFailure") })
+	{
+		OutBeautifiedNames.Add(Name);
+		OutTestCommands.Add(Name);
+	}
+}
+
+bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
+{
+	const bool bDirtyBlueprint = Parameters.StartsWith(TEXT("Dirty"));
+	const bool bFailPreparation = Parameters.EndsWith(TEXT("Failure"));
+	const FString OutputPath = TEXT("/Game/Design2UMG/Automation/RenderPreparation/") + Parameters;
+	const FString TexturePackageName = OutputPath / TEXT("D2U_PathTextures/T_RenderPreparation");
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	ON_SCOPE_EXIT
+	{
+		if (UPackage* TexturePackage = FindPackage(nullptr, *TexturePackageName))
+		{
+			TexturePackage->ClearPackageFlags(PKG_InMemoryOnly);
+		}
+		DeleteGeneratedAssetsAtPath(OutputPath);
+	};
+
+	UPackage* TexturePackage = CreatePackage(*TexturePackageName);
+	UTexture2D* Texture = NewObject<UTexture2D>(TexturePackage, TEXT("T_RenderPreparation"), RF_Public | RF_Standalone);
+	FAssetRegistryModule::AssetCreated(Texture);
+	const FColor Pixel = FColor::White;
+	Texture->Source.Init(1, 1, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(&Pixel));
+	Texture->SRGB = true;
+	const FString TextureFilename = FPackageName::LongPackageNameToFilename(TexturePackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(TextureFilename), true);
+	FSavePackageArgs SaveArgs;
+	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+	SaveArgs.SaveFlags = SAVE_NoError;
+	if (!TestTrue(TEXT("Texture fixture saves"), UPackage::SavePackage(TexturePackage, Texture, *TextureFilename, SaveArgs)))
+	{
+		return false;
+	}
+
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(MakeSaveSemanticsWidgetData(TEXT("WBP_RenderPreparation")), OutputPath);
+	if (!TestNotNull(TEXT("Blueprint fixture builds"), Blueprint))
+	{
+		return false;
+	}
+	UImage* Image = Blueprint->WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("PreparedImage"));
+	Image->SetBrushFromTexture(Texture);
+	CastChecked<UPanelWidget>(Blueprint->WidgetTree->RootWidget)->AddChild(Image);
+	if (!TestTrue(TEXT("Blueprint fixture saves"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess()))
+	{
+		return false;
+	}
+	const FString BlueprintPath = Blueprint->GetPathName();
+	const TWeakObjectPtr<UWidgetBlueprint> OriginalBlueprint(Blueprint);
+	UPackage* BlueprintPackage = Blueprint->GetOutermost();
+	UUserWidget* CDO = CastChecked<UUserWidget>(Blueprint->GeneratedClass->GetDefaultObject());
+	const FVector2D UnsavedSize(321.0f, 123.0f);
+	if (bDirtyBlueprint)
+	{
+		CDO->DesignTimeSize = UnsavedSize;
+		BlueprintPackage->MarkPackageDirty();
+		// No test-owned strong reference may hide a missing GC guard in preparation.
+		Blueprint->ClearFlags(RF_Standalone);
+		AddExpectedMessagePlain(TEXT("has unsaved changes; skipping pre-render reload"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+	}
+	TestEqual(TEXT("Fixture blueprint dirty state"), BlueprintPackage->IsDirty(), bDirtyBlueprint);
+	Texture->SRGB = false;
+	TestFalse(TEXT("Texture memory edit is not marked dirty"), TexturePackage->IsDirty());
+	// Keep only the failing resource alive across the requested reset; do not retain the blueprint.
+	const TStrongObjectPtr<UTexture2D> FailureTexture(bFailPreparation ? Texture : nullptr);
+	if (bFailPreparation)
+	{
+		TexturePackage->SetPackageFlags(PKG_InMemoryOnly);
+		AddExpectedMessagePlain(TEXT("marked PKG_InMemoryOnly"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+	}
+	const TWeakObjectPtr<UImage> UnreferencedObject(NewObject<UImage>(GetTransientPackage()));
+	FBlueprintRenderPreparationOptions Preparation;
+	Preparation.bResetTransientRenderState = bFailPreparation || Parameters.EndsWith(TEXT("Reset"));
+	Preparation.bRefreshGeneratedTextures = !bFailPreparation;
+	Preparation.ImportedFontPackagePath = bFailPreparation ? FPaths::GetPath(TexturePackageName) : FString();
+	FString PreparationError;
+	UWidgetBlueprint* Prepared = DesignImportUtils::ReloadWidgetBlueprintForRender(Blueprint, &Preparation, &PreparationError);
+	TestFalse(TEXT("Resource preparation collects unreferenced transient objects"), UnreferencedObject.IsValid());
+	if (bFailPreparation)
+	{
+		TestNull(TEXT("Resource preparation failure is returned"), Prepared);
+		TestTrue(TEXT("Preparation error identifies failed resource package"), PreparationError.Contains(TexturePackageName));
+	}
+	else
+	{
+		if (!TestNotNull(TEXT("Prepared blueprint is returned"), Prepared))
+		{
+			return false;
+		}
+		TestTrue(TEXT("Successful preparation has no error"), PreparationError.IsEmpty());
+		UImage* PreparedImage = Cast<UImage>(Prepared->WidgetTree->FindWidget(TEXT("PreparedImage")));
+		UTexture2D* PreparedTexture = PreparedImage ? Cast<UTexture2D>(PreparedImage->GetBrush().GetResourceObject()) : nullptr;
+		if (TestNotNull(TEXT("Image retains its texture through package reload"), PreparedTexture))
+		{
+			TestTrue(TEXT("Texture was refreshed from its saved package"), PreparedTexture->SRGB);
+			TestNotNull(TEXT("Refreshed texture has a render resource"), PreparedTexture->GetResource());
+		}
+	}
+	if (bDirtyBlueprint)
+	{
+		if (TestTrue(TEXT("Dirty blueprint survives preparation garbage collection"), OriginalBlueprint.IsValid()))
+		{
+			UWidgetBlueprint* Kept = OriginalBlueprint.Get();
+			TestTrue(TEXT("Dirty blueprint remains the registered in-memory asset"), FindObject<UWidgetBlueprint>(nullptr, *BlueprintPath) == Kept);
+			TestTrue(TEXT("Preparation preserves dirty state"), Kept->GetOutermost()->IsDirty());
+			TestEqual(TEXT("Preparation preserves the unsaved CDO edit"), CastChecked<UUserWidget>(Kept->GeneratedClass->GetDefaultObject())->DesignTimeSize, UnsavedSize);
+			if (!bFailPreparation)
+			{
+				TestTrue(TEXT("Dirty blueprint is not reloaded"), Prepared == Kept);
+			}
+		}
+	}
+	else if (Prepared)
+	{
+		TestFalse(TEXT("Clean blueprint remains clean"), Prepared->GetOutermost()->IsDirty());
+		TestFalse(TEXT("Clean blueprint was reloaded"), OriginalBlueprint.IsValid());
+	}
 	return true;
 }
 

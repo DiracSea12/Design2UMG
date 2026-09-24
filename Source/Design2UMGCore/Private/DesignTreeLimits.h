@@ -13,6 +13,13 @@
 // so the log dependency stays on this side of the boundary.
 #include "Design2UMGLog.h"
 
+namespace DesignTreeLimits
+{
+	// Expanded reference paths are effective design-tree paths and use the same supported depth,
+	// but require their own guard because flat source JSON can encode an arbitrarily long ref chain.
+	constexpr int32 MaxReferenceChainDepth = MaxNodeDepth;
+}
+
 /** Shared depth guard for parse/convert/size-estimation recursion over design trees (DesignTreeLimits::MaxNodeDepth). */
 struct FDesignRecursionGuard
 {

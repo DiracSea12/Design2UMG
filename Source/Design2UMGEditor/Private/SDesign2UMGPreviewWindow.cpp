@@ -65,6 +65,8 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 {
 	CurrentJson = InArgs._OriginalJson;
 	OriginalData = InArgs._OriginalData;
+	InitialImageResult = InArgs._InitialImageResult;
+	CurrentImageResult = InitialImageResult;
 	CurrentOutputPath = InArgs._OutputPath;
 	ConversionWarnings = InArgs._Warnings;
 	CachedMaterializationSettingsSnapshot = InArgs._InitialMaterializationSettingsSnapshot;
@@ -242,6 +244,58 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		];
 	}
 
+	BottomBox->AddSlot()
+	.AutoHeight()
+	.Padding(0, 0, 0, 6)
+	[
+		SNew(SBorder)
+		.Visibility_Lambda([this]()
+		{
+			return CurrentImageResult.IsSet() && CurrentImageResult->HasFailures()
+				? EVisibility::Visible : EVisibility::Collapsed;
+		})
+		.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+		.BorderBackgroundColor(FLinearColor(0.25f, 0.18f, 0.0f, 1.0f))
+		.Padding(FMargin(8, 4))
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]()
+			{
+				if (!CurrentImageResult.IsSet())
+				{
+					return FText::GetEmpty();
+				}
+				FString WarningText = FString::Printf(
+					TEXT("%d image(s) failed to resolve:"), CurrentImageResult->FailedCount);
+				int32 DisplayedCount = 0;
+				for (const FDesignImageDiagnostic& Diagnostic : CurrentImageResult->Diagnostics)
+				{
+					if (Diagnostic.Outcome != EDesignImageDiagnosticOutcome::Failed)
+					{
+						continue;
+					}
+					if (DisplayedCount++ >= 32)
+					{
+						continue;
+					}
+					WarningText += TEXT("\n  - ");
+					WarningText += Diagnostic.Message.IsEmpty()
+						? FString::Printf(TEXT("%s: %s"), LexToString(Diagnostic.Category), *Diagnostic.Reason)
+						: Diagnostic.Message;
+				}
+				if (DisplayedCount > 32)
+				{
+					WarningText += FString::Printf(
+						TEXT("\n%d more image failure detail(s) omitted"), DisplayedCount - 32);
+				}
+				return FText::FromString(WarningText);
+			})
+			.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.85f, 0.3f)))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+			.AutoWrapText(true)
+		]
+	];
+
 	BottomBox->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
 	[
 		SNew(STextBlock)
@@ -353,7 +407,7 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 	GenerationRequest.ApprovedSnapshot = LatestApprovedSnapshot.GetValue();
 	GenerationRequest.GenerationRequest.SourceRequestId = GenerationRequest.ApprovedSnapshot.RequestId;
 	GenerationRequest.GenerationRequest.OutputPath = CurrentOutputPath;
-	GenerationRequest.GenerationRequest.RuntimeImageReport = GenerationRequest.ApprovedSnapshot.ImageReport;
+	GenerationRequest.GenerationRequest.RuntimeImageResult = GenerationRequest.ApprovedSnapshot.ImageResult;
 	if (!OnConfirmed.IsBound())
 	{
 		GenerationStatus = LOCTEXT("NoConfirmationHandler", "Generation was not started: no confirmation handler is bound.");
@@ -439,6 +493,7 @@ FReply SDesign2UMGPreviewWindow::OnFormatJsonClicked()
 void SDesign2UMGPreviewWindow::OnJsonTextChanged(const FText& NewText)
 {
 	CurrentJson = NewText.ToString();
+	CurrentImageResult.Reset();
 	InvalidateApprovedSnapshot();
 
 	// Keep preview refresh debounced while editing.
@@ -538,6 +593,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 	FString Error;
 	if (!ValidateJson(CurrentJson, Error))
 	{
+		CurrentImageResult.Reset();
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
@@ -605,6 +661,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	RefreshInput.RequestId = RequestId;
 	RefreshInput.EditedJson = JsonString;
 	RefreshInput.OriginalData = OriginalData;
+	RefreshInput.InitialImageResult = InitialImageResult;
 	RefreshInput.bResolveImages = false;
 	const FPreviewRefreshResult RefreshResult = PreviewRefreshAnalyzer->AnalyzePreview(RefreshInput);
 	if (RequestId != LatestRequestedRefreshId)
@@ -614,6 +671,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 
 	if (!RefreshResult.bSucceeded)
 	{
+		CurrentImageResult.Reset();
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
@@ -631,6 +689,8 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		return;
 	}
 
+	CurrentImageResult = RefreshResult.ImageResult;
+
 	if (!PreviewMaterializationService)
 	{
 		PreviewMaterializationService = MakeShared<FDesignPreviewMaterializationService>();
@@ -640,7 +700,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	ApprovedSnapshot.RequestId = RefreshResult.RequestId;
 	ApprovedSnapshot.EditedJson = RefreshResult.EditedJson;
 	ApprovedSnapshot.Data = RefreshResult.Data;
-	ApprovedSnapshot.ImageReport = RefreshResult.ImageReport;
+	ApprovedSnapshot.ImageResult = RefreshResult.ImageResult;
 	ApprovedSnapshot.MaterializationSettingsSnapshot = ResolveMaterializationSettingsSnapshot();
 
 	FDesignPreviewMaterializationRequest MaterializationRequest;
@@ -734,4 +794,3 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 }
 
 #undef LOCTEXT_NAMESPACE
-

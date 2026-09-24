@@ -10,6 +10,13 @@ struct FUMGSourceNodeData;
 struct FUMGSourceDocumentData;
 struct FUMGPrototypeNavigationData;
 
+enum class EDesign2UMGConversionStatus : uint8
+{
+	Succeeded,
+	SucceededWithDegradation,
+	Failed
+};
+
 /**
  * Generated widget node data for a single widget.
  * Source-specific extensions stay opt-in so aggregate consumers do not have to
@@ -125,8 +132,22 @@ struct DESIGN2UMGCORE_API FUMGWidgetData
 	/** Degradation warnings produced during conversion, e.g. Ellipse -> Border. */
 	TArray<FString> Warnings;
 
+	/** Fatal conversion reason. Non-empty data must not be used for asset generation. */
+	FString ConversionError;
+
 	/** Icon-font mapping suggestions emitted during conversion. */
 	FUMGIconFontMappingChanges IconFontMappingChanges;
+
+	EDesign2UMGConversionStatus GetConversionStatus() const
+	{
+		if (!ConversionError.IsEmpty())
+		{
+			return EDesign2UMGConversionStatus::Failed;
+		}
+		return Warnings.IsEmpty()
+			? EDesign2UMGConversionStatus::Succeeded
+			: EDesign2UMGConversionStatus::SucceededWithDegradation;
+	}
 
 	bool HasSourceDocumentData() const;
 	const FUMGSourceDocumentData& SourceDocument() const;

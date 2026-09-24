@@ -319,39 +319,37 @@ namespace DesignImportDiagnosticReport
 			}
 		}
 
+		FString ImageFailureKind(const EDesignImageDiagnosticCategory Category)
+		{
+			return FString::Printf(TEXT("%s_failure"), LexToString(Category));
+		}
+
 		void CollectImageFailureEntries(
-			const FString& ImageReport,
+			const FDesignImageImportResult& ImageResult,
 			TArray<TSharedPtr<FJsonValue>>& OutValues,
 			TArray<FString>& InOutRecommendations)
 		{
-			TArray<FString> Lines;
-			ImageReport.ParseIntoArrayLines(Lines, true);
-			for (const FString& Line : Lines)
+			for (const FDesignImageDiagnostic& Diagnostic : ImageResult.Diagnostics)
 			{
-				if (!Line.Contains(TEXT("failed"), ESearchCase::IgnoreCase)
-					|| Line.StartsWith(TEXT("Remote image import:"), ESearchCase::CaseSensitive))
+				if (Diagnostic.Outcome != EDesignImageDiagnosticOutcome::Failed)
 				{
 					continue;
 				}
 
 				TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
-				Entry->SetStringField(TEXT("message"), Line);
-				if (Line.Contains(TEXT("download failed"), ESearchCase::IgnoreCase))
+				Entry->SetStringField(TEXT("kind"), ImageFailureKind(Diagnostic.Category));
+				Entry->SetStringField(TEXT("outcome"), LexToString(Diagnostic.Outcome));
+				Entry->SetStringField(TEXT("category"), LexToString(Diagnostic.Category));
+				if (!Diagnostic.NodeId.IsEmpty() || !Diagnostic.NodeName.IsEmpty())
 				{
-					Entry->SetStringField(TEXT("kind"), TEXT("download_failure"));
+					TSharedRef<FJsonObject> Node = MakeShared<FJsonObject>();
+					if (!Diagnostic.NodeId.IsEmpty()) Node->SetStringField(TEXT("id"), Diagnostic.NodeId);
+					if (!Diagnostic.NodeName.IsEmpty()) Node->SetStringField(TEXT("name"), Diagnostic.NodeName);
+					Entry->SetObjectField(TEXT("node"), Node);
 				}
-				else if (Line.Contains(TEXT("decode failed"), ESearchCase::IgnoreCase))
-				{
-					Entry->SetStringField(TEXT("kind"), TEXT("decode_failure"));
-				}
-				else if (Line.Contains(TEXT("import failed"), ESearchCase::IgnoreCase))
-				{
-					Entry->SetStringField(TEXT("kind"), TEXT("import_failure"));
-				}
-				else
-				{
-					Entry->SetStringField(TEXT("kind"), TEXT("resource_failure"));
-				}
+				if (!Diagnostic.Resource.IsEmpty()) Entry->SetStringField(TEXT("resource"), Diagnostic.Resource);
+				if (!Diagnostic.Reason.IsEmpty()) Entry->SetStringField(TEXT("reason"), Diagnostic.Reason);
+				if (!Diagnostic.Message.IsEmpty()) Entry->SetStringField(TEXT("message"), Diagnostic.Message);
 				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
 			}
 
@@ -359,8 +357,38 @@ namespace DesignImportDiagnosticReport
 			{
 				AddUniqueRecommendation(
 					InOutRecommendations,
-					TEXT("Remote resource failures should be fixed at the asset source or replaced with local assets before final release verification."));
+					TEXT("Remote image import failures are partial-success diagnostics; retry after checking the reported category, resource, and reason."));
 			}
+		}
+
+		TSharedRef<FJsonObject> BuildImageImportResult(const FDesignImageImportResult& ImageResult)
+		{
+			TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetStringField(TEXT("status"), ImageResult.HasFailures() ? TEXT("failed")
+			: ImageResult.bWasExecuted ? TEXT("succeeded") : TEXT("not_run"));
+			Result->SetNumberField(TEXT("importedCount"), ImageResult.ImportedCount);
+			Result->SetNumberField(TEXT("reusedCount"), ImageResult.ReusedCount);
+			Result->SetNumberField(TEXT("refreshedCount"), ImageResult.RefreshedCount);
+			Result->SetNumberField(TEXT("skippedCount"), ImageResult.SkippedCount);
+			Result->SetNumberField(TEXT("failedCount"), ImageResult.FailedCount);
+			Result->SetNumberField(TEXT("diagnosticCount"), ImageResult.Diagnostics.Num());
+			if (!ImageResult.ImportPath.IsEmpty()) Result->SetStringField(TEXT("importPath"), ImageResult.ImportPath);
+
+			TMap<EDesignImageDiagnosticCategory, int32> FailureCounts;
+			for (const FDesignImageDiagnostic& Diagnostic : ImageResult.Diagnostics)
+			{
+				if (Diagnostic.Outcome == EDesignImageDiagnosticOutcome::Failed)
+				{
+					++FailureCounts.FindOrAdd(Diagnostic.Category);
+				}
+			}
+			TSharedRef<FJsonObject> CategoryCounts = MakeShared<FJsonObject>();
+			for (const TPair<EDesignImageDiagnosticCategory, int32>& Pair : FailureCounts)
+			{
+				CategoryCounts->SetNumberField(LexToString(Pair.Key), Pair.Value);
+			}
+			Result->SetObjectField(TEXT("failureCategoryCounts"), CategoryCounts);
+			return Result;
 		}
 
 		FString BuildImportReportPath(const FDesignDocument& Document)
@@ -728,7 +756,7 @@ namespace DesignImportDiagnosticReport
 		CollectEffectWrappersRecursive(Data.RootWidget, EffectWrapperValues, Recommendations);
 
 		TArray<TSharedPtr<FJsonValue>> ImageFailureValues;
-		CollectImageFailureEntries(Artifacts.ImageReport, ImageFailureValues, Recommendations);
+		CollectImageFailureEntries(Artifacts.ImageResult, ImageFailureValues, Recommendations);
 
 		TSharedRef<FJsonObject> Diagnostics = MakeShared<FJsonObject>();
 		Diagnostics->SetArrayField(TEXT("warnings"), WarningValues);
@@ -738,9 +766,10 @@ namespace DesignImportDiagnosticReport
 		TSharedRef<FJsonObject> Resources = MakeShared<FJsonObject>();
 		Resources->SetArrayField(TEXT("missingFonts"), MissingFontValues);
 		Resources->SetArrayField(TEXT("imageFailures"), ImageFailureValues);
-		if (!Artifacts.ImageReport.IsEmpty())
+		Resources->SetObjectField(TEXT("imageImport"), BuildImageImportResult(Artifacts.ImageResult));
+		if (!Artifacts.ImageResult.DisplaySummary.IsEmpty())
 		{
-			Resources->SetStringField(TEXT("imageImportSummary"), Artifacts.ImageReport);
+			Resources->SetStringField(TEXT("imageImportSummary"), Artifacts.ImageResult.DisplaySummary);
 		}
 		if (const FString* PenExtensionResourceGap = Document.Metadata.Find(TEXT("design2umg.penExtensionResourceGap")))
 		{
@@ -819,11 +848,13 @@ namespace DesignImportDiagnosticReport
 		const FString& TargetAssetPath,
 		const TArray<FDesign2UMGMappingDiagnostic>& ReimportDiagnostics,
 		const TArray<FDesign2UMGMappingDiagnostic>* ComponentMappingDiagnostics,
-		const FDesign2UMGCommitResult* Commit)
+		const FDesign2UMGCommitResult* Commit,
+		const FDesignImageImportResult* ImageResult)
 	{
 		// requestedOutputPath carries the reimport target asset; its diagnostics go to the reimport section.
 		FImportReportArtifacts Artifacts;
 		Artifacts.RequestedOutputPath = TargetAssetPath;
+		if (ImageResult) Artifacts.ImageResult = *ImageResult;
 		if (Commit) Artifacts.Commit = *Commit;
 		return Write(Document, Data, Artifacts, ComponentMappingDiagnostics, &ReimportDiagnostics);
 	}

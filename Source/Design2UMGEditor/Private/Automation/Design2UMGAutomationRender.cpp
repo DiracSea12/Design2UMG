@@ -12,12 +12,9 @@
 #include "DesignImportPipeline.h"
 #include "DesignImportUtils.h"
 #include "DesignJsonUtils.h"
-#include "DesignPathRasterizer.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
-#include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
-#include "ProceduralShapeGenerator.h"
 #include "UMGSchema.h"
 #include "UMGWidgetUtils.h"
 
@@ -25,7 +22,6 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
-#include "Engine/Texture2D.h"
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
 #include "Framework/Application/SlateApplication.h"
@@ -34,26 +30,16 @@
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
-#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "ObjectTools.h"
 #include "RenderingThread.h"
 #include "Rendering/SlateRenderer.h"
 #include "Serialization/JsonSerializer.h"
-#include "TextureCompiler.h"
-#include "UObject/Linker.h"
 #include "UObject/Package.h"
-#include "UObject/PackageReload.h"
 #include "UObject/UObjectGlobals.h"
 
 namespace
 {
-	// Test-only render-automation state; compiled out of non-test builds where
-	// IsAutomationRenderActive() is a constant false.
-#if WITH_DEV_AUTOMATION_TESTS
-	bool GDesign2UMGAutomationRenderActive = false;
-	FString GDesign2UMGAutomationFontImportPath;
-#endif
 	const TCHAR* AssetPackageReloadAuthority = TEXT("ue_reload_package_before_asset_render_v1");
 
 	struct FAutomationRenderSpec
@@ -346,9 +332,10 @@ namespace
 	}
 
 	bool LoadFigmaSourceData(
-		const FString& SourcePath,
-		const FString& TargetNodeId,
-		FDesignDocument& OutDocument,
+	const FString& SourcePath,
+	const FString& TargetNodeId,
+	const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
+	FDesignDocument& OutDocument,
 		FImportAnalysisResult& OutAnalysis,
 		FString& OutError)
 	{
@@ -357,7 +344,10 @@ namespace
 			return false;
 		}
 
-		OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, FImportAnalysisInput{ true });
+	FImportAnalysisInput AnalysisInput;
+	AnalysisInput.bResolveImages = true;
+	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
+	OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, AnalysisInput);
 		if (!OutAnalysis.ErrorMessage.IsEmpty())
 		{
 			OutError = OutAnalysis.ErrorMessage;
@@ -378,79 +368,6 @@ namespace
 		return true;
 	}
 
-	void ResetAutomationTransientState()
-	{
-		FlushRenderingCommands();
-		FlushAsyncLoading();
-		if (FSlateApplication::IsInitialized())
-		{
-			if (FSlateRenderer* SlateRenderer = FSlateApplication::Get().GetRenderer())
-			{
-				SlateRenderer->FlushFontCache(TEXT("Design2UMG automation transient reset"));
-				// FlushFontCache only queues a request. Complete the reset before GC
-				// and before measuring fonts for the next source.
-				SlateRenderer->GetFontCache()->ConditionalFlushCache();
-			}
-		}
-		FFontResolver::ClearCache();
-		FDesignPathRasterizer::ClearCache();
-		FProceduralShapeGenerator::ReleaseTransientTextures();
-		CollectGarbage(RF_NoFlags, true);
-	}
-
-	void PrepareAutomationTransientState()
-	{
-		ResetAutomationTransientState();
-	}
-
-	FString NormalizeWidgetBlueprintObjectPath(const FString& AssetPath)
-	{
-		FString Normalized = AssetPath.TrimStartAndEnd();
-		if (Normalized.IsEmpty())
-		{
-			return Normalized;
-		}
-
-		const FString AssetName = FPaths::GetBaseFilename(Normalized);
-		const FString ObjectSuffix = TEXT(".") + AssetName;
-		if (!AssetName.IsEmpty() && !Normalized.EndsWith(ObjectSuffix))
-		{
-			Normalized += ObjectSuffix;
-		}
-		return Normalized;
-	}
-
-	bool ReloadAssetPackageForAutomationRender(const FString& ObjectPath, FString& OutError)
-	{
-		const FString PackageName = FPackageName::ObjectPathToPackageName(ObjectPath);
-		if (PackageName.IsEmpty())
-		{
-			OutError = FString::Printf(TEXT("Failed to resolve package name from asset path: %s"), *ObjectPath);
-			return false;
-		}
-
-		UPackage* Package = FindPackage(nullptr, *PackageName);
-		if (!Package)
-		{
-			return true;
-		}
-
-		UE_LOG(LogDesign2UMG, Log,
-			TEXT("AutomationRender: force reloading package before asset render: %s"),
-			*PackageName);
-		FlushAsyncLoading();
-		ResetLoaders(static_cast<UObject*>(Package));
-		if (!ReloadPackage(Package, LOAD_None))
-		{
-			OutError = FString::Printf(TEXT("Failed to reload package before asset render: %s"), *PackageName);
-			return false;
-		}
-
-		FlushRenderingCommands();
-		CollectGarbage(RF_NoFlags, true);
-		return true;
-	}
-
 	FString NormalizeAutomationPackagePath(const FString& PackagePath)
 	{
 		FString Normalized = PackagePath.TrimStartAndEnd();
@@ -468,152 +385,6 @@ namespace
 			.StartsWith(TEXT("/Game/Design2UMG/Automation/"), ESearchCase::CaseSensitive);
 	}
 
-	bool IsAutomationImportedFontPath(const FString& FontAssetPath)
-	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);
-		return NormalizedPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::CaseSensitive)
-			&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive);
-	}
-
-	bool RefreshAutomationPackagesInDirectory(const FString& PackagePath, const TCHAR* Description, FString& OutError)
-	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(PackagePath);
-		const FString PackageDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
-		if (PackageDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*PackageDirectory))
-		{
-			return true;
-		}
-
-		TArray<FString> AssetFiles;
-		IFileManager::Get().FindFiles(AssetFiles, *(PackageDirectory / TEXT("*.uasset")), true, false);
-		if (AssetFiles.Num() == 0)
-		{
-			return true;
-		}
-
-		FlushAsyncLoading();
-		for (const FString& AssetFile : AssetFiles)
-		{
-			const FString AssetName = FPaths::GetBaseFilename(AssetFile);
-			if (AssetName.IsEmpty())
-			{
-				continue;
-			}
-
-			const FString PackageName = NormalizeAutomationPackagePath(NormalizedPath / AssetName);
-			UPackage* Package = FindPackage(nullptr, *PackageName);
-			if (!Package)
-			{
-				Package = LoadPackage(nullptr, *PackageName, LOAD_None);
-				if (!Package)
-				{
-					OutError = FString::Printf(
-						TEXT("Failed to load %s package before asset render: %s"),
-						Description,
-						*PackageName);
-					return false;
-				}
-			}
-			else
-			{
-				ResetLoaders(static_cast<UObject*>(Package));
-				if (!ReloadPackage(Package, LOAD_None))
-				{
-					OutError = FString::Printf(
-						TEXT("Failed to reload %s package before asset render: %s"),
-						Description,
-						*PackageName);
-					return false;
-				}
-			}
-
-			if (UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName))
-			{
-				Texture->ConditionalPostLoad();
-#if WITH_EDITOR
-				FTextureCompilingManager::Get().FinishCompilation({ Texture });
-#endif
-				Texture->UpdateResource();
-			}
-		}
-
-		FlushRenderingCommands();
-		CollectGarbage(RF_NoFlags, true);
-		return true;
-	}
-
-	bool RefreshAutomationImportedFontPackages(const FString& FontImportPath, FString& OutError)
-	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(FontImportPath);
-		if (!IsAutomationImportedFontPath(NormalizedPath))
-		{
-			return true;
-		}
-
-		return RefreshAutomationPackagesInDirectory(NormalizedPath, TEXT("automation imported font"), OutError);
-	}
-
-	bool RefreshAutomationTextureResourcesInDirectory(const FString& PackagePath, const TCHAR* Description, FString& OutError)
-	{
-		const FString NormalizedPath = NormalizeAutomationPackagePath(PackagePath);
-		const FString PackageDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
-		if (PackageDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*PackageDirectory))
-		{
-			return true;
-		}
-
-		TArray<FString> AssetFiles;
-		IFileManager::Get().FindFiles(AssetFiles, *(PackageDirectory / TEXT("*.uasset")), true, false);
-		if (AssetFiles.Num() == 0)
-		{
-			return true;
-		}
-
-		FlushAsyncLoading();
-		for (const FString& AssetFile : AssetFiles)
-		{
-			const FString AssetName = FPaths::GetBaseFilename(AssetFile);
-			if (AssetName.IsEmpty())
-			{
-				continue;
-			}
-
-			const FString PackageName = NormalizeAutomationPackagePath(NormalizedPath / AssetName);
-			UPackage* Package = FindPackage(nullptr, *PackageName);
-			if (!Package)
-			{
-				Package = LoadPackage(nullptr, *PackageName, LOAD_None);
-				if (!Package)
-				{
-					OutError = FString::Printf(
-						TEXT("Failed to load %s package before asset render: %s"),
-						Description,
-						*PackageName);
-					return false;
-				}
-			}
-
-			UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName);
-			if (!Texture)
-			{
-				const FString ObjectPath = PackageName + TEXT(".") + AssetName;
-				Texture = LoadObject<UTexture2D>(nullptr, *ObjectPath);
-			}
-			if (Texture)
-			{
-				Texture->ConditionalPostLoad();
-#if WITH_EDITOR
-				FTextureCompilingManager::Get().FinishCompilation({ Texture });
-#endif
-				Texture->UpdateResource();
-			}
-		}
-
-		FlushRenderingCommands();
-		CollectGarbage(RF_NoFlags, true);
-		return true;
-	}
-
 	FString ResolveAutomationFontImportPath(const FString& OutputPath)
 	{
 		const FString NormalizedOutputPath = NormalizeAutomationPackagePath(OutputPath);
@@ -625,20 +396,6 @@ namespace
 		const FString ParentPath = FPaths::GetPath(NormalizedOutputPath);
 		const FString ImportRoot = ParentPath.IsEmpty() ? NormalizedOutputPath : ParentPath;
 		return NormalizeAutomationPackagePath(ImportRoot / TEXT("ImportedFonts"));
-	}
-
-	bool RefreshGeneratedTexturePackagesForAutomationRender(const FString& GeneratedAssetPath, FString& OutError)
-	{
-		const FString PackageName = FPackageName::ObjectPathToPackageName(GeneratedAssetPath);
-		if (PackageName.IsEmpty())
-		{
-			return true;
-		}
-
-		const FString PackagePath = FPaths::GetPath(PackageName);
-		return RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_PathTextures"), TEXT("automation path texture"), OutError)
-			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ProceduralTextures"), TEXT("automation procedural texture"), OutError)
-			&& RefreshAutomationTextureResourcesInDirectory(PackagePath / TEXT("D2U_ImageTransforms"), TEXT("automation image transform texture"), OutError);
 	}
 
 	bool ClearDefaultAutomationOutputAssets(const FString& OutputPath, FString& OutError)
@@ -710,10 +467,8 @@ namespace
 
 	bool RunAutomationRender(const FAutomationRenderSpec& Spec, FAutomationRenderResult& OutResult)
 	{
+		const FString ImportedFontPackagePath = ResolveAutomationFontImportPath(Spec.OutputPath);
 #if WITH_DEV_AUTOMATION_TESTS
-		const TGuardValue<FString> FontImportPathGuard(
-			GDesign2UMGAutomationFontImportPath,
-			ResolveAutomationFontImportPath(Spec.OutputPath));
 		const TGuardValue<FString> IrDumpPathGuard(
 			Design2UMGAutomationIrDump::GDesign2UMGAutomationIrDumpPath,
 			Spec.IrDumpPath);
@@ -721,9 +476,16 @@ namespace
 			Design2UMGAutomationGeometryDump::GDesign2UMGAutomationGeometryDumpPath,
 			Spec.GeometryDumpPath);
 #endif
-		FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
-			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
-		Design2UMGAutomationRender::SanitizeImportSettingsSnapshot(AutomationSettingsSnapshot);
+	FDesign2UMGImportSettingsSnapshot AutomationSettingsSnapshot =
+		FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
+	Design2UMGAutomationRender::SanitizeImportSettingsSnapshot(AutomationSettingsSnapshot);
+	auto AnalyzeAutomationDocument = [&](FDesignDocument& Document)
+	{
+		FImportAnalysisInput AnalysisInput;
+		AnalysisInput.bResolveImages = true;
+		AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
+		return DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+	};
 
 		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
 		{
@@ -733,6 +495,12 @@ namespace
 			Request.bResolveImages = bResolveImages;
 			Request.Generation.Mode = EDesignBlueprintGenerationMode::BlueprintAndCompiledPng;
 			Request.Generation.CompiledPngFilePath = Spec.RenderPngPath;
+			FBlueprintRenderPreparationOptions RenderPreparation;
+			RenderPreparation.ImportedFontPackagePath = ImportedFontPackagePath;
+			RenderPreparation.bRefreshGeneratedTextures = true;
+			RenderPreparation.bResetTransientRenderState = true;
+			Request.Generation.RenderPreparation = MoveTemp(RenderPreparation);
+			Request.Generation.bPersistIconFontMappingChanges = false;
 			Request.SettingsSnapshot = AutomationSettingsSnapshot;
 			return Request;
 		};
@@ -744,11 +512,16 @@ namespace
 				? Spec.RenderPngPath
 				: ExecutionResult.RenderPngPath;
 			OutResult.RenderSize = ExecutionResult.RenderedSize;
-			if (!ExecutionResult.bSucceeded && !ExecutionResult.ErrorMessage.IsEmpty())
-			{
-				OutResult.ErrorMessage = ExecutionResult.ErrorMessage;
-			}
-			return ExecutionResult.bSucceeded;
+		if (!ExecutionResult.bSucceeded && !ExecutionResult.ErrorMessage.IsEmpty())
+		{
+			OutResult.ErrorMessage = ExecutionResult.ErrorMessage;
+		}
+		if (ExecutionResult.RenderedWidget.IsValid())
+		{
+			Design2UMGAutomationGeometryDump::MaybeWriteGeometryDump(
+				ExecutionResult.RenderedWidget->WidgetTree);
+		}
+		return ExecutionResult.bSucceeded;
 		};
 
 		auto ApplyGenerationResult = [&](const FArtifactGenerationResult& GenerationResult)
@@ -758,11 +531,16 @@ namespace
 				? Spec.RenderPngPath
 				: GenerationResult.RenderPngPath;
 			OutResult.RenderSize = GenerationResult.RenderedSize;
-			if (!GenerationResult.bSucceeded && !GenerationResult.ErrorMessage.IsEmpty())
-			{
-				OutResult.ErrorMessage = GenerationResult.ErrorMessage;
-			}
-			return GenerationResult.bSucceeded;
+		if (!GenerationResult.bSucceeded && !GenerationResult.ErrorMessage.IsEmpty())
+		{
+			OutResult.ErrorMessage = GenerationResult.ErrorMessage;
+		}
+		if (GenerationResult.RenderedWidget.IsValid())
+		{
+			Design2UMGAutomationGeometryDump::MaybeWriteGeometryDump(
+				GenerationResult.RenderedWidget->WidgetTree);
+		}
+		return GenerationResult.bSucceeded;
 		};
 
 		auto CaptureGeneratedAssetStructure = [&]()
@@ -792,22 +570,24 @@ namespace
 		UWidgetBlueprint* WidgetBlueprint = nullptr;
 		if (Spec.Mode.Equals(TEXT("asset"), ESearchCase::IgnoreCase))
 		{
-			const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(Spec.SourcePath);
-			if (!Design2UMGAutomationRender::PrepareGeneratedAssetForAutomationRender(
-				ObjectPath,
+			FBlueprintRenderPreparationOptions RenderPreparation;
+			RenderPreparation.ImportedFontPackagePath = ImportedFontPackagePath;
+			RenderPreparation.bRefreshGeneratedTextures = Spec.bForceReloadPackage;
+			RenderPreparation.bResetTransientRenderState = true;
+			WidgetBlueprint = DesignImportUtils::PrepareWidgetBlueprintForRender(
+				Spec.SourcePath,
+				RenderPreparation,
 				Spec.bForceReloadPackage,
-				OutResult.ErrorMessage))
-			{
-				return false;
-			}
-
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: loading asset %s"), *ObjectPath);
-			WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
+				&OutResult.ErrorMessage);
 			if (!WidgetBlueprint)
 			{
-				OutResult.ErrorMessage = FString::Printf(TEXT("Failed to load Widget Blueprint: %s"), *ObjectPath);
+				if (OutResult.ErrorMessage.IsEmpty())
+				{
+					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to prepare Widget Blueprint: %s"), *Spec.SourcePath);
+				}
 				return false;
 			}
+			const FString ObjectPath = WidgetBlueprint->GetPathName();
 
 		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
 		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
@@ -842,23 +622,28 @@ namespace
 			}
 		}
 		OutResult.bRenderSizeOverridden = EffectiveRenderSizeOverride.IsSet();
+		TStrongObjectPtr<UUserWidget> RenderedWidget;
+		TSharedPtr<SWidget> RenderedSlateWidget;
 		if (!DesignImportUtils::RenderCompiledBlueprintToPngFile(
 			WidgetBlueprint,
 			Spec.RenderPngPath,
 			&OutResult.RenderSize,
 			&OutResult.ErrorMessage,
 			EffectiveRenderSizeOverride,
-			Spec.RootExportOffset))
+			Spec.RootExportOffset,
+			&RenderedWidget,
+			&RenderedSlateWidget))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{
 					OutResult.ErrorMessage = FString::Printf(TEXT("Failed to render compiled Widget Blueprint: %s"), *ObjectPath);
-				}
-				return false;
 			}
+			return false;
+		}
 
-			OutResult.bSuccess = true;
-			return true;
+		Design2UMGAutomationGeometryDump::MaybeWriteGeometryDump(RenderedWidget->WidgetTree);
+		OutResult.bSuccess = true;
+		return true;
 		}
 		if (Spec.Mode.Equals(TEXT("pen"), ESearchCase::IgnoreCase))
 		{
@@ -871,13 +656,23 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
-				Document,
-				Spec.NodeId,
-				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
+		OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+			Document,
+			Spec.NodeId,
+			ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
+		FImportAnalysisResult AnalysisResult = AnalyzeAutomationDocument(Document);
+		if (!AnalysisResult.ErrorMessage.IsEmpty())
+		{
+			OutResult.ErrorMessage = AnalysisResult.ErrorMessage;
+			return false;
+		}
+		Design2UMGAutomationIrDump::MaybeWriteIrDump(AnalysisResult.Data);
 
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-			if (!ApplyExecutionResult(DesignImportPipeline::Execute(Document, MakeAutomationImportRequest(true))))
+		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+		if (!ApplyExecutionResult(DesignImportPipeline::Execute(
+			Document,
+			MakeAutomationImportRequest(true),
+			&AnalysisResult)))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{
@@ -894,7 +689,7 @@ namespace
 		FUMGWidgetData Data;
 		FDesignDocument SourceDocument;
 		TOptional<FDesignDocument> DiagnosticDocument;
-		TOptional<FImportAnalysisResult> DeferredAnalysisResult;
+		TOptional<FImportInPlaceAnalysisResult> DeferredAnalysisResult;
 		if (Spec.Mode.Equals(TEXT("pen_mcp"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing pen source via MCP payload"));
@@ -931,11 +726,14 @@ namespace
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = true;
 			AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
-			const FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, AnalysisInput);
-			Data = AnalysisResult.Data;
-			DeferredAnalysisResult = AnalysisResult;
-			DiagnosticDocument = SourceDocument;
+			const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, AnalysisInput);
+		DeferredAnalysisResult = AnalysisResult;
+		DiagnosticDocument = SourceDocument;
+		if (AnalysisResult.ErrorMessage.IsEmpty())
+		{
+			Design2UMGAutomationIrDump::MaybeWriteIrDump(Data);
 		}
+	}
 		else if (Spec.Mode.Equals(TEXT("local_figma"), ESearchCase::IgnoreCase))
 		{
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing local figma export"));
@@ -946,12 +744,22 @@ namespace
 				return false;
 			}
 
-			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
-				SourceDocument,
-				Spec.NodeId,
-				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
+		OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+			SourceDocument,
+			Spec.NodeId,
+			ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
+		FImportAnalysisResult AnalysisResult = AnalyzeAutomationDocument(SourceDocument);
+		if (!AnalysisResult.ErrorMessage.IsEmpty())
+		{
+			OutResult.ErrorMessage = AnalysisResult.ErrorMessage;
+			return false;
+		}
+		Design2UMGAutomationIrDump::MaybeWriteIrDump(AnalysisResult.Data);
+		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+		if (!ApplyExecutionResult(DesignImportPipeline::Execute(
+			SourceDocument,
+			MakeAutomationImportRequest(true),
+			&AnalysisResult)))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{
@@ -969,18 +777,28 @@ namespace
 			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: importing raw figma source json"));
 			FString ErrorMessage;
 			FImportAnalysisResult AnalysisResult;
-			if (!LoadFigmaSourceData(Spec.SourcePath, Spec.NodeId, SourceDocument, AnalysisResult, ErrorMessage))
+		if (!LoadFigmaSourceData(
+			Spec.SourcePath,
+			Spec.NodeId,
+			AutomationSettingsSnapshot,
+			SourceDocument,
+			AnalysisResult,
+			ErrorMessage))
 			{
 				OutResult.ErrorMessage = ErrorMessage;
 				return false;
 			}
 
-			OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
-				SourceDocument,
-				Spec.NodeId,
-				ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
-			UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
-			if (!ApplyExecutionResult(DesignImportPipeline::Execute(SourceDocument, MakeAutomationImportRequest(true))))
+		OutResult.SourceStructure = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(
+			SourceDocument,
+			Spec.NodeId,
+			ShouldSkipDesignerOnlyNodeForAutomationSnapshot);
+		Design2UMGAutomationIrDump::MaybeWriteIrDump(AnalysisResult.Data);
+		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: generating blueprint and compiled png"));
+		if (!ApplyExecutionResult(DesignImportPipeline::Execute(
+			SourceDocument,
+			MakeAutomationImportRequest(true),
+			&AnalysisResult)))
 			{
 				if (OutResult.ErrorMessage.IsEmpty())
 				{
@@ -1009,7 +827,7 @@ namespace
 		}
 		if (DeferredAnalysisResult.IsSet())
 		{
-			GenerationRequest.RuntimeImageReport = DeferredAnalysisResult->ImageReport;
+			GenerationRequest.RuntimeImageResult = DeferredAnalysisResult->ImageResult;
 		}
 
 		if (!ApplyGenerationResult(
@@ -1034,49 +852,13 @@ namespace
 
 namespace Design2UMGAutomationRender
 {
-	bool IsAutomationRenderActive()
+	bool IsCaseLocalImportedFontPath(const FString& FontAssetPath)
 	{
-#if WITH_DEV_AUTOMATION_TESTS
-		return GDesign2UMGAutomationRenderActive;
-#else
-		return false;
-#endif
-	}
-
-	bool PrepareGeneratedAssetForAutomationRender(
-		const FString& GeneratedAssetPath,
-		const bool bForceReloadPackage,
-		FString& OutError)
-	{
-		if (!IsAutomationRenderActive())
-		{
-			return true;
-		}
-
-#if WITH_DEV_AUTOMATION_TESTS
-		ResetAutomationTransientState();
-		if (!RefreshAutomationImportedFontPackages(GDesign2UMGAutomationFontImportPath, OutError))
-		{
-			return false;
-		}
-#endif
-
-		if (!bForceReloadPackage)
-		{
-			return true;
-		}
-
-		const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(GeneratedAssetPath);
-		if (!RefreshGeneratedTexturePackagesForAutomationRender(ObjectPath, OutError)
-			|| !ReloadAssetPackageForAutomationRender(ObjectPath, OutError))
-		{
-			return false;
-		}
-
-		// Package refresh and reload populate render-related caches after the initial reset.
-		// Clear them once more so loading the asset below starts from the same state for every case.
-		ResetAutomationTransientState();
-		return true;
+		const FString NormalizedPath = NormalizeAutomationPackagePath(FontAssetPath);
+		return NormalizedPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::CaseSensitive)
+			&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive)
+			&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
+			&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
 	}
 
 	void SanitizeImportSettingsSnapshot(FDesign2UMGImportSettingsSnapshot& InOutSettingsSnapshot)
@@ -1084,7 +866,7 @@ namespace Design2UMGAutomationRender
 		TArray<FString> FamiliesToRemove;
 		for (const TPair<FString, FString>& Pair : InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths)
 		{
-			if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(Pair.Value))
+			if (IsCaseLocalImportedFontPath(Pair.Value))
 			{
 				FamiliesToRemove.Add(Pair.Key);
 			}
@@ -1095,7 +877,7 @@ namespace Design2UMGAutomationRender
 			InOutSettingsSnapshot.ConversionSettings.IconFontAssetPaths.Remove(Family);
 		}
 
-		if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath))
+		if (IsCaseLocalImportedFontPath(InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath))
 		{
 			InOutSettingsSnapshot.ConversionSettings.DefaultIconFontAssetPath.Reset();
 		}
@@ -1103,9 +885,6 @@ namespace Design2UMGAutomationRender
 
 	void HandleConsoleCommand(const TArray<FString>& Args)
 	{
-#if WITH_DEV_AUTOMATION_TESTS
-		TGuardValue<bool> AutomationGuard(GDesign2UMGAutomationRenderActive, true);
-#endif
 		FAutomationRenderResult Result;
 		Result.Mode = TEXT("unknown");
 		const bool bSuppressExitAfterCompletion = Args.ContainsByPredicate([](const FString& Arg)
@@ -1168,7 +947,7 @@ namespace Design2UMGAutomationRender
 		}
 
 		UE_LOG(LogDesign2UMG, Log, TEXT("AutomationRender: spec loaded successfully"));
-		PrepareAutomationTransientState();
+		DesignImportUtils::ResetTransientRenderState();
 		const bool bOk = RunAutomationRender(Spec, Result);
 		WriteAutomationRenderResult(Spec, Result);
 
@@ -1203,7 +982,7 @@ bool FDesign2UMGFontResetSynchronousTest::RunTest(const FString&)
 {
 	FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
 	Renderer->FlushFontCache(TEXT("Font reset regression test"));
-	ResetAutomationTransientState();
+	DesignImportUtils::ResetTransientRenderState();
 	return TestFalse(TEXT("No pending font flush remains before parsing the next case"),
 		Renderer->GetFontCache()->ConditionalFlushCache());
 }

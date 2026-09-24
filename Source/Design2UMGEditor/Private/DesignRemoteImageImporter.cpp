@@ -23,6 +23,7 @@
 namespace
 {
 	using DesignRemoteImageImporterInternal::FImagePayloadIO;
+	using DesignRemoteImageImporterInternal::FImageProcessingFailure;
 	using DesignImageResources::FImageResourceLimits;
 	using DesignRemoteImageImporterInternal::FResolveContext;
 	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
@@ -395,7 +396,14 @@ namespace
 				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 			}
 			InOutTexturePath = *CachedPath;
-			++Context.Report.ReusedCount;
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Reused,
+				EDesignImageDiagnosticCategory::None,
+				FString(),
+				FString(),
+				*CachedPath,
+				FString(),
+				FString());
 			return true;
 		}
 		return false;
@@ -416,12 +424,18 @@ namespace
 				EnsureUiTextureReady(CachedTexture, Context.bTextureResourceUpdatePending);
 			}
 			InOutTexturePath = *ExistingPath;
-			++Context.Report.ReusedCount;
 			Context.UrlToAssetPath.Add(SourceKey, *ExistingPath);
-			if (ReusedMessagePrefix)
-			{
-				Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, **ExistingPath));
-			}
+			const FString Message = ReusedMessagePrefix
+				? FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, **ExistingPath)
+				: FString();
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Reused,
+				EDesignImageDiagnosticCategory::None,
+				FString(),
+				FString(),
+				*ExistingPath,
+				FString(),
+				Message);
 			return true;
 		}
 		return false;
@@ -440,13 +454,19 @@ namespace
 	{
 		EnsureUiTextureReady(Texture, Context.bTextureResourceUpdatePending);
 		InOutTexturePath = ObjectPath;
-		++Context.Report.ReusedCount;
 		Context.UrlToAssetPath.Add(SourceKey, ObjectPath);
 		Context.ContentHashToAsset.Add(ContentKey, ObjectPath);
-		if (ReusedMessagePrefix)
-		{
-			Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, *ObjectPath));
-		}
+		const FString Message = ReusedMessagePrefix
+			? FString::Printf(TEXT("%s%s"), ReusedMessagePrefix, *ObjectPath)
+			: FString();
+		Context.Report.AddDiagnostic(
+			EDesignImageDiagnosticOutcome::Reused,
+			EDesignImageDiagnosticCategory::None,
+			FString(),
+			FString(),
+			ObjectPath,
+			FString(),
+			Message);
 	}
 
 	// Reuse a texture persisted by a previous run under {ImportPath}/_Shared/.
@@ -483,14 +503,34 @@ namespace
 		const TArray<uint8>& FileData,
 		const FString& ObjectPath,
 		const FString& WidgetName,
+		const FString& WidgetId,
+		const FString& LocalPath,
 		FResolveContext& Context)
 	{
 		int32 SourceWidth = 0;
 		int32 SourceHeight = 0;
 		TArray64<uint8> SourceRawBGRA;
 		FString SourceDecodeError;
-		if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, SourceWidth, SourceHeight, SourceRawBGRA, SourceDecodeError, &Context.OperationBudget))
+		EDesignImageDiagnosticCategory DecodeCategory = EDesignImageDiagnosticCategory::Decode;
+		if (!FImagePayloadIO::DecodeToBGRA8(
+			FileData,
+			Context.ImageLimits,
+			SourceWidth,
+			SourceHeight,
+			SourceRawBGRA,
+			SourceDecodeError,
+			&Context.OperationBudget,
+			&DecodeCategory))
 		{
+			const FString Message = FString::Printf(TEXT("Texture refresh decode failed for '%s': %s"), *WidgetName, *SourceDecodeError);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				DecodeCategory,
+				WidgetId,
+				WidgetName,
+				LocalPath,
+				SourceDecodeError,
+				Message);
 			return;
 		}
 
@@ -506,13 +546,28 @@ namespace
 		FString RewriteError;
 		if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
 		{
-			++Context.Report.RefreshedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Refreshed local texture: %s (%dx%d -> %dx%d)"),
-				*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight));
+			const FString Message = FString::Printf(TEXT("Refreshed local texture: %s (%dx%d -> %dx%d)"),
+				*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Refreshed,
+				EDesignImageDiagnosticCategory::TextureRefresh,
+				WidgetId,
+				WidgetName,
+				LocalPath,
+				FString(),
+				Message);
 		}
 		else
 		{
-			Context.Report.AddMessage(FString::Printf(TEXT("Texture refresh failed for '%s': %s"), *WidgetName, *RewriteError));
+			const FString Message = FString::Printf(TEXT("Texture refresh failed for '%s': %s"), *WidgetName, *RewriteError);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				EDesignImageDiagnosticCategory::TextureRefresh,
+				WidgetId,
+				WidgetName,
+				LocalPath,
+				RewriteError,
+				Message);
 		}
 	}
 
@@ -531,10 +586,17 @@ namespace
 			EnsureUiTextureReady(ImportedTexture, Context.bTextureResourceUpdatePending);
 		}
 		InOutTexturePath = ImportedObjectPath;
-		++Context.Report.ImportedCount;
 		Context.UrlToAssetPath.Add(SourceKey, ImportedObjectPath);
 		Context.ContentHashToAsset.Add(ContentKey, ImportedObjectPath);
-		Context.Report.AddMessage(FString::Printf(TEXT("%s%s"), ImportedMessagePrefix, *ImportedObjectPath));
+		const FString Message = FString::Printf(TEXT("%s%s"), ImportedMessagePrefix, *ImportedObjectPath);
+		Context.Report.AddDiagnostic(
+			EDesignImageDiagnosticOutcome::Imported,
+			EDesignImageDiagnosticCategory::None,
+			FString(),
+			FString(),
+			ImportedObjectPath,
+			FString(),
+			Message);
 	}
 
 	bool ResolveTexturePath(FString& InOutTexturePath, const FString& WidgetName, const FString& WidgetId, FResolveContext& Context)
@@ -565,14 +627,28 @@ namespace
 			FString ReadError;
 			if (!FImagePayloadIO::LoadLocalFile(LocalPath, Context.ImageLimits, FileData, ReadError))
 			{
-				++Context.Report.FailedCount;
-				Context.Report.AddMessage(FString::Printf(TEXT("Local file read failed for '%s': %s (%s)"), *WidgetName, *LocalPath, *ReadError));
+				const FString Message = FString::Printf(TEXT("Local file read failed for '%s': %s (%s)"), *WidgetName, *LocalPath, *ReadError);
+				Context.Report.AddDiagnostic(
+					EDesignImageDiagnosticOutcome::Failed,
+					EDesignImageDiagnosticCategory::FileRead,
+					WidgetId,
+					WidgetName,
+					LocalPath,
+					ReadError,
+					Message);
 				return false;
 			}
 			if (!Context.OperationBudget.ConsumeCompressedBytes(static_cast<uint64>(FileData.Num()), ReadError))
 			{
-				++Context.Report.FailedCount;
-				Context.Report.AddMessage(FString::Printf(TEXT("Local image budget exceeded for '%s': %s"), *WidgetName, *ReadError));
+				const FString Message = FString::Printf(TEXT("Local image budget exceeded for '%s': %s"), *WidgetName, *ReadError);
+				Context.Report.AddDiagnostic(
+					EDesignImageDiagnosticOutcome::Failed,
+					EDesignImageDiagnosticCategory::Budget,
+					WidgetId,
+					WidgetName,
+					LocalPath,
+					ReadError,
+					Message);
 				return false;
 			}
 
@@ -594,7 +670,7 @@ namespace
 			const FString PerWidgetObjectPath = BuildObjectPathFromImport(SubDir, PerWidgetAssetName);
 			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *PerWidgetObjectPath))
 			{
-				RefreshWidgetTextureFromSource(Existing, FileData, PerWidgetObjectPath, WidgetName, Context);
+				RefreshWidgetTextureFromSource(Existing, FileData, PerWidgetObjectPath, WidgetName, WidgetId, LocalPath, Context);
 				RegisterReusedTexture(LocalKey, ContentKey, PerWidgetObjectPath, Existing, nullptr, InOutTexturePath, Context);
 				return true;
 			}
@@ -602,18 +678,41 @@ namespace
 			int32 Width = 0, Height = 0;
 			TArray64<uint8> RawBGRA;
 			FString DecodeError;
-			if (!FImagePayloadIO::DecodeToBGRA8(FileData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError, &Context.OperationBudget))
+			EDesignImageDiagnosticCategory DecodeCategory = EDesignImageDiagnosticCategory::Decode;
+			if (!FImagePayloadIO::DecodeToBGRA8(
+				FileData,
+				Context.ImageLimits,
+				Width,
+				Height,
+				RawBGRA,
+				DecodeError,
+				&Context.OperationBudget,
+				&DecodeCategory))
 			{
-				++Context.Report.FailedCount;
-				Context.Report.AddMessage(FString::Printf(TEXT("Local image decode failed for '%s': %s"), *WidgetName, *DecodeError));
+				const FString Message = FString::Printf(TEXT("Local image decode failed for '%s': %s"), *WidgetName, *DecodeError);
+				Context.Report.AddDiagnostic(
+					EDesignImageDiagnosticOutcome::Failed,
+					DecodeCategory,
+					WidgetId,
+					WidgetName,
+					LocalPath,
+					DecodeError,
+					Message);
 				return false;
 			}
 
 			FString ImportedObjectPath, ImportError;
 			if (!CreateTextureAsset(BuildSharedImportPath(Context.ImportPath), SharedAssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 			{
-				++Context.Report.FailedCount;
-				Context.Report.AddMessage(FString::Printf(TEXT("Local image import failed for '%s': %s"), *WidgetName, *ImportError));
+				const FString Message = FString::Printf(TEXT("Local image import failed for '%s': %s"), *WidgetName, *ImportError);
+				Context.Report.AddDiagnostic(
+					EDesignImageDiagnosticOutcome::Failed,
+					EDesignImageDiagnosticCategory::TextureImport,
+					WidgetId,
+					WidgetName,
+					LocalPath,
+					ImportError,
+					Message);
 				return false;
 			}
 			RegisterImportedTexture(LocalKey, ContentKey, ImportedObjectPath, TEXT("Imported local texture: "), InOutTexturePath, Context);
@@ -622,13 +721,30 @@ namespace
 
 		if (!DesignImportUtils::IsHttpUrl(InOutTexturePath))
 		{
-			Context.Report.AddMessage(FString::Printf(TEXT("Skipped non-asset path for '%s': %s"), *WidgetName, *InOutTexturePath));
+			const FString Message = FString::Printf(TEXT("Skipped non-asset path for '%s': %s"), *WidgetName, *InOutTexturePath);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Skipped,
+				EDesignImageDiagnosticCategory::UnsupportedPath,
+				WidgetId,
+				WidgetName,
+				InOutTexturePath,
+				TEXT("Path is neither a UE asset, an existing local file, nor an HTTP URL"),
+				Message);
 			return true;
 		}
 
 		if (!Context.bResolveRemoteImages)
 		{
-			Context.Report.AddMessage(FString::Printf(TEXT("Skipped remote image for '%s': remote image import is disabled"), *WidgetName));
+			const FString Reason = TEXT("Remote image import is disabled");
+			const FString Message = FString::Printf(TEXT("Skipped remote image for '%s': %s"), *WidgetName, *Reason);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Skipped,
+				EDesignImageDiagnosticCategory::Disabled,
+				WidgetId,
+				WidgetName,
+				InOutTexturePath,
+				Reason,
+				Message);
 			return true;
 		}
 
@@ -640,14 +756,21 @@ namespace
 			return true;
 		}
 
-		if (const FString* PreviousError = Context.UrlProcessingErrors.Find(NormalizedUrl))
+		if (const FImageProcessingFailure* PreviousFailure = Context.UrlProcessingErrors.Find(NormalizedUrl))
 		{
-			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(
+			const FString Message = FString::Printf(
 				TEXT("Image '%s' reused cached processing failure: %s (reason: %s)"),
 				*WidgetName,
 				*NormalizedUrl,
-				**PreviousError));
+				*PreviousFailure->Reason);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				PreviousFailure->Category,
+				WidgetId,
+				WidgetName,
+				NormalizedUrl,
+				PreviousFailure->Reason,
+				Message);
 			return false;
 		}
 
@@ -656,8 +779,15 @@ namespace
 		FUrlDownloadResult& Download = Context.UrlDownloads.FindChecked(NormalizedUrl);
 		if (!Download.bSuccess)
 		{
-			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *Download.Error));
+			const FString Message = FString::Printf(TEXT("Image '%s' download failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *Download.Error);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				Download.FailureCategory,
+				WidgetId,
+				WidgetName,
+				NormalizedUrl,
+				Download.Error,
+				Message);
 			return false;
 		}
 		// Keep the URL outcome for repeated nodes, but move its payload into this one
@@ -694,11 +824,27 @@ namespace
 		int32 Height = 0;
 		TArray64<uint8> RawBGRA;
 		FString DecodeError;
-		if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Context.ImageLimits, Width, Height, RawBGRA, DecodeError, &Context.OperationBudget))
+		EDesignImageDiagnosticCategory DecodeCategory = EDesignImageDiagnosticCategory::Decode;
+		if (!FImagePayloadIO::DecodeToBGRA8(
+			CompressedData,
+			Context.ImageLimits,
+			Width,
+			Height,
+			RawBGRA,
+			DecodeError,
+			&Context.OperationBudget,
+			&DecodeCategory))
 		{
-			Context.UrlProcessingErrors.Add(NormalizedUrl, DecodeError);
-			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError));
+			Context.UrlProcessingErrors.Add(NormalizedUrl, { DecodeCategory, DecodeError });
+			const FString Message = FString::Printf(TEXT("Image '%s' decode failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *DecodeError);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				DecodeCategory,
+				WidgetId,
+				WidgetName,
+				NormalizedUrl,
+				DecodeError,
+				Message);
 			return false;
 		}
 		CompressedData.Empty();
@@ -707,9 +853,16 @@ namespace
 		FString ImportError;
 		if (!CreateTextureAsset(BuildSharedImportPath(Context.ImportPath), SharedAssetName, RawBGRA, Width, Height, ImportedObjectPath, ImportError))
 		{
-			Context.UrlProcessingErrors.Add(NormalizedUrl, ImportError);
-			++Context.Report.FailedCount;
-			Context.Report.AddMessage(FString::Printf(TEXT("Image '%s' import failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *ImportError));
+			Context.UrlProcessingErrors.Add(NormalizedUrl, { EDesignImageDiagnosticCategory::TextureImport, ImportError });
+			const FString Message = FString::Printf(TEXT("Image '%s' import failed: %s (reason: %s)"), *WidgetName, *NormalizedUrl, *ImportError);
+			Context.Report.AddDiagnostic(
+				EDesignImageDiagnosticOutcome::Failed,
+				EDesignImageDiagnosticCategory::TextureImport,
+				WidgetId,
+				WidgetName,
+				NormalizedUrl,
+				ImportError,
+				Message);
 			return false;
 		}
 		RegisterImportedTexture(SourceKey, ContentKey, ImportedObjectPath, TEXT("Imported texture: "), InOutTexturePath, Context);
@@ -723,11 +876,25 @@ namespace
 		{
 			const FString DebugName = Node.Name.IsEmpty() ? Node.Id : Node.Name;
 			FString ResolvedTexturePath = TexturePath;
+			const int32 FirstDiagnostic = Context.Report.Result.Diagnostics.Num();
 			ResolveTexturePath(
 				ResolvedTexturePath,
 				DebugName.IsEmpty() ? TEXT("UnnamedWidget") : DebugName,
 				Node.Id,
 				Context);
+			// Success and cache-hit events need the same source identity as failures;
+			// the output asset path alone cannot identify a later source retry.
+			for (int32 Index = FirstDiagnostic; Index < Context.Report.Result.Diagnostics.Num(); ++Index)
+			{
+				FDesignImageDiagnostic& Diagnostic = Context.Report.Result.Diagnostics[Index];
+				Diagnostic.NodeId = Node.Id;
+				Diagnostic.NodeName = DebugName;
+				Diagnostic.Resource = TexturePath.TrimStartAndEnd();
+				if (IsAssetPath(ResolvedTexturePath))
+				{
+					Diagnostic.ResolvedAssetPath = ResolvedTexturePath;
+				}
+			}
 			// Keep the canonical typed owner in sync after import-time path rewriting.
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;
 		}
@@ -753,22 +920,24 @@ namespace
 	}
 }
 
-// Partial-success contract: returns false as soon as any URL in the batch
-// fails, but every texture imported before that failure stays saved on disk
-// (CreateTextureAsset writes each package immediately). Callers must treat
-// false as "this run had failures; some assets may already be written", not
-// as an all-or-nothing rollback. A Warning with the failure count is logged
-// below. Generation continues so unaffected images are still resolved.
-bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport)
+// Partial-success contract: imported textures stay saved even when other
+// resources fail. The result records every outcome so generation can continue
+// for unaffected images while callers surface the degradation.
+FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData)
 {
 	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
 	if (!Settings)
 	{
-		if (OutReport)
-		{
-			*OutReport = TEXT("Remote image import: settings unavailable");
-		}
-		return false;
+		FDesignImageImportResult Result;
+		Result.bWasExecuted = true;
+		FDesignImageDiagnostic Diagnostic;
+		Diagnostic.Outcome = EDesignImageDiagnosticOutcome::Failed;
+		Diagnostic.Category = EDesignImageDiagnosticCategory::Configuration;
+		Diagnostic.Reason = TEXT("Design2UMG settings are unavailable");
+		Diagnostic.Message = TEXT("Remote image import: settings unavailable");
+		Result.AddDiagnostic(MoveTemp(Diagnostic));
+		Result.RefreshDisplaySummary();
+		return Result;
 	}
 
 	TSet<FString> RemoteUrls;
@@ -781,12 +950,16 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 	FString LimitError;
 	if (!FImagePayloadIO::ValidateUrlCount(RemoteUrls.Num(), Context.ImageLimits, LimitError))
 	{
-		if (OutReport)
-		{
-			*OutReport = LimitError;
-		}
+		Context.Report.AddDiagnostic(
+			EDesignImageDiagnosticOutcome::Failed,
+			EDesignImageDiagnosticCategory::Budget,
+			FString(),
+			FString(),
+			FString(),
+			LimitError,
+			LimitError);
 		UE_LOG(LogDesign2UMG, Error, TEXT("Remote image import rejected: %s"), *LimitError);
-		return false;
+		return Context.Report.BuildResult(FString());
 	}
 
 	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
@@ -814,21 +987,18 @@ bool FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData, 
 		FlushRenderingCommands();
 	}
 
-	if (OutReport)
+	FDesignImageImportResult Result = Context.Report.BuildResult(Context.ImportPath);
+	if (Result.HasFailures())
 	{
-		*OutReport = Context.Report.BuildSummary(Context.ImportPath);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("Remote image import finished with failures (%d)"), Result.FailedCount);
+		UE_LOG(LogDesign2UMG, Warning, TEXT("%d image resolutions failed; generation will continue but some images may be missing."), Result.FailedCount);
 	}
-
-	if (Context.Report.FailedCount > 0)
+	else
 	{
-		UE_LOG(LogDesign2UMG, Verbose, TEXT("Remote image import finished with failures (%d)"), Context.Report.FailedCount);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("%d image downloads failed; generation will continue but some images may be missing."), Context.Report.FailedCount);
-		return false;
+		UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d refreshed=%d"),
+			Result.ImportedCount, Result.ReusedCount, Result.RefreshedCount);
 	}
-
-	UE_LOG(LogDesign2UMG, Log, TEXT("Remote image import finished: imported=%d reused=%d refreshed=%d"),
-		Context.Report.ImportedCount, Context.Report.ReusedCount, Context.Report.RefreshedCount);
-	return true;
+	return Result;
 }
 
 // ============================================================================

@@ -24,6 +24,7 @@ public:
 	SLATE_BEGIN_ARGS(SDesign2UMGPreviewWindow) {}
 		SLATE_ARGUMENT(FString, OriginalJson)
 		SLATE_ARGUMENT(TSharedPtr<const FUMGWidgetData>, OriginalData)
+		SLATE_ARGUMENT(FDesignImageImportResult, InitialImageResult)
 		SLATE_ARGUMENT(FString, OutputPath)
 		SLATE_ARGUMENT(TArray<FString>, Warnings)
 		SLATE_ARGUMENT(TOptional<FDesignPreviewMaterializationSettingsSnapshot>, InitialMaterializationSettingsSnapshot)
@@ -47,6 +48,8 @@ private:
 
 	FString CurrentJson;
 	TSharedPtr<const FUMGWidgetData> OriginalData;
+	FDesignImageImportResult InitialImageResult;
+	TOptional<FDesignImageImportResult> CurrentImageResult;
 	FText GenerationStatus;
 	FString CurrentOutputPath;
 	TArray<FString> ConversionWarnings;

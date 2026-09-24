@@ -181,68 +181,32 @@ namespace
 			}
 		}
 	}
-}
-
-FString Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot::FindIconFontAssetPath(const FString& FontFamily) const
-{
-	if (FontFamily.IsEmpty())
-	{
-		return FString();
-	}
-
-	if (const FString* ExactMatch = IconFontAssetPaths.Find(FontFamily))
-	{
-		return *ExactMatch;
-	}
-
-	for (const TPair<FString, FString>& Pair : IconFontAssetPaths)
-	{
-		if (Pair.Key.Equals(FontFamily, ESearchCase::IgnoreCase))
-		{
-			return Pair.Value;
-		}
-	}
-
-	return FString();
-}
-
-FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings)
-{
-	FUMGWidgetNode Widget;
-
-	const auto EscapeRichTextText = [](const FString& Value)
+	FString EscapeRichTextText(const FString& Value)
 	{
 		FString Escaped = Value;
 		Escaped.ReplaceInline(TEXT("&"), TEXT("&amp;"));
 		Escaped.ReplaceInline(TEXT("<"), TEXT("&lt;"));
 		Escaped.ReplaceInline(TEXT(">"), TEXT("&gt;"));
 		return Escaped;
-	};
+	}
 
-	const auto EscapeRichTextAttribute = [&EscapeRichTextText](const FString& Value)
+	FString EscapeRichTextAttribute(const FString& Value)
 	{
 		FString Escaped = EscapeRichTextText(Value);
 		Escaped.ReplaceInline(TEXT("\""), TEXT("&quot;"));
 		Escaped.ReplaceInline(TEXT("'"), TEXT("&apos;"));
 		return Escaped;
-	};
+	}
 
-	const auto TextRunNeedsRichText = [](const FDesignTextRun& Run)
+	bool TextRunNeedsRichText(const FDesignTextRun& Run)
 	{
-		return !Run.Color.IsEmpty()
-			|| !Run.FontFamily.IsEmpty()
-			|| !Run.FontPostScriptName.IsEmpty()
-			|| Run.FontSize.IsSet()
-			|| !Run.FontWeight.IsEmpty()
-			|| !Run.FontStyle.IsEmpty()
-			|| Run.LineHeight.IsSet()
-			|| Run.LetterSpacing.IsSet()
-			|| Run.bUnderline.IsSet()
-			|| Run.bStrikethrough.IsSet()
-			|| !Run.Href.IsEmpty();
-	};
+		return !Run.Color.IsEmpty() || !Run.FontFamily.IsEmpty() || !Run.FontPostScriptName.IsEmpty() ||
+			   Run.FontSize.IsSet() || !Run.FontWeight.IsEmpty() || !Run.FontStyle.IsEmpty() ||
+			   Run.LineHeight.IsSet() || Run.LetterSpacing.IsSet() || Run.bUnderline.IsSet() ||
+			   Run.bStrikethrough.IsSet() || !Run.Href.IsEmpty();
+	}
 
-	const auto ShouldUseRichTextBlock = [&TextRunNeedsRichText](const TSharedPtr<FDesignNode>& InNode)
+	bool ShouldUseRichTextBlock(const TSharedPtr<FDesignNode>& InNode)
 	{
 		if (!InNode.IsValid())
 		{
@@ -263,10 +227,11 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		}
 
 		return false;
-	};
+	}
 
-	const auto BuildResolvedRichTextRun =
-		[FontMappings](const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run, int32 RunIndex, float ResolvedNodeFontSize)
+	FResolvedRichTextRun BuildResolvedRichTextRun(const TSharedPtr<FDesignNode>& InNode, const FDesignTextRun* Run,
+												  int32 RunIndex, float ResolvedNodeFontSize,
+												  const FDesign2UMGFontMappings* FontMappings)
 	{
 		FResolvedRichTextRun Result;
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
@@ -274,27 +239,26 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 
 		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty())
 		{
-			const FString EffectiveFontFamily = (Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
-			const FString EffectivePostScriptName = Run
-				? Run->FontPostScriptName
-				: InNode->Text.FontPostScriptName;
-			const FString EffectiveFontWeight = (Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
-			const FString EffectiveFontStyle = (Run && !Run->FontStyle.IsEmpty()) ? Run->FontStyle : InNode->Text.FontStyle;
+			const FString EffectiveFontFamily =
+				(Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
+			const FString EffectivePostScriptName = Run ? Run->FontPostScriptName : InNode->Text.FontPostScriptName;
+			const FString EffectiveFontWeight =
+				(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
+			const FString EffectiveFontStyle =
+				(Run && !Run->FontStyle.IsEmpty()) ? Run->FontStyle : InNode->Text.FontStyle;
 			const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
-				EffectiveFontFamily,
-				EffectivePostScriptName,
-				EffectiveFontWeight,
-				EffectiveFontStyle, FontMappings);
+				EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight, EffectiveFontStyle, FontMappings);
 			Result.Style.FontFamily = ResolvedFont.FontAssetPath;
 			Result.Style.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
 		else if (!Run->FontWeight.IsEmpty() || !Run->FontStyle.IsEmpty())
 		{
-			Result.Style.TypefaceFontName = TextFontResolution::Resolve(
-				InNode->Text.FontFamily,
-				InNode->Text.FontPostScriptName,
-				Run->FontWeight.IsEmpty() ? InNode->Text.FontWeight : Run->FontWeight,
-				Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle, FontMappings).TypefaceName;
+			Result.Style.TypefaceFontName =
+				TextFontResolution::Resolve(InNode->Text.FontFamily, InNode->Text.FontPostScriptName,
+											Run->FontWeight.IsEmpty() ? InNode->Text.FontWeight : Run->FontWeight,
+											Run->FontStyle.IsEmpty() ? InNode->Text.FontStyle : Run->FontStyle,
+											FontMappings)
+					.TypefaceName;
 		}
 
 		const bool bRunHasFontSize = Run && Run->FontSize.IsSet();
@@ -320,16 +284,19 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		}
 		else if (bHasNodeColor)
 		{
-			Result.Style.Color = FLinearColor::FromSRGBColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor).ToFColor(true));
+			Result.Style.Color =
+				FLinearColor::FromSRGBColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor).ToFColor(true));
 		}
 
 		const bool bRunUnderline = Run ? Run->bUnderline.Get(InNode->Text.bUnderline) : InNode->Text.bUnderline;
-		Result.Style.bStrikethrough = Run ? Run->bStrikethrough.Get(InNode->Text.bStrikethrough) : InNode->Text.bStrikethrough;
+		Result.Style.bStrikethrough =
+			Run ? Run->bStrikethrough.Get(InNode->Text.bStrikethrough) : InNode->Text.bStrikethrough;
 		Result.Style.Href = (Run && !Run->Href.IsEmpty()) ? Run->Href : InNode->Text.Href;
 		Result.Style.bUnderline = bRunUnderline || !Result.Style.Href.IsEmpty();
 
 		const bool bRunHasLetterSpacing = Run && Run->LetterSpacing.IsSet();
-		const float EffectiveLetterSpacing = bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing.Get(0.0f);
+		const float EffectiveLetterSpacing =
+			bRunHasLetterSpacing ? Run->LetterSpacing.GetValue() : InNode->Text.LetterSpacing.Get(0.0f);
 		const bool bHasLetterSpacing = bRunHasLetterSpacing || InNode->Text.LetterSpacing.IsSet();
 		if (bHasLetterSpacing)
 		{
@@ -337,10 +304,10 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		}
 
 		return Result;
-	};
+	}
 
-	const auto BuildRichTextContent =
-		[&BuildResolvedRichTextRun, &EscapeRichTextAttribute, &EscapeRichTextText, FontMappings](const TSharedPtr<FDesignNode>& InNode)
+	FGeneratedRichTextContent BuildRichTextContent(const TSharedPtr<FDesignNode>& InNode,
+												   const FDesign2UMGFontMappings* FontMappings)
 	{
 		FGeneratedRichTextContent Result;
 		if (!InNode.IsValid())
@@ -354,12 +321,13 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		{
 			for (int32 RunIndex = 0; RunIndex < InNode->Text.TextRuns.Num(); ++RunIndex)
 			{
-				Runs.Add(BuildResolvedRichTextRun(InNode, &InNode->Text.TextRuns[RunIndex], RunIndex, ResolvedNodeFontSize));
+				Runs.Add(BuildResolvedRichTextRun(InNode, &InNode->Text.TextRuns[RunIndex], RunIndex,
+												  ResolvedNodeFontSize, FontMappings));
 			}
 		}
 		else
 		{
-			Runs.Add(BuildResolvedRichTextRun(InNode, nullptr, 0, ResolvedNodeFontSize));
+			Runs.Add(BuildResolvedRichTextRun(InNode, nullptr, 0, ResolvedNodeFontSize, FontMappings));
 		}
 
 		TSet<FString> UniqueHrefs;
@@ -403,10 +371,38 @@ FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FD
 		}
 
 		return Result;
-	};
+	}
+} // namespace
+
+FString Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot::FindIconFontAssetPath(const FString& FontFamily) const
+{
+	if (FontFamily.IsEmpty())
+	{
+		return FString();
+	}
+
+	if (const FString* ExactMatch = IconFontAssetPaths.Find(FontFamily))
+	{
+		return *ExactMatch;
+	}
+
+	for (const TPair<FString, FString>& Pair : IconFontAssetPaths)
+	{
+		if (Pair.Key.Equals(FontFamily, ESearchCase::IgnoreCase))
+		{
+			return Pair.Value;
+		}
+	}
+
+	return FString();
+}
+
+FUMGWidgetNode Design2UMGTextWidgetBuilder::CreateTextWidget(const TSharedPtr<FDesignNode>& Node, const FDesign2UMGFontMappings* FontMappings)
+{
+	FUMGWidgetNode Widget;
 
 	const bool bUseRichTextBlock = ShouldUseRichTextBlock(Node);
-	FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node) : FGeneratedRichTextContent();
+	FGeneratedRichTextContent RichTextContent = bUseRichTextBlock ? BuildRichTextContent(Node, FontMappings) : FGeneratedRichTextContent();
 	Widget.Type = bUseRichTextBlock ? UMGWidgetTypes::RichTextBlock : UMGWidgetTypes::TextBlock;
 	Widget.Text.Text = bUseRichTextBlock ? RichTextContent.Markup : TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
 	ApplyTextProperties(Widget, Node, FontMappings);
@@ -601,4 +597,3 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 
 	return Result;
 }
-

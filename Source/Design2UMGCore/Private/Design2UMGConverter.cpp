@@ -165,8 +165,21 @@ namespace Design2UMGConverterPrivate
 			const FConversionContext& Context,
 			const EDesignLayout ParentLayout) const
 		{
+			if (!Context.State.ConversionError.IsEmpty())
+			{
+				return FUMGWidgetNode();
+			}
+
 			FRecursionGuard Guard(Context.State.RecursionDepth, TEXT("ConvertNode"));
-			if (!Guard.bValid || !ShouldConvertNode(Node, ParentLayout))
+			if (!Guard.bValid)
+			{
+				Context.State.ConversionError = FString::Printf(
+					TEXT("Design conversion failed at node '%s': expanded design tree exceeds %d levels."),
+					Node.IsValid() ? *Node->Id : TEXT("<invalid>"),
+					DesignTreeLimits::MaxNodeDepth);
+				return FUMGWidgetNode();
+			}
+			if (!ShouldConvertNode(Node, ParentLayout))
 			{
 				return FUMGWidgetNode();
 			}
@@ -237,7 +250,12 @@ namespace Design2UMGConverterPrivate
 				{
 					return PreResolutionResolver.MakeWorkingCopy(RefNode);
 				};
-			SizeEstimator::PromoteFitContentSizes(Expanded, ActiveContext.State.Document, RefResolver, &ActiveContext.State.SettingsSnapshot.FontMappings);
+			SizeEstimator::PromoteFitContentSizes(
+				Expanded,
+				ActiveContext.State.Document,
+				RefResolver,
+				&ActiveContext.State.SettingsSnapshot.FontMappings,
+				&ActiveContext.State.ConversionError);
 			return ConvertNode(Expanded, ActiveContext, ParentLayout);
 		}
 
@@ -572,6 +590,13 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	Design2UMGConverterInternal::FConversionState State(Document, Result.Warnings, SettingsSnapshot);
 	auto FinalizeResult = [&Result, &State, &Document]()
 	{
+		if (!State.ConversionError.IsEmpty())
+		{
+			Result.RootWidget = FUMGWidgetNode();
+			Result.ConversionError = State.ConversionError;
+			return;
+		}
+
 		Design2UMGCanvasFlattening::FFlattenStats FlattenStats;
 		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Result.RootWidget, FlattenStats);
 		if (FlattenStats.MergedNestedCanvasCount > 0 || FlattenStats.RemovedEmptyCanvasCount > 0
@@ -658,12 +683,26 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		};
 	for (const auto& Child : VisibleChildren)
 	{
-		SizeEstimator::PromoteFitContentSizes(Child, Document, RefResolver, &State.SettingsSnapshot.FontMappings);
+		if (Child->bReusable) continue;
+		SizeEstimator::PromoteFitContentSizes(
+			Child,
+			Document,
+			RefResolver,
+			&State.SettingsSnapshot.FontMappings,
+			&State.ConversionError);
+		if (!State.ConversionError.IsEmpty())
+		{
+			break;
+		}
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
 	for (const auto& Child : VisibleChildren)
 	{
+		if (!State.ConversionError.IsEmpty())
+		{
+			break;
+		}
 		if (Child->bReusable)
 			continue;
 

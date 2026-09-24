@@ -249,9 +249,225 @@ bool FDesign2UMGComponentBlueprintContext::ApplyInstance(UUserWidget* Instance, 
 	return Apply(Component->Data.RootWidget, Node, TEXT("0"));
 }
 
-UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetData& Data,
-	const FString& Folder, const FDesign2UMGGenerationSettingsSnapshot* Settings,
-	FDesign2UMGGenerationOutput* Output, FUMGPrototypeNavigationData* Navigation, UWidgetBlueprint* TargetBlueprint, DesignImageResources::FImageOperationBudget* Budget)
+namespace
+{
+	struct FPreparedComponentTemplates
+	{
+		TArray<FString> Order;
+		TMap<FString, UWidgetBlueprint*> Existing;
+		bool bAssetConflict = false;
+	};
+
+	bool PrepareComponentTemplates(const FUMGWidgetData& Data, const FString& Folder,
+		const FDesign2UMGGenerationSettingsSnapshot& Effective, FDesign2UMGComponentBlueprintContext& Context,
+		FPreparedComponentTemplates& OutPrepared)
+	{
+		FigmaComponentDependencies::FCatalog Catalog;
+		if (!FigmaComponentDependencies::Parse(Data.SourceDocument().ComponentDependenciesJson, Catalog, Context.Error))
+			return false;
+		TSet<FString> MappedKeys;
+		for (const auto& Entry : Effective.ComponentMapping.Table.Entries)
+		{
+			if (Entry.Provider == TEXT("figma") && Entry.DocumentScope == Context.DocumentScope)
+			{
+				MappedKeys.Add(Entry.ComponentKey);
+			}
+		}
+		for (const auto& Pair : Catalog.Definitions)
+		{
+			Context.NodeIdToKey.Add(Pair.Value.NodeId, Pair.Key);
+			DesignComponentMapping::FDesignComponentIdentity Identity;
+			Identity.Provider = TEXT("figma");
+			Identity.DocumentScope = Context.DocumentScope;
+			Identity.ComponentKey = Pair.Key;
+			// Published set identity is shared by user mapping and dependency traversal.
+			Identity.ComponentSetKey = Pair.Value.ComponentSetKey;
+			bool AtSet = false;
+			if (Effective.ComponentMapping.Table.Match(Identity, AtSet))
+				MappedKeys.Add(Pair.Key);
+		}
+		TArray<FString> Requested;
+		TFunction<void(const FUMGWidgetNode&)> Collect = [&](const FUMGWidgetNode& Node)
+		{
+			const FString Key = Context.ResolveKey(Node);
+			if (!Key.IsEmpty())
+			{
+				DesignComponentMapping::FDesignComponentIdentity Identity;
+				bool AtSet = false;
+				if (DesignComponentMapping::TryResolveFigmaComponentIdentity(
+						Node.Source(), Context.DocumentScope, Identity) &&
+					Effective.ComponentMapping.Table.Match(Identity, AtSet))
+					MappedKeys.Add(Key);
+				Requested.AddUnique(Key);
+				if (MappedKeys.Contains(Key))
+					return;
+			}
+			for (const auto& Child : Node.Children)
+				Collect(Child);
+		};
+		Collect(Data.RootWidget);
+		TArray<FString> Order;
+		if (!FigmaComponentDependencies::BuildOrder(Catalog, Requested, MappedKeys, Order, Context.Error))
+			return false;
+		DesignLocalFontImport::FSourceIndex FontSources;
+		TMap<FString, UWidgetBlueprint*> Existing;
+		const FComponentFolders ComponentFolders = IndexComponentFolders(Folder / TEXT("Components"));
+		for (const FString& Key : Order)
+		{
+			const auto& Definition = Catalog.Definitions[Key];
+			TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
+			Json->SetStringField(TEXT("fileKey"), Context.DocumentScope);
+			Json->SetObjectField(TEXT("document"), Definition.Document);
+			FString Serialized;
+			FJsonSerializer::Serialize(Json, TJsonWriterFactory<>::Create(&Serialized));
+			FDesignDocument Document;
+			if (!FFigmaParser::ParseDocument(Serialized, Document))
+			{
+				Context.Error = TEXT("Failed to parse component definition: ") + Key;
+				return false;
+			}
+			FDesign2UMGComponentBlueprintContext::FComponent& Component = Context.Components.Add(Key);
+			TSet<FString> ImageRefs;
+			FFigmaParser::CollectImageRefs(Document, ImageRefs);
+			for (const FString& Ref : ImageRefs)
+			{
+				const FString* Url = Data.SourceDocument().ResolvedComponentImageUrls.Find(Ref);
+				const bool HasLocalImage = !Data.SourceDocument().SourceFilePath.IsEmpty() &&
+										   FPaths::FileExists(FPaths::GetPath(Data.SourceDocument().SourceFilePath) /
+															  TEXT("images") / (Ref + TEXT(".png")));
+				if ((!Url || Url->IsEmpty()) && !HasLocalImage)
+				{
+					Context.Error = FString::Printf(TEXT("Component '%s' is missing image '%s'"), *Key, *Ref);
+					return false;
+				}
+			}
+			FFigmaParser::ApplyImageUrls(Document, Data.SourceDocument().ResolvedComponentImageUrls);
+			if (!Data.SourceDocument().SourceFilePath.IsEmpty())
+			{
+				Design2UMGLocalFigmaImport::ResolveDocumentImages(Document, Data.SourceDocument().SourceFilePath);
+			}
+			// A selected definition is the asset body, rather than an off-page reusable library entry.
+			for (const auto& RootNode : Document.Children)
+			{
+				RootNode->bReusable = false;
+				// Library placement visibility is not the visibility of a component instance.
+				// Each instance keeps its own visibility in the parent IR.
+				RootNode->Transform.bEnabled = true;
+				// An empty component is still a reusable, sized template. With no children,
+				// hug-content estimation has nothing to measure; keep its declared extent.
+				if (RootNode->Children.IsEmpty() && RootNode->Transform.LayoutBoundsSize.IsSet())
+				{
+					const FVector2D SourceSize = RootNode->Transform.LayoutBoundsSize.GetValue();
+					if (RootNode->Transform.Width.IsFit())
+						RootNode->Transform.Width = FDesignSize::Fixed(SourceSize.X);
+					if (RootNode->Transform.Height.IsFit())
+						RootNode->Transform.Height = FDesignSize::Fixed(SourceSize.Y);
+				}
+			}
+			TArray<FString> FontWarnings;
+			if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Context.Error, &FontSources))
+				return false;
+			Component.Data = FDesign2UMGConverter::Convert(Document, Effective.ComponentConversionSettings);
+			if (!Component.Data.ConversionError.IsEmpty())
+			{
+				Context.Error = Component.Data.ConversionError;
+				return false;
+			}
+			// Ordinary empty frames may be removed by conversion. A standalone empty
+			// component instead needs a blank root that can accept its instance content.
+			if (Document.Children.Num() == 1 && Document.Children[0]->Children.IsEmpty() &&
+				Component.Data.RootWidget.Children.IsEmpty() && Component.Data.RootWidget.Bounds.W == 0 &&
+				Component.Data.RootWidget.Bounds.H == 0 && Document.Children[0]->Transform.LayoutBoundsSize.IsSet())
+			{
+				const auto& SourceRoot = Document.Children[0];
+				const FVector2D Size = SourceRoot->Transform.LayoutBoundsSize.GetValue();
+				Component.Data.RootWidget.Id = SourceRoot->Id;
+				Component.Data.RootWidget.Name = SourceRoot->Name;
+				Component.Data.RootWidget.Bounds.W = Size.X;
+				Component.Data.RootWidget.Bounds.H = Size.Y;
+				Component.Data.RootWidget.MutableSource().SourceNodeId = SourceRoot->Id;
+				Component.Data.RootWidget.MutableSource().SourceNodeType = TEXT("COMPONENT");
+			}
+			Component.Data.Warnings.Append(FontWarnings);
+			Component.Data.WidgetName = StableName(Context.DocumentScope, Key);
+			Component.Data.MutableSourceDocument().DocumentScope = Context.DocumentScope;
+			Component.PackageFolder = Folder / TEXT("Components");
+			const FString SetKey =
+				Definition.ComponentSetKey.IsEmpty() ? Definition.ComponentSetId : Definition.ComponentSetKey;
+			if (!SetKey.IsEmpty())
+				Component.PackageFolder /= StableName(Context.DocumentScope, SetKey);
+			UWidgetBlueprint* ExistingComponent = nullptr;
+			if (!ResolveExistingComponentFolder(
+					ComponentFolders, Component.Data.WidgetName, Component.PackageFolder, Context.Error) ||
+				!FindExisting(Component.Data, Component.PackageFolder, ExistingComponent, Context.Error))
+			{
+				OutPrepared.bAssetConflict = true;
+				return false;
+			}
+			Existing.Add(Key, ExistingComponent);
+		}
+		OutPrepared.Order = MoveTemp(Order);
+		OutPrepared.Existing = MoveTemp(Existing);
+		return true;
+	}
+
+	void MarkExistingAssetsTransactional(
+		const TMap<FString, UWidgetBlueprint*>& ExistingComponents, UWidgetBlueprint* ExistingRoot)
+	{
+		TArray<UWidgetBlueprint*> ExistingAssets;
+		ExistingComponents.GenerateValueArray(ExistingAssets);
+		ExistingAssets.AddUnique(ExistingRoot);
+		for (UWidgetBlueprint* Asset : ExistingAssets)
+		{
+			if (!Asset)
+			{
+				continue;
+			}
+
+			Asset->SetFlags(RF_Transactional);
+			Asset->Modify();
+			TArray<UObject*> TreeObjects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, true);
+#else
+			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, EGetObjectsFlags::IncludeNestedObjects);
+#endif
+			TreeObjects.Add(Asset->WidgetTree);
+			for (UObject* Object : TreeObjects)
+			{
+				Object->SetFlags(RF_Transactional);
+				Object->Modify();
+			}
+		}
+	}
+
+	void AppendComponentBuildDiagnostics(const TArray<FString>& Order,
+		const FDesign2UMGComponentBlueprintContext& Context, FDesign2UMGGenerationOutput& Result)
+	{
+		for (int32 Index = 0; Index < Order.Num(); ++Index)
+		{
+			const FString& Key = Order[Index];
+			Result.bHasDegradation |= Result.Components[Index].Output->bHasDegradation;
+			for (const FString& Warning : Context.Components[Key].Data.Warnings)
+			{
+				Result.MappingDiagnostics.Add(
+					{TEXT("component_warning"), FString::Printf(TEXT("Component '%s': %s"), *Key, *Warning)});
+			}
+			for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.Components[Index].Output->MappingDiagnostics)
+			{
+				Result.MappingDiagnostics.Add(
+					{Diagnostic.Kind, FString::Printf(TEXT("Component '%s': %s"), *Key, *Diagnostic.Message)});
+			}
+		}
+	}
+} // namespace
+
+UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetData& Data, const FString& Folder,
+															  const FDesign2UMGGenerationSettingsSnapshot* Settings,
+															  FDesign2UMGGenerationOutput* Output,
+															  FUMGPrototypeNavigationData* Navigation,
+															  UWidgetBlueprint* TargetBlueprint,
+															  DesignImageResources::FImageOperationBudget* Budget)
 {
 	// Every component and the page root draw from the same operation budget.
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
@@ -288,135 +504,20 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		}
 		return nullptr;
 	};
-	FigmaComponentDependencies::FCatalog Catalog;
 	if (Context.DocumentScope.IsEmpty() || !Output)
 	{
 		Context.Error = TEXT("Component batch requires a stable document identity and generation output for dependency saves");
 		return Fail();
 	}
-	if (!FigmaComponentDependencies::Parse(Data.SourceDocument().ComponentDependenciesJson, Catalog, Context.Error)) return Fail();
-	TSet<FString> MappedKeys;
-	for (const auto& Entry : Effective.ComponentMapping.Table.Entries)
+	FPreparedComponentTemplates PreparedComponents;
+	if (!PrepareComponentTemplates(Data, Folder, Effective, Context, PreparedComponents))
 	{
-		if (Entry.Provider == TEXT("figma") && Entry.DocumentScope == Context.DocumentScope)
-		{
-			MappedKeys.Add(Entry.ComponentKey);
-		}
+		return PreparedComponents.bAssetConflict
+			? Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict)
+			: Fail();
 	}
-	for (const auto& Pair : Catalog.Definitions)
-	{
-		Context.NodeIdToKey.Add(Pair.Value.NodeId, Pair.Key);
-		DesignComponentMapping::FDesignComponentIdentity Identity;
-		Identity.Provider = TEXT("figma");
-		Identity.DocumentScope = Context.DocumentScope;
-		Identity.ComponentKey = Pair.Key;
-		// Published set identity is shared by user mapping and dependency traversal.
-		Identity.ComponentSetKey = Pair.Value.ComponentSetKey;
-		bool AtSet = false;
-		if (Effective.ComponentMapping.Table.Match(Identity, AtSet)) MappedKeys.Add(Pair.Key);
-	}
-	TArray<FString> Requested;
-	TFunction<void(const FUMGWidgetNode&)> Collect = [&](const FUMGWidgetNode& Node)
-	{
-		const FString Key = Context.ResolveKey(Node);
-		if (!Key.IsEmpty())
-		{
-			DesignComponentMapping::FDesignComponentIdentity Identity;
-			bool AtSet = false;
-			if (DesignComponentMapping::TryResolveFigmaComponentIdentity(Node.Source(), Context.DocumentScope, Identity)
-				&& Effective.ComponentMapping.Table.Match(Identity, AtSet)) MappedKeys.Add(Key);
-			Requested.AddUnique(Key);
-			if (MappedKeys.Contains(Key)) return;
-		}
-		for (const auto& Child : Node.Children) Collect(Child);
-	};
-	Collect(Data.RootWidget);
-	TArray<FString> Order;
-	if (!FigmaComponentDependencies::BuildOrder(Catalog, Requested, MappedKeys, Order, Context.Error)) return Fail();
-	DesignLocalFontImport::FSourceIndex FontSources;
-	TMap<FString, UWidgetBlueprint*> Existing;
-	const FComponentFolders ComponentFolders = IndexComponentFolders(Folder / TEXT("Components"));
-	for (const FString& Key : Order)
-	{
-		const auto& Definition = Catalog.Definitions[Key];
-		TSharedRef<FJsonObject> Json = MakeShared<FJsonObject>();
-		Json->SetStringField(TEXT("fileKey"), Context.DocumentScope);
-		Json->SetObjectField(TEXT("document"), Definition.Document);
-		FString Serialized;
-		FJsonSerializer::Serialize(Json, TJsonWriterFactory<>::Create(&Serialized));
-		FDesignDocument Document;
-		if (!FFigmaParser::ParseDocument(Serialized, Document))
-		{
-			Context.Error = TEXT("Failed to parse component definition: ") + Key;
-			return Fail();
-		}
-		FComponent& Component = Context.Components.Add(Key);
-		TSet<FString> ImageRefs;
-		FFigmaParser::CollectImageRefs(Document, ImageRefs);
-		for (const FString& Ref : ImageRefs)
-		{
-			const FString* Url = Data.SourceDocument().ResolvedComponentImageUrls.Find(Ref);
-			const bool HasLocalImage = !Data.SourceDocument().SourceFilePath.IsEmpty()
-				&& FPaths::FileExists(FPaths::GetPath(Data.SourceDocument().SourceFilePath) / TEXT("images") / (Ref + TEXT(".png")));
-			if ((!Url || Url->IsEmpty()) && !HasLocalImage)
-			{
-				Context.Error = FString::Printf(TEXT("Component '%s' is missing image '%s'"), *Key, *Ref);
-				return Fail();
-			}
-		}
-		FFigmaParser::ApplyImageUrls(Document, Data.SourceDocument().ResolvedComponentImageUrls);
-		if (!Data.SourceDocument().SourceFilePath.IsEmpty())
-		{
-			Design2UMGLocalFigmaImport::ResolveDocumentImages(Document, Data.SourceDocument().SourceFilePath);
-		}
-		// A selected definition is the asset body, rather than an off-page reusable library entry.
-		for (const auto& RootNode : Document.Children)
-		{
-			RootNode->bReusable = false;
-			// Library placement visibility is not the visibility of a component instance.
-			// Each instance keeps its own visibility in the parent IR.
-			RootNode->Transform.bEnabled = true;
-			// An empty component is still a reusable, sized template. With no children,
-			// hug-content estimation has nothing to measure; keep its declared extent.
-			if (RootNode->Children.IsEmpty() && RootNode->Transform.LayoutBoundsSize.IsSet())
-			{
-				const FVector2D SourceSize = RootNode->Transform.LayoutBoundsSize.GetValue();
-				if (RootNode->Transform.Width.IsFit())
-					RootNode->Transform.Width = FDesignSize::Fixed(SourceSize.X);
-				if (RootNode->Transform.Height.IsFit())
-					RootNode->Transform.Height = FDesignSize::Fixed(SourceSize.Y);
-			}
-		}
-		TArray<FString> FontWarnings;
-		if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Context.Error, &FontSources)) return Fail();
-		Component.Data = FDesign2UMGConverter::Convert(Document, Effective.ComponentConversionSettings);
-		// Ordinary empty frames may be removed by conversion. A standalone empty
-		// component instead needs a blank root that can accept its instance content.
-		if (Document.Children.Num() == 1 && Document.Children[0]->Children.IsEmpty()
-			&& Component.Data.RootWidget.Children.IsEmpty()
-			&& Component.Data.RootWidget.Bounds.W == 0 && Component.Data.RootWidget.Bounds.H == 0
-			&& Document.Children[0]->Transform.LayoutBoundsSize.IsSet())
-		{
-			const auto& SourceRoot = Document.Children[0];
-			const FVector2D Size = SourceRoot->Transform.LayoutBoundsSize.GetValue();
-			Component.Data.RootWidget.Id = SourceRoot->Id;
-			Component.Data.RootWidget.Name = SourceRoot->Name;
-			Component.Data.RootWidget.Bounds.W = Size.X;
-			Component.Data.RootWidget.Bounds.H = Size.Y;
-			Component.Data.RootWidget.MutableSource().SourceNodeId = SourceRoot->Id;
-			Component.Data.RootWidget.MutableSource().SourceNodeType = TEXT("COMPONENT");
-		}
-		Component.Data.Warnings.Append(FontWarnings);
-		Component.Data.WidgetName = StableName(Context.DocumentScope, Key);
-		Component.Data.MutableSourceDocument().DocumentScope = Context.DocumentScope;
-		Component.PackageFolder = Folder / TEXT("Components");
-		const FString SetKey = Definition.ComponentSetKey.IsEmpty() ? Definition.ComponentSetId : Definition.ComponentSetKey;
-		if (!SetKey.IsEmpty()) Component.PackageFolder /= StableName(Context.DocumentScope, SetKey);
-		UWidgetBlueprint* ExistingComponent = nullptr;
-		if (!ResolveExistingComponentFolder(ComponentFolders, Component.Data.WidgetName, Component.PackageFolder, Context.Error)
-			|| !FindExisting(Component.Data, Component.PackageFolder, ExistingComponent, Context.Error)) return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
-		Existing.Add(Key, ExistingComponent);
-	}
+	const TArray<FString>& Order = PreparedComponents.Order;
+	TMap<FString, UWidgetBlueprint*>& Existing = PreparedComponents.Existing;
 	FUMGWidgetData RootData = Data;
 	RootData.WidgetName = TargetBlueprint ? TargetBlueprint->GetName()
 		: StableName(Context.DocumentScope, TEXT("root|") + Data.RootWidget.GetStableDesignNodeId());
@@ -440,27 +541,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		}
 		BulkTransactionIndex = GEditor->BeginTransaction(TEXT("Design2UMG Component Bulk"),
 			NSLOCTEXT("Design2UMG", "ComponentBulkTransaction", "Design2UMG Component Bulk"), ExistingRoot);
-		TArray<UWidgetBlueprint*> ExistingAssets;
-		Existing.GenerateValueArray(ExistingAssets);
-		ExistingAssets.AddUnique(ExistingRoot);
-		for (UWidgetBlueprint* Asset : ExistingAssets)
-		{
-			if (!Asset) continue;
-			Asset->SetFlags(RF_Transactional);
-			Asset->Modify();
-			TArray<UObject*> TreeObjects;
-#if UE_VERSION_OLDER_THAN(5, 8, 0)
-			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, true);
-#else
-			GetObjectsWithOuter(Asset->WidgetTree, TreeObjects, EGetObjectsFlags::IncludeNestedObjects);
-#endif
-			TreeObjects.Add(Asset->WidgetTree);
-			for (UObject* Object : TreeObjects)
-			{
-				Object->SetFlags(RF_Transactional);
-				Object->Modify();
-			}
-		}
+		MarkExistingAssetsTransactional(Existing, ExistingRoot);
 	}
 	for (const FString& Key : Order)
 	{
@@ -566,19 +647,7 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 	}
 	// Root generation writes its own diagnostics. Append dependency diagnostics
 	// afterwards so successful, off-page components are represented in the report.
-	for (int32 Index = 0; Index < Order.Num(); ++Index)
-	{
-		const FString& Key = Order[Index];
-		Result.bHasDegradation |= Result.Components[Index].Output->bHasDegradation;
-		for (const FString& Warning : Context.Components[Key].Data.Warnings)
-		{
-			Result.MappingDiagnostics.Add({TEXT("component_warning"), FString::Printf(TEXT("Component '%s': %s"), *Key, *Warning)});
-		}
-		for (const FDesign2UMGMappingDiagnostic& Diagnostic : Result.Components[Index].Output->MappingDiagnostics)
-		{
-			Result.MappingDiagnostics.Add({Diagnostic.Kind, FString::Printf(TEXT("Component '%s': %s"), *Key, *Diagnostic.Message)});
-		}
-	}
+	AppendComponentBuildDiagnostics(Order, Context, Result);
 	Result.Manifest.bComponentBulkRoot = true;
 	Result.Commit.Memory = EDesign2UMGMemoryState::Modified;
 	if (Root) Result.Commit.AssetPath = Root->GetPathName();

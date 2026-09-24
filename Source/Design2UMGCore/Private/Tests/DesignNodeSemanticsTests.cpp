@@ -609,7 +609,7 @@ bool FSizeEstimatorSourceFlagsDoNotLockFitGrowthTest::RunTest(const FString& Par
 	FDesignDocument EmptyDocument;
 	const auto ExpandRefFromDoc = [&EmptyDocument](const TSharedPtr<FDesignNode>& RefNode)
 	{
-		return RefExpander::ExpandRef(RefNode, EmptyDocument);
+		return RefExpander::ExpandRef(RefNode, EmptyDocument).ExpandedNode;
 	};
 	const FVector2D SourceFlaggedSize = SizeEstimator::PromoteFitContentSizes(SourceFlaggedNode, EmptyDocument, ExpandRefFromDoc);
 	const FVector2D UnflaggedSize = SizeEstimator::PromoteFitContentSizes(UnflaggedNode, EmptyDocument, ExpandRefFromDoc);

@@ -177,6 +177,77 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticImageResultContractTest,
+	"Design2UMG.Import.ImportDiagnosticImageResultContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImportDiagnosticImageResultContractTest::RunTest(const FString& Parameters)
+{
+	const FString ReportDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("ImportReports"));
+	TArray<FString> ExistingReportFiles;
+	IFileManager::Get().FindFilesRecursive(ExistingReportFiles, *ReportDir, TEXT("*.import_report.json"), true, false, false);
+	TSet<FString> ExistingReports;
+	ExistingReports.Append(ExistingReportFiles);
+
+	FDesignDocument Document;
+	Document.MutableSourceDocument().SourceFilePath = TEXT("G:/Fixtures/image_result_contract.json");
+	FUMGWidgetData Data;
+	Data.WidgetName = TEXT("WBP_ImageResultContract");
+
+	FDesignImageImportResult ImageResult;
+	ImageResult.ImportPath = TEXT("/Game/Design2UMG/ImportedImages");
+	for (int32 Index = 0; Index < 33; ++Index)
+	{
+		FDesignImageDiagnostic Success;
+		Success.Outcome = EDesignImageDiagnosticOutcome::Imported;
+		Success.Resource = Index == 0
+			? TEXT("/Game/Textures/T_successfully_failed_name")
+			: FString::Printf(TEXT("/Game/Textures/T_Success_%d"), Index);
+		Success.Message = FString::Printf(TEXT("Imported texture: %s"), *Success.Resource);
+		ImageResult.AddDiagnostic(MoveTemp(Success));
+	}
+	FDesignImageDiagnostic BudgetFailure;
+	BudgetFailure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	BudgetFailure.Category = EDesignImageDiagnosticCategory::Budget;
+	BudgetFailure.NodeId = TEXT("late_failure");
+	BudgetFailure.NodeName = TEXT("Late Failure");
+	BudgetFailure.Resource = TEXT("https://example.com/late.png");
+	BudgetFailure.Reason = TEXT("Cumulative image byte budget exceeded");
+	BudgetFailure.Message = TEXT("Late image exceeded the operation budget");
+	ImageResult.AddDiagnostic(MoveTemp(BudgetFailure));
+	ImageResult.RefreshDisplaySummary();
+
+	DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
+	Artifacts.ImageResult = ImageResult;
+	TestTrue(TEXT("Typed image result report is written"), DesignImportDiagnosticReport::Write(Document, Data, Artifacts));
+	const FString ReportPath = FindNewImportReport(ReportDir, ExistingReports);
+	TestTrue(TEXT("Typed image result report path is found"), !ReportPath.IsEmpty());
+
+	TSharedPtr<FJsonObject> RootObject;
+	if (!LoadImportReportJson(*this, ReportPath, RootObject))
+	{
+		return false;
+	}
+	const TSharedPtr<FJsonObject>* ResourcesObject = nullptr;
+	if (!TestTrue(TEXT("Report has resources object"), RootObject->TryGetObjectField(TEXT("resources"), ResourcesObject) && ResourcesObject))
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>& Failures = (*ResourcesObject)->GetArrayField(TEXT("imageFailures"));
+	TestEqual(TEXT("Only the typed failure is reported"), Failures.Num(), 1);
+	if (Failures.Num() == 1)
+	{
+		const TSharedPtr<FJsonObject> Failure = Failures[0]->AsObject();
+		TestEqual(TEXT("A failure after 32 successes keeps its category"), Failure->GetStringField(TEXT("category")), FString(TEXT("budget")));
+		TestEqual(TEXT("A failure after 32 successes keeps its node"), Failure->GetObjectField(TEXT("node"))->GetStringField(TEXT("id")), FString(TEXT("late_failure")));
+	}
+	const FString Summary = (*ResourcesObject)->GetStringField(TEXT("imageImportSummary"));
+	TestTrue(TEXT("Summary keeps the total failure count"), Summary.Contains(TEXT("failed=1")));
+	TestTrue(TEXT("Summary keeps the failure category count"), Summary.Contains(TEXT("budget=1")));
+	TestTrue(TEXT("Summary explicitly reports omitted detail"), Summary.Contains(TEXT("2 image diagnostic detail(s) omitted")));
+	IFileManager::Get().Delete(*ReportPath, false, true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportOutcomeContractTest,
 	"Design2UMG.Import.ImportDiagnosticReportOutcomeContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -487,14 +558,23 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	Wrapper.Children.Add(Child);
 	Data.RootWidget = Wrapper;
 
-	const FString ImageReport =
-		TEXT("Remote image import: imported=0 reused=0 repaired=0 failed=1 path=/Game/Design2UMG/ImportedImages\n")
-		TEXT("Image 'Hero' download failed: https://example.com/hero.png (reason: Network request failed)");
+	FDesignImageImportResult ImageResult;
+	ImageResult.ImportPath = TEXT("/Game/Design2UMG/ImportedImages");
+	FDesignImageDiagnostic ImageFailure;
+	ImageFailure.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	ImageFailure.Category = EDesignImageDiagnosticCategory::Download;
+	ImageFailure.NodeId = TEXT("hero_image");
+	ImageFailure.NodeName = TEXT("Hero");
+	ImageFailure.Resource = TEXT("https://example.com/hero.png");
+	ImageFailure.Reason = TEXT("Network request failed");
+	ImageFailure.Message = TEXT("Image 'Hero' download failed: https://example.com/hero.png (reason: Network request failed)");
+	ImageResult.AddDiagnostic(MoveTemp(ImageFailure));
+	ImageResult.RefreshDisplaySummary();
 
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		ImageReport,
+		ImageResult,
 		TEXT("/Game/Design2UMG/_TestOutput/ImportReport"),
 		TEXT("G:/SampleProject/Saved/Design2UMG/WBP_ImportReportFixture.png"),
 		TEXT("/Game/Design2UMG/_TestOutput/ImportReport/WBP_ImportReportFixture"));
@@ -594,6 +674,23 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Report has resources object"), RootObject->TryGetObjectField(TEXT("resources"), ResourcesObject) && ResourcesObject);
 	TestEqual(TEXT("Report records missing fonts"), (*ResourcesObject)->GetArrayField(TEXT("missingFonts")).Num(), 1);
 	TestEqual(TEXT("Report records image failures"), (*ResourcesObject)->GetArrayField(TEXT("imageFailures")).Num(), 1);
+	const TSharedPtr<FJsonObject> ImageFailureObject = (*ResourcesObject)->GetArrayField(TEXT("imageFailures"))[0]->AsObject();
+	TestEqual(TEXT("Image failure has typed outcome"), ImageFailureObject->GetStringField(TEXT("outcome")), FString(TEXT("failed")));
+	TestEqual(TEXT("Image failure has typed category"), ImageFailureObject->GetStringField(TEXT("category")), FString(TEXT("download")));
+	TestEqual(TEXT("Image failure has structured resource"), ImageFailureObject->GetStringField(TEXT("resource")), FString(TEXT("https://example.com/hero.png")));
+	TestEqual(TEXT("Image failure has structured reason"), ImageFailureObject->GetStringField(TEXT("reason")), FString(TEXT("Network request failed")));
+	const TSharedPtr<FJsonObject>* ImageNodeObject = nullptr;
+	TestTrue(TEXT("Image failure has structured node"), ImageFailureObject->TryGetObjectField(TEXT("node"), ImageNodeObject) && ImageNodeObject);
+	if (ImageNodeObject)
+	{
+		TestEqual(TEXT("Image failure node id is preserved"), (*ImageNodeObject)->GetStringField(TEXT("id")), FString(TEXT("hero_image")));
+	}
+	const TSharedPtr<FJsonObject>* ImageImportObject = nullptr;
+	TestTrue(TEXT("Report has structured image import result"), (*ResourcesObject)->TryGetObjectField(TEXT("imageImport"), ImageImportObject) && ImageImportObject);
+	if (ImageImportObject)
+	{
+		TestEqual(TEXT("Structured image failed count is preserved"), static_cast<int32>((*ImageImportObject)->GetNumberField(TEXT("failedCount"))), 1);
+	}
 	TestFalse(TEXT("Top-level missingFonts alias is retired"), RootObject->HasField(TEXT("missingFonts")));
 	TestFalse(TEXT("Top-level imageImportReport alias is retired"), RootObject->HasField(TEXT("imageImportReport")));
 	const TSharedPtr<FJsonObject>* FontResolutionObject = nullptr;
@@ -685,7 +782,7 @@ bool FImportDiagnosticReportEngineFontFallbackWarnsTest::RunTest(const FString& 
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/EngineFontFallback"),
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/EngineFontFallback/WBP_EngineFontFallbackReportFixture"));
@@ -823,7 +920,7 @@ bool FImportDiagnosticReportInvalidExplicitFontMappingTest::RunTest(const FStrin
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/InvalidExplicitFontMapping"),
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/InvalidExplicitFontMapping/WBP_InvalidExplicitFontMappingReportFixture"));
@@ -967,7 +1064,7 @@ bool FImportDiagnosticReportExplicitMappingMissingTypefaceTest::RunTest(const FS
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/ExplicitMappingMissingTypeface"),
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/ExplicitMappingMissingTypeface/WBP_ExplicitMappingMissingTypefaceReportFixture"));
@@ -1172,7 +1269,7 @@ bool FImportDiagnosticReportFontIdentityEvidenceTest::RunTest(const FString& Par
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/FontIdentityEvidence"),
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/FontIdentityEvidence/WBP_FontIdentityEvidenceReportFixture"));
@@ -1376,7 +1473,7 @@ bool FImportDiagnosticReportAmbiguousFontIdentityEvidenceTest::RunTest(const FSt
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/AmbiguousFontIdentityEvidence"),
 		FString(),
 		TEXT("/Game/Design2UMG/_TestOutput/AmbiguousFontIdentityEvidence/WBP_AmbiguousFontIdentityEvidenceReportFixture"));
@@ -1453,7 +1550,7 @@ bool FImportDiagnosticReportTypedSourcePathContractTest::RunTest(const FString& 
 	DesignImportPipeline::WriteImportDiagnosticReport(
 		Document,
 		Data,
-		FString(),
+		FDesignImageImportResult(),
 		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath"),
 		TEXT("G:/SampleProject/Saved/Design2UMG/WBP_TypedSourcePathFixture.png"),
 		TEXT("/Game/Design2UMG/_TestOutput/TypedSourcePath/WBP_TypedSourcePathFixture"));

@@ -4,6 +4,7 @@
 
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "DesignSchema.h"
+#include "DesignTreeBudget.h"
 #include "FontResolver.h"
 #include "DesignReferenceExpansion.h"
 #include "UMGWidgetUtils.h"
@@ -244,10 +245,14 @@ namespace Design2UMGAutomationStructureSnapshot
 
 			if (Node->Type == EDesignNodeType::Ref)
 			{
-				if (TSharedPtr<FDesignNode> Expanded = RefExpander::ExpandRef(Node, Doc))
+				const FDesignReferenceExpansionResult Expansion = RefExpander::ExpandRef(Node, Doc);
+				if (Expansion.IsSuccess())
 				{
-					return Expanded;
+					return Expansion.ExpandedNode;
 				}
+				// A fatal expansion has no effective structure. Missing targets retain the authored
+				// ref node so the diagnostic snapshot can still identify the degraded source node.
+				return Expansion.IsFatal() ? nullptr : Node;
 			}
 
 			return Node;
@@ -313,6 +318,11 @@ namespace Design2UMGAutomationStructureSnapshot
 			const int32 Depth,
 			FStructureSnapshotStats& Stats)
 		{
+			if (Depth >= DesignTreeLimits::MaxNodeDepth)
+			{
+				return;
+			}
+
 			TSharedPtr<FDesignNode> EffectiveNode = ResolveEffectiveDesignNodeForStructure(Node, Doc);
 			if (ShouldSkipDesignNodeForStructure(EffectiveNode, AdditionalSkipNodePredicate))
 			{

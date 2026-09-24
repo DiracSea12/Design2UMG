@@ -6,6 +6,7 @@
 #include "PencilConnector.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FeedbackContext.h"
 #include "Misc/ScopeExit.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "WidgetBlueprint.h"
@@ -40,17 +41,22 @@ namespace
 		return Data;
 	}
 
-	struct FScopedGenerationCancelPoint
+	class FCancelAfterProgressPollFeedbackContext final : public FFeedbackContext
 	{
-		explicit FScopedGenerationCancelPoint(const DesignImportUtils::EAutomationGenerationCancelPoint CancelPoint)
+	public:
+		explicit FCancelAfterProgressPollFeedbackContext(const int32 InCancelOnPoll)
+			: CancelOnPoll(InCancelOnPoll)
 		{
-			DesignImportUtils::SetAutomationGenerationCancelPoint(CancelPoint);
 		}
 
-		~FScopedGenerationCancelPoint()
+		virtual bool ReceivedUserCancel() override
 		{
-			DesignImportUtils::ResetAutomationGenerationCancelPoint();
+			return ++PollCount >= CancelOnPoll;
 		}
+
+	private:
+		int32 CancelOnPoll = 0;
+		int32 PollCount = 0;
 	};
 
 	struct FScopedNotificationCapture
@@ -164,12 +170,13 @@ bool FImportPlanningTest::RunTest(const FString& Parameters)
 
 	FImportAnalysisInput Input;
 	Input.bResolveImages = false;
-	const FImportAnalysisResult Result = DesignImportPlanning::AnalyzeWidgetData(WidgetData, Input);
+	const FImportInPlaceAnalysisResult Result = DesignImportPlanning::AnalyzeWidgetData(WidgetData, Input);
 
-	TestEqual(TEXT("Import planning copies widget name"), Result.Data.WidgetName, WidgetData.WidgetName);
-	TestEqual(TEXT("Import planning copies root type"), Result.Data.RootWidget.Type, FString(TEXT("CanvasPanel")));
-	TestEqual(TEXT("Import planning copies root bounds width"), Result.Data.RootWidget.Bounds.W, 256.0f);
-	TestTrue(TEXT("Import planning without image resolution produces no image report"), Result.ImageReport.IsEmpty());
+	TestEqual(TEXT("Import planning keeps widget name in place"), WidgetData.WidgetName, FString(TEXT("WBP_ImportPlanningSmoke")));
+	TestEqual(TEXT("Import planning keeps root type in place"), WidgetData.RootWidget.Type, FString(TEXT("CanvasPanel")));
+	TestEqual(TEXT("Import planning keeps root bounds width in place"), WidgetData.RootWidget.Bounds.W, 256.0f);
+	TestTrue(TEXT("In-place analysis succeeds"), Result.ErrorMessage.IsEmpty());
+	TestFalse(TEXT("Import planning without image resolution produces no image diagnostics"), Result.ImageResult.HasDiagnostics());
 	return true;
 }
 
@@ -196,10 +203,13 @@ bool FGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
 
 	{
 		FScopedNotificationCapture Notifications;
-		FScopedGenerationCancelPoint CancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::BeforeBuild);
+		FCancelAfterProgressPollFeedbackContext Cancellation(2);
 		UWidgetBlueprint* CancelledBlueprint = DesignImportUtils::GenerateBlueprint(
 			MakeCancelBoundaryWidgetData(TEXT("WBP_GenerationCancelBeforeMutation")),
-			OutputDir);
+			OutputDir,
+			nullptr,
+			nullptr,
+			&Cancellation);
 
 		TestNull(TEXT("Pre-mutation cancel returns null"), CancelledBlueprint);
 		TestEqual(TEXT("Pre-mutation cancel emits one warning"), Notifications.Warnings.Num(), 1);
@@ -212,10 +222,13 @@ bool FGenerationCancelBoundaryBehaviorTest::RunTest(const FString& Parameters)
 
 	{
 		FScopedNotificationCapture Notifications;
-		FScopedGenerationCancelPoint CancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::AfterBuildBeforeSave);
+		FCancelAfterProgressPollFeedbackContext Cancellation(6);
 		UWidgetBlueprint* CompletedBlueprint = DesignImportUtils::GenerateBlueprint(
 			MakeCancelBoundaryWidgetData(TEXT("WBP_GenerationCancelAfterMutation")),
-			OutputDir);
+			OutputDir,
+			nullptr,
+			nullptr,
+			&Cancellation);
 
 		TestNotNull(TEXT("Post-mutation cancel completes generation"), CompletedBlueprint);
 		if (CompletedBlueprint)

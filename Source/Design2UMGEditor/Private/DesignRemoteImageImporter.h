@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImageDiagnostics.h"
 #include "UMGSchema.h"
 
 class UTexture2D;
@@ -19,7 +20,7 @@ public:
 	 * Resolve remote images and rewrite TexturePath to UE asset object paths.
 	 * Returns false when one or more URL images failed to import.
 	 */
-	static bool ResolveRemoteImages(FUMGWidgetData& InOutData, FString* OutReport = nullptr);
+	static FDesignImageImportResult ResolveRemoteImages(FUMGWidgetData& InOutData);
 
 	/**
 	 * Collect all remote TexturePath URLs in the widget tree and download them

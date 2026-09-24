@@ -19,10 +19,13 @@ namespace SizeEstimator
 	/**
 	 * Resolve fit-content sizes, including expanded references, on the working-copy IR.
 	 * Update dimensions and presence flags before child conversion.
+	 * OutError receives fatal nested-reference and expanded-tree traversal errors.
+	 * A custom resolver must propagate its structured expansion failure before returning.
 	 */
 	FVector2D PromoteFitContentSizes(
 		const TSharedPtr<FDesignNode>& Node,
 		const FDesignDocument& Doc,
 		FRefExpansionResolver RefResolver,
-		const FDesign2UMGFontMappings* FontMappings = nullptr);
+		const FDesign2UMGFontMappings* FontMappings = nullptr,
+		FString* OutError = nullptr);
 }

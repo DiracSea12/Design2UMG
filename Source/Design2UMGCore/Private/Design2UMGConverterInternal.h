@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignReferenceExpansion.h"
 #include "FontResolver.h"
 #include "Misc/Crc.h"
 #include "DesignTreeLimits.h"
@@ -39,19 +40,26 @@ namespace Design2UMGConverterInternal
 
 	struct FRefExpansionCacheEntry
 	{
-		TSharedPtr<FDesignNode> Expanded;
-		bool bResolved = false;
+		FDesignReferenceExpansionResult Result;
 	};
 
 	struct FRefExpansionCache
 	{
-		explicit FRefExpansionCache(const FDesignDocument& Document, TArray<FString>* Warnings = nullptr)
+		explicit FRefExpansionCache(
+			const FDesignDocument& Document,
+			TArray<FString>* InWarnings = nullptr,
+			FString* InFatalError = nullptr)
+			: Warnings(InWarnings)
+			, FatalError(InFatalError)
 		{
-			Document.BuildReusableNodeIndex(ReusableNodesById, Warnings);
+			Document.BuildReusableNodeIndex(ReusableNodesById, InWarnings);
 		}
 
 		TMap<FRefExpansionCacheKey, FRefExpansionCacheEntry> Entries;
 		TMap<FString, TSharedPtr<FDesignNode>> ReusableNodesById;
+		TMap<FString, int32> WarningIndices;
+		TArray<FString>* Warnings = nullptr;
+		FString* FatalError = nullptr;
 		// Working copies retain aliases to their immutable snapshot nodes so nested
 		// refs can reuse the pointer-keyed cache without merging distinct instances.
 		TMap<const FDesignNode*, const FDesignNode*> SnapshotAliases;
@@ -74,13 +82,14 @@ namespace Design2UMGConverterInternal
 			: Document(InDocument)
 			, Warnings(InWarnings)
 			, SettingsSnapshot(InSettingsSnapshot)
-			, RefExpansionCache(MakeShared<FRefExpansionCache>(InDocument, &InWarnings))
+			, RefExpansionCache(MakeShared<FRefExpansionCache>(InDocument, &InWarnings, &ConversionError))
 		{
 		}
 
 		const FDesignDocument& Document;
 		TArray<FString>& Warnings;
 		const FConversionSettingsSnapshot& SettingsSnapshot;
+		FString ConversionError;
 		TSharedPtr<FRefExpansionCache> RefExpansionCache;
 		TSet<FString> WarnedFamilies;
 		TSet<FString> PrunedInvalidMappings;

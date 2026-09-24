@@ -6,8 +6,10 @@
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
-#include "Automation/Design2UMGAutomationRender.h"
-#include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDefaults.h"
+#include "DesignPathRasterizer.h"
+#include "FontResolver.h"
+#include "ProceduralShapeGenerator.h"
 #include "UMGGenerator.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetUtils.h"
@@ -15,6 +17,10 @@
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
+#include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Fonts/FontCache.h"
+#include "Misc/FeedbackContext.h"
 #include "Misc/ScopedSlowTask.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
@@ -22,6 +28,8 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "RenderingThread.h"
+#include "Rendering/SlateRenderer.h"
+#include "TextureCompiler.h"
 #include "UObject/Linker.h"
 #include "UObject/Package.h"
 #include "UObject/PackageReload.h"
@@ -33,7 +41,7 @@ namespace
 {
 	FString ResolveImportOutputPath(const FString& OutputPath)
 	{
-		return OutputPath.IsEmpty() ? FString(Design2UMGEditorImportOrchestrator::DefaultPenOutputPath) : OutputPath;
+		return OutputPath.IsEmpty() ? FString(DesignImportDefaults::PenOutputPath) : OutputPath;
 	}
 
 	FIntPoint ResolveOutputRenderSize(UWidgetBlueprint* WidgetBlueprint)
@@ -117,9 +125,9 @@ namespace
 		return Count;
 	}
 
-	bool ShouldUseInteractiveEditorWork()
+	bool ShouldUseInteractiveEditorWork(const FFeedbackContext* ProgressFeedback = nullptr)
 	{
-		return GIsEditor && !FApp::IsUnattended();
+		return GIsEditor && (ProgressFeedback != nullptr || !FApp::IsUnattended());
 	}
 
 	// Interactive generation scope: guards the slow task against reentry.
@@ -130,9 +138,10 @@ namespace
 	// memory and disk inconsistent.
 	struct FInteractiveGenerationScope
 	{
-		explicit FInteractiveGenerationScope(const TCHAR* Context)
+		explicit FInteractiveGenerationScope(const FFeedbackContext* ProgressFeedback)
+			: bEnabled(ShouldUseInteractiveEditorWork(ProgressFeedback))
 		{
-			if (!ShouldUseInteractiveEditorWork())
+			if (!bEnabled)
 			{
 				return;
 			}
@@ -142,7 +151,7 @@ namespace
 
 		~FInteractiveGenerationScope()
 		{
-			if (ShouldUseInteractiveEditorWork() && Depth > 0)
+			if (bEnabled && Depth > 0)
 			{
 				--Depth;
 			}
@@ -150,39 +159,34 @@ namespace
 
 		bool IsOwner() const
 		{
-			return ShouldUseInteractiveEditorWork() && Depth == 1;
+			return bEnabled && Depth == 1;
 		}
 
 	private:
 		static int32 Depth;
+		bool bEnabled = false;
 	};
 
 	int32 FInteractiveGenerationScope::Depth = 0;
 
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-	DesignImportUtils::EAutomationGenerationCancelPoint GAutomationGenerationCancelPoint =
-		DesignImportUtils::EAutomationGenerationCancelPoint::None;
-	bool GAutomationGenerationCancelArmed = false;
-
-	bool IsAutomationCancelPoint(const DesignImportUtils::EAutomationGenerationCancelPoint CancelPoint)
-	{
-		return GAutomationGenerationCancelArmed && GAutomationGenerationCancelPoint == CancelPoint;
-	}
-#endif
-
-	bool BeginInteractiveGenerationProgress(TUniquePtr<FScopedSlowTask>& OutSlowTask, const TCHAR* Context)
+	bool BeginInteractiveGenerationProgress(
+		TUniquePtr<FScopedSlowTask>& OutSlowTask,
+		const TCHAR* Context,
+		FFeedbackContext* ProgressFeedback)
 	{
 		OutSlowTask.Reset();
-		if (!ShouldUseInteractiveEditorWork())
+		if (!ShouldUseInteractiveEditorWork(ProgressFeedback))
 		{
 			return true;
 		}
 
 		OutSlowTask = MakeUnique<FScopedSlowTask>(
-			3.0f,
+			5.0f,
 			FText::Format(
 				LOCTEXT("GenerateProgress", "Design2UMG: Generating Widget Blueprint ({0})"),
-				FText::FromString(Context ? FString(Context) : FString(TEXT("Import")))));
+				FText::FromString(Context ? FString(Context) : FString(TEXT("Import")))),
+			true,
+			ProgressFeedback ? *ProgressFeedback : *GWarn);
 		OutSlowTask->MakeDialog(true);
 		OutSlowTask->EnterProgressFrame(1.0f, LOCTEXT("GenerateProgressPrepare", "Preparing import"));
 		return !OutSlowTask->ShouldCancel();
@@ -194,17 +198,6 @@ namespace
 		const FText& StepText,
 		const TCHAR* CancelContext)
 	{
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::BeforeBuild))
-		{
-			UE_LOG(LogDesign2UMG, Warning,
-				TEXT("DesignImportUtils: %s cancelled before mutation by automation seam"),
-				CancelContext ? CancelContext : TEXT("generation"));
-			FDesign2UMGNotification::Warning(LOCTEXT("GenerationCancelled", "Design2UMG: Generation cancelled"));
-			return false;
-		}
-#endif
-
 		if (!SlowTask)
 		{
 			return true;
@@ -237,20 +230,6 @@ namespace
 		const TCHAR* CancelContext,
 		bool& bCancelRequestedAfterMutation)
 	{
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-		if (IsAutomationCancelPoint(DesignImportUtils::EAutomationGenerationCancelPoint::AfterBuildBeforeSave))
-		{
-			if (!bCancelRequestedAfterMutation)
-			{
-				bCancelRequestedAfterMutation = true;
-				UE_LOG(LogDesign2UMG, Warning,
-					TEXT("DesignImportUtils: %s cancellation requested after asset mutation by automation seam; completing generation to avoid partial state"),
-					CancelContext ? CancelContext : TEXT("generation"));
-			}
-			return;
-		}
-#endif
-
 		if (!SlowTask || !SlowTask->ShouldCancel() || bCancelRequestedAfterMutation)
 		{
 			return;
@@ -312,14 +291,16 @@ namespace
 		const TCHAR* Label,
 		const TResult FailureResult,
 		bool& bOutCancelAfterMutation,
+		FFeedbackContext* ProgressFeedback,
 		CoreFn&& Core)
 	{
 		bOutCancelAfterMutation = false;
 
 		const FString CancelContext = FString(Label) + TEXT(" generation");
-		FInteractiveGenerationScope GenerationScope(Label);
+		FInteractiveGenerationScope GenerationScope(ProgressFeedback);
 		TUniquePtr<FScopedSlowTask> SlowTask;
-		if (GenerationScope.IsOwner() && !BeginInteractiveGenerationProgress(SlowTask, Label))
+		if (GenerationScope.IsOwner()
+			&& !BeginInteractiveGenerationProgress(SlowTask, Label, ProgressFeedback))
 		{
 			FinishInteractiveGenerationProgress(SlowTask);
 			UE_LOG(LogDesign2UMG, Warning,
@@ -458,8 +439,11 @@ namespace
 		const FString& OutputPngFilePath,
 		FString* OutGeneratedAssetPath,
 		FIntPoint* OutRenderedSize,
-		FDesign2UMGGenerationOutput* OutGenerationOutput,
-		FString* OutError)
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	FString* OutError,
+	const FBlueprintRenderPreparationOptions* RenderPreparation,
+	TStrongObjectPtr<UUserWidget>* OutRenderedWidget,
+	TSharedPtr<SWidget>* OutRenderedSlateWidget)
 	{
 		UWidgetBlueprint* WidgetBlueprint = Built.WidgetBlueprint;
 		FDesign2UMGGenerationOutput GenerationOutput = MoveTemp(Built.GenerationOutput);
@@ -500,15 +484,22 @@ namespace
 			RenderWidgetTreeToPngFile(WidgetBlueprint, TreeRenderPath);
 		}
 
-		FString AutomationPreparationError;
-		WidgetBlueprint = DesignImportUtils::ReloadWidgetBlueprintForRender(WidgetBlueprint, &AutomationPreparationError);
+		FString PreparationError;
+		WidgetBlueprint = DesignImportUtils::ReloadWidgetBlueprintForRender(
+			WidgetBlueprint,
+			RenderPreparation,
+			&PreparationError);
 		if (!WidgetBlueprint)
 		{
-			if (!AutomationPreparationError.IsEmpty())
+			if (!PreparationError.IsEmpty())
 			{
 				UE_LOG(LogDesign2UMG, Error,
-					TEXT("DesignImportUtils: aborting compiled PNG render because shared automation prep failed: %s"),
-					*AutomationPreparationError);
+					TEXT("DesignImportUtils: aborting compiled PNG render because preparation failed: %s"),
+					*PreparationError);
+				if (OutError)
+				{
+					*OutError = PreparationError;
+				}
 			}
 			return false;
 		}
@@ -519,7 +510,11 @@ namespace
 			WidgetBlueprint,
 			OutputPngFilePath,
 			OutRenderedSize,
-			&RenderError);
+			&RenderError,
+			TOptional<FVector2D>(),
+			TOptional<FVector2D>(),
+			OutRenderedWidget,
+			OutRenderedSlateWidget);
 		if (!bCompiledRendered)
 		{
 			if (OutError && !RenderError.IsEmpty())
@@ -543,6 +538,7 @@ namespace
 		const FString& OutputPath,
 		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 		const bool bLogBuildFailure,
+		const bool bPersistIconFontMappingChanges,
 		FDesign2UMGGenerationOutput* OutGenerationOutput,
 		TFunctionRef<bool(FBuiltBlueprint&& Built, FGenerationProgress& Progress)> Stage)
 	{
@@ -551,6 +547,7 @@ namespace
 			Label,
 			false,
 			bCancelAfterMutation,
+			nullptr,
 			[&](FGenerationProgress& Progress) -> bool
 			{
 				if (!Progress.Advance(1.0f, LOCTEXT("GenerateProgressBuild", "Building Widget Blueprint")))
@@ -559,7 +556,7 @@ namespace
 				}
 
 				const FString FinalPath = ResolveImportOutputPath(OutputPath);
-				DesignImportUtils::ApplyPendingIconFontMappingChanges(Data);
+				DesignImportUtils::ApplyPendingIconFontMappingChanges(Data, bPersistIconFontMappingChanges);
 				FBuiltBlueprint Built;
 				Built.WidgetBlueprint = DesignImportUtils::BuildWidgetBlueprint(
 					Data, FinalPath, GenerationSettings, &Built.GenerationOutput, &Built.PrototypeNavigation);
@@ -586,7 +583,7 @@ namespace
 		return bOk;
 	}
 
-	FString NormalizeFontAssetPackagePath(const FString& PackagePath)
+	FString NormalizePackagePath(const FString& PackagePath)
 	{
 		FString Normalized = PackagePath.TrimStartAndEnd();
 		Normalized.ReplaceInline(TEXT("\\"), TEXT("/"));
@@ -596,6 +593,133 @@ namespace
 		}
 		return Normalized;
 	}
+
+	FString NormalizeWidgetBlueprintObjectPath(const FString& AssetPath)
+	{
+		FString Normalized = NormalizePackagePath(AssetPath);
+		if (Normalized.IsEmpty())
+		{
+			return Normalized;
+		}
+
+		const FString AssetName = FPaths::GetBaseFilename(Normalized);
+		const FString ObjectSuffix = TEXT(".") + AssetName;
+		if (!AssetName.IsEmpty() && !Normalized.EndsWith(ObjectSuffix))
+		{
+			Normalized += ObjectSuffix;
+		}
+		return Normalized;
+	}
+
+	bool RefreshPackagesInDirectory(
+		const FString& PackagePath,
+		const TCHAR* Description,
+		const bool bRefreshTextures,
+		FString& OutError)
+	{
+		const FString NormalizedPath = NormalizePackagePath(PackagePath);
+		if (NormalizedPath.IsEmpty())
+		{
+			return true;
+		}
+
+		const FString PackageDirectory = FPackageName::LongPackageNameToFilename(NormalizedPath, TEXT(""));
+		if (PackageDirectory.IsEmpty() || !IFileManager::Get().DirectoryExists(*PackageDirectory))
+		{
+			return true;
+		}
+
+		TArray<FString> AssetFiles;
+		IFileManager::Get().FindFiles(AssetFiles, *(PackageDirectory / TEXT("*.uasset")), true, false);
+		FlushAsyncLoading();
+		for (const FString& AssetFile : AssetFiles)
+		{
+			const FString AssetName = FPaths::GetBaseFilename(AssetFile);
+			if (AssetName.IsEmpty())
+			{
+				continue;
+			}
+
+			const FString PackageName = NormalizePackagePath(NormalizedPath / AssetName);
+			UPackage* Package = FindPackage(nullptr, *PackageName);
+			if (!Package)
+			{
+				Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+			}
+			else if (!Package->IsDirty())
+			{
+				ResetLoaders(static_cast<UObject*>(Package));
+				Package = ReloadPackage(Package, LOAD_None);
+				if (!Package)
+				{
+					OutError = FString::Printf(
+						TEXT("Failed to reload %s package before render: %s"), Description, *PackageName);
+					return false;
+				}
+			}
+
+			if (!Package)
+			{
+				OutError = FString::Printf(
+					TEXT("Failed to load %s package before render: %s"), Description, *PackageName);
+				return false;
+			}
+
+			if (bRefreshTextures)
+			{
+				UTexture2D* Texture = FindObject<UTexture2D>(Package, *AssetName);
+				if (!Texture)
+				{
+					Texture = LoadObject<UTexture2D>(nullptr, *(PackageName + TEXT(".") + AssetName));
+				}
+				if (Texture)
+				{
+					Texture->ConditionalPostLoad();
+#if WITH_EDITOR
+					FTextureCompilingManager::Get().FinishCompilation({ Texture });
+#endif
+					Texture->UpdateResource();
+				}
+			}
+		}
+
+		FlushRenderingCommands();
+		CollectGarbage(RF_NoFlags, true);
+		return true;
+	}
+
+	bool RefreshGeneratedTexturePackages(const FString& WidgetBlueprintObjectPath, FString& OutError)
+	{
+		const FString PackageName = FPackageName::ObjectPathToPackageName(WidgetBlueprintObjectPath);
+		if (PackageName.IsEmpty())
+		{
+			return true;
+		}
+
+		const FString PackagePath = FPaths::GetPath(PackageName);
+		return RefreshPackagesInDirectory(PackagePath / TEXT("D2U_PathTextures"), TEXT("path texture"), true, OutError)
+			&& RefreshPackagesInDirectory(PackagePath / TEXT("D2U_ProceduralTextures"), TEXT("procedural texture"), true, OutError)
+			&& RefreshPackagesInDirectory(PackagePath / TEXT("D2U_ImageTransforms"), TEXT("image transform"), true, OutError);
+	}
+
+	bool PrepareRenderResources(
+		const FString& WidgetBlueprintObjectPath,
+		const FBlueprintRenderPreparationOptions& Preparation,
+		FString& OutError)
+	{
+		if (!Preparation.ImportedFontPackagePath.IsEmpty()
+			&& !RefreshPackagesInDirectory(
+				Preparation.ImportedFontPackagePath,
+				TEXT("imported font"),
+				false,
+				OutError))
+		{
+			return false;
+		}
+
+		return !Preparation.bRefreshGeneratedTextures
+			|| RefreshGeneratedTexturePackages(WidgetBlueprintObjectPath, OutError);
+	}
 }
 
 bool DesignImportUtils::IsHttpUrl(const FString& Value)
@@ -604,112 +728,205 @@ bool DesignImportUtils::IsHttpUrl(const FString& Value)
 		|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
 }
 
-bool DesignImportUtils::IsCaseLocalAutomationImportedFontPath(const FString& FontAssetPath)
+void DesignImportUtils::ResetTransientRenderState()
 {
-	const FString NormalizedPath = NormalizeFontAssetPackagePath(FontAssetPath);
-	return NormalizedPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::CaseSensitive)
-		&& NormalizedPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::CaseSensitive)
-		&& !NormalizedPath.Equals(TEXT("/Game/Design2UMG/Automation/ImportedFonts"), ESearchCase::CaseSensitive)
-		&& !NormalizedPath.StartsWith(TEXT("/Game/Design2UMG/Automation/ImportedFonts/"), ESearchCase::CaseSensitive);
+	FlushRenderingCommands();
+	FlushAsyncLoading();
+	if (FSlateApplication::IsInitialized())
+	{
+		if (FSlateRenderer* SlateRenderer = FSlateApplication::Get().GetRenderer())
+		{
+			SlateRenderer->FlushFontCache(TEXT("Design2UMG render preparation"));
+			SlateRenderer->GetFontCache()->ConditionalFlushCache();
+		}
+	}
+	FFontResolver::ClearCache();
+	FDesignPathRasterizer::ClearCache();
+	FProceduralShapeGenerator::ReleaseTransientTextures();
+	CollectGarbage(RF_NoFlags, true);
 }
-
-// Blueprint generation.
-
-#if defined(WITH_AUTOMATION_TESTS) && WITH_AUTOMATION_TESTS
-void DesignImportUtils::SetAutomationGenerationCancelPoint(const EAutomationGenerationCancelPoint CancelPoint)
-{
-	GAutomationGenerationCancelPoint = CancelPoint;
-	GAutomationGenerationCancelArmed = CancelPoint != EAutomationGenerationCancelPoint::None;
-}
-
-void DesignImportUtils::ResetAutomationGenerationCancelPoint()
-{
-	GAutomationGenerationCancelPoint = EAutomationGenerationCancelPoint::None;
-	GAutomationGenerationCancelArmed = false;
-}
-#endif
 
 UWidgetBlueprint* DesignImportUtils::ReloadWidgetBlueprintForRender(
 	UWidgetBlueprint* WidgetBlueprint,
-	FString* OutAutomationPreparationError)
+	const FBlueprintRenderPreparationOptions* Preparation,
+	FString* OutPreparationError)
 {
 	if (!WidgetBlueprint)
 	{
 		return nullptr;
 	}
 
-	const FString ObjectPath = WidgetBlueprint->GetPathName();
+	const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(WidgetBlueprint->GetPathName());
 	const FString PackageName = FPackageName::ObjectPathToPackageName(ObjectPath);
 	if (PackageName.IsEmpty())
 	{
 		return WidgetBlueprint;
 	}
 
-	if (Design2UMGAutomationRender::IsAutomationRenderActive())
-	{
-		FString PrepareError;
-		if (!Design2UMGAutomationRender::PrepareGeneratedAssetForAutomationRender(
-			ObjectPath,
-			true,
-			PrepareError))
-		{
-			UE_LOG(LogDesign2UMG, Error,
-				TEXT("DesignImportUtils: bootstrap render shared automation prep failed for %s: %s"),
-				*ObjectPath,
-				*PrepareError);
-			if (OutAutomationPreparationError)
-			{
-				*OutAutomationPreparationError = PrepareError;
-			}
-			return nullptr;
-		}
-		else if (UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath))
-		{
-			return ReloadedBlueprint;
-		}
-	}
-
 	UPackage* Package = FindPackage(nullptr, *PackageName);
 	if (!Package)
 	{
 		Package = LoadPackage(nullptr, *PackageName, LOAD_None);
-		if (!Package)
+	}
+	if (!Package)
+	{
+		if (OutPreparationError)
 		{
-			return WidgetBlueprint;
+			*OutPreparationError = FString::Printf(
+				TEXT("Failed to load Widget Blueprint package before render: %s"), *PackageName);
 		}
+		return nullptr;
 	}
 
-	// Reload would discard unsaved in-memory edits to this blueprint (ResetLoaders +
-	// ReloadPackage + CollectGarbage reload from disk). Editor edits mark the package
-	// dirty, so a dirty package means the in-memory version must be kept and rendered.
-	if (Package->IsDirty())
+	// Preparation may collect garbage or replace resource packages. Keep unsaved
+	// blueprint edits alive without preventing clean blueprint package reloads.
+	const TStrongObjectPtr<UWidgetBlueprint> DirtyBlueprint(Package->IsDirty() ? WidgetBlueprint : nullptr);
+	if (DirtyBlueprint.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Warning,
 			TEXT("DesignImportUtils: %s has unsaved changes; skipping pre-render reload and rendering the in-memory version"),
 			*PackageName);
-		return WidgetBlueprint;
+	}
+
+	const bool bResetTransientState = Preparation && Preparation->bResetTransientRenderState;
+	if (bResetTransientState)
+	{
+		ResetTransientRenderState();
+	}
+
+	FString LocalError;
+	if (Preparation && !PrepareRenderResources(ObjectPath, *Preparation, LocalError))
+	{
+		if (bResetTransientState)
+		{
+			ResetTransientRenderState();
+		}
+		if (OutPreparationError)
+		{
+			*OutPreparationError = LocalError;
+		}
+		return nullptr;
+	}
+
+	if (DirtyBlueprint.IsValid())
+	{
+		if (bResetTransientState)
+		{
+			ResetTransientRenderState();
+		}
+		return DirtyBlueprint.Get();
+	}
+
+	Package = FindPackage(nullptr, *PackageName);
+	if (!Package)
+	{
+		Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+	}
+	if (!Package)
+	{
+		if (bResetTransientState)
+		{
+			ResetTransientRenderState();
+		}
+		if (OutPreparationError)
+		{
+			*OutPreparationError = FString::Printf(
+				TEXT("Widget Blueprint package was unavailable after render preparation: %s"), *PackageName);
+		}
+		return nullptr;
 	}
 
 	FlushAsyncLoading();
 	ResetLoaders(static_cast<UObject*>(Package));
 	if (!ReloadPackage(Package, LOAD_None))
 	{
-		return WidgetBlueprint;
+		if (bResetTransientState)
+		{
+			ResetTransientRenderState();
+		}
+		if (OutPreparationError)
+		{
+			*OutPreparationError = FString::Printf(
+				TEXT("Failed to reload Widget Blueprint package before render: %s"), *PackageName);
+		}
+		return nullptr;
 	}
 
 	FlushRenderingCommands();
 	CollectGarbage(RF_NoFlags, true);
+	if (bResetTransientState)
+	{
+		ResetTransientRenderState();
+	}
 	if (UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath))
 	{
 		return ReloadedBlueprint;
 	}
 
+	if (OutPreparationError)
+	{
+		*OutPreparationError = FString::Printf(
+			TEXT("Failed to load Widget Blueprint after package reload: %s"), *ObjectPath);
+	}
+	return nullptr;
+}
+
+UWidgetBlueprint* DesignImportUtils::PrepareWidgetBlueprintForRender(
+	const FString& WidgetBlueprintAssetPath,
+	const FBlueprintRenderPreparationOptions& Preparation,
+	const bool bReloadPackage,
+	FString* OutPreparationError)
+{
+	const FString ObjectPath = NormalizeWidgetBlueprintObjectPath(WidgetBlueprintAssetPath);
+	if (bReloadPackage)
+	{
+		UWidgetBlueprint* WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
+		if (!WidgetBlueprint)
+		{
+			if (OutPreparationError)
+			{
+				*OutPreparationError = FString::Printf(
+					TEXT("Failed to load Widget Blueprint before render: %s"), *ObjectPath);
+			}
+			return nullptr;
+		}
+		return ReloadWidgetBlueprintForRender(WidgetBlueprint, &Preparation, OutPreparationError);
+	}
+
+	if (Preparation.bResetTransientRenderState)
+	{
+		ResetTransientRenderState();
+	}
+
+	FString LocalError;
+	const bool bPrepared = PrepareRenderResources(ObjectPath, Preparation, LocalError);
+	if (Preparation.bResetTransientRenderState)
+	{
+		ResetTransientRenderState();
+	}
+	if (!bPrepared)
+	{
+		if (OutPreparationError)
+		{
+			*OutPreparationError = LocalError;
+		}
+		return nullptr;
+	}
+
+	UWidgetBlueprint* WidgetBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
+	if (!WidgetBlueprint && OutPreparationError)
+	{
+		*OutPreparationError = FString::Printf(
+			TEXT("Failed to load Widget Blueprint after render preparation: %s"), *ObjectPath);
+	}
 	return WidgetBlueprint;
 }
 
-void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data)
+void DesignImportUtils::ApplyPendingIconFontMappingChanges(
+	const FUMGWidgetData& Data,
+	const bool bPersistChanges)
 {
-	if (!Data.IconFontMappingChanges.HasChanges())
+	if (!bPersistChanges || !Data.IconFontMappingChanges.HasChanges())
 	{
 		return;
 	}
@@ -739,24 +956,6 @@ void DesignImportUtils::ApplyPendingIconFontMappingChanges(const FUMGWidgetData&
 	{
 		if (Pair.Key.IsEmpty() || Pair.Value.IsEmpty())
 		{
-			continue;
-		}
-
-		if (DesignImportUtils::IsCaseLocalAutomationImportedFontPath(Pair.Value))
-		{
-			const TSoftObjectPtr<UFont>* ExistingTransient = Settings->IconFontAssetMap.Find(Pair.Key);
-			if (ExistingTransient
-				&& DesignImportUtils::IsCaseLocalAutomationImportedFontPath(ExistingTransient->ToString()))
-			{
-				Settings->IconFontAssetMap.Remove(Pair.Key);
-				bModified = true;
-				UE_LOG(LogDesign2UMG, Display, TEXT("Removed transient automation icon font mapping for '%s'"), *Pair.Key);
-			}
-
-			UE_LOG(LogDesign2UMG, Display,
-				TEXT("Skip persisting transient automation icon font mapping '%s' -> '%s'"),
-				*Pair.Key,
-				*Pair.Value);
 			continue;
 		}
 
@@ -878,7 +1077,9 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 	const FUMGWidgetData& Data,
 	const FString& OutputPath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-	FDesign2UMGGenerationOutput* OutGenerationOutput)
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	FFeedbackContext* ProgressFeedback,
+	const bool bPersistIconFontMappingChanges)
 {
 	double StartTime = 0.0;
 	bool bCancelAfterMutation = false;
@@ -886,6 +1087,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 		TEXT("Blueprint"),
 		nullptr,
 		bCancelAfterMutation,
+		ProgressFeedback,
 		[&](FGenerationProgress& Progress) -> UWidgetBlueprint*
 		{
 			StartTime = FPlatformTime::Seconds();
@@ -895,7 +1097,7 @@ UWidgetBlueprint* DesignImportUtils::GenerateBlueprint(
 			{
 				return nullptr;
 			}
-			ApplyPendingIconFontMappingChanges(Data);
+			ApplyPendingIconFontMappingChanges(Data, bPersistIconFontMappingChanges);
 			FDesign2UMGGenerationOutput GenerationOutput;
 			FUMGPrototypeNavigationData NavigationData;
 			UWidgetBlueprint* BuiltWBP = DesignImportUtils::BuildWidgetBlueprint(
@@ -953,7 +1155,8 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 	FString* OutGeneratedAssetPath,
 	FString* OutRenderPngPath,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-	FDesign2UMGGenerationOutput* OutGenerationOutput)
+	FDesign2UMGGenerationOutput* OutGenerationOutput,
+	const bool bPersistIconFontMappingChanges)
 {
 	if (OutGeneratedAssetPath)
 	{
@@ -970,6 +1173,7 @@ bool DesignImportUtils::GenerateBlueprintAndPng(
 		OutputPath,
 		GenerationSettings,
 		true,
+		bPersistIconFontMappingChanges,
 		OutGenerationOutput,
 		[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 		{
@@ -989,7 +1193,9 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	FIntPoint* OutRenderedSize,
 	FString* OutError,
 	const TOptional<FVector2D>& RenderSizeOverride,
-	const TOptional<FVector2D>& RootExportOffset)
+	const TOptional<FVector2D>& RootExportOffset,
+	TStrongObjectPtr<UUserWidget>* OutRenderedWidget,
+	TSharedPtr<SWidget>* OutRenderedSlateWidget)
 {
 	if (!WidgetBlueprint)
 	{
@@ -1020,7 +1226,15 @@ bool DesignImportUtils::RenderCompiledBlueprintToPngFile(
 	}
 
 	TArray<uint8> PngData;
-	if (!FUMGWidgetUtils::RenderWidgetToPng(WidgetBlueprint, PngData, ActualSize, OutError, RenderSizeOverride, RootExportOffset))
+	if (!FUMGWidgetUtils::RenderWidgetToPng(
+		WidgetBlueprint,
+		PngData,
+		ActualSize,
+		OutError,
+		RenderSizeOverride,
+		RootExportOffset,
+		OutRenderedWidget,
+		OutRenderedSlateWidget))
 	{
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("DesignImportUtils: RenderCompiledBlueprintToPngFile failed for %s"),
@@ -1053,7 +1267,11 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 	FIntPoint* OutRenderedSize,
 	const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
 	FDesign2UMGGenerationOutput* OutGenerationOutput,
-	FString* OutError)
+	FString* OutError,
+	const FBlueprintRenderPreparationOptions* RenderPreparation,
+	const bool bPersistIconFontMappingChanges,
+	TStrongObjectPtr<UUserWidget>* OutRenderedWidget,
+	TSharedPtr<SWidget>* OutRenderedSlateWidget)
 {
 	if (OutGeneratedAssetPath)
 	{
@@ -1074,6 +1292,7 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 		OutputPath,
 		GenerationSettings,
 		false,
+		bPersistIconFontMappingChanges,
 		OutGenerationOutput,
 		[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 		{
@@ -1084,7 +1303,10 @@ bool DesignImportUtils::GenerateBlueprintAndCompiledPng(
 				OutGeneratedAssetPath,
 				OutRenderedSize,
 				OutGenerationOutput,
-				OutError);
+				OutError,
+				RenderPreparation,
+				OutRenderedWidget,
+				OutRenderedSlateWidget);
 		});
 }
 

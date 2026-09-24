@@ -7,15 +7,83 @@
 #include "RefExpander.h"
 #include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
+	struct FChildWidthHints
+	{
+		float DefaultWidth = 0.0f;
+		float RemainingWidth = 0.0f;
+		int32 FillChildCount = 0;
+		bool bDistributesFill = false;
+
+		void PrepareFillWidths(
+			const TSharedPtr<FDesignNode>& Node,
+			const TArray<TSharedPtr<FDesignNode>>& VisibleChildren)
+		{
+			if (!bDistributesFill) return;
+			RemainingWidth = DefaultWidth - Node->LayoutData.ExplicitGap.Get(0.0f) * (VisibleChildren.Num() - 1);
+			// Preserve the authored sibling subtraction order for unchanged widths.
+			for (const auto& Child : VisibleChildren)
+			{
+				if (Child->Transform.Width.IsFill()) ++FillChildCount;
+				else RemainingWidth -= Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Child, 0.0f);
+			}
+		}
+
+		float GetWidth(const TSharedPtr<FDesignNode>& Child) const
+		{
+			if (!Child.IsValid()) return 0.0f;
+			return bDistributesFill && Child->Transform.Width.IsFill() && FillChildCount > 0 && RemainingWidth > 0.0f
+				? RemainingWidth / FillChildCount : DefaultWidth;
+		}
+
+		void UpdateChild(const TSharedPtr<FDesignNode>& Child, bool bWasFill, float PreviousFixedWidth)
+		{
+			const bool bIsFill = Child->Transform.Width.IsFill();
+			FillChildCount += static_cast<int32>(bIsFill) - static_cast<int32>(bWasFill);
+			const float FixedWidth = bIsFill ? 0.0f : Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Child, 0.0f);
+			if (FixedWidth != PreviousFixedWidth) RemainingWidth += PreviousFixedWidth - FixedWidth;
+		}
+	};
+
+	FChildWidthHints MakeChildWidthHints(
+		const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, int32 VisibleChildCount)
+	{
+		FChildWidthHints Hints;
+		if (VisibleChildCount == 0 || Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
+			return Hints;
+		const float ResolvedWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
+		if (ResolvedWidth <= 0.0f) return Hints;
+		const auto Padding = Node->LayoutData.ExplicitPadding.Get(FDesignPadding{});
+		Hints.DefaultWidth = FMath::Max(0.0f, ResolvedWidth - Padding.Left - Padding.Right);
+		Hints.bDistributesFill = Node->LayoutData.Layout == EDesignLayout::Horizontal && VisibleChildCount > 1 && Hints.DefaultWidth > 0.0f;
+		return Hints;
+	}
+
 	struct FSizeEstimatorState
 	{
 		int32 EstimateDepth = 0;
 		int32 PrecomputeDepth = 0;
 		const FDesign2UMGFontMappings* FontMappings = nullptr;
+		FString* Error = nullptr;
+		TArray<TPair<FString, FString>> ActiveReferenceNodes;
 	};
+
+	void SetTraversalError(FSizeEstimatorState& State, FString Message)
+	{
+		if (State.Error && State.Error->IsEmpty())
+		{
+			*State.Error = MoveTemp(Message);
+		}
+	}
+
+	bool BeginSizingNode(const TSharedPtr<FDesignNode>& Node, FSizeEstimatorState& State)
+	{
+		if ((State.Error && !State.Error->IsEmpty()) || !Node.IsValid()) return false;
+		return true;
+	}
 
 	bool ShouldSkipNodeForSizing(const TSharedPtr<FDesignNode>& Node)
 	{
@@ -53,6 +121,7 @@ namespace
 			|| Node->Type == EDesignNodeType::Polygon;
 	}
 
+
 	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
 	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State);
 
@@ -63,9 +132,20 @@ namespace
 		FSizeEstimatorState& State,
 		const SizeEstimator::FRefExpansionResolver* RefResolver = nullptr)
 	{
+		if (!BeginSizingNode(Node, State))
+		{
+			return FVector2D::ZeroVector;
+		}
+
 		FDesignRecursionGuard Guard(State.PrecomputeDepth, TEXT("PromoteFitContentSizes"));
 		if (!Guard.bValid)
 		{
+			SetTraversalError(
+				State,
+				FString::Printf(
+					TEXT("Design conversion failed at node '%s': expanded design tree exceeds %d levels."),
+					Node.IsValid() ? *Node->Id : TEXT("<invalid>"),
+					DesignTreeLimits::MaxNodeDepth));
 			return FVector2D::ZeroVector;
 		}
 
@@ -76,9 +156,68 @@ namespace
 
 		if (Node->Type == EDesignNodeType::Ref)
 		{
-			TSharedPtr<FDesignNode> Expanded = RefResolver
-				? (*RefResolver)(Node)
-				: RefExpander::ExpandRef(Node, Doc);
+			const FString RefTargetId = Node->Ref;
+			// Replacing children cuts the dependency on the template's child tree.
+			const bool bTracksTemplateChildren =
+				!Node->RefOverrides.IsValid() || !Node->RefOverrides->Children.IsSet();
+			const bool bTrackedReference = !RefTargetId.IsEmpty() && bTracksTemplateChildren;
+			if (bTrackedReference && State.ActiveReferenceNodes.ContainsByPredicate(
+				[&RefTargetId, &Node](const TPair<FString, FString>& Active)
+				{
+					return Active.Key == RefTargetId && Active.Value == Node->Id;
+				}))
+			{
+				const FString Message = FString::Printf(
+					TEXT("Reference expansion failed for node '%s': circular nested reference reaches '%s'."),
+					*Node->Id,
+					*RefTargetId);
+				UE_LOG(LogDesign2UMG, Error, TEXT("PromoteFitContentSizes: nested circular reference at '%s' -> '%s'"), *Node->Id, *RefTargetId);
+				SetTraversalError(State, Message);
+				return FVector2D::ZeroVector;
+			}
+			if (bTrackedReference && State.ActiveReferenceNodes.Num() >= DesignTreeLimits::MaxReferenceChainDepth)
+			{
+				const FString Message = FString::Printf(
+					TEXT("Reference expansion failed for node '%s': nested reference path exceeds %d targets at '%s'."),
+					*Node->Id,
+					DesignTreeLimits::MaxReferenceChainDepth,
+					*RefTargetId);
+				UE_LOG(LogDesign2UMG, Error, TEXT("PromoteFitContentSizes: nested reference path limit %d exceeded at '%s' -> '%s'"),
+					DesignTreeLimits::MaxReferenceChainDepth, *Node->Id, *RefTargetId);
+				SetTraversalError(State, Message);
+				return FVector2D::ZeroVector;
+			}
+
+			if (bTrackedReference)
+			{
+				State.ActiveReferenceNodes.Emplace(RefTargetId, Node->Id);
+			}
+			ON_SCOPE_EXIT
+			{
+				if (bTrackedReference)
+				{
+					State.ActiveReferenceNodes.Pop();
+				}
+			};
+
+			TSharedPtr<FDesignNode> Expanded;
+			if (RefResolver)
+			{
+				Expanded = (*RefResolver)(Node);
+			}
+			else
+			{
+				const FDesignReferenceExpansionResult ExpansionResult = RefExpander::ExpandRef(Node, Doc);
+				if (ExpansionResult.IsFatal())
+				{
+					SetTraversalError(State, ExpansionResult.Message);
+				}
+				Expanded = ExpansionResult.ExpandedNode;
+			}
+			if (State.Error && !State.Error->IsEmpty())
+			{
+				return FVector2D::ZeroVector;
+			}
 			if (Expanded.IsValid())
 			{
 				const FVector2D RefSize = PromoteFitContentSizesImpl(Expanded, Doc, ParentContentWidth, State, RefResolver);
@@ -166,10 +305,21 @@ namespace
 				Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f);
 		}
 
+		// Sizing changes dimensions, not visibility; reuse membership within this parent pass.
+		TArray<TSharedPtr<FDesignNode>> Visible;
+		SizeEstimator::GatherVisibleChildren(Node, Visible);
+		FChildWidthHints WidthHints = MakeChildWidthHints(Node, ParentContentWidth, Visible.Num());
+		WidthHints.PrepareFillWidths(Node, Visible);
 		for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 		{
-			const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+			const float ChildContentWidth = WidthHints.GetWidth(Child);
+			const bool bTrackWidth = WidthHints.bDistributesFill && !ShouldSkipNodeForSizing(Child);
+			const bool bWasFill = bTrackWidth && Child->Transform.Width.IsFill();
+			const float PreviousFixedWidth = bTrackWidth && !bWasFill
+				? Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Child, 0.0f) : 0.0f;
 			(void)PromoteFitContentSizesImpl(Child, Doc, ChildContentWidth, State, RefResolver);
+			// A promoted fit sibling changes the remaining width for subsequent fill children.
+			if (bTrackWidth) WidthHints.UpdateChild(Child, bWasFill, PreviousFixedWidth);
 		}
 		float FinalW = Node->Transform.Width.Value;
 		float FinalH = Node->Transform.Height.Value;
@@ -215,59 +365,16 @@ void SizeEstimator::GatherVisibleChildren(const TSharedPtr<FDesignNode>& Node, T
 
 float SizeEstimator::ComputeChildContentWidthHint(const TSharedPtr<FDesignNode>& Node, const TSharedPtr<FDesignNode>& Child, float ParentContentWidth)
 {
-	if (!Node.IsValid() || !Child.IsValid())
+	if (!Node.IsValid() || !Child.IsValid()
+		|| Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
 	{
 		return 0.0f;
 	}
-
-	if (Node->LayoutData.Layout == EDesignLayout::Wrap || Node->LayoutData.Layout == EDesignLayout::Grid)
-	{
-		return 0.0f;
-	}
-
 	TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 	GatherVisibleChildren(Node, VisibleChildren);
-	if (VisibleChildren.Num() == 0)
-	{
-		return 0.0f;
-	}
-
-	const float ResolvedWidth = Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(Node, ParentContentWidth);
-	if (ResolvedWidth <= 0.0f)
-	{
-		return 0.0f;
-	}
-
-	const float InnerWidth = FMath::Max(0.0f, ResolvedWidth - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Left - Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}).Right);
-	if (InnerWidth <= 0.0f)
-	{
-		return 0.0f;
-	}
-
-	if (Node->LayoutData.Layout != EDesignLayout::Horizontal || VisibleChildren.Num() == 1)
-	{
-		return InnerWidth;
-	}
-
-	float RemainingWidth = InnerWidth - Node->LayoutData.ExplicitGap.Get(0.0f) * (VisibleChildren.Num() - 1);
-	int32 FillChildCount = 0;
-	for (const TSharedPtr<FDesignNode>& VisibleChild : VisibleChildren)
-	{
-		if (VisibleChild->Transform.Width.IsFill())
-		{
-			++FillChildCount;
-			continue;
-		}
-
-		RemainingWidth -= Design2UMGCore::DesignNodeSemantics::ResolveWidthHint(VisibleChild, 0.0f);
-	}
-
-	if (!Child->Transform.Width.IsFill() || FillChildCount <= 0 || RemainingWidth <= 0.0f)
-	{
-		return InnerWidth;
-	}
-
-	return RemainingWidth / FillChildCount;
+	FChildWidthHints WidthHints = MakeChildWidthHints(Node, ParentContentWidth, VisibleChildren.Num());
+	if (Child->Transform.Width.IsFill()) WidthHints.PrepareFillWidths(Node, VisibleChildren);
+	return WidthHints.GetWidth(Child);
 }
 
 void SizeEstimator::SetResolvedNodeDimension(const TSharedPtr<FDesignNode>& Node, bool bWidth, float Pixels, bool bKeepSourceDimension)
@@ -309,6 +416,10 @@ namespace
 {
 	FVector2D EstimateNodeSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
+		if (!BeginSizingNode(Node, State))
+		{
+			return FVector2D::ZeroVector;
+		}
 		FDesignRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateNodeSize"));
 		if (!Guard.bValid)
 		{
@@ -360,6 +471,10 @@ namespace
 
 	FVector2D EstimateContentSizeImpl(const TSharedPtr<FDesignNode>& Node, float ParentContentWidth, FSizeEstimatorState& State)
 	{
+		if (!BeginSizingNode(Node, State))
+		{
+			return FVector2D::ZeroVector;
+		}
 		FDesignRecursionGuard Guard(State.EstimateDepth, TEXT("EstimateContentSize"));
 		if (!Guard.bValid)
 		{
@@ -373,6 +488,8 @@ namespace
 
 		TArray<TSharedPtr<FDesignNode>> Visible;
 		SizeEstimator::GatherVisibleChildren(Node, Visible);
+		FChildWidthHints WidthHints = MakeChildWidthHints(Node, ParentContentWidth, Visible.Num());
+		WidthHints.PrepareFillWidths(Node, Visible);
 		if (Visible.Num() == 0)
 		{
 			return FVector2D(PadH, PadV);
@@ -383,7 +500,7 @@ namespace
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)
 			{
-				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const float ChildContentWidth = WidthHints.GetWidth(Child);
 				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
 				W += ChildSize.X;
 				H = FMath::Max(H, ChildSize.Y);
@@ -394,7 +511,7 @@ namespace
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)
 			{
-				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const float ChildContentWidth = WidthHints.GetWidth(Child);
 				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
 				W = FMath::Max(W, ChildSize.X);
 				H += ChildSize.Y;
@@ -405,7 +522,7 @@ namespace
 		{
 			for (const TSharedPtr<FDesignNode>& Child : Visible)
 			{
-				const float ChildContentWidth = SizeEstimator::ComputeChildContentWidthHint(Node, Child, ParentContentWidth);
+				const float ChildContentWidth = WidthHints.GetWidth(Child);
 				const FVector2D ChildSize = EstimateNodeSizeImpl(Child, ChildContentWidth, State);
 				W = FMath::Max(W, Child->Transform.X + ChildSize.X);
 				H = FMath::Max(H, Child->Transform.Y + ChildSize.Y);
@@ -434,9 +551,11 @@ FVector2D SizeEstimator::PromoteFitContentSizes(
 	const TSharedPtr<FDesignNode>& Node,
 	const FDesignDocument& Doc,
 	FRefExpansionResolver RefResolver,
-	const FDesign2UMGFontMappings* FontMappings)
+	const FDesign2UMGFontMappings* FontMappings,
+	FString* OutError)
 {
 	FSizeEstimatorState State;
 	State.FontMappings = FontMappings;
+	State.Error = OutError;
 	return PromoteFitContentSizesImpl(Node, Doc, 0.0f, State, &RefResolver);
 }
