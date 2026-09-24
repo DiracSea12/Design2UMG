@@ -23,6 +23,7 @@ from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
+from design2umg_verify_lib.net_guard import build_guarded_opener
 from design2umg_verify_lib.run_history import write_historical_best_validation
 from PIL import Image, ImageChops, ImageStat
 from design2umg_verify_lib.pencil_mcp import (
@@ -685,17 +686,24 @@ def parse_figma_node_id(value: str) -> str:
     return f"{match.group(1)}:{match.group(2)}"
 
 
+_REMOTE_HTTP = build_guarded_opener()
+
+
 def http_json(url: str, headers: dict[str, str]) -> dict:
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with _REMOTE_HTTP.open(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def download_file(url: str, output_path: Path, headers: dict[str, str] | None = None):
+def download_file(url: str, output_dir: Path, filename: str, headers: dict[str, str] | None = None) -> Path:
+    if Path(filename).name != filename or filename in ("", ".", ".."):
+        raise ValueError(f"Refusing unsafe download file name: {filename}")
+    output_path = output_dir / filename
     output_path.parent.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(request, timeout=60) as response, open(output_path, "wb") as handle:
+    with _REMOTE_HTTP.open(request, timeout=60) as response, output_path.open("wb") as handle:
         shutil.copyfileobj(response, handle)
+    return output_path
 
 
 def prepare_png_reference(reference_path: str, output_path: Path) -> Path:
@@ -707,7 +715,7 @@ def prepare_png_reference(reference_path: str, output_path: Path) -> Path:
     return output_path
 
 
-def prepare_figma_reference(file_value: str, node_value: str, token: str, output_path: Path) -> Path:
+def prepare_figma_reference(file_value: str, node_value: str, token: str, output_dir: Path) -> Path:
     file_key = parse_figma_file_key(file_value)
     node_id = parse_figma_node_id(node_value)
     if not file_key or not node_id or not token:
@@ -720,8 +728,7 @@ def prepare_figma_reference(file_value: str, node_value: str, token: str, output
     image_url = meta.get("images", {}).get(node_id)
     if not image_url:
         raise RuntimeError(f"Figma did not return an export URL for node {node_id}")
-    download_file(image_url, output_path)
-    return output_path
+    return download_file(image_url, output_dir, "reference.png")
 
 
 def extract_png_paths_from_tool_result(tool_result: str, output_dir: Path) -> list[Path]:
@@ -1041,7 +1048,7 @@ _INVALID_WIDGET_NAME_CHARS = set("\"' ,/.:|&!~\n\r\t@#(){}[]=;^%$`")
 
 
 def sanitize_widget_name_for_match(name: str, fallback_prefix: str = "") -> str:
-    """Mirror FUMGWidgetUtils::SanitizeWidgetName so python-side source
+    """Mirror FUMGWidgetTreeBuilder::SanitizeWidgetName so python-side source
     snapshots produce the same names the converter gives widget objects."""
     sanitized = "".join(char for char in (name or "") if char not in _INVALID_WIDGET_NAME_CHARS)
     if not sanitized:
@@ -1843,7 +1850,7 @@ def run_editor(
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as handle:
+    with log_path.open("w", encoding="utf-8") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
         process_started_at = time.time()
         last_progress_time = time.time()
@@ -2024,8 +2031,7 @@ def finalize_single_run_history(output_dir: Path, args, report_path: Path) -> No
 
 
 def load_ue_result(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8-sig") as handle:
-        result = json.load(handle)
+    result = json.loads(path.read_text(encoding="utf-8-sig"))
 
     # A failed render never produces its PNG; waiting for it would abort the
     # whole run instead of letting the case be reported as render_failed.
@@ -2236,7 +2242,7 @@ def prepare_reference(args, output_dir: Path, expected_design_size: tuple[int, i
         shutil.copyfile(provided_path, reference_png)
         return reference_png, context
     if args.reference_provider == "figma":
-        prepare_figma_reference(args.figma_file, args.figma_node, args.figma_token, reference_png)
+        prepare_figma_reference(args.figma_file, args.figma_node, args.figma_token, output_dir)
         context["canonical_source"] = "figma_api"
         return reference_png, context
     if args.reference_provider == "pencil":

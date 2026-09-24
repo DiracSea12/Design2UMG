@@ -26,23 +26,32 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
+from design2umg_verify_lib.net_guard import build_guarded_opener
+
 API = "https://api.figma.com/v1"
+
+_REMOTE_HTTP = build_guarded_opener()
 
 
 def http_json(url: str, token: str):
     req = urllib.request.Request(url, headers={"X-Figma-Token": token})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with _REMOTE_HTTP.open(req, timeout=120) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def http_download(url: str, out_path: Path):
+def http_download(url: str, output_dir: Path, filename: str) -> Path:
+    if Path(filename).name != filename or filename in ("", ".", ".."):
+        raise ValueError(f"Refusing unsafe download file name: {filename}")
+    out_path = output_dir / filename
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=300) as resp, open(out_path, "wb") as fh:
+    with _REMOTE_HTTP.open(req, timeout=300) as resp, out_path.open("wb") as fh:
         while True:
             chunk = resp.read(1 << 16)
             if not chunk:
                 break
             fh.write(chunk)
+    return out_path
 
 
 def get_token() -> str:
@@ -145,7 +154,7 @@ def main():
                 url = mapping.get(ref)
                 if not url:
                     continue
-                http_download(url, images_dir / f"{ref}.png")
+                http_download(url, images_dir, f"{ref}.png")
                 done += 1
             print(f"image fills: {done}/{len(refs)} downloaded")
 
@@ -160,14 +169,14 @@ def main():
                 url = fills.get(vid)
                 if not url:
                     continue
-                http_download(url, images_dir / f"vec_{vid.replace(':', '_').replace('/', '_')}.png")
+                http_download(url, images_dir, f"vec_{vid.replace(':', '_').replace('/', '_')}.png")
                 done += 1
         print(f"vector renders: {done}/{len(vec_ids)}")
 
         query = urllib.parse.urlencode({"ids": node_id, "format": "png", "scale": "2"})
         png = http_json(f"{API}/images/{key}?{query}", token).get("images", {}).get(node_id)
         if png:
-            http_download(png, outdir / "reference.png")
+            http_download(png, outdir, "reference.png")
             print("reference.png saved")
         print("export dir:", outdir)
 

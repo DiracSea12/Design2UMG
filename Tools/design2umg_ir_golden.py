@@ -35,8 +35,7 @@ DUMP_NAME = "ir_dump.json"
 
 
 def load_json_file(path: Path):
-    with open(path, "r", encoding="utf-8-sig") as handle:
-        return json.load(handle)
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def format_value(value) -> str:
@@ -136,7 +135,7 @@ def compare_dump_files(golden_path: Path, dump_path: Path) -> dict:
 def write_case_report(case_dir: Path, result: dict) -> Path:
     report_path = case_dir / REPORT_NAME
     case_dir.mkdir(parents=True, exist_ok=True)
-    with open(report_path, "w", encoding="utf-8", newline="\n") as handle:
+    with report_path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(result, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
     return report_path

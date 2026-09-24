@@ -1140,3 +1140,27 @@ if (typeof figma !== 'undefined') {
     }
   };
 }
+
+// ── Node test exposure ──
+// In the Figma sandbox `module` is undefined and this block is skipped; under
+// Node (tests via load-exporter-test-api.js) the internals attach to the
+// CommonJS export so tests can require them without dynamic evaluation.
+declare const module: { exports?: Record<string, unknown> };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    attachRenderFallbackMetadata,
+    indexRestNodes,
+    makeRenderFallbackKey,
+    serializePaint,
+    serializeEffect,
+    buildTextStyle,
+    serializeNode,
+    unwrapRestExportResponse,
+    collectReferencedComponents,
+    collectComponentDependencies,
+    collectComponentDependencyImages,
+    collectImages,
+    exportReferencePng,
+    shouldExportNodeRenderFallback,
+  };
+}

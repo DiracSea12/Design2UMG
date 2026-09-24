@@ -281,7 +281,7 @@ def run_gate(args: argparse.Namespace) -> int:
     ]
     started_at = time.time()
     print(f"[GATE] Launching fresh editor process for {len(spec_paths)} asset(s)...")
-    with open(gate_log_path, "w", encoding="utf-8", errors="replace") as handle:
+    with gate_log_path.open("w", encoding="utf-8", errors="replace") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
         try:
             exit_code = process.wait(timeout=args.deadline_sec)

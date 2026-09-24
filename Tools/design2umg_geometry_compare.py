@@ -85,7 +85,7 @@ def effective_panel_type(widget_class: str) -> str:
         return widget_class[len(CONSTRAINED_TYPE_PREFIX):]
     return widget_class
 
-# Widget object names run through FUMGWidgetUtils::SanitizeWidgetName ->
+# Widget object names run through FUMGWidgetTreeBuilder::SanitizeWidgetName ->
 # engine SlugStringForValidName (delete INVALID_OBJECTNAME_CHARACTERS, then the
 # plugin adds a fallback name for empty results and a "W" prefix for digit-led
 # names). The IR keeps the raw name, so alignment sanitizes IR names the same way.
@@ -102,8 +102,7 @@ def sanitize_widget_name(raw_name: str, fallback_prefix: str = "") -> str:
 
 
 def load_json_file(path: Path):
-    with open(path, "r", encoding="utf-8-sig") as handle:
-        return json.load(handle)
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def fnum(value) -> float | None:
@@ -610,7 +609,7 @@ def compare_case(golden_root: Path | None, case_name: str, case_dir: Path) -> di
 def write_case_report(case_dir: Path, result: dict) -> Path:
     report_path = case_dir / REPORT_NAME
     case_dir.mkdir(parents=True, exist_ok=True)
-    with open(report_path, "w", encoding="utf-8", newline="\n") as handle:
+    with report_path.open("w", encoding="utf-8", newline="\n") as handle:
         json.dump(result, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
     return report_path

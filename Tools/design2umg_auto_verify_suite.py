@@ -652,7 +652,7 @@ def run_editor_driver(
     if log_cmds:
         command.append(f"-LogCmds={log_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as handle:
+    with log_path.open("w", encoding="utf-8") as handle:
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT)
         process_started_at = time.time()
         last_progress_time = time.time()

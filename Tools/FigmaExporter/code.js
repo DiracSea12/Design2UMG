@@ -897,3 +897,21 @@ if (typeof figma !== 'undefined') {
         }
     };
 }
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        attachRenderFallbackMetadata,
+        indexRestNodes,
+        makeRenderFallbackKey,
+        serializePaint,
+        serializeEffect,
+        buildTextStyle,
+        serializeNode,
+        unwrapRestExportResponse,
+        collectReferencedComponents,
+        collectComponentDependencies,
+        collectComponentDependencyImages,
+        collectImages,
+        exportReferencePng,
+        shouldExportNodeRenderFallback,
+    };
+}

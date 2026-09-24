@@ -181,7 +181,7 @@ def run_editor_process(editor_path, project_path, driver_script_path, result_pat
     if extra_cmds:
         cmd.append(f"-LogCmds={extra_cmds}")
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as handle:
+    with log_path.open("w", encoding="utf-8") as handle:
         proc = subprocess.Popen(cmd, stdout=handle, stderr=subprocess.STDOUT)
 
     proc_started = time.time()
