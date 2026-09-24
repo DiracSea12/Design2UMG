@@ -9,6 +9,7 @@
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontCache.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Misc/PackageName.h"
 #include "RenderingThread.h"
