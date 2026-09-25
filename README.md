@@ -24,6 +24,7 @@ Bridge / debug utilities that remain available but are not formal release promis
 ## Demo And Examples
 
 - `Examples/` includes ready-to-import `.pen` samples such as `Dashboard.pen`, `GameHUD.pen`, `LoginForm.pen`, and `SimpleCard.pen`.
+- `Examples/AiHud/` is a ready-to-import Figma export sample ("AI NPC Demo — 中式赛博朋克 HUD"): import its `design.json` with the editor console command `Design2UMG.LocalFigmaImport Examples/AiHud/design.json`.
 - The screenshots above show the current preview surfaces shipped with the plugin workflow.
 - A fast local smoke path is: enable the plugin, drag one of the example `.pen` files into Content Browser, then inspect the generated Widget Blueprint and preview PNG.
 

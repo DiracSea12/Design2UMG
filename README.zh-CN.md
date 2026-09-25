@@ -20,6 +20,7 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 ## Demo 和示例
 
 - `Examples/` 里有可导入的 `.pen` 示例，例如 `Dashboard.pen`、`GameHUD.pen`、`LoginForm.pen`、`SimpleCard.pen`。
+- `Examples/AiHud/` 是可直接导入的 Figma 导出示例（"AI NPC Demo — 中式赛博朋克 HUD"）：用编辑器控制台命令 `Design2UMG.LocalFigmaImport Examples/AiHud/design.json` 导入它的 `design.json`。
 - `Docs/Images/` 中的截图展示了当前插件流程里的预览界面。
 - 最快的本地 smoke 路径是：启用插件，把示例 `.pen` 拖进 Content Browser，然后检查生成的 Widget Blueprint 和 preview PNG。
 
