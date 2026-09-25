@@ -21,7 +21,7 @@ English canonical: [TestCoverageBoundary.md](TestCoverageBoundary.md)
 | Job | 触发方式 | 真正检查什么 | PR 默认会不会跑 |
 | --- | --- | --- | --- |
 | `repository-hygiene` | `push`、`pull_request`、`workflow_dispatch` | 必需文件、公开边界/文本卫生、全部验证器自检、进程隔离及FigmaExporter构建/Node测试 | 会 |
-| `build-plugin` | 维护者 push、同仓库 PR、`workflow_dispatch` | Unreal `BuildPlugin`、打包插件聚焦自动化、产物边界清理和复核、artifact 上传 | 仅同仓库 PR 会跑 |
+| `build-plugin` | 维护者 push、同仓库 PR、`workflow_dispatch` | Unreal `BuildPlugin` 编译、产物边界清理和复核、针对同 checkout 引擎安装副本的聚焦自动化、artifact 上传 | 仅同仓库 PR 会跑 |
 
 `build-plugin` 依赖维护者提供的 self-hosted Windows UE runner、`UE_ROOT` 和 `DESIGN2UMG_RUNTIME_PROJECT`。外部 PR 不会在这台 runner 上执行代码。
 

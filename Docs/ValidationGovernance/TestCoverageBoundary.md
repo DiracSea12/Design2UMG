@@ -21,7 +21,7 @@ Today it has two different jobs with different trust levels:
 | Job | Trigger | What it really checks | Public PR default? |
 | --- | --- | --- | --- |
 | `repository-hygiene` | `push`, `pull_request`, `workflow_dispatch` | required files, public boundary/text hygiene, all verifier selftests, process isolation and FigmaExporter build/Node tests | Yes |
-| `build-plugin` | maintainer push, same-repository PR, `workflow_dispatch` | Unreal `BuildPlugin`, packaged-plugin focused automation, boundary strip/verify, artifact upload | Same-repository PRs only |
+| `build-plugin` | maintainer push, same-repository PR, `workflow_dispatch` | Unreal `BuildPlugin` compile, package boundary strip/verify, focused automation against the engine-installed plugin copy from the same checkout, artifact upload | Same-repository PRs only |
 
 `build-plugin` requires a maintainer-provided self-hosted Windows UE runner, `UE_ROOT`, and `DESIGN2UMG_RUNTIME_PROJECT`. External PRs do not run code on that runner.
 
