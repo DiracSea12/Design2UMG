@@ -4,7 +4,7 @@ Validation tools accept your own case directory and discover its actual size. Th
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
-[![Repository Hygiene](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/ImageToUMG/actions/workflows/build.yml)
+[![Repository Hygiene](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml)
 
 Chinese companion: [README.zh-CN.md](README.zh-CN.md)
 
@@ -34,11 +34,11 @@ This repo intentionally separates contributor-facing validation from maintainer 
 | Layer | Purpose | Who runs it |
 |------|------|------|
 | `repository-hygiene` | Public repo boundary and required-file checks | GitHub Actions on push / PR |
-| `self-hosted build and automation` | Package the plugin, run focused Unreal automation, and upload the artifact | Maintainer pushes, same-repository PRs, and manual runs |
+| `maintainer build and automation` | Package the plugin, run focused Unreal automation, and upload the artifact | Maintainer-local verification, outside hosted CI |
 | `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
 | `maintainer formal admissible gate` | Full discovered case set release gate | Maintainers only |
 
-The workflow badge above reflects the tracked `Plugin CI` workflow. Unreal packaging and automation run on the maintainer self-hosted runner for pushes, same-repository PRs, and manual runs; external PRs run only repository hygiene. This is not presented as a public hosted UE formal gate.
+The workflow badge above reflects the tracked `Plugin CI` workflow, whose hosted portion runs repository hygiene. Unreal packaging and automation are maintainer-local verifications and do not run in hosted CI; external PRs run only repository hygiene. This is not presented as a public hosted UE formal gate.
 
 For a plain-language coverage boundary and a contributor-versus-maintainer split, see [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 
@@ -194,7 +194,7 @@ Key options:
 ## Repository And Release Checks
 
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
-- `self-hosted build and automation`: the packaging and Unreal automation job in `.github/workflows/build.yml`; it runs for maintainer pushes, same-repository PRs, and manual dispatches, requires a Windows runner with `UE_ROOT` and `DESIGN2UMG_RUNTIME_PROJECT`, validates the package boundary, runs focused generation, Figma parser, and lifecycle tests from the packaged plugin, and uploads the artifact.
+- `maintainer build and automation`: the packaging and Unreal automation job in `.github/workflows/build.yml`; it triggers on maintainer pushes, same-repository PRs, and manual dispatches but runs only on a self-hosted Windows runner (registered with `UE_ROOT` and `DESIGN2UMG_RUNTIME_PROJECT`). When no runner is registered the job stays queued; hosted CI then covers repository hygiene only, and packaging and automation are maintainer-local verifications. It validates the package boundary, runs focused generation, Figma parser, and lifecycle tests from the packaged plugin, and uploads the artifact.
 - `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate documented in `Docs/ValidationProtocol.md`.
 - `Tools/README.md`: the short index for contributor-facing helpers versus maintainer-only workflows.

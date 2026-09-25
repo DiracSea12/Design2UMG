@@ -30,11 +30,11 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 | 层级 | 用途 | 谁来运行 |
 | --- | --- | --- |
 | `repository-hygiene` | 检查公开仓库边界和必需文件 | GitHub Actions push / PR |
-| `self-hosted build` | 在维护者自托管 Windows UE runner 上打包插件并上传产物 | 维护者手动触发 |
+| `maintainer build` | 打包插件、运行聚焦 UE 自动化并上传产物 | 维护者本地验证，不进托管 CI |
 | `public smoke/public validate` | 本地构建和聚焦验证，用于贡献者复现 | 贡献者和维护者 |
 | `maintainer formal admissible gate` | 维护者拥有的完整 admissible case set 正式无回退发布门禁 | 维护者 |
 
-当前公开 badge 只代表仓库 hygiene job。插件打包 job 是手动、自托管的，不是公开托管的 UE formal gate。
+当前公开 badge 只代表仓库 hygiene job。插件打包与 UE 自动化属于维护者本地验证，不在公开 CI 中运行，不是公开托管的 UE formal gate。
 
 如果想看“各层测试到底覆盖什么、普通贡献者和维护者分别能跑什么”，请直接看 [Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md](Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md)。
 

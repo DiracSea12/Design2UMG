@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 
-## [1.1.0] - 2026-09-25
+## [Unreleased]
 
 ### Changed
 - `DesignImportUtils` (grab-bag of generation orchestration, render preparation, and URL helpers) split into `DesignImportGeneration` and `DesignBlueprintRenderPreparation`; the shared `IsHttpUrl` predicate moved next to its only semantic owner, `FDesignRemoteImageImporter`.
@@ -12,7 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 - Import pipeline generation-settings resolution (request, analysis, CDO fallback) collapsed into a single rule function in `DesignImportPipeline`.
 - `FDesignNodePatch` now documents its field-synchronization contract: every patch field must be handled by both `MergePatch` and `ApplyPatch` in `RefExpander`.
 - Source-wide blank-line formatting normalized (no consecutive blank lines, no trailing blank lines at EOF); no behavior change.
-- Public release docs now spell out the current validation boundary: the README badge reflects `repository-hygiene`, the packaged plugin artifact comes from the manual self-hosted `build-plugin` job, and the maintainer formal admissible gate is a separate release check.
+- Public release docs now spell out the current validation boundary: the README badge reflects `repository-hygiene`, Unreal packaging and automation are maintainer-local verifications outside hosted CI, and the maintainer formal admissible gate is a separate release check.
 - Release/export docs now align with the current package boundary scripts: public packages must exclude maintainer-local files and folders such as `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`, `.cowork-temp/`, `openspec/`, raw automation trees, caches, and generated HostProject fallback artifacts.
 - Figma token examples in release-facing docs now use placeholders and explicitly say real tokens must not be committed or copied into public logs, command transcripts, screenshots, or release artifacts.
 
@@ -24,8 +24,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ### Security
 - Validation tools enforce a remote-HTTPS boundary at the transport layer (`design2umg_verify_lib/net_guard.py`): cleartext HTTP is refused and loopback/private/link-local/resolved-non-public targets are rejected, redirects included. Downloads are contained to an explicit output directory with a validated file name, and report/log writes go through `pathlib` handles.
 - FigmaExporter tests now load the compiled bundle through a CommonJS export block in `code.ts` instead of dynamically evaluating the bundle source.
-
-## [Unreleased]
 
 ## [1.0.0] - 2026-02-15
 
