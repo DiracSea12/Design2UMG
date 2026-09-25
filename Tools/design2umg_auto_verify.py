@@ -801,7 +801,14 @@ def ensure_pencil_document_open(
     timeout_sec: float = 15.0,
     poll_interval: float = 0.5,
 ):
-    normalized_target = normalize_local_document_path(str(Path(source_path).resolve()))
+    # Resolve only paths this host can actually see; document paths that belong
+    # to another host's editor stay as opaque text instead of gaining a bogus
+    # CWD prefix from Path.resolve().
+    candidate = Path(source_path)
+    if candidate.is_file():
+        normalized_target = normalize_local_document_path(str(candidate.resolve()))
+    else:
+        normalized_target = normalize_local_document_path(source_path)
     active_document = normalize_local_document_path(get_active_pencil_document(client))
     if active_document == normalized_target and not force_reopen:
         return
