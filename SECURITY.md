@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are provided for the latest `main` branch and the latest tagged release.
+Security fixes are provided for the latest `main` branch and for tagged releases as they are published (`Design2UMG.uplugin` `VersionName` tracks the current release line; release tags may lag `main`).
 
 ## Reporting a Vulnerability
 

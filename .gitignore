@@ -97,6 +97,13 @@ Tools/FigmaExporter/node_modules/
 # images and reference renders; open-source users bring or fetch their own)
 /FigmaExports/
 
+# Font binaries stay local: 82 tracked ttf/otf files carried permissive-license
+# gaps (11 OFL families without license text, 6 Chinese display fonts with
+# unverified redistribution terms) and 40MB+ of history weight. The runtime
+# font lookup falls back to Saved/ManualFonts, engine and system font
+# directories when the plugin Fonts/ folder is absent.
+/Fonts/
+
 # Pen design corpus slot: real folder for open-source users, directory
 # junction to the editing source on this machine (cannot be committed)
 /PenDesigns/

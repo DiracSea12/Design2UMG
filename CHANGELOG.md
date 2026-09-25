@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 Format: [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.0] - Unreleased
 
 ### Changed
 - `DesignImportUtils` (grab-bag of generation orchestration, render preparation, and URL helpers) split into `DesignImportGeneration` and `DesignBlueprintRenderPreparation`; the shared `IsHttpUrl` predicate moved next to its only semantic owner, `FDesignRemoteImageImporter`.
