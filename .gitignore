@@ -68,6 +68,7 @@ verify_design_size.py
 # Local tooling outputs
 .mimosa/
 Temp/
+dist/
 
 # Script caches / local dependencies
 __pycache__/
