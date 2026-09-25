@@ -11,7 +11,7 @@ jobs:
   repository-hygiene:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify required files exist
         run: |
@@ -72,7 +72,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build plugin package with RunUAT
         run: |
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload focused automation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Design2UMG-Automation-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/Design2UMG-Automation-${{ github.run_id }}-${{ github.run_attempt }}
@@ -235,7 +235,7 @@ jobs:
           retention-days: 14
 
       - name: Upload packaged plugin artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Design2UMG-BuildPlugin-${{ github.sha }}
           path: dist/Design2UMG
