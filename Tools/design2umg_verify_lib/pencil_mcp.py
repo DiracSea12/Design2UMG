@@ -22,8 +22,12 @@ def discover_mcp_server(override_path: str) -> str:
     all_matches = glob.glob(pattern)
     if all_matches:
         def version_key(path_str: str):
-            version_text = Path(path_str).parents[1].name.removeprefix("highagency.pencildev-")
-            return tuple(int(token) for token in re.findall(r"\d+", version_text))
+            # Parse the version from the path text so Windows and POSIX separators
+            # both work; Path(parents) indexing depends on the host platform.
+            match = re.search(r"highagency\.pencildev-(\d+(?:\.\d+)*)", path_str.replace("\\", "/"))
+            if not match:
+                return ()
+            return tuple(int(token) for token in match.group(1).split("."))
 
         return max(all_matches, key=version_key)
     raise FileNotFoundError("Pencil MCP server binary not found; use --mcp-server to override")
