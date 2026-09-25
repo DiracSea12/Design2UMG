@@ -57,7 +57,7 @@ def binary_binding_payload() -> dict:
             "mtime": "2026-06-08T00:00:00Z",
         },
         "validation_project_path": "G:/SampleProject/SampleProject.uproject",
-        "engine_root": "G:/UE5/UnrealEngine",
+        "engine_root": "E:/MockEngineRoot",
     }
 
 

@@ -782,7 +782,7 @@ def test_binary_binding_contract_shared_by_manifest_production() -> None:
                 "mtime": "2026-06-08T00:00:00Z",
             },
             "validation_project_path": "G:/SampleProject/SampleProject.uproject",
-            "engine_root": "G:/UE5/UnrealEngine",
+            "engine_root": "E:/MockEngineRoot",
         }
     }
 

@@ -181,6 +181,7 @@ $publicSurfaceRecursiveRoots = @(
 
 $forbiddenPathPatterns = @(
     'G:\UE5\',
+    'G:/UE5/',
     'C:\Users\Administrator',
     'Design2UMG_Host_',
     'HostProject.uproject'

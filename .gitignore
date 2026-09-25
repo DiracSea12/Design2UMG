@@ -105,6 +105,7 @@ Tools/FigmaExporter/node_modules/
 # directories when the plugin Fonts/ folder is absent.
 /Fonts/
 
-# Pen design corpus slot: real folder for open-source users, directory
-# junction to the editing source on this machine (cannot be committed)
+# Pen design corpus stays local: open-source users import the .pen samples
+# under Examples/ or bring their own designs; this path is a local workspace
+# slot (optionally a directory junction to the editing source on this machine)
 /PenDesigns/
