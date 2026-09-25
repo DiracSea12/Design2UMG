@@ -2,6 +2,7 @@ import argparse
 import base64
 import json
 import math
+import ntpath
 import os
 import queue
 import re
@@ -769,7 +770,20 @@ def normalize_local_document_path(value: str) -> str:
     normalized = (value or "").strip().replace("/", "\\")
     if re.match(r"^\\+[A-Za-z]:\\", normalized):
         normalized = normalized.lstrip("\\")
-    return os.path.normcase(os.path.normpath(normalized))
+    # Pencil document paths carry Windows semantics (case-insensitive, backslash
+    # separators); apply them on every host so equivalence does not depend on
+    # the comparing OS (os.path.normcase is the identity function on POSIX).
+    return ntpath.normcase(ntpath.normpath(normalized))
+
+
+def resolve_document_path(source_path: str) -> str:
+    # Resolve only paths this host can actually see; document paths that belong
+    # to another host's editor stay as opaque text instead of gaining a bogus
+    # CWD prefix from Path.resolve().
+    candidate = Path(source_path)
+    if candidate.is_file():
+        return str(candidate.resolve())
+    return source_path
 
 
 def activate_pencil_document(app_name: str, source_path: str):
@@ -779,7 +793,7 @@ def activate_pencil_document(app_name: str, source_path: str):
     if not command_path:
         raise FileNotFoundError(f"editor command not found: {command_name or '<empty>'}")
 
-    resolved_source_path = str(Path(source_path).resolve())
+    resolved_source_path = resolve_document_path(source_path)
     command = [command_path, "--reuse-window", resolved_source_path]
     if os.name == "nt" and Path(command_path).suffix.lower() in {".bat", ".cmd"}:
         command = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", *command]
@@ -801,14 +815,7 @@ def ensure_pencil_document_open(
     timeout_sec: float = 15.0,
     poll_interval: float = 0.5,
 ):
-    # Resolve only paths this host can actually see; document paths that belong
-    # to another host's editor stay as opaque text instead of gaining a bogus
-    # CWD prefix from Path.resolve().
-    candidate = Path(source_path)
-    if candidate.is_file():
-        normalized_target = normalize_local_document_path(str(candidate.resolve()))
-    else:
-        normalized_target = normalize_local_document_path(source_path)
+    normalized_target = normalize_local_document_path(resolve_document_path(source_path))
     active_document = normalize_local_document_path(get_active_pencil_document(client))
     if active_document == normalized_target and not force_reopen:
         return
