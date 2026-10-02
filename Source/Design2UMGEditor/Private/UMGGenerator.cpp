@@ -81,8 +81,10 @@ namespace
 			Navigation->Right = FWidgetNavigationData();
 			Navigation->Next = FWidgetNavigationData();
 			Navigation->Previous = FWidgetNavigationData();
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
 			Navigation->RoutingPolicy = EWidgetNavigationRoutingPolicy::Default;
 			Navigation->NavigationMethod.Reset();
+#endif
 			SanitizedNavigationObjects.Add(Navigation);
 		};
 
