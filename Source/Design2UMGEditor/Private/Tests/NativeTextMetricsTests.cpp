@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -46,7 +47,7 @@ bool FNativeTextMetricsTest::RunTest(const FString&)
         Adjusted->SetFlags(RF_Public | RF_Standalone);
     }
     int32 FaceCount = 0;
-    for (FTypefaceEntry& Entry : Adjusted->GetMutableInternalCompositeFont().DefaultTypeface.Fonts)
+    for (FTypefaceEntry& Entry : Design2UMGFontAccess::GetMutableCompositeFont(*Adjusted).DefaultTypeface.Fonts)
     {
         const UFontFace* SourceFace = Cast<UFontFace>(Entry.Font.GetFontFaceAsset());
         if (!TestNotNull(TEXT("Persistent face asset"), SourceFace)) return false;

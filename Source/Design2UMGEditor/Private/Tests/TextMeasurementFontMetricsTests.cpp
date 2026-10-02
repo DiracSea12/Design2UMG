@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGFontMetrics.h"
 #include "Editor.h"
 #include "Engine/Font.h"
@@ -45,7 +46,7 @@ bool FFontFaceMetricReimportTest::RunTest(const FString&)
 	Font->FontCacheType = EFontCacheType::Runtime;
 	FTypefaceEntry Entry(TEXT("Regular"));
 	Entry.Font = FFontData(Face);
-	Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(Entry);
+	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(Entry);
 	FSlateFontInfo Info(Font, 12, TEXT("Regular"));
 	float Gap = 0.0f;
 	TestTrue(TEXT("Asset-backed metrics readable"), Design2UMGFontMetrics::TryReadLineGapEm(Info, Gap));

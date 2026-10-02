@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Design2UMGConverter.h"
@@ -321,7 +322,7 @@ bool FExplicitFontMappingMissingTypefaceDoesNotAutoSubstituteTest::RunTest(const
 	}
 
 	RegularOnlyFont->FontCacheType = EFontCacheType::Runtime;
-	RegularOnlyFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+	Design2UMGFontAccess::GetMutableCompositeFont(*RegularOnlyFont).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 		FName(TEXT("Regular")),
 		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 		EFontHinting::Default,
@@ -405,7 +406,7 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 	}
 
 	Font->FontCacheType = EFontCacheType::Runtime;
-	Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 		FName(TEXT("Bold")),
 		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Bold.ttf")),
 		EFontHinting::Default,
@@ -593,7 +594,7 @@ bool FTextRunPostScriptNameTriggersRichTextBlockTest::RunTest(const FString& Par
 	}
 
 	RunFont->FontCacheType = EFontCacheType::Runtime;
-	RunFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+	Design2UMGFontAccess::GetMutableCompositeFont(*RunFont).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 		FName(TEXT("Regular")),
 		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 		EFontHinting::Default,

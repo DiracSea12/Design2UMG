@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "DesignLocalFontImport.h"
+#include "Design2UMGFontAccess.h"
 #include "DesignSchema.h"
 #include "Design2UMGLog.h"
 #include "FontResolver.h"
@@ -208,8 +209,10 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	}
 	if (!Font) Font = NewObject<UFont>(Package, *AssetName, RF_Public | RF_Standalone);
 	const EFontCacheType OldCacheType = Font->FontCacheType;
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
 	const ERuntimeFontSource OldSource = Font->RuntimeFontSource;
-	auto& Composite = Font->GetMutableInternalCompositeFont();
+#endif
+	auto& Composite = Design2UMGFontAccess::GetMutableCompositeFont(*Font);
 	const FCompositeFont Previous = Composite;
 	const bool bWasDirty = Package->IsDirty();
 	const FString ResolvedTypeface = TypefaceName.IsEmpty() ? Typeface(Face) : TypefaceName;
@@ -217,7 +220,10 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	if (const auto* Existing = Composite.DefaultTypeface.Fonts.FindByPredicate([&](const FTypefaceEntry& Item) { return Item.Name == Name; }))
 	{
 		const UFontFace* ExistingFace = Cast<UFontFace>(Existing->Font.GetFontFaceAsset());
-		if (OldCacheType == EFontCacheType::Runtime && OldSource == ERuntimeFontSource::Asset
+		if (OldCacheType == EFontCacheType::Runtime
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
+			&& OldSource == ERuntimeFontSource::Asset
+#endif
 			&& ExistingFace && ExistingFace->FontFaceData->GetData() == Bytes)
 		{
 			FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
@@ -235,7 +241,9 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	}
 	else Composite.DefaultTypeface.Fonts.Add(MoveTemp(Entry));
 	Font->FontCacheType = EFontCacheType::Runtime;
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
 	Font->RuntimeFontSource = ERuntimeFontSource::Asset;
+#endif
 	Composite.MakeDirty();
 	const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
@@ -246,7 +254,9 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	{
 		Composite = Previous;
 		Font->FontCacheType = OldCacheType;
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
 		Font->RuntimeFontSource = OldSource;
+#endif
 		Embedded->ClearFlags(RF_Public | RF_Standalone);
 		Embedded->MarkAsGarbage();
 		if (bNew) { Font->ClearFlags(RF_Public | RF_Standalone); Font->MarkAsGarbage(); }

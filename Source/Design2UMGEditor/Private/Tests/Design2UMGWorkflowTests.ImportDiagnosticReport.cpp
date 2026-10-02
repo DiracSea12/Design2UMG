@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
 #include "Design2UMGSettings.h"
@@ -37,7 +38,7 @@ namespace
 		}
 
 		Font->FontCacheType = EFontCacheType::Runtime;
-		Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+		Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 			FName(*TypefaceName),
 			FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 			EFontHinting::Default,
@@ -1024,7 +1025,7 @@ bool FImportDiagnosticReportExplicitMappingMissingTypefaceTest::RunTest(const FS
 	}
 
 	RegularOnlyFont->FontCacheType = EFontCacheType::Runtime;
-	RegularOnlyFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+	Design2UMGFontAccess::GetMutableCompositeFont(*RegularOnlyFont).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 		FName(TEXT("Regular")),
 		FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 		EFontHinting::Default,

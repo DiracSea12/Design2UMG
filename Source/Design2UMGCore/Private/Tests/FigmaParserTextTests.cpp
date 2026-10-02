@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #include "FigmaParser.h"
 #include "DesignSchema.h"
@@ -92,14 +93,14 @@ namespace
 		}
 
 		Font->FontCacheType = EFontCacheType::Runtime;
-		Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+		Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 			FName(TEXT("SemiBold")),
 			FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 			EFontHinting::Default,
 			EFontLoadingPolicy::LazyLoad));
 		if (bIncludeItalicEntry)
 		{
-			Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+			Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(FTypefaceEntry(
 				FName(TEXT("SemiBold Italic")),
 				FPaths::Combine(FPaths::EngineContentDir(), TEXT("Slate/Fonts/Roboto-Regular.ttf")),
 				EFontHinting::Default,

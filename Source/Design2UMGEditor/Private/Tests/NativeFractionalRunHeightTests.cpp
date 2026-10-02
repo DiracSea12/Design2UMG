@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/Font.h"
@@ -38,7 +39,7 @@ bool FNativeFractionalRunHeightTest::RunTest(const FString&)
     {
         UFont* Font = DuplicateObject<UFont>(Source, GetTransientPackage());
         Fonts.Emplace(Font);
-        for (FTypefaceEntry& Entry : Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts)
+        for (FTypefaceEntry& Entry : Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts)
         {
             const UFontFace* SourceFace = Cast<UFontFace>(Entry.Font.GetFontFaceAsset());
             if (!TestNotNull(TEXT("Native face"), SourceFace)) return nullptr;

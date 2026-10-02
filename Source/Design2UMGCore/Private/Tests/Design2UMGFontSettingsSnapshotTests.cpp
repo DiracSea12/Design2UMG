@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGCoreTestNodes.h"
 #include "Design2UMGSettings.h"
@@ -28,7 +29,7 @@ namespace
 		Face->FontFaceData = FFontFaceData::MakeFontFaceData(MoveTemp(Bytes));
 		FTypefaceEntry Entry(TEXT("Regular"));
 		Entry.Font = FFontData(Face);
-		Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(Entry);
+		Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.Add(Entry);
 		return Font;
 	}
 

@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGFontAccess.h"
 #include "DesignLocalFontImport.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
@@ -275,7 +276,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	TestEqual(TEXT("Existing family asset reused"), Path, Font->GetPathName());
 	UFont* ColdFont = NewObject<UFont>();
 	ColdFont->FontCacheType = EFontCacheType::Runtime;
-	ColdFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts =
+	Design2UMGFontAccess::GetMutableCompositeFont(*ColdFont).DefaultTypeface.Fonts =
 		Font->GetCompositeFont()->DefaultTypeface.Fonts;
 	const FVector2D Expected = Measure->Measure(TEXT("MMMMiiii"), FSlateFontInfo(ColdFont, 24, TEXT("Bold")));
 	const FVector2D After = Measure->Measure(TEXT("MMMMiiii"), HotInfo);
@@ -288,7 +289,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	const auto SavedMappings = Settings->ExplicitFontMappings;
 	ON_SCOPE_EXIT { Settings->ExplicitFontMappings = SavedMappings; FFontResolver::ClearCache(); };
 	Settings->ExplicitFontMappings.Add(TEXT("Biryani"), Font);
-	Font->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
+	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
 	FFontResolver::ClearCache();
 	DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Explicit mapping prevents automatic modification"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), 1);
