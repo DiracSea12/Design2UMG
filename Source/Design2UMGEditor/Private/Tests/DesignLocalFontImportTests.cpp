@@ -187,6 +187,64 @@ bool FDesignLocalFontIdentityTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignLocalFontSaveFailureTest,
+	"Design2UMG.Fonts.LocalSource.SaveFailureRestoresFont",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDesignLocalFontSaveFailureTest::RunTest(const FString&)
+{
+	DesignLocalFontImport::FFace Seed;
+	FString Error;
+	if (!TestTrue(TEXT("Read seed font"), DesignLocalFontImport::ReadFace(
+		FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), Seed, Error))) return false;
+	const FString Package = TEXT("/Game/D2UFontSaveFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT("/Font");
+	if (!TestTrue(TEXT("Save seed font"), DesignLocalFontImport::ImportFace(Seed, Package, Error, TEXT("Regular")))) return false;
+	UFont* Font = LoadObject<UFont>(nullptr, *(Package + TEXT(".Font")));
+	if (!TestNotNull(TEXT("Seed font exists"), Font)) return false;
+	const FString Filename = FPaths::ConvertRelativePathToFull(FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension()));
+	ON_SCOPE_EXIT
+	{
+		FAssetRegistryModule::AssetDeleted(Font);
+		IFileManager::Get().Delete(*Filename);
+		Font->ClearFlags(RF_Public | RF_Standalone);
+		Font->MarkAsGarbage();
+		FFontResolver::ClearCache();
+	};
+	TArray<uint8> Before;
+	if (!TestTrue(TEXT("Read saved font"), FFileHelper::LoadFileToArray(Before, *Filename))) return false;
+	Font->FontCacheType = EFontCacheType::Offline;
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
+	Font->RuntimeFontSource = ERuntimeFontSource::CoreStyleDefault;
+#endif
+	Font->GetOutermost()->SetDirtyFlag(false);
+	const FFontData OriginalFace = Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts[0].Font;
+	bool bSaveRejected = false;
+	Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure(
+		[&](const FString& Path)
+		{
+			bSaveRejected = Path.Equals(Filename, ESearchCase::IgnoreCase);
+			return bSaveRejected;
+		});
+	TestFalse(TEXT("Rejected font save fails import"), DesignLocalFontImport::ImportFace(Seed, Package, Error, TEXT("Bold")));
+	TestTrue(TEXT("The target save was rejected"), bSaveRejected);
+	TestTrue(TEXT("Failure identifies font persistence"), Error.StartsWith(TEXT("Failed to save local font:")));
+	TestTrue(TEXT("Original cache type restored"), Font->FontCacheType == EFontCacheType::Offline);
+#if !UE_VERSION_OLDER_THAN(5, 7, 0)
+	TestTrue(TEXT("Original runtime source restored"), Font->RuntimeFontSource == ERuntimeFontSource::CoreStyleDefault);
+#endif
+	const auto& Entries = Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts;
+	TestEqual(TEXT("No added face survives failure"), Entries.Num(), 1);
+	if (Entries.Num() == 1)
+	{
+		TestEqual(TEXT("Original face name restored"), Entries[0].Name, FName(TEXT("Regular")));
+		TestTrue(TEXT("Original face data restored"), Entries[0].Font.GetFontFaceAsset() == OriginalFace.GetFontFaceAsset());
+	}
+	TestFalse(TEXT("Original package dirty state restored"), Font->GetOutermost()->IsDirty());
+	TArray<uint8> After;
+	TestTrue(TEXT("Saved font remains readable"), FFileHelper::LoadFileToArray(After, *Filename));
+	TestTrue(TEXT("Failed save leaves persisted font unchanged"), Before == After);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignLocalFontUserAssetProtectionTest,
 	"Design2UMG.Fonts.LocalSource.UserAssetProtection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
