@@ -13,8 +13,11 @@
 class FDesignHttpClientSlot
 {
 public:
-	explicit FDesignHttpClientSlot(FHttpModule& InHttpModule) : HttpModule(InHttpModule) {}
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateRequest() { return HttpModule.CreateRequest(); }
+	using FRequestFactory = TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()>;
+	explicit FDesignHttpClientSlot(FHttpModule& InHttpModule)
+		: FDesignHttpClientSlot([&InHttpModule]() { return InHttpModule.CreateRequest(); }) {}
+	explicit FDesignHttpClientSlot(FRequestFactory InFactory) : RequestFactory(MoveTemp(InFactory)) {}
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateRequest() { return RequestFactory(); }
 
 	/** Reserves the next request id and makes it the active request. */
 	int32 BeginRequest();
@@ -37,7 +40,7 @@ public:
 	void ClearActiveRequest(int32 RequestId);
 
 private:
-	FHttpModule& HttpModule;
+	FRequestFactory RequestFactory;
 	FHttpRequestPtr ActiveRequest;
 	int32 ActiveRequestId = 0;
 	int32 NextRequestId = 0;

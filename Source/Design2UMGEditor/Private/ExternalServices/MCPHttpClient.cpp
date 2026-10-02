@@ -78,6 +78,11 @@ FMCPHttpClient::FMCPHttpClient(FHttpModule& HttpModule)
 {
 }
 
+FMCPHttpClient::FMCPHttpClient(TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()> RequestFactory)
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>(MoveTemp(RequestFactory)))
+{
+}
+
 FMCPHttpClient::~FMCPHttpClient()
 {
 	// Must go through Disconnect: the session can own its own cancel callback (ConnectAsync

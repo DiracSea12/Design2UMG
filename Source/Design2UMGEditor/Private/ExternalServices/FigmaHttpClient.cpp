@@ -20,6 +20,11 @@ FFigmaHttpClient::FFigmaHttpClient(FHttpModule& HttpModule)
 {
 }
 
+FFigmaHttpClient::FFigmaHttpClient(TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()> RequestFactory)
+	: State(MakeShared<FDesignHttpClientSlot, ESPMode::ThreadSafe>(MoveTemp(RequestFactory)))
+{
+}
+
 FFigmaHttpClient::~FFigmaHttpClient()
 {
 	CancelActiveRequest();

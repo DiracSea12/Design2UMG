@@ -446,7 +446,7 @@ bool FResourceFailureFigmaMissingImagesObjectIsFailureTest::RunTest(const FStrin
 	AddExpectedError(TEXT("No 'images' in meta"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 
 	bool bCompleted = false;
 	bool bSuccess = true;
@@ -481,7 +481,7 @@ bool FResourceFailureFigmaEmptyImagesDictionaryIsAllowedSubstituteTest::RunTest(
 	AddExpectedErrorPlain(TEXT("requested image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 
 	bool bCompleted = false;
 	bool bSuccess = false;
@@ -527,7 +527,7 @@ bool FResourceFailureFigmaUnresolvedBitmapFillRefIsFailureTest::RunTest(const FS
 	AddExpectedErrorPlain(TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 
 	bool bCompleted = false;
 	bool bSuccess = true;
@@ -560,7 +560,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaResolvedRefIsAppliedTest,
 bool FResourceFailureFigmaResolvedRefIsAppliedTest::RunTest(const FString& Parameters)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 
 	const TSharedRef<FDesignDocument> Document = MakeDocumentWithImageRef(TEXT("ref-alpha"));
 	bool bCompleted = false;
@@ -596,7 +596,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaNoImageRefsSkipsRequestTes
 bool FResourceFailureFigmaNoImageRefsSkipsRequestTest::RunTest(const FString& Parameters)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 
 	const TSharedRef<FDesignDocument> Document = MakeShared<FDesignDocument>();
 	Document->Children.Add(Design2UMGEditorTests::MakeNode(
@@ -789,7 +789,7 @@ bool FResourceFailureFigmaSubstituteMustCoverEveryUseTest::RunTest(const FString
 			Document->Children[0]->Visual.Stroke.Fill.Reset();
 		}
 		FScopedHttpTestTransport Transport;
-		FFigmaHttpClient Client(Transport);
+		FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 		bool bCompleted = false;
 		bool bSucceeded = true;
 		FFigmaImageExporter::ResolveImageRefs(Client, TEXT("resource_failure-file"), Document,

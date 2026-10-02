@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
 
 /**
  * Figma REST API HTTP client.
@@ -15,6 +16,7 @@ class DESIGN2UMGEDITOR_API FFigmaHttpClient
 {
 public:
 	explicit FFigmaHttpClient(FHttpModule& HttpModule = FHttpModule::Get());
+	explicit FFigmaHttpClient(TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()> RequestFactory);
 	~FFigmaHttpClient();
 
 	FFigmaHttpClient(const FFigmaHttpClient&) = delete;

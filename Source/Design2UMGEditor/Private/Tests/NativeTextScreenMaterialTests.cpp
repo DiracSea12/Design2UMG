@@ -3,7 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/TextureRenderTarget2D.h"
 #include "Materials/Material.h"
-#include "Materials/MaterialExpressionScreenPosition.h"
+#include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionDivide.h"
 #include "Materials/MaterialExpressionCustom.h"
@@ -64,7 +64,9 @@ bool FNativeTextScreenMaterialTest::RunTest(const FString&)
     TStrongObjectPtr<UMaterial> Material(NewObject<UMaterial>());
     Material->MaterialDomain = MD_UI;
     Material->BlendMode = BLEND_Translucent;
-    auto* Position = NewObject<UMaterialExpressionScreenPosition>(Material.Get());
+    UClass* ScreenPositionClass = LoadClass<UMaterialExpression>(nullptr, TEXT("/Script/Engine.MaterialExpressionScreenPosition"));
+    if (!TestNotNull(TEXT("Engine ScreenPosition expression class exists"), ScreenPositionClass)) return false;
+    auto* Position = NewObject<UMaterialExpression>(Material.Get(), ScreenPositionClass);
     auto* Mask = NewObject<UMaterialExpressionComponentMask>(Material.Get());
     Mask->Input.Expression = Position;
     Mask->Input.OutputIndex = 1; // Native pixel position, not viewport UV.
@@ -131,7 +133,9 @@ bool FNativeTextTransformedMaterialTest::RunTest(const FString&)
     TStrongObjectPtr<UMaterial> Material(NewObject<UMaterial>());
     Material->MaterialDomain = MD_UI;
     Material->BlendMode = BLEND_Translucent;
-    auto* Position = NewObject<UMaterialExpressionScreenPosition>(Material.Get());
+    UClass* ScreenPositionClass = LoadClass<UMaterialExpression>(nullptr, TEXT("/Script/Engine.MaterialExpressionScreenPosition"));
+    if (!TestNotNull(TEXT("Engine ScreenPosition expression class exists"), ScreenPositionClass)) return false;
+    auto* Position = NewObject<UMaterialExpression>(Material.Get(), ScreenPositionClass);
     auto* Mapping = NewObject<UMaterialExpressionVectorParameter>(Material.Get());
     Mapping->ParameterName = TEXT("PixelToTextX");
     auto* Expression = NewObject<UMaterialExpressionCustom>(Material.Get());

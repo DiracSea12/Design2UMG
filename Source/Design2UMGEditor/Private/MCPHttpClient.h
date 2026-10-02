@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
 
 class FJsonObject;
 
@@ -19,6 +20,7 @@ private:
 
 public:
 	explicit FMCPHttpClient(FHttpModule& HttpModule = FHttpModule::Get());
+	explicit FMCPHttpClient(TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()> RequestFactory);
 	~FMCPHttpClient();
 
 	FMCPHttpClient(const FMCPHttpClient&) = delete;

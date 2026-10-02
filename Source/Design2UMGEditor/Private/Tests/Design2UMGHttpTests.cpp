@@ -34,7 +34,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaHttpCancellationBehaviorTest,
 bool FFigmaHttpCancellationBehaviorTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	int32 CallbackCount = 0;
 	Client.GetFile(TEXT("test-file"), [&](bool, const FString&) { ++CallbackCount; });
 	TestEqual(TEXT("One request started"), Transport.Pending.Num(), 1);
@@ -65,7 +65,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpCancellationBehaviorTest,
 bool FMCPHttpCancellationBehaviorTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	bool bConnected = false;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess) { bConnected = bSuccess; });
 	if (!CompleteHandshake(*this, Transport)) return false;
@@ -85,7 +85,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpClientSessionCycleReleaseTest,
 bool FMCPHttpClientSessionCycleReleaseTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	TSharedPtr<int32> CallbackLifetime = MakeShared<int32>(0);
 	TWeakPtr<int32> WeakCallback = CallbackLifetime;
 	bool bConnected = false;
@@ -126,7 +126,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPRequestIdSemanticsTest,
 bool FMCPRequestIdSemanticsTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	Client.ConnectAsync(TEXT("http://transport.test"), [](bool) {});
 	if (!CompleteHandshake(*this, Transport)) return false;
 	TestTrue(TEXT("Handshake has no pending requests"), Transport.Pending.IsEmpty());
@@ -163,7 +163,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPDisconnectCollisionTest,
 bool FMCPDisconnectCollisionTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	int32 OldConnectionCallbacks = 0;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool) { ++OldConnectionCallbacks; });
 	// Leave the old notification pending: a tool can supersede it after initialize.
@@ -209,7 +209,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaHttpResponseContractTest,
 bool FFigmaHttpResponseContractTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FFigmaHttpClient Client(Transport);
+	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	Client.SetToken(TEXT("test-token"));
 	AddExpectedError(TEXT("FigmaHttpClient: HTTP "), EAutomationExpectedErrorFlags::Contains, 5);
 	AddExpectedError(TEXT("FigmaHttpClient: Connection failed"), EAutomationExpectedErrorFlags::Contains, 2);
@@ -253,7 +253,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMCPHttpResponseContractTest,
 bool FMCPHttpResponseContractTest::RunTest(const FString&)
 {
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	Client.ConnectAsync(TEXT("http://transport.test"), [](bool) {});
 	if (!CompleteHandshake(*this, Transport)) return false;
 	AddExpectedError(TEXT("MCPHttpClient: Async parse failed"), EAutomationExpectedErrorFlags::Contains, 1);
@@ -309,7 +309,7 @@ bool FMCPHttpHandshakeFailureTest::RunTest(const FString&)
 	{
 		FScopedHttpTestTransport Transport;
 		Transport.bStartRequests = Case.bStarts;
-		FMCPHttpClient Client(Transport);
+		FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 		int32 Callbacks = 0;
 		Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess)
 		{
@@ -329,7 +329,7 @@ bool FMCPHttpHandshakeFailureTest::RunTest(const FString&)
 
 	// Notification failure is a warning after a successful initialize, not a lost session.
 	FScopedHttpTestTransport Transport;
-	FMCPHttpClient Client(Transport);
+	FMCPHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
 	int32 Callbacks = 0;
 	Client.ConnectAsync(TEXT("http://transport.test"), [&](bool bSuccess)
 	{

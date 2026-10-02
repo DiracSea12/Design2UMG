@@ -72,7 +72,7 @@ namespace Design2UMGEditorTests
 	};
 
 	/** Declare before the client so cancellation is observed during client teardown. */
-	struct FScopedHttpTestTransport final : FHttpModule
+	struct FScopedHttpTestTransport final
 	{
 		TFunction<bool(int32, const FHttpRequestPtr&)> StartRequest;
 		TMap<int32, FHttpRequestPtr> Pending;
@@ -93,7 +93,7 @@ namespace Design2UMGEditorTests
 		FScopedHttpTestTransport(const FScopedHttpTestTransport&) = delete;
 		FScopedHttpTestTransport& operator=(const FScopedHttpTestTransport&) = delete;
 
-		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateRequest() override
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> CreateRequest()
 		{
 			return MakeShared<FRequest, ESPMode::ThreadSafe>(*this, ++NextId);
 		}
