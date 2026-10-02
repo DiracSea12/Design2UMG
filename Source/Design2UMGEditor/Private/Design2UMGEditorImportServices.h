@@ -42,11 +42,26 @@ namespace Design2UMGEditorImportServices
 			FOnResolvedDocument InOnResolvedDocument,
 			FString InSelectedRootId = FString(),
 			FHttpModule& HttpModule = FHttpModule::Get())
+			: FFigmaImportSession(InOwner, MoveTemp(InFileKey), Token, InGeneration,
+				InSettingsSnapshot, MoveTemp(InOnResolvedDocument), MoveTemp(InSelectedRootId),
+				[&HttpModule]() { return HttpModule.CreateRequest(); })
+		{
+		}
+
+		FFigmaImportSession(
+			FFigmaImportService& InOwner,
+			FString InFileKey,
+			const FString& Token,
+			const uint32 InGeneration,
+			const FDesign2UMGImportSettingsSnapshot& InSettingsSnapshot,
+			FOnResolvedDocument InOnResolvedDocument,
+			FString InSelectedRootId,
+			TFunction<TSharedRef<IHttpRequest, ESPMode::ThreadSafe>()> RequestFactory)
 			: Owner(InOwner)
 			, FileKey(MoveTemp(InFileKey))
 			, SelectedRootId(MoveTemp(InSelectedRootId))
 			, Generation(InGeneration)
-			, Client(MakeUnique<FFigmaHttpClient>(HttpModule))
+			, Client(MakeUnique<FFigmaHttpClient>(MoveTemp(RequestFactory)))
 			, SettingsSnapshot(InSettingsSnapshot)
 			, OnResolvedDocument(MoveTemp(InOnResolvedDocument))
 		{

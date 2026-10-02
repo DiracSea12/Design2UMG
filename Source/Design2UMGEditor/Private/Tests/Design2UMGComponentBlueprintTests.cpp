@@ -894,7 +894,7 @@ bool FComponentBlueprintRestTest::RunTest(const FString&)
 	TSharedPtr<FDesignDocument> ResolvedDocument;
 	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
 		Owner, TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings,
-		[&](const TSharedRef<FDesignDocument>& Document, bool bImageFailure) { ResolvedDocument = Document; }, TEXT("root"), Transport);
+		[&](const TSharedRef<FDesignDocument>& Document, bool bImageFailure) { ResolvedDocument = Document; }, TEXT("root"), [&Transport]() { return Transport.CreateRequest(); });
 	Session->Start();
 	TestEqual(TEXT("Root, published identity, library and image requests executed once"), Requests, 4);
 	if (!TestTrue(TEXT("Remote dependency resolution completes"), ResolvedDocument.IsValid())) return false;
@@ -960,7 +960,7 @@ bool FRemoteSetMappingDependencyTest::RunTest(const FString&)
 	bool Resolved = false;
 	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
 		Owner, TEXT("component-blueprint-test"), TEXT("test-token"), 1, Settings,
-		[&](const TSharedRef<FDesignDocument>&, bool bImageFailure) { Resolved = !bImageFailure; }, FString(), Transport);
+		[&](const TSharedRef<FDesignDocument>&, bool bImageFailure) { Resolved = !bImageFailure; }, FString(), [&Transport]() { return Transport.CreateRequest(); });
 	Session->Start();
 	TestTrue(TEXT("Set mapping resolves without the source library"), Resolved);
 	TestEqual(TEXT("Only the selected document is fetched"), Requests, 1);
