@@ -10,6 +10,7 @@
 #include "Components/RichTextBlock.h"
 #include "Components/TextBlock.h"
 #include "Components/TextWidgetTypes.h"
+#include "Misc/EngineVersionComparison.h"
 
 namespace
 {
@@ -193,12 +194,17 @@ namespace UMGTextPropertyApplier
 			EditableTextBox->SetHintText(FText::FromString(Node.Text.HintText.GetValue()));
 		}
 
-		FEditableTextBoxStyle Style = EditableTextBox->GetWidgetStyle();
+		FEditableTextBoxStyle Style = EditableTextBox->WidgetStyle;
 		bool bStyleChanged = false;
 		ApplyEditableTextBoxStyle(Style, Node, bStyleChanged);
 		if (bStyleChanged)
 		{
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+			EditableTextBox->WidgetStyle = Style;
+			EditableTextBox->SynchronizeProperties();
+#else
 			EditableTextBox->SetWidgetStyle(Style);
+#endif
 		}
 
 		ApplyEditableTextJustification(EditableTextBox, Node);
