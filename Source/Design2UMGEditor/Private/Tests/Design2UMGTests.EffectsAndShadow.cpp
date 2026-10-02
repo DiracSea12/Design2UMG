@@ -2,6 +2,8 @@
 
 // Effect wrappers: blur / inner shadow / drop shadow / geometry mask conversion, retainer material application, and effect JSON round trips.
 
+#include "Misc/EngineVersionComparison.h"
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
@@ -339,7 +341,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRetainerEffectMaterialApplicationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FRetainerEffectMaterialApplicationTest::RunTest(const FString& Parameters)
 {
-	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackage());
 	TestTrue(TEXT("RetainerBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -373,7 +375,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeometryMaskRetainerMaterialApplicationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FGeometryMaskRetainerMaterialApplicationTest::RunTest(const FString& Parameters)
 {
-	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackage());
 	TestTrue(TEXT("Geometry mask RetainerBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -401,7 +403,13 @@ bool FGeometryMaskRetainerMaterialApplicationTest::RunTest(const FString& Parame
 			ESearchCase::CaseSensitive)
 		&& !EffectMaterial->HasAnyFlags(RF_Transient));
 	const FMaterialResource* MaterialResource = EffectMaterial
-		? EffectMaterial->GetMaterialResource(GMaxRHIShaderPlatform)
+		? EffectMaterial->GetMaterialResource(
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+			GMaxRHIFeatureLevel
+#else
+			GMaxRHIShaderPlatform
+#endif
+		)
 		: nullptr;
 	TestTrue(TEXT("Geometry mask material shader compilation is complete"),
 		MaterialResource && MaterialResource->IsGameThreadShaderMapComplete());
@@ -429,7 +437,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInnerShadowRetainerMaterialApplicationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Parameters)
 {
-	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	URetainerBox* Widget = NewObject<URetainerBox>(GetTransientPackage());
 	TestTrue(TEXT("Inner shadow RetainerBox created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -451,7 +459,7 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 		Node.Effect.EffectColor.IsSet()
 		&& Node.Effect.EffectColor.GetValue().Equals(FLinearColor(0.1f, 0.2f, 0.3f, 0.4f), 0.0001f));
 
-	URetainerBox* PayloadWidget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	URetainerBox* PayloadWidget = NewObject<URetainerBox>(GetTransientPackage());
 	TestTrue(TEXT("Typed payload RetainerBox created"), PayloadWidget != nullptr);
 	if (!PayloadWidget)
 	{
@@ -513,8 +521,8 @@ bool FRetainerTypedPayloadExplicitFalseAndRenderingPhaseTest::RunTest(const FStr
 	TestTrue(TEXT("Typed retainer payload keeps RenderingPhase phase count"),
 		Node.Effect.RenderingPhase.IsSet() && Node.Effect.RenderingPhase.GetValue().PhaseCount == 5);
 
-	URetainerBox* TypedWidget = NewObject<URetainerBox>(GetTransientPackageAsObject());
-	URetainerBox* PayloadWidget = NewObject<URetainerBox>(GetTransientPackageAsObject());
+	URetainerBox* TypedWidget = NewObject<URetainerBox>(GetTransientPackage());
+	URetainerBox* PayloadWidget = NewObject<URetainerBox>(GetTransientPackage());
 	TestNotNull(TEXT("Typed retainer widget created"), TypedWidget);
 	TestNotNull(TEXT("Payload retainer widget created"), PayloadWidget);
 	if (!TypedWidget || !PayloadWidget)

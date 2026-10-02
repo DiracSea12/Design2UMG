@@ -2,6 +2,7 @@
 #pragma once
 
 #include "HAL/PlatformFile.h"
+#include "Misc/EngineVersionComparison.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformTLS.h"
 #include "Misc/PackageName.h"
@@ -120,7 +121,11 @@ namespace Design2UMGEditorTests
 		FFileStatData GetStatData(const TCHAR* Path) override { return LowerLevel->GetStatData(Path); }
 		bool IterateDirectory(const TCHAR* Path, FDirectoryVisitor& Visitor) override { return LowerLevel->IterateDirectory(Path, Visitor); }
 		bool IterateDirectoryStat(const TCHAR* Path, FDirectoryStatVisitor& Visitor) override { return LowerLevel->IterateDirectoryStat(Path, Visitor); }
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		IAsyncReadFileHandle* OpenAsyncRead(const TCHAR* Path) override { return LowerLevel->OpenAsyncRead(Path); }
+#else
 		IAsyncReadFileHandle* OpenAsyncRead(const TCHAR* Path, bool AllowWrite = false) override { return LowerLevel->OpenAsyncRead(Path, AllowWrite); }
+#endif
 
 		IFileHandle* OpenRead(const TCHAR* Filename, bool bAllowWrite = false) override
 		{

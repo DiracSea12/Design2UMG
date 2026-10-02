@@ -13,6 +13,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Misc/App.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeLock.h"
 #include "Misc/ScopedSlowTask.h"
@@ -487,23 +488,27 @@ namespace DesignRemoteImageImporterInternal
 			const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& BulkBudget,
 			const DesignImageResources::FImageResourceLimits& Limits)
 		{
+			// DownloadUrls stops receive callbacks before returning; accepted bytes stay billed.
+			const auto ReceiveChunk = [State, BulkBudget, MaxCompressedBytes = Limits.MaxCompressedBytes](void* Ptr, int64 Length)
+			{
+				if (!IsStillReceiving(State)
+					|| !AcceptChunkForSingleImageLimit(State, Length, MaxCompressedBytes)
+					|| !ChargeChunkToOperationBudget(State, BulkBudget, Length))
+				{
+					return false;
+				}
+				AppendAcceptedChunk(State, static_cast<const uint8*>(Ptr), Length);
+				return true;
+			};
+#if UE_VERSION_OLDER_THAN(5, 5, 0)
+			return Request->SetResponseBodyReceiveStreamDelegate(FHttpRequestStreamDelegate::CreateLambda(ReceiveChunk));
+#else
 			return Request->SetResponseBodyReceiveStreamDelegateV2(
-				FHttpRequestStreamDelegateV2::CreateLambda(
-					// HTTP callbacks share request state and the budget mutex. DownloadUrls owns the
-					// borrowed budget and stops receive callbacks before returning.
-					[State, BulkBudget, MaxCompressedBytes = Limits.MaxCompressedBytes](void* Ptr, int64& InOutLength)
-					{
-						const int64 ChunkLen = InOutLength;
-						if (!IsStillReceiving(State)
-							|| !AcceptChunkForSingleImageLimit(State, ChunkLen, MaxCompressedBytes)
-							|| !ChargeChunkToOperationBudget(State, BulkBudget, ChunkLen))
-						{
-							InOutLength = 0;
-							return;
-						}
-						AppendAcceptedChunk(State, static_cast<const uint8*>(Ptr), ChunkLen);
-						InOutLength = ChunkLen;
-					}));
+				FHttpRequestStreamDelegateV2::CreateLambda([ReceiveChunk](void* Ptr, int64& InOutLength)
+				{
+					if (!ReceiveChunk(Ptr, InOutLength)) InOutLength = 0;
+				}));
+#endif
 		}
 
 		/** Requests that have neither finished nor been given a terminal reason by the wait loop. */

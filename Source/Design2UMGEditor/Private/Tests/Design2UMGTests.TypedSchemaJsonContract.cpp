@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
 #include "PenParser.h"
@@ -20,7 +21,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedNodeEmptyStringStillAppliesTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTypedNodeEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 {
-	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackageAsObject());
+	UEditableTextBox* Widget = NewObject<UEditableTextBox>(GetTransientPackage());
 	TestTrue(TEXT("EditableTextBox created"), Widget != nullptr);
 	if (!Widget)
 	{

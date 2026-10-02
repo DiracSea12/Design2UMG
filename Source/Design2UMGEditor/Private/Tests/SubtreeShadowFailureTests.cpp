@@ -11,6 +11,7 @@
 #include "Materials/MaterialExpressionCustom.h"
 #include "MaterialShared.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/EngineVersionComparison.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSubtreeShadowKernelBoundTest,
@@ -107,7 +108,13 @@ bool FSubtreeShadowShaderFailureTest::RunTest(const FString&)
 	Material->PostEditChange();
 	Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
 	Material->EnsureIsComplete();
-	const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+	const FMaterialResource* Resource = Material->GetMaterialResource(
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+		GMaxRHIFeatureLevel
+#else
+		GMaxRHIShaderPlatform
+#endif
+	);
 	if (!TestTrue(TEXT("Fault injection actually causes shader compilation errors"), Resource && !Resource->GetCompileErrors().IsEmpty())) return false;
 	TestFalse(TEXT("Shader compilation failure is not reported as successful preparation"),
 		Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Source, Error));

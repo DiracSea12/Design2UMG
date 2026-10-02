@@ -2,6 +2,7 @@
 
 // Typed widget state and brush JSON round trips (switcher state, widget state, scroll box, brush texture path normalization, gradient brush).
 
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "UMGJsonParser.h"
@@ -25,7 +26,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetSwitcherUsesTypedStateTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWidgetSwitcherUsesTypedStateTest::RunTest(const FString& Parameters)
 {
-	UWidgetSwitcher* Widget = NewObject<UWidgetSwitcher>(GetTransientPackageAsObject());
+	UWidgetSwitcher* Widget = NewObject<UWidgetSwitcher>(GetTransientPackage());
 	TestTrue(TEXT("WidgetSwitcher created"), Widget != nullptr);
 	if (!Widget)
 	{

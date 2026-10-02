@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Misc/EngineVersionComparison.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "Design2UMGLog.h"
 
@@ -31,7 +32,13 @@ namespace
 {
 	bool ValidateCompiledSubtreeMaterial(UMaterial* Material, const FString& NodeName, FString& OutError)
 	{
-		const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+		const FMaterialResource* Resource = Material->GetMaterialResource(
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+			GMaxRHIFeatureLevel
+#else
+			GMaxRHIShaderPlatform
+#endif
+		);
 		if (Resource && !Resource->GetCompileErrors().IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("Subtree shadow '%s' material '%s' shader compilation failed: %s"),
@@ -226,7 +233,13 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 	UMaterial* Material = LoadObject<UMaterial>(nullptr, *ObjectPath);
 	if (Material)
 	{
-		const FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform);
+		const FMaterialResource* Resource = Material->GetMaterialResource(
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+			GMaxRHIFeatureLevel
+#else
+			GMaxRHIShaderPlatform
+#endif
+		);
 		if (!Resource || !Resource->GetGameThreadShaderMap() || !Resource->GetGameThreadShaderMap()->IsValidForRendering())
 		{
 			Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
@@ -297,7 +310,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackageAsObject(),
+		GetTransientPackage(),
 		TEXT("D2U_ForegroundBlurRetainer"),
 		RF_Transient,
 		nullptr,
@@ -360,7 +373,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackageAsObject(),
+		GetTransientPackage(),
 		TEXT("D2U_InnerShadowRetainer"),
 		RF_Transient,
 		nullptr,

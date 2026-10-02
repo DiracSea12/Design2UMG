@@ -2,6 +2,7 @@
 
 // Typed text payload application and parity for the text widget family (TextBlock, editable text family, rich text, letter spacing, JSON round trips).
 
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "UMGJsonParser.h"
@@ -34,7 +35,7 @@ namespace
 	template <typename T>
 	T* NewTextFamilyWidget(FAutomationTestBase& Test, const TCHAR* CreationLabel)
 	{
-		T* Widget = NewObject<T>(GetTransientPackageAsObject());
+		T* Widget = NewObject<T>(GetTransientPackage());
 		Test.TestNotNull(CreationLabel, Widget);
 		return Widget;
 	}
@@ -110,7 +111,7 @@ namespace
 		FTextFamilyWidgetState State;
 		State.Text = Widget->GetText().ToString();
 		State.Hint = Widget->GetHintText().ToString();
-		const FEditableTextBoxStyle& Style = Widget->GetWidgetStyle();
+		const FEditableTextBoxStyle& Style = Widget->WidgetStyle;
 		State.FontSize = Style.TextStyle.Font.Size;
 		State.TypefaceFontName = Style.TextStyle.Font.TypefaceFontName.ToString();
 		State.LetterSpacing = Style.TextStyle.Font.LetterSpacing;
@@ -241,7 +242,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockSourceShadowExtentTest,
 
 bool FTextBlockSourceShadowExtentTest::RunTest(const FString&)
 {
-	UTextBlock* Widget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	UTextBlock* Widget = NewObject<UTextBlock>(GetTransientPackage());
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("TextBlock");
 	Node.Text.Text = TEXT("Source label");
@@ -260,8 +261,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadParityTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
 {
-	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	UTextBlock* SerializedWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackage());
+	UTextBlock* SerializedWidget = NewObject<UTextBlock>(GetTransientPackage());
 	TestTrue(TEXT("Typed TextBlock created"), TypedWidget != nullptr);
 	TestTrue(TEXT("Serialized TextBlock created"), SerializedWidget != nullptr);
 	if (!TypedWidget || !SerializedWidget)
@@ -469,8 +470,8 @@ bool FTextTypedPayloadExplicitFalseFormattingFlagsTest::RunTest(const FString& P
 	TestTrue(TEXT("Typed text payload keeps explicit false Strikethrough"),
 		Node.Text.bStrikethrough.IsSet() && !Node.Text.bStrikethrough.GetValue());
 
-	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
-	UTextBlock* PayloadWidget = NewObject<UTextBlock>(GetTransientPackageAsObject());
+	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackage());
+	UTextBlock* PayloadWidget = NewObject<UTextBlock>(GetTransientPackage());
 	TestNotNull(TEXT("Typed text widget created"), TypedWidget);
 	TestNotNull(TEXT("Payload text widget created"), PayloadWidget);
 	if (!TypedWidget || !PayloadWidget)
@@ -547,7 +548,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRichTextBlockStyleRowsApplicationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 {
-	URichTextBlock* Widget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
+	URichTextBlock* Widget = NewObject<URichTextBlock>(GetTransientPackage());
 	TestTrue(TEXT("RichTextBlock created"), Widget != nullptr);
 	if (!Widget)
 	{
@@ -661,7 +662,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rich text application preserves 0.375 point row sizes"),
 		FMath::IsNearlyEqual(SubpointRow->TextStyle.Font.Size, 0.375f, 0.001f));
 
-	URichTextBlock* SerializedWidget = NewObject<URichTextBlock>(GetTransientPackageAsObject());
+	URichTextBlock* SerializedWidget = NewObject<URichTextBlock>(GetTransientPackage());
 	TestTrue(TEXT("Serialized RichTextBlock created"), SerializedWidget != nullptr);
 	if (!SerializedWidget)
 	{

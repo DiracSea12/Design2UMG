@@ -2,6 +2,7 @@
 
 // Box shadow fidelity: blur padding, explicit material params, and negative spread.
 
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
@@ -74,7 +75,7 @@ bool FBoxShadowBlurPaddingFidelityTest::RunTest(const FString& Parameters)
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(*ShadowWidget, TEXT("HeightOverride"))), 48.0f, 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *ShadowWidget),
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Box shadow texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -108,10 +109,10 @@ bool FBoxShadowExplicitBlurPaddingMaterialParamTest::RunTest(const FString& Para
 
 	UTexture2D* DefaultPaddingTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		DefaultPaddingRequest,
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	UTexture2D* ExplicitPaddingTexture = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		ExplicitPaddingShadowRequest,
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Default-padding box shadow texture generated"), DefaultPaddingTexture != nullptr);
 	TestTrue(TEXT("Explicit blur-padding texture generated"), ExplicitPaddingTexture != nullptr);
 	if (!DefaultPaddingTexture || !ExplicitPaddingTexture)
@@ -183,7 +184,7 @@ bool FBoxShadowNegativeSpreadFidelityTest::RunTest(const FString& Parameters)
 		&& ShadowWidget->Render.RenderTranslation.GetValue().Equals(FVector2D(0.0f, 0.0f), 0.001f));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *ShadowWidget),
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Negative spread texture generated"), Texture != nullptr);
 	if (!Texture)
 	{

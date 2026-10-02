@@ -22,7 +22,11 @@ namespace Design2UMGEditorTests
 			Content.Append(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
 		}
 
+#if UE_VERSION_OLDER_THAN(5, 6, 0)
+		FString GetURL() const override { return Url; }
+#else
 		const FString& GetURL() const override { return Url; }
+#endif
 		const FString& GetEffectiveURL() const override { return Url; }
 		EHttpRequestStatus::Type GetStatus() const override { return EHttpRequestStatus::Succeeded; }
 		EHttpFailureReason GetFailureReason() const override { return EHttpFailureReason::None; }
@@ -53,10 +57,12 @@ namespace Design2UMGEditorTests
 			const FUTF8ToTCHAR Text(reinterpret_cast<const ANSICHAR*>(Content.GetData()), Content.Num());
 			return FString(Text.Length(), Text.Get());
 		}
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		FUtf8StringView GetContentAsUtf8StringView() const override
 		{
 			return FUtf8StringView(reinterpret_cast<const UTF8CHAR*>(Content.GetData()), Content.Num());
 		}
+#endif
 
 	private:
 		FString Url;

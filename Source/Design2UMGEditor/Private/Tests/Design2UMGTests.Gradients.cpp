@@ -2,6 +2,7 @@
 
 // Radial gradient fidelity: multi-stop payloads, transform handling, and Figma handle conversion.
 
+#include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
@@ -75,7 +76,7 @@ bool FRadialGradientMultiStopFidelityTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Radial gradient no longer falls back to center/edge pair"), MaterialParams.Contains(TEXT("ColorCenter")));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *Widget),
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Radial gradient texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -152,7 +153,7 @@ bool FRadialGradientTransformFidelityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Radial transform exports rotation"), MaterialParams.Contains(TEXT("\"Rotation\":90.0000")));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *Widget),
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Radial transform texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
@@ -225,7 +226,7 @@ bool FFigmaRadialGradientHandleFidelityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Figma radial exports rotation"), MaterialParams.Contains(TEXT("\"Rotation\":90.0000")));
 
 	UTexture2D* Texture = FProceduralShapeGenerator::GenerateFromMaterialRef(BuildProceduralRequestForTest(*this, *Widget),
-		GetTransientPackageAsObject());
+		GetTransientPackage());
 	TestTrue(TEXT("Figma radial texture generated"), Texture != nullptr);
 	if (!Texture)
 	{
