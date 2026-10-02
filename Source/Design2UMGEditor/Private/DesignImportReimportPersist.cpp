@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportReimportInternal.h"
+#include "Misc/EngineVersionComparison.h"
 #include "GeneratedAssetLifecycle.h"
 
 #include "DesignImportDiagnosticReport.h"
@@ -529,6 +530,7 @@ namespace DesignImportPipeline
 	 */
 	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP)
 	{
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		// Widgets created by this generation run (plus test injections via ConstructWidget) have no
 		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
 		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
@@ -547,6 +549,7 @@ namespace DesignImportPipeline
 			});
 		}
 
+#endif
 	}
 
 	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize)
@@ -564,6 +567,7 @@ namespace DesignImportPipeline
 
 		EnsureReimportWidgetGuids(WBP);
 
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		// Generated transition animations follow the same rule as widgets: a non-empty GUID map makes the
 		// compiler ensure on animations missing from it, so backfill them deterministically too (same
 		// formula as the compiler's own empty-map path, keeping GUIDs stable across regenerates).
@@ -576,6 +580,7 @@ namespace DesignImportPipeline
 					Animation->GetFName(), FGuid::NewDeterministicGuid(Animation->GetPathName()));
 			}
 		}
+#endif
 	}
 
 	/** Validate writability, compile and save, then roll back the transaction on failure. */

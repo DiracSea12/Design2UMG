@@ -15,8 +15,9 @@
 #include "Components/Widget.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WidgetBlueprint.h"
-#include "WidgetBlueprintEditorUtils.h"
+#include "DesignWidgetBlueprintUtils.h"
 #include "Design2UMGReimportTestFixtures.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -146,19 +147,24 @@ bool FSafeReimportRemovePureNodeTest::RunTest(const FString&)
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
 	// The project side already deleted GhostStat's widget in the editor (the manifest still records it).
-	// Uses the editor's own DeleteWidgets (destroys the objects + cleans variable GUIDs); a bare RemoveWidget merely
+	// Uses the same subtree deletion as reimport (moves objects out and cleans variable GUIDs); a bare RemoveWidget merely
 	// unhooks it from the tree while the object stays alive - any later compile would trip the compiler's ensure on the detached widget/GUID.
 	if (UWidget* Ghost = WBP->WidgetTree->FindWidget(TEXT("GhostStat")))
 	{
-		FWidgetBlueprintEditorUtils::DeleteWidgets(
-			WBP, { Ghost }, FWidgetBlueprintEditorUtils::EDeleteWidgetWarningType::DeleteSilently);
+		DesignWidgetBlueprintUtils::DeleteSubtreeSilently(WBP, Ghost);
+		TestEqual(TEXT("already-removed widget no longer belongs to the asset"), Ghost->GetOuter(), static_cast<UObject*>(GetTransientPackage()));
 	}
 
+	TStrongObjectPtr<UWidget> CleanStat(WBP->WidgetTree->FindWidget(TEXT("CleanStat")));
 	const FString V2 = MakeFixtureDoc(MakeFixtureText(TEXT("fixture_keep"), TEXT("Keeper"), 250, 24, TEXT("Keep")));
 	const FDesignReimportResult Result = FixtureReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("reimport succeeds"), Result.bSucceeded);
 
 	TestNull(TEXT("purely owned node deleted from tree"), WBP->WidgetTree->FindWidget(TEXT("CleanStat")));
+	if (TestNotNull(TEXT("owned node existed before removal"), CleanStat.Get()))
+	{
+		TestEqual(TEXT("removed owned widget no longer belongs to the asset"), CleanStat->GetOuter(), static_cast<UObject*>(GetTransientPackage()));
+	}
 	TestNull(TEXT("already-absent node stays absent"), WBP->WidgetTree->FindWidget(TEXT("GhostStat")));
 	TestNotNull(TEXT("kept node still present"), WBP->WidgetTree->FindWidget(TEXT("Keeper")));
 

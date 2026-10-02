@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGPrototypeAnimationBuilder.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Design2UMGLog.h"
 #include "Design2UMGPrototypeGraphWiring.h"
@@ -343,7 +344,9 @@ void RemoveGeneratedAnimations(UWidgetBlueprint* WidgetBlueprint)
 	{
 		// The GUID entry must go with the animation: leaving it behind would trip the compiler's
 		// deleted-variable ensure on the next compile of a non-empty GUID map.
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		WidgetBlueprint->WidgetVariableNameToGuidMap.Remove(Animation->GetFName());
+#endif
 		// Engine timeline-deletion pattern (AnimationTabSummoner): move the subobject to the
 		// transient package so the save/GC drops it instead of serializing an orphan.
 		Animation->Rename(/*NewName=*/nullptr, GetTransientPackage());

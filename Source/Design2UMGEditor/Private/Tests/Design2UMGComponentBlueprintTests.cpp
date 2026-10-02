@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
@@ -1442,7 +1443,9 @@ bool FComponentPageUserContentTest::RunTest(const FString&)
 	UTextBlock* UserLabel = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("UserLabel"));
 	UserLabel->SetText(FText::FromString(TEXT("Manual label")));
 	Panel->AddChild(UserLabel);
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 	Blueprint->WidgetVariableNameToGuidMap.Add(UserLabel->GetFName(), FGuid::NewGuid());
+#endif
 	Blueprint->BlueprintDescription = TEXT("User page description");
 	FEdGraphPinType Type;
 	Type.PinCategory = UEdGraphSchema_K2::PC_Int;
@@ -1627,7 +1630,9 @@ bool FComponentRemovedSlotUserContentTest::RunTest(const FString&)
 	UTextBlock* Manual = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ManualSlotContent"));
 	Manual->SetText(FText::FromString(TEXT("Keep this user content")));
 	Instances[0]->SetContentForSlot(RemovedSlot, Manual);
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 	Blueprint->WidgetVariableNameToGuidMap.Add(Manual->GetFName(), FGuid::NewGuid());
+#endif
 	if (!TestTrue(TEXT("User content saved"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
 	const FString ChildPackage = Output.Components[0].Blueprint->GetOutermost()->GetName();
 	const FString ChildHash = Design2UMGGenerationManifest::ComputeSavedAssetHash(ChildPackage);

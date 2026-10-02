@@ -3,6 +3,7 @@
 // Safe reimport: editor event-binding lifecycle across reimports and binding function-name collision.
 
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Design2UMGGenerationManifest.h"
 #include "Design2UMGWidgetBindingTools.h"
@@ -296,7 +297,9 @@ bool FSafeReimportAnimationOwnershipTest::RunTest(const FString&)
 	Binding.bIsRootWidget = false;
 	Animation->AnimationBindings.Add(Binding);
 	Blueprint->Animations.Add(Animation);
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 	Blueprint->WidgetVariableNameToGuidMap.Add(Animation->GetFName(), FGuid::NewGuid());
+#endif
 	const FString Package = Blueprint->GetOutermost()->GetName();
 	const FDesignReimportResult Result = FixtureReimport(MakeFixtureDoc(Keep), nullptr, Package);
 	TestTrue(TEXT("Per-node animation conflict permits remaining import"), Result.bSucceeded);

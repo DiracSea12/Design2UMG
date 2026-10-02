@@ -413,7 +413,9 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 
 		if (Settings.ComponentBlueprints)
 		{
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 			Blueprint.WidgetVariableNameToGuidMap.Empty();
+#endif
 		}
 
 		if (!OutGenerationOutput)
@@ -600,7 +602,9 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	// intermediate compile. Clear it so CompileBlueprint rebuilds from the widget tree
 	// instead of carrying stale entries forward.
 	WBP->Modify();
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 	WBP->WidgetVariableNameToGuidMap.Empty();
+#endif
 	ClearGeneratedWidgetNavigationState(WBP);
 
 	// The structural mark above synchronously regenerated the skeleton class, so the tree

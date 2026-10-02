@@ -13,7 +13,7 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/PackageName.h"
 #include "WidgetBlueprint.h"
-#include "WidgetBlueprintEditorUtils.h"
+#include "DesignWidgetBlueprintUtils.h"
 
 namespace DesignImportPipeline
 {
@@ -138,8 +138,7 @@ namespace DesignImportPipeline
 			RemovedNames.Add(RemovedWidget->GetFName().ToString());
 		});
 		EnsureReimportWidgetGuids(WBP);
-		FWidgetBlueprintEditorUtils::DeleteWidgets(
-			WBP, { SubtreeRoot }, FWidgetBlueprintEditorUtils::EDeleteWidgetWarningType::DeleteSilently);
+		DesignWidgetBlueprintUtils::DeleteSubtreeSilently(WBP, SubtreeRoot);
 		for (const FString& RemovedName : RemovedNames)
 		{
 			InOutUpdatedD2UOwned.Remove(RemovedName);

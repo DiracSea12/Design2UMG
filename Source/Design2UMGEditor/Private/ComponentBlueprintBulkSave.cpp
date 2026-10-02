@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "UMGGenerator.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Design2UMGLog.h"
 #include "GeneratedAssetLifecycle.h"
 #include "WidgetBlueprint.h"
@@ -64,7 +65,9 @@ EDesign2UMGMemoryState FUMGGenerator::RestoreUnsavedComponentBulk(const TArray<U
 		{
 			// Reload can compile dependent blueprints before replacing their partial trees.
 			// Do not retain variable GUIDs from the old tree through that intermediate compile.
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
 			Asset->WidgetVariableNameToGuidMap.Empty();
+#endif
 			ExistingPackages.AddUnique(Asset->GetOutermost());
 		}
 		else Restored &= GeneratedAssetLifecycle::DiscardUnsavedAsset(Asset);
