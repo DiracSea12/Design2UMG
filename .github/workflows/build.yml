@@ -121,6 +121,20 @@ jobs:
               throw "Candidate module was not rebuilt: $binary"
             }
           }
+          $projectRoot = Split-Path -Parent $env:DESIGN2UMG_RUNTIME_PROJECT
+          $metadata = @(Get-ChildItem (Join-Path $projectRoot 'Intermediate/Build/Win64') -Filter TargetMetadata.dat -Recurse |
+            Where-Object { $_.Directory.Name -eq 'Development' -and $_.Directory.Parent.Name -eq $env:DESIGN2UMG_EDITOR_TARGET })
+          if ($metadata.Count -ne 1) { throw 'Expected one target metadata plan from the editor build.' }
+          $writerSource = Join-Path $env:UE_ROOT 'Engine/Source/Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs'
+          $writerVersion = [regex]::Match([IO.File]::ReadAllText($writerSource), 'CurrentVersionNumber\s*=\s*(\d+)\s*;')
+          if (-not $writerVersion.Success) { throw 'UBT metadata writer version was not found.' }
+          & $build -Mode=WriteMetadata "-Input=$($metadata[0].FullName)" "-Version=$($writerVersion.Groups[1].Value)"
+          if ($LASTEXITCODE -ne 0) { throw "Target metadata generation failed: $LASTEXITCODE" }
+          $manifest = Get-Content (Join-Path $installed 'Binaries/Win64/UnrealEditor.modules') -Raw | ConvertFrom-Json
+          $engineManifest = Get-Content (Join-Path $env:UE_ROOT 'Engine/Binaries/Win64/UnrealEditor.modules') -Raw | ConvertFrom-Json
+          if ($manifest.BuildId -ne $engineManifest.BuildId) {
+            throw 'Generated candidate module manifest does not match the engine build.'
+          }
 
       - name: Build plugin package with RunUAT
         run: |
@@ -205,7 +219,8 @@ jobs:
           $testRuns = @(
             [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "RenderOffscreen" },
-            [pscustomobject]@{ Filter = "Design2UMG.Http"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Http.Figma"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.MCP.Stdio"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.LocalSource"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Save"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
@@ -213,7 +228,8 @@ jobs:
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.RetryReplacement"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "RenderOffscreen" },
-            [pscustomobject]@{ Filter = "Design2UMG.Pencil.RetryTickerLifecycle"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Pencil.ConnectionLifecycle"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Pencil.ReadDocumentPayload"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.LayoutData.Layout.WrapGapUsesInnerSlotPaddingOnly"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.RemoteImages.ReceiveBudget"; Mode = "RenderOffscreen" },
@@ -246,8 +262,10 @@ jobs:
             # argument arrays mangle ExecCmds when passed through &.
             $argumentLine = (@(
               ('"{0}"' -f $project),
+              '/Engine/Maps/Templates/Template_Default',
               ('"-UserDir={0}"' -f $automationUserDir),
               '-NoSplash',
+              '-Unattended',
               '-NoSound',
               '-nop4',
               '-ini:Engine:[/Script/Engine.AutomationTestSettings]:DefaultInteractiveFramerateWaitTime=5',
