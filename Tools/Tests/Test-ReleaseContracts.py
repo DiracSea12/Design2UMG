@@ -321,6 +321,15 @@ class ReleaseContracts(unittest.TestCase):
         build.parent.mkdir(parents=True)
         binaries = installed / "Binaries/Win64"
         intermediate = installed / "Intermediate"
+        metadata = project.parent / "Intermediate/Build/Win64/x64/FixtureEditor/Development/TargetMetadata.dat"
+        metadata.parent.mkdir(parents=True)
+        metadata.write_bytes(b"fixture plan")
+        writer = engine / "Engine/Source/Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs"
+        writer.parent.mkdir(parents=True)
+        writer.write_text("const int CurrentVersionNumber = 2;\n", encoding="utf-8")
+        engine_manifest = engine / "Engine/Binaries/Win64/UnrealEditor.modules"
+        engine_manifest.parent.mkdir(parents=True)
+        engine_manifest.write_text('{"BuildId":"fixture-engine"}', encoding="utf-8")
         driver = source / "ci-rebuild.ps1"
         driver.write_text(
             "$ErrorActionPreference='Stop'\n"
@@ -329,8 +338,8 @@ class ReleaseContracts(unittest.TestCase):
             "$env:DESIGN2UMG_EDITOR_TARGET='FixtureEditor'\n" + block,
             encoding="utf-8",
         )
-        for complete in (False, True):
-            with self.subTest(complete_build=complete):
+        for complete, matching_manifest in ((False, True), (True, True), (True, False)):
+            with self.subTest(complete_build=complete, matching_manifest=matching_manifest):
                 binaries.mkdir(parents=True, exist_ok=True)
                 intermediate.mkdir(parents=True, exist_ok=True)
                 (binaries / "stale.dll").write_bytes(b"old")
@@ -341,12 +350,22 @@ class ReleaseContracts(unittest.TestCase):
                     for module in ("Core", "Editor"):
                         binary = binaries / f"UnrealEditor-Design2UMG{module}.dll"
                         output += f"[IO.File]::WriteAllText('{binary.as_posix()}', 'rebuilt')\n"
-                build.write_text(output + "$global:LASTEXITCODE=0\n", encoding="utf-8")
+                build_id = "fixture-engine" if matching_manifest else "different-engine"
+                write_metadata = (
+                    "if ($args -contains '-Mode=WriteMetadata') {\n"
+                    "  $normalizedArgs = @($args | ForEach-Object { $_.Replace('\\', '/') })\n"
+                    f"  if ($normalizedArgs -notcontains '-Input={metadata.as_posix()}' -or $args -notcontains '-Version=2') {{ throw 'Wrong metadata arguments' }}\n"
+                    f"  [IO.File]::WriteAllText('{(binaries / 'UnrealEditor.modules').as_posix()}', '{{\"BuildId\":\"{build_id}\"}}')\n"
+                    "  $global:LASTEXITCODE=0; return\n}\n"
+                )
+                build.write_text(write_metadata + output + "$global:LASTEXITCODE=0\n", encoding="utf-8")
                 result = subprocess.run(["pwsh", "-NoProfile", "-File", str(driver)],
                                         cwd=source, capture_output=True, encoding="utf-8", errors="replace")
                 self.assertFalse((binaries / "stale.dll").exists(), result.stdout + result.stderr)
                 self.assertFalse((intermediate / "stale.obj").exists(), result.stdout + result.stderr)
-                self.assertEqual(result.returncode == 0, complete, result.stdout + result.stderr)
+                self.assertEqual(result.returncode == 0, complete and matching_manifest, result.stdout + result.stderr)
+                if complete and not matching_manifest:
+                    self.assertIn("does not match the engine build", result.stdout + result.stderr)
 
     def test_additional_plugin_directory(self):
         source, installed, project = self.candidate_fixture()
