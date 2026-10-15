@@ -164,7 +164,7 @@ Coverage boundaries for unit tests, smoke checks, focused automation render, and
 
 Key options:
 - Design Width / Height
-- Remote Image Import
+- Remote Image Import: enabled by default; saved user preferences still apply. Insecure or local image URLs remain disabled by default.
 - Generated Texture Budget (MiB): cumulative newly generated raster data per generation or preview; defaults to 512, minimum 1. Changes apply to the next operation. This does not change remote-download, decoded-input or single-image limits, and is not a cap on total editor memory.
 - Icon Font mapping
 - Widget Class override rules

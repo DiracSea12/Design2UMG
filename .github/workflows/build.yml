@@ -113,7 +113,7 @@ jobs:
           & $build $env:DESIGN2UMG_EDITOR_TARGET Win64 Development `
             "-Project=$env:DESIGN2UMG_RUNTIME_PROJECT" `
             -Module=Design2UMGCore -Module=Design2UMGEditor `
-            -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
+            -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
           if ($LASTEXITCODE -ne 0) { throw "Editor build failed: $LASTEXITCODE" }
           foreach ($module in @('Core', 'Editor')) {
             $binary = Join-Path $installed "Binaries/Win64/UnrealEditor-Design2UMG$module.dll"
@@ -217,6 +217,7 @@ jobs:
             [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.LayoutData.Layout.WrapGapUsesInnerSlotPaddingOnly"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.RemoteImages.ReceiveBudget"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Resources.ImageResultFlow"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Resources.Failure"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.PreviewContext"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.UMGJsonParser"; Mode = "RenderOffscreen" },
