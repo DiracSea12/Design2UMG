@@ -2,6 +2,7 @@
 #include "Design2UMGAssetRegistryAccess.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "AssetRegistry/AssetData.h"
 #include "Misc/EngineVersionComparison.h"
 #include "UObject/SoftObjectPath.h"
 

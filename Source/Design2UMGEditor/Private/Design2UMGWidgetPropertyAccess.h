@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ScrollBox.h"
+#include "Framework/Text/TextLayout.h"
 
 class UButton;
 class UBorder;

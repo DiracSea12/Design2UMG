@@ -5,6 +5,7 @@
 #include "Components/TextBlock.h"
 #include "Fonts/FontCache.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
 #include "UObject/UnrealType.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
