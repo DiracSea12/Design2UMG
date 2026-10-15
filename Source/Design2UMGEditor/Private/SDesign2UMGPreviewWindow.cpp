@@ -15,9 +15,11 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/SNullWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
 #include "Dom/JsonObject.h"
@@ -160,8 +162,30 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 				.AutoWidth()
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("UMGPreview", "UMG Preview (1:1)"))
+					.Text_Lambda([this]()
+					{
+						return bFitPreviewToWindow ? LOCTEXT("UMGPreviewFit", "UMG Preview (fit to window)") : LOCTEXT("UMGPreviewActualSize", "UMG Preview (1:1)");
+					})
 					.Font(GetAppStyleFont("BoldFont"))
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(12, 0)
+				[
+					SNew(SButton)
+					.IsEnabled_Lambda([this]() { return PreviewDesignFrame.IsValid(); })
+					.OnClicked_Lambda([this]()
+					{
+						bFitPreviewToWindow = !bFitPreviewToWindow;
+						UpdatePreviewViewport();
+						return FReply::Handled();
+					})
+					.Text_Lambda([this]()
+					{
+						return bFitPreviewToWindow ? LOCTEXT("PreviewActualSize", "Original size (1:1)") : LOCTEXT("FitPreview", "Fit to window");
+					})
+					.ToolTipText(LOCTEXT("FitPreviewTooltip", "Switch between the whole design and original size with scrolling."))
 				]
 			]
 
@@ -592,10 +616,49 @@ FString SDesign2UMGPreviewWindow::FormatJson(const FString& JsonString)
 
 void SDesign2UMGPreviewWindow::CleanupPreviewWidget()
 {
+	PreviewDesignFrame.Reset();
 	if (PreviewMaterializationService)
 	{
 		PreviewMaterializationService->Reset();
 	}
+}
+
+void SDesign2UMGPreviewWindow::UpdatePreviewViewport()
+{
+	// Detach the current viewport before reusing its design frame in the other view.
+	UMGPreviewContainer->SetContent(SNullWidget::NullWidget);
+	TSharedRef<SWidget> Viewport = SNullWidget::NullWidget;
+	if (bFitPreviewToWindow)
+	{
+		Viewport = SNew(SScaleBox)
+			.Stretch(EStretch::ScaleToFit)
+			.StretchDirection(EStretchDirection::DownOnly)
+			[
+				PreviewDesignFrame.ToSharedRef()
+			];
+	}
+	else
+	{
+		Viewport = SNew(SScrollBox)
+			.Orientation(Orient_Vertical)
+			+ SScrollBox::Slot()
+			[
+				SNew(SScrollBox)
+				.Orientation(Orient_Horizontal)
+				+ SScrollBox::Slot()
+				[
+					PreviewDesignFrame.ToSharedRef()
+				]
+			];
+	}
+	UMGPreviewContainer->SetContent(
+		SNew(SBorder)
+		.BorderImage(GetAppStyleBrush("WhiteBrush"))
+		.BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 1.0f))
+		.Padding(4)
+		[
+			Viewport
+		]);
 }
 
 void SDesign2UMGPreviewWindow::InvalidateApprovedSnapshot()
@@ -637,6 +700,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 	LatestRequestedRefreshId = RequestId;
 
 	// Show loading state first.
+	PreviewDesignFrame.Reset();
 	UMGPreviewContainer->SetContent(
 		SNew(SBorder)
 		.BorderImage(GetAppStyleBrush("WhiteBrush"))
@@ -761,30 +825,13 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 
 		TSharedRef<SWidget> SlateWidget = MaterializedPreviewWidget->TakeWidget();
 
-		UMGPreviewContainer->SetContent(
-			SNew(SBorder)
-			.BorderImage(GetAppStyleBrush("WhiteBrush"))
-			.BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 1.0f))
-			.Padding(4)
+		SAssignNew(PreviewDesignFrame, SBox)
+			.WidthOverride(MaterializationResult.PreviewDesignSize.X)
+			.HeightOverride(MaterializationResult.PreviewDesignSize.Y)
 			[
-				SNew(SScrollBox)
-				.Orientation(Orient_Vertical)
-				+ SScrollBox::Slot()
-				[
-					SNew(SScrollBox)
-					.Orientation(Orient_Horizontal)
-					+ SScrollBox::Slot()
-					[
-					SNew(SBox)
-						.WidthOverride(MaterializationResult.PreviewDesignSize.X)
-						.HeightOverride(MaterializationResult.PreviewDesignSize.Y)
-						[
-							SlateWidget
-						]
-					]
-				]
-			]
-		);
+				SlateWidget
+			];
+		UpdatePreviewViewport();
 	}
 	else
 	{

@@ -489,6 +489,8 @@ bool FReimportAutomaticOverrideFailureTest::RunTest(const FString&)
 	TestFalse(TEXT("no false refresh success"), F.HasDiagnostic(ReimportDiagnosticKinds::Updated));
 
 	Node.Children[1].Type = TEXT("Border");
+	UWidgetTree* PreviewTree = NewObject<UWidgetTree>(Instance);
+	Instance->WidgetTree = PreviewTree;
 	Instance->RejectedSlot = TEXT("D2U_Content_0_1");
 	TestNull(TEXT("second slot rejects commit"), RefreshAutomaticInstance(Node, Instance, F.Shared));
 	TestTrue(TEXT("earlier slot is restored after late rejection"), Instance->GetContentForSlot(TEXT("D2U_Content_0_0")) == First
@@ -506,6 +508,7 @@ bool FReimportAutomaticOverrideFailureTest::RunTest(const FString&)
 		&& Instance->GetContentForSlot(TEXT("D2U_Content_0_1")) == Second);
 	Component.ClassPath = Instance->GetClass()->GetPathName();
 	TestTrue(TEXT("successful override refresh preserves instance identity"), RefreshAutomaticInstance(Node, Instance, F.Shared) == Instance);
+	TestTrue(TEXT("refresh retains the transient preview tree"), Instance->WidgetTree == PreviewTree);
 	TestTrue(TEXT("successful override refresh replaces both contents"), Instance->GetContentForSlot(TEXT("D2U_Content_0_0")) != First
 		&& Instance->GetContentForSlot(TEXT("D2U_Content_0_1")) != Second);
 	TestEqual(TEXT("old overrides removed without leaving ghost source objects"), WBP->GetAllSourceWidgets().Num(), ObjectCount);

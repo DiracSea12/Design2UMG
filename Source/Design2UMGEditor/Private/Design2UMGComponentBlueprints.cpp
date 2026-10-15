@@ -29,18 +29,48 @@
 #include "Dom/JsonObject.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Modules/ModuleManager.h"
+#include "ObjectTools.h"
 
 namespace
 {
-	FString StableName(const FString& Scope, const FString& Identity)
+	FString StableName(const FString& Scope, const FString& Identity, const FString& Prefix = TEXT("WBP"))
 	{
 		const FTCHARToUTF8 Bytes(*(Scope + TEXT("|") + Identity));
-		return TEXT("WBP_") + FMD5::HashBytes(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
+		return Prefix + TEXT("_") + FMD5::HashBytes(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
 	}
 
 	FName SlotName(const FString& Path)
 	{
 		return FUMGWidgetTreeBuilder::SanitizeWidgetName(TEXT("D2U_Content_") + Path, TEXT("NamedSlot"));
+	}
+
+	bool ResolveRootAssetName(const FUMGWidgetData& Data, const FString& Folder,
+		FString& OutName, FString& Error)
+	{
+		TArray<FAssetData> Assets;
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get()
+			.GetAssetsByPath(FName(*Folder), Assets);
+		FString ExistingName;
+		for (const FAssetData& Asset : Assets)
+		{
+			FDesign2UMGGenerationManifestSidecar Sidecar;
+			FString SidecarError;
+			if (!Design2UMGGenerationManifest::TryLoadSidecarForAsset(Asset.PackageName.ToString(), Sidecar, SidecarError)
+				|| !Sidecar.bComponentBulkRoot || Sidecar.DocumentScope != Data.SourceDocument().DocumentScope
+				|| Sidecar.SourceRootNodeId != Data.RootWidget.GetStableDesignNodeId()) continue;
+			if (!ExistingName.IsEmpty())
+			{
+				Error = FString::Printf(TEXT("Multiple generated root assets for source '%s': '%s' and '%s'"),
+					*Data.RootWidget.GetStableDesignNodeId(), *ExistingName, *Asset.AssetName.ToString());
+				return false;
+			}
+			ExistingName = Asset.AssetName.ToString();
+		}
+		OutName = ExistingName.IsEmpty()
+			? StableName(Data.SourceDocument().DocumentScope, TEXT("root|") + Data.RootWidget.GetStableDesignNodeId(),
+				ObjectTools::SanitizeObjectName(Data.WidgetName))
+			: ExistingName;
+		return true;
 	}
 
 	void ExposeContent(FUMGWidgetNode& Node, const FString& Path,
@@ -518,8 +548,9 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 	const TArray<FString>& Order = PreparedComponents.Order;
 	TMap<FString, UWidgetBlueprint*>& Existing = PreparedComponents.Existing;
 	FUMGWidgetData RootData = Data;
-	RootData.WidgetName = TargetBlueprint ? TargetBlueprint->GetName()
-		: StableName(Context.DocumentScope, TEXT("root|") + Data.RootWidget.GetStableDesignNodeId());
+	if (TargetBlueprint) RootData.WidgetName = TargetBlueprint->GetName();
+	else if (!ResolveRootAssetName(Data, Folder, RootData.WidgetName, Context.Error))
+		return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
 	UWidgetBlueprint* ExistingRoot = nullptr;
 	if (!FindExisting(RootData, Folder, ExistingRoot, Context.Error, false)) return Fail(TEXT("component_asset_conflict"), EDesign2UMGCommitStatus::Conflict);
 	FDesign2UMGGenerationManifestSidecar RootManifest;

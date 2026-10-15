@@ -43,6 +43,8 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> JsonEditor;
 	TSharedPtr<SEditableTextBox> OutputPathBox;
 	TSharedPtr<SBox> UMGPreviewContainer;
+	TSharedPtr<SBox> PreviewDesignFrame;
+	bool bFitPreviewToWindow = true;
 	TSharedPtr<IDesignPreviewRefreshAnalyzer> PreviewRefreshAnalyzer;
 	TSharedPtr<IDesignPreviewMaterializationService> PreviewMaterializationService;
 
@@ -69,6 +71,7 @@ private:
 	void RefreshUMGPreview();
 	void DoRefreshPreview(uint64 RequestId, const FString& JsonString);
 	void CleanupPreviewWidget();
+	void UpdatePreviewViewport();
 	TOptional<FDesignPreviewMaterializationSettingsSnapshot> ResolveMaterializationSettingsSnapshot();
 	void OnJsonTextChanged(const FText& NewText);
 	void OnOutputPathChanged(const FText& NewText);

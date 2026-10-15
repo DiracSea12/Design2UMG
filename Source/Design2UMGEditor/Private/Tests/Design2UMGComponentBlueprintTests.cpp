@@ -107,6 +107,7 @@ bool FComponentSameSourceReimportTest::RunTest(const FString&)
 	UWidgetBlueprint* First = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &FirstOutput);
 	if (!TestNotNull(TEXT("Fresh component import succeeds"), First)) return false;
+	TestTrue(TEXT("Root asset name retains the readable source name"), First->GetName().StartsWith(TEXT("WBP_Parent_")));
 	TArray<FString> Names = FirstOutput.Manifest.D2UOwnedNames;
 	Names.Sort();
 	TArray<uint8> BeforePng;
@@ -116,8 +117,10 @@ bool FComponentSameSourceReimportTest::RunTest(const FString&)
 	for (int32 Repeat = 0; Repeat < 2; ++Repeat)
 	{
 		FDesign2UMGGenerationOutput Output;
+		FUMGWidgetData UpdatedData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+		UpdatedData.WidgetName = TEXT("WBP_RenamedParent");
 		UWidgetBlueprint* Updated = DesignImportGeneration::GenerateWidgetBlueprint(
-			FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
+			UpdatedData, Folder, &Settings, &Output);
 		if (!TestNotNull(TEXT("Same-source reimport succeeds"), Updated)) return false;
 		TestTrue(TEXT("Reimport retains the root asset"), Updated == First);
 		TArray<FString> UpdatedNames = Output.Manifest.D2UOwnedNames;

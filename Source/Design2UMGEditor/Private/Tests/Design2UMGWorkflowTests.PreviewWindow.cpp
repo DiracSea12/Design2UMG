@@ -819,6 +819,18 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Initial open proves preview refresh used injected seam"), Harness.DidObserveInjectedPreviewRefresh());
 	TestEqual(TEXT("Initial open preview text comes from injected seam"), Harness.GetPreviewWidgetText(), TEXT("SpyMaterialized:SpyAnalyzed-1"));
 	TestTrue(TEXT("Preview window is attached to Slate"), Harness.IsWindowAttached());
+	const UUserWidget* InitialWidget = Harness.MaterializationSpy->GetLastPreviewWidget();
+	TSharedPtr<SButton> ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), TEXT("Original size (1:1)"));
+	if (!TestTrue(TEXT("Preview starts fitted with an original-size action"), ScaleButton.IsValid())) return false;
+	ScaleButton->SimulateClick();
+	ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), TEXT("Fit to window"));
+	if (!TestTrue(TEXT("Original-size view offers fit to window"), ScaleButton.IsValid())) return false;
+	TestTrue(TEXT("Original-size view retains preview content"), Harness.PreviewWidgetMatchesSpyMaterialization());
+	ScaleButton->SimulateClick();
+	TestTrue(TEXT("Fit view retains preview content"), Harness.PreviewWidgetMatchesSpyMaterialization());
+	TestTrue(TEXT("Scale changes reuse the same preview widget"), Harness.MaterializationSpy->GetLastPreviewWidget() == InitialWidget);
+	TestEqual(TEXT("Scale changes do not rematerialize the preview"), Harness.MaterializationSpy->GetInvocationCount(), 1);
+	TestTrue(TEXT("Scale changes retain the approved generation snapshot"), FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
 	return true;
 }
 

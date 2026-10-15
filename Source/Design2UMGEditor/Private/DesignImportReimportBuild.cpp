@@ -257,22 +257,26 @@ namespace DesignImportPipeline
 			return Fail(TEXT("Could not prepare instance overrides; existing content preserved"));
 
 		Instance->Modify();
-		for (int32 Index = 0; Index < Slots.Num(); ++Index)
 		{
-			UWidget* Content = Prepared->GetContentForSlot(Slots[Index]);
-			Instance->SetContentForSlot(Slots[Index], Content);
-			if (Instance->GetContentForSlot(Slots[Index]) != Content)
+			// Source bindings must not depend on an initialized transient widget tree.
+			TGuardValue<decltype(Instance->WidgetTree)> EditTemplateBindings(Instance->WidgetTree, nullptr);
+			for (int32 Index = 0; Index < Slots.Num(); ++Index)
 			{
-				bool bRestored = true;
-				for (int32 RestoreIndex = 0; RestoreIndex <= Index; ++RestoreIndex)
+				UWidget* Content = Prepared->GetContentForSlot(Slots[Index]);
+				Instance->SetContentForSlot(Slots[Index], Content);
+				if (Instance->GetContentForSlot(Slots[Index]) != Content)
 				{
-					Instance->SetContentForSlot(Slots[RestoreIndex], OldContents[RestoreIndex]);
-					bRestored &= Instance->GetContentForSlot(Slots[RestoreIndex]) == OldContents[RestoreIndex];
+					bool bRestored = true;
+					for (int32 RestoreIndex = 0; RestoreIndex <= Index; ++RestoreIndex)
+					{
+						Instance->SetContentForSlot(Slots[RestoreIndex], OldContents[RestoreIndex]);
+						bRestored &= Instance->GetContentForSlot(Slots[RestoreIndex]) == OldContents[RestoreIndex];
+					}
+					Context.Error = bRestored ? TEXT("Could not attach instance overrides; original slots restored")
+						: TEXT("Could not attach instance overrides; slot restoration incomplete");
+					AddReimportDiagnostic(*Shared.Diagnostics, ReimportDiagnosticKinds::AttachFailed, Context.Error + TEXT(": ") + Node.Name);
+					return nullptr;
 				}
-				Context.Error = bRestored ? TEXT("Could not attach instance overrides; original slots restored")
-					: TEXT("Could not attach instance overrides; slot restoration incomplete");
-				AddReimportDiagnostic(*Shared.Diagnostics, ReimportDiagnosticKinds::AttachFailed, Context.Error + TEXT(": ") + Node.Name);
-				return nullptr;
 			}
 		}
 		for (UWidget* Content : OldContents)
