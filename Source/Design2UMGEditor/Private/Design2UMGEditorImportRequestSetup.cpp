@@ -5,7 +5,6 @@
 #include "Design2UMGSettings.h"
 
 #include "Dom/JsonObject.h"
-#include "Dom/JsonValue.h"
 
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
 
@@ -73,27 +72,14 @@ namespace Design2UMGEditorImportRequestSetup
 		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
 	}
 
-	TSharedPtr<FJsonObject> MakePencilBulkGetArgs()
+	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs()
 	{
-		TSharedPtr<FJsonObject> BulkArgs = MakeShared<FJsonObject>();
-		BulkArgs->SetStringField(TEXT("filePath"), TEXT(""));
-
-		TArray<TSharedPtr<FJsonValue>> Patterns;
-		TSharedPtr<FJsonObject> Pattern = MakeShared<FJsonObject>();
-		Pattern->SetStringField(TEXT("type"), TEXT("frame"));
-		Patterns.Add(MakeShared<FJsonValueObject>(Pattern));
-		BulkArgs->SetArrayField(TEXT("patterns"), Patterns);
-		BulkArgs->SetBoolField(TEXT("includePathGeometry"), true);
-		BulkArgs->SetNumberField(TEXT("searchDepth"), 1);
-		BulkArgs->SetNumberField(TEXT("readDepth"), 99);
-		return BulkArgs;
-	}
-
-	TSharedPtr<FJsonObject> MakePencilVariablesArgs()
-	{
-		TSharedPtr<FJsonObject> VarsArgs = MakeShared<FJsonObject>();
-		VarsArgs->SetStringField(TEXT("filePath"), TEXT(""));
-		return VarsArgs;
+		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
+		Args->SetStringField(TEXT("filePath"), TEXT(""));
+		Args->SetStringField(TEXT("description"), TEXT("Read document for UMG import"));
+		// Print a single marked JSON line; execute also returns human-readable status text.
+		Args->SetStringField(TEXT("input"), TEXT("Print(\"Design2UMGDocument:\"+JSON.stringify({nodes:Get((n,ctx)=>{if(ctx.depth!==0||n.type!==\"frame\")return;ctx.skipChildren();return Get(n.id,{depth:99,includePathGeometry:true})},{depth:0}),variables:GetVariables()}))"));
+		return Args;
 	}
 }
 

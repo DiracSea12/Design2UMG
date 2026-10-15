@@ -120,6 +120,12 @@ Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-pr
 
 This MCP JSON path is a bridge/debug utility. The current release contract does not treat live sync itself as a formal support promise.
 
+### 5. Read the active Pencil document
+
+Open a `.pen` file in the pen.dev design editor in VS Code, then choose **Design2UMG > Connect to Pencil...** in Unreal Editor. The connection uses the installed Pencil 0.6.77 MCP server over stdio and reads frames and variables through its `execute` tool without changing the design. Select a frame, review the preview, and generate the Widget Blueprint.
+
+After updating Pencil, close and reopen an existing design tab so the new extension registers the document. Use the latest installed extension; the plugin discovers its server automatically, with the server path and app name settings available as overrides.
+
 ## Automation
 
 Full automation visual verification now has two layers:

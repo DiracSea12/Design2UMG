@@ -51,7 +51,6 @@ namespace Design2UMGEditorImportServices
 		{
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("LaunchingMCP", "Design2UMG: Launching MCP Server..."), SNotificationItem::CS_Pending);
 			ActiveConnector.LaunchAsync(
-				0,
 				[this, FetchGeneration](const bool bLaunchOk)
 				{
 					if (!IsGenerationCurrent(FetchGeneration))
@@ -86,9 +85,9 @@ namespace Design2UMGEditorImportServices
 		Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("Connecting", "Design2UMG: Fetching design from Pencil..."), SNotificationItem::CS_Pending);
 
 		Connector->GetClient().CallToolAsync(
-			TEXT("batch_get"),
-			Design2UMGEditorImportRequestSetup::MakePencilBulkGetArgs(),
-			[this, FetchGeneration](const bool bBulkOk, const FString& NodesJson)
+			TEXT("execute"),
+			Design2UMGEditorImportRequestSetup::MakePencilReadDocumentArgs(),
+			[this, FetchGeneration](const bool bReadOk, const FString& Response)
 			{
 				if (!IsGenerationCurrent(FetchGeneration))
 				{
@@ -96,39 +95,17 @@ namespace Design2UMGEditorImportServices
 					return;
 				}
 
-				if (!bBulkOk)
+				FString NodesJson, VarsJson;
+				if (!bReadOk || !Design2UMGEditorMcpImportPayload::ParseReadDocumentResponse(Response, NodesJson, VarsJson))
 				{
-					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("BulkGetFailed", "Design2UMG: batch_get failed"), SNotificationItem::CS_Fail);
+					UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to read the active document via execute"));
+					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("PencilReadFailed", "Design2UMG: Failed to read the active Pencil document"), SNotificationItem::CS_Fail);
 					ReleaseFetchSlot();
 					return;
 				}
 
-				if (!Connector)
-				{
-					ReleaseFetchSlot();
-					return;
-				}
-
-				Connector->GetClient().CallToolAsync(
-					TEXT("get_variables"),
-					Design2UMGEditorImportRequestSetup::MakePencilVariablesArgs(),
-					[this, FetchGeneration, CapturedNodes = NodesJson](const bool bVarsOk, const FString& VarsJson)
-					{
-						if (!IsGenerationCurrent(FetchGeneration))
-						{
-							ReleaseFetchSlot();
-							return;
-						}
-
-						const FString FinalVars = bVarsOk ? VarsJson : TEXT("{}");
-						if (!bVarsOk)
-						{
-							UE_LOG(LogDesign2UMG, Warning, TEXT("ConnectToPencil: get_variables failed, using empty"));
-						}
-
-						Design2UMGEditorMcpImportPayload::HandleMCPDataReady(CapturedNodes, FinalVars);
-						ReleaseFetchSlot();
-					});
+				Design2UMGEditorMcpImportPayload::HandleMCPDataReady(NodesJson, VarsJson);
+				ReleaseFetchSlot();
 			});
 	}
 

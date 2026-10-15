@@ -4,6 +4,7 @@
 #include "DesignImportGeneration.h"
 #include "Design2UMGNotifications.h"
 #include "PencilConnector.h"
+#include "Tests/Design2UMGMCPStdioTestProcess.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FeedbackContext.h"
@@ -13,19 +14,6 @@
 #include "UObject/Package.h"
 
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
-
-struct FPencilConnectorTestAccess
-{
-	static void ScheduleRetry(FPencilConnector& Connector)
-	{
-		Connector.ScheduleRetry(FTickerDelegate::CreateLambda([](float) { return true; }), 60.0f);
-	}
-
-	static bool HasRetryTicker(const FPencilConnector& Connector)
-	{
-		return Connector.RetryTickerHandle.IsValid();
-	}
-};
 
 namespace
 {
@@ -184,17 +172,21 @@ bool FImportPlanningTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPencilRetryTickerLifecycleTest,
-	"Design2UMG.Pencil.RetryTickerLifecycle",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FPencilRetryTickerLifecycleTest::RunTest(const FString& Parameters)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPencilConnectionLifecycleTest,
+ "Design2UMG.Pencil.ConnectionLifecycle",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPencilConnectionLifecycleTest::RunTest(const FString&)
 {
-	FPencilConnector Connector;
-	FPencilConnectorTestAccess::ScheduleRetry(Connector);
-	TestTrue(TEXT("Pencil connector reports a scheduled retry ticker"), FPencilConnectorTestAccess::HasRetryTicker(Connector));
-	Connector.Shutdown();
-	TestFalse(TEXT("Shutdown unregisters the retry ticker"), FPencilConnectorTestAccess::HasRetryTicker(Connector));
-	return true;
+ FPencilConnector Connector;
+ if (!Design2UMGEditorTests::ConnectStdioFixture(*this, Connector.GetClient())) return false;
+ TestTrue(TEXT("Connector reports its connected child"), Connector.IsRunning());
+ int32 Callbacks = 0;
+ Connector.GetClient().CallToolAsync(TEXT("slow"), nullptr, [&](bool, const FString&) { ++Callbacks; });
+ Connector.Shutdown();
+ TestFalse(TEXT("Shutdown closes the server and its polling connection"), Connector.IsRunning());
+ TestFalse(TEXT("Shutdown clears client connection"), Connector.GetClient().IsConnected());
+ TestEqual(TEXT("Shutdown silently cancels pending import work"), Callbacks, 0);
+ return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGenerationCancelBoundaryBehaviorTest,

@@ -6,6 +6,9 @@
 
 namespace Design2UMGEditorMcpImportPayload
 {
-	/** Parses the Pencil MCP batch_get/get_variables payloads and routes them into the frame-selection import flow. */
+	/** Extracts the marked document JSON printed by Pencil execute. */
+	bool ParseReadDocumentResponse(const FString& Response, FString& OutNodesJson, FString& OutVarsJson);
+
+	/** Routes Pencil nodes and variables into the frame-selection import flow. */
 	void HandleMCPDataReady(const FString& NodesJson, const FString& VarsJson);
 }

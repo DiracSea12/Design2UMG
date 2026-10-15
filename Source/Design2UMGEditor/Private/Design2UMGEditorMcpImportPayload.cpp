@@ -10,6 +10,8 @@
 #include "DesignImportTypes.h"
 #include "DesignJsonUtils.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 // Same LOCTEXT namespace string as the pre-split orchestrator, so the moved keys keep their identity.
@@ -74,6 +76,30 @@ namespace
 
 namespace Design2UMGEditorMcpImportPayload
 {
+	bool ParseReadDocumentResponse(const FString& Response, FString& OutNodesJson, FString& OutVarsJson)
+	{
+		OutNodesJson.Reset();
+		OutVarsJson.Reset();
+		TArray<FString> Lines;
+		Response.ParseIntoArrayLines(Lines);
+		const FString Marker = TEXT("Design2UMGDocument:");
+		for (const FString& Line : Lines)
+		{
+			if (!Line.StartsWith(Marker, ESearchCase::CaseSensitive)) continue;
+			TSharedPtr<FJsonObject> Payload;
+			const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+			const TSharedPtr<FJsonObject>* Variables = nullptr;
+			const TSharedPtr<FJsonObject>* Definitions = nullptr;
+			if (!DesignJsonUtils::TryParseObject(Line.Mid(Marker.Len()), Payload)
+				|| !Payload->TryGetArrayField(TEXT("nodes"), Nodes)
+				|| !Payload->TryGetObjectField(TEXT("variables"), Variables)
+				|| !(*Variables)->TryGetObjectField(TEXT("variables"), Definitions)) return false;
+			return FJsonSerializer::Serialize(*Nodes, TJsonWriterFactory<>::Create(&OutNodesJson))
+				&& FJsonSerializer::Serialize(Variables->ToSharedRef(), TJsonWriterFactory<>::Create(&OutVarsJson));
+		}
+		return false;
+	}
+
 	void HandleMCPDataReady(const FString& NodesJson, const FString& VarsJson)
 	{
 		const TArray<FDesignFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);

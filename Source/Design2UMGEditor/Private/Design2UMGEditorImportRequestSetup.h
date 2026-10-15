@@ -40,6 +40,5 @@ namespace Design2UMGEditorImportRequestSetup
 		const FString& TargetNodeId,
 		const FDesignImportRequest& Request);
 
-	TSharedPtr<FJsonObject> MakePencilBulkGetArgs();
-	TSharedPtr<FJsonObject> MakePencilVariablesArgs();
+	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs();
 }
