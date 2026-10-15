@@ -262,7 +262,7 @@ jobs:
             # argument arrays mangle ExecCmds when passed through &.
             $argumentLine = (@(
               ('"{0}"' -f $project),
-              '/Engine/Maps/Templates/Template_Default',
+              '/Engine/Maps/Templates/VR-Basic',
               ('"-UserDir={0}"' -f $automationUserDir),
               '-NoSplash',
               '-Unattended',

@@ -775,6 +775,10 @@ bool FLocalFontPersistenceSaveTest::RunTest(const FString&)
 	Settings->ExplicitFontMappings.Add(Face.Family, Font);
 	Embedded->LoadingPolicy = EFontLoadingPolicy::LazyLoad;
 	FDesignDocument Document;
+	auto Node = MakeShared<FDesignNode>();
+	Node->Text.Content = TEXT("Mapped persistent font");
+	Node->Text.FontFamily = Face.Family;
+	Document.Children.Add(Node);
 	TArray<FString> Diagnostics;
 	if (!SaveFontPolicyFixture(*this, *Font)
 		|| !TestTrue(TEXT("Prepare mapped generated font for restart"), DesignLocalFontImport::Prepare(Document, Diagnostics, Error))
