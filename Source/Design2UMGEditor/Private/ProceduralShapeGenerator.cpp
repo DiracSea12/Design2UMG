@@ -10,12 +10,56 @@
 #include "Dom/JsonObject.h"
 #include "Engine/Texture2D.h"
 #include "ImageCore.h"
+#include "Misc/EngineVersionComparison.h"
 #include "TextureResource.h"
 #include <cmath>
 
 namespace
 {
 	using FGeneratedGradientStop = ProceduralShapeGeneratorAssets::FGradientStop;
+
+	bool ReadTextureSourceImage(UTexture2D& Texture, FImage& OutImage)
+	{
+		if (!Texture.Source.IsValid())
+		{
+			return false;
+		}
+
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		ERawImageFormat::Type RawFormat;
+		switch (Texture.Source.GetFormat())
+		{
+		case TSF_G8: RawFormat = ERawImageFormat::G8; break;
+		case TSF_BGRA8: RawFormat = ERawImageFormat::BGRA8; break;
+		case TSF_BGRE8: RawFormat = ERawImageFormat::BGRE8; break;
+		case TSF_RGBA16: RawFormat = ERawImageFormat::RGBA16; break;
+		case TSF_RGBA16F: RawFormat = ERawImageFormat::RGBA16F; break;
+		case TSF_G16: RawFormat = ERawImageFormat::G16; break;
+		default: return false;
+		}
+
+		TArray64<uint8> RawData;
+		if (!Texture.Source.GetMipData(RawData, 0))
+		{
+			return false;
+		}
+
+		FTextureFormatSettings FormatSettings;
+		Texture.GetLayerFormatSettings(0, FormatSettings);
+		const EGammaSpace GammaSpace = FormatSettings.SRGB
+			? (Texture.bUseLegacyGamma ? EGammaSpace::Pow22 : EGammaSpace::sRGB)
+			: EGammaSpace::Linear;
+		OutImage.Init(Texture.Source.GetSizeX(), Texture.Source.GetSizeY(), RawFormat, GammaSpace);
+		if (OutImage.RawData.Num() != RawData.Num())
+		{
+			return false;
+		}
+		OutImage.RawData = MoveTemp(RawData);
+		return true;
+#else
+		return Texture.Source.GetMipImage(OutImage, 0);
+#endif
+	}
 
 	enum class EProceduralShapeKind : uint8
 	{
@@ -91,20 +135,21 @@ namespace
 		FImage SourceImage;
 		if (Texture->Source.IsValid()
 			&& !DesignImageResources::FImageResourceLimits().AllowsDimensions(Texture->Source.GetSizeX(), Texture->Source.GetSizeY())) return false;
-		if (Texture->Source.IsValid() && Texture->Source.GetMipImage(SourceImage, 0))
+		if (ReadTextureSourceImage(*Texture, SourceImage))
 		{
-			SourceImage.ChangeFormat(ERawImageFormat::BGRA8, SourceImage.GammaSpace);
-			OutWidth = SourceImage.SizeX;
-			OutHeight = SourceImage.SizeY;
+			FImage BgraImage;
+			SourceImage.CopyTo(BgraImage, ERawImageFormat::BGRA8, SourceImage.GammaSpace);
+			OutWidth = BgraImage.SizeX;
+			OutHeight = BgraImage.SizeY;
 			const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
 			const int64 ExpectedBytes = PixelCount * sizeof(FColor);
-			if (OutWidth <= 0 || OutHeight <= 0 || SourceImage.RawData.Num() < ExpectedBytes)
+			if (OutWidth <= 0 || OutHeight <= 0 || BgraImage.RawData.Num() < ExpectedBytes)
 			{
 				return false;
 			}
 
 			OutPixels.SetNumUninitialized(PixelCount);
-			FMemory::Memcpy(OutPixels.GetData(), SourceImage.RawData.GetData(), ExpectedBytes);
+			FMemory::Memcpy(OutPixels.GetData(), BgraImage.RawData.GetData(), ExpectedBytes);
 			return true;
 		}
 #endif

@@ -1,9 +1,14 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetRenderer.h"
+
+#include "Design2UMGMaterialAccess.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterizer.h"
 #include "ProceduralShapeGenerator.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Misc/ScopeExit.h"
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
@@ -24,7 +29,7 @@
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Input/HittestGrid.h"
-#include "RHIGlobals.h"
+#include "RHI.h"
 #include "Slate/WidgetRenderer.h"
 #include "TextureResource.h"
 #include "RenderingThread.h"
@@ -103,7 +108,7 @@ namespace
 			const TCHAR* Kind = nullptr;
 			if (const UImage* Image = Cast<UImage>(Widget))
 			{
-				Brush = &Image->GetBrush();
+				Brush = &Design2UMGWidgetPropertyAccess::GetBrush(*Image);
 				Kind = TEXT("Image");
 			}
 			else if (const UBorder* Border = Cast<UBorder>(Widget))
@@ -232,13 +237,13 @@ namespace
 
 			if (const UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
 			{
-				WarmUpFontResource(TextBlock->GetFont());
+				WarmUpFontResource(Design2UMGWidgetPropertyAccess::GetFont(*TextBlock));
 			}
 
 			const FSlateBrush* Brush = nullptr;
 			if (const UImage* Image = Cast<UImage>(Widget))
 			{
-				Brush = &Image->GetBrush();
+				Brush = &Design2UMGWidgetPropertyAccess::GetBrush(*Image);
 			}
 			else if (const UBorder* Border = Cast<UBorder>(Widget))
 			{
@@ -401,7 +406,7 @@ void FUMGWidgetRenderer::DumpTextBlockFontStates(
 			return;
 		}
 
-		const FSlateFontInfo FontInfo = TextBlock->GetFont();
+		const FSlateFontInfo FontInfo = Design2UMGWidgetPropertyAccess::GetFont(*TextBlock);
 		const UObject* FontObject = FontInfo.FontObject;
 		FMsg::Logf(
 			__FILE__,
@@ -416,7 +421,7 @@ void FUMGWidgetRenderer::DumpTextBlockFontStates(
 			*TextBlock->GetText().ToString(),
 			FontObject ? *FontObject->GetPathName() : TEXT("<null>"),
 			*FontInfo.TypefaceFontName.ToString(),
-			FontInfo.Size,
+			static_cast<double>(FontInfo.Size),
 			FontInfo.LetterSpacing,
 			TextBlock->GetWrapTextAt(),
 			TextBlock->GetAutoWrapText() ? 1 : 0);
@@ -471,6 +476,12 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	DumpWidgetVisualState(TEXT("compiled-instance"), Widget->WidgetTree, WidgetBP->GetPathName());
 	Widget->SetFlags(RF_Transient);
 	Widget->AddToRoot();
+	ON_SCOPE_EXIT
+	{
+		Widget->ReleaseSlateResources(true);
+		FlushRenderingCommands();
+		Widget->RemoveFromRoot();
+	};
 
 	TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
 	// Retainer dynamic materials exist only after the Slate tree is built.
@@ -483,12 +494,24 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 		{
 			if (URetainerBox* Retainer = Cast<URetainerBox>(Child))
 			{
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+				// Older UMG disables retained rendering whenever a widget is in design mode.
+				// Reapply the asset setting after the Slate subtree exists so previews keep
+				// their effects without changing PreConstruct's design-time behavior.
+				const bool bRetainRendering = Design2UMGWidgetPropertyAccess::IsRetainRendering(*Retainer);
+				Retainer->SetRetainRendering(bRetainRendering);
+				if (bRetainRendering)
+				{
+					Retainer->RequestRender();
+				}
+#endif
+
 				if (UMaterialInstanceDynamic* Effect = Retainer->GetEffectMaterial())
 				{
 					UMaterial* Material = Effect->GetMaterial();
 					if (!PreparedRetainerMaterials.Contains(Material))
 					{
-						Material->EnsureIsComplete();
+						Design2UMGMaterialAccess::WaitForCompilation(*Material);
 						Material->RecacheUniformExpressions(true);
 						PreparedRetainerMaterials.Add(Material);
 					}
@@ -504,7 +527,6 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 		UE_LOG(LogDesign2UMG, Warning,
 			TEXT("RenderWidgetToPng: missing valid DesignTimeSize for %s; source design size is required"),
 			*WidgetBP->GetPathName());
-		Widget->RemoveFromRoot();
 		return false;
 	}
 
@@ -518,7 +540,6 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 		UE_LOG(LogDesign2UMG, Warning,
 			TEXT("RenderWidgetToPng: invalid design/render size %dx%d"),
 			SlateRenderSize.X, SlateRenderSize.Y);
-		Widget->RemoveFromRoot();
 		return false;
 	}
 	if (!IsRenderSizeWithinRHITextureLimits(SlateRenderSize))
@@ -529,7 +550,6 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 		{
 			*OutError = Reason;
 		}
-		Widget->RemoveFromRoot();
 		return false;
 	}
 	// Keep the root at its design extent when the export canvas includes overflow.
@@ -592,7 +612,6 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	FTextureRenderTargetResource* Resource = RT->GameThread_GetRenderTargetResource();
 	if (!Resource)
 	{
-		Widget->RemoveFromRoot();
 		RT->ReleaseResource();
 		RT->MarkAsGarbage();
 		return false;
@@ -603,7 +622,6 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 	RT->ReleaseResource();
 	RT->MarkAsGarbage();
-	Widget->RemoveFromRoot();
 
 	if (Pixels.Num() == 0) return false;
 
@@ -709,6 +727,11 @@ bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArra
 	}
 
 	if (!FSlateApplication::IsInitialized()) return false;
+	ON_SCOPE_EXIT
+	{
+		WidgetBP->WidgetTree->ForEachWidget([](UWidget* Widget) { Widget->ReleaseSlateResources(true); });
+		FlushRenderingCommands();
+	};
 
 	// Materialize every SWidget in the WidgetTree and sync its properties.
 	WidgetBP->WidgetTree->ForEachWidget([](UWidget* W)

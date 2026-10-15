@@ -4,6 +4,7 @@
 #include "FigmaComponentDependencies.h"
 #include "DesignJsonUtils.h"
 #include "Dom/JsonObject.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Serialization/JsonSerializer.h"
 
 namespace Design2UMGEditorImportServices
@@ -81,7 +82,11 @@ namespace Design2UMGEditorImportServices
 		for (const auto& Instance : Catalog.InstanceKeys) Visit(Instance.Value);
 		while (!Pending.IsEmpty() && MissingKey.IsEmpty())
 		{
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+			const auto* Reference = Pending.Pop(false);
+#else
 			const auto* Reference = Pending.Pop(EAllowShrinking::No);
+#endif
 			if (IsMapped(Reference->Key)) continue;
 			Visit(Reference->Key);
 			AddRefs(Reference->Children);

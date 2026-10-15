@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Misc/OutputDevice.h"
 #include "DesignJsonUtils.h"
 #include "FigmaParser.h"
 #include "PenParser.h"
@@ -10,6 +12,37 @@
 
 namespace
 {
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+	class FScopedExpectedWarning final : public FOutputDevice
+	{
+	public:
+		FScopedExpectedWarning(FAutomationTestBase& InTest, FString InText, const int32 InOccurrences)
+			: Test(InTest), Text(MoveTemp(InText)), Occurrences(InOccurrences)
+		{
+			Test.AddExpectedError(FString::Printf(TEXT("(?i:%s)"), *Text), EAutomationExpectedErrorFlags::Contains, Occurrences);
+			if (GLog) GLog->AddOutputDevice(this);
+		}
+		~FScopedExpectedWarning()
+		{
+			if (GLog) GLog->RemoveOutputDevice(this);
+			Test.TestEqual(FString::Printf(TEXT("Expected Warning matching '%s'"), *Text), ActualOccurrences, Occurrences);
+		}
+		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName&) override
+		{
+			const ELogVerbosity::Type MessageVerbosity = static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask);
+			if (V && MessageVerbosity == ELogVerbosity::Warning && FString(V).Contains(Text, ESearchCase::IgnoreCase))
+			{
+				++ActualOccurrences;
+			}
+		}
+	private:
+		FAutomationTestBase& Test;
+		FString Text;
+		int32 Occurrences = 0;
+		int32 ActualOccurrences = 0;
+	};
+#endif
+
 	FString FormatTransform(const FDesignImageTransform& Value)
 	{
 		return FString::Printf(TEXT("%g,%g,%g,%g,%g,%g"), Value.A, Value.B, Value.TX, Value.C, Value.D, Value.TY);
@@ -48,8 +81,15 @@ namespace
 		CheckSourceMatrix(Test, bFigma, TEXT("[[0,0,0],[0,0,0]]"), TEXT("0,0,0,0,0,0"));
 		const TCHAR* InvalidComponents[] = { TEXT("\"bad\""), TEXT("true"), TEXT("null"), TEXT("{}"), TEXT("[]"), TEXT("1e39"), TEXT("\"1e+\""), TEXT("\"NaN\"") };
 		const TCHAR* InvalidShapes[] = { TEXT("null"), TEXT("false"), TEXT("{}"), TEXT("\"matrix\""), TEXT("[]"), TEXT("[null,[0,1,0]]"), TEXT("[[1,0],[0,1,0]]"), TEXT("[[1,0,0],[0,1,0,2]]"), TEXT("[[1,0,0],[0,1,0],[0,0,1]]") };
-		Test.AddExpectedMessagePlain(bFigma ? TEXT("FigmaParser: Invalid imageTransform") : TEXT("PenParser: Invalid imageTransform"),
-			ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidComponents) * 6 + UE_ARRAY_COUNT(InvalidShapes));
+		const FString ExpectedWarning = bFigma ? TEXT("FigmaParser: Invalid imageTransform") : TEXT("PenParser: Invalid imageTransform");
+		const int32 ExpectedWarningCount = UE_ARRAY_COUNT(InvalidComponents) * 6 + UE_ARRAY_COUNT(InvalidShapes);
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+		FScopedExpectedWarning WarningScope(Test, ExpectedWarning, ExpectedWarningCount);
+#elif UE_VERSION_OLDER_THAN(5, 4, 0)
+		Test.AddExpectedMessage(ExpectedWarning, ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, ExpectedWarningCount);
+#else
+		Test.AddExpectedMessagePlain(ExpectedWarning, ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, ExpectedWarningCount);
+#endif
 		for (const TCHAR* Invalid : InvalidComponents)
 		{
 			for (int32 Index = 0; Index < 6; ++Index)

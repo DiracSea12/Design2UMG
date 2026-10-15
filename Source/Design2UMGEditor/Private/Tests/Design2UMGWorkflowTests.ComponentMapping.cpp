@@ -15,7 +15,7 @@
 #include "UMGJsonSerializer.h"
 #include "Misc/ScopeExit.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "Tests/Design2UMGMappedComponentTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "Blueprint/UserWidget.h"
@@ -42,7 +42,7 @@ namespace
 	using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
 
 	const TCHAR* TestScope = TEXT("mapping-workflow-file-key");
-	const TCHAR* TestWidgetClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	const TCHAR* TestWidgetClassPath = ComponentFixtures::MappedClassPath;
 
 	FString MakeWorkflowMappingFigmaJson()
 	{
@@ -90,6 +90,7 @@ namespace
 
 	FDesign2UMGGenerationSettingsSnapshot MakeMappingGenerationSettings()
 	{
+		ComponentFixtures::MappedClass();
 		FDesign2UMGGenerationSettingsSnapshot Settings;
 		// Name-based ClassOverride applies only to nodes that did not hit a mapping:
 		// both "PrimaryButton" (a mapped node name) and "PlainCard" (an unmapped node name) hit here,
@@ -126,15 +127,15 @@ namespace
 		return Settings;
 	}
 
-	UDesign2UMGMappedComponentTestWidget* FindMappedInstanceByLabel(
+	UUserWidget* FindMappedInstanceByLabel(
 		const UWidgetTree* WidgetTree, const FText& Label)
 	{
-		UDesign2UMGMappedComponentTestWidget* Match = nullptr;
+		UUserWidget* Match = nullptr;
 		WidgetTree->ForEachWidget([&Label, &Match](UWidget* Widget)
 		{
-			if (UDesign2UMGMappedComponentTestWidget* Candidate = Cast<UDesign2UMGMappedComponentTestWidget>(Widget))
+			if (UUserWidget* Candidate = ComponentFixtures::CastMapped(Widget))
 			{
-				if (Candidate->Label.ToString() == Label.ToString())
+				if (ComponentFixtures::Read<FTextProperty>(Candidate, TEXT("Label")).ToString() == Label.ToString())
 				{
 					Match = Candidate;
 				}
@@ -176,25 +177,25 @@ bool FComponentMappingWorkflowTest::RunTest(const FString&)
 	UWidgetTree* WidgetTree = Blueprint->WidgetTree;
 
 	// mapped instance 1: project class instance + inputs written + subtree unexpanded.
-	UDesign2UMGMappedComponentTestWidget* Instance1 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Checkout")));
+	UUserWidget* Instance1 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Checkout")));
 	TestNotNull(TEXT("First mapped instance generated"), Instance1);
 	if (Instance1)
 	{
 		TestEqual(TEXT("Mapped instance keeps its project class"), Instance1->GetClass()->GetPathName(), TestWidgetClassPath);
-		TestFalse(TEXT("Mapped flag written from design"), Instance1->EnabledFlag);
-		TestEqual(TEXT("Variant name written from design"), Instance1->VariantName, FName(TEXT("Primary")));
-		TestTrue(TEXT("Float value written from design"), FMath::IsNearlyEqual(Instance1->Value, 12.5));
+		TestFalse(TEXT("Mapped flag written from design"), ComponentFixtures::Read<FBoolProperty>(Instance1, TEXT("EnabledFlag")));
+		TestEqual(TEXT("Variant name written from design"), ComponentFixtures::Read<FNameProperty>(Instance1, TEXT("VariantName")), FName(TEXT("Primary")));
+		TestTrue(TEXT("Float value written from design"), FMath::IsNearlyEqual(ComponentFixtures::Read<FDoubleProperty>(Instance1, TEXT("Value")), 12.5));
 		TestNull(TEXT("Component internals not expanded into host tree"), WidgetTree->FindWidget(TEXT("btn_inst_1_label")));
 	}
 
 	// mapped instance 2: a second instance of the same component definition; values never cross-contaminate.
-	UDesign2UMGMappedComponentTestWidget* Instance2 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Pay Now")));
+	UUserWidget* Instance2 = FindMappedInstanceByLabel(WidgetTree, FText::FromString(TEXT("Pay Now")));
 	TestNotNull(TEXT("Second mapped instance generated"), Instance2);
 	if (Instance2)
 	{
-		TestTrue(TEXT("Second instance flag from its own design values"), Instance2->EnabledFlag);
-		TestEqual(TEXT("Second instance variant"), Instance2->VariantName, FName(TEXT("Secondary")));
-		TestTrue(TEXT("Second instance value"), FMath::IsNearlyEqual(Instance2->Value, 3.25));
+		TestTrue(TEXT("Second instance flag from its own design values"), ComponentFixtures::Read<FBoolProperty>(Instance2, TEXT("EnabledFlag")));
+		TestEqual(TEXT("Second instance variant"), ComponentFixtures::Read<FNameProperty>(Instance2, TEXT("VariantName")), FName(TEXT("Secondary")));
+		TestTrue(TEXT("Second instance value"), FMath::IsNearlyEqual(ComponentFixtures::Read<FDoubleProperty>(Instance2, TEXT("Value")), 3.25));
 		TestNull(TEXT("Second instance internals not expanded into host tree"), WidgetTree->FindWidget(TEXT("btn_inst_2_label")));
 	}
 	TestTrue(TEXT("Two mapped instances are distinct widgets"), Instance1 != Instance2);
@@ -324,7 +325,7 @@ bool FComponentMappingClassMissingFallbackTest::RunTest(const FString&)
 		bool bSawMappedInstance = false;
 		Blueprint->WidgetTree->ForEachWidget([&bSawMappedInstance](UWidget* Widget)
 		{
-			bSawMappedInstance |= Widget->IsA<UDesign2UMGMappedComponentTestWidget>();
+			bSawMappedInstance |= Widget->IsA(ComponentFixtures::MappedClass());
 		});
 		TestFalse(TEXT("No mapped instance survives class load failure"), bSawMappedInstance);
 
@@ -559,9 +560,9 @@ bool FPreviewContextMappedGenerationTest::RunTest(const FString& Parameters)
 		auto* Instance = FindMappedInstanceByLabel(Blueprint->WidgetTree, FText::FromString(TEXT("Checkout")));
 		if (TestNotNull(TEXT("Mapped instance and text input retained"), Instance))
 		{
-			TestFalse(TEXT("Boolean input retained"), Instance->EnabledFlag);
-			TestEqual(TEXT("Name input retained"), Instance->VariantName, FName(TEXT("Primary")));
-			TestTrue(TEXT("Numeric input retained"), FMath::IsNearlyEqual(Instance->Value, 12.5));
+			TestFalse(TEXT("Boolean input retained"), ComponentFixtures::Read<FBoolProperty>(Instance, TEXT("EnabledFlag")));
+			TestEqual(TEXT("Name input retained"), ComponentFixtures::Read<FNameProperty>(Instance, TEXT("VariantName")), FName(TEXT("Primary")));
+			TestTrue(TEXT("Numeric input retained"), FMath::IsNearlyEqual(ComponentFixtures::Read<FDoubleProperty>(Instance, TEXT("Value")), 12.5));
 		}
 		TSharedPtr<FJsonObject> Manifest;
 		if (TestTrue(TEXT("Generation manifest exists"), ReadSidecarJson(Blueprint->GetOutermost()->GetName(), Manifest)) && Manifest)

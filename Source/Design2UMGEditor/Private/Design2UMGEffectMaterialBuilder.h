@@ -25,10 +25,13 @@ namespace Design2UMGEffectMaterialBuilder
 		const FVector2D& Size,
 		const FVector4& CornerRadii);
 	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial();
+	/** Resolve and persist typed effect parameters without WidgetTree-owned materials. */
+	UMaterialInterface* GetOrCreateRetainerEffectMaterial(
+		const FUMGEffectData& Effect, UMaterialInterface* ExistingMaterial = nullptr);
 	/** Persist subtree effects before modifying a generated WidgetTree. */
 	bool PrepareSubtreeShadowMaterials(FUMGWidgetNode& Root, FString& OutError);
-	/** Resolve persisted mask dependencies before creating or replacing a WidgetTree. */
-	bool PrepareGeometryMaskMaterials(FUMGWidgetNode& Root,
+	/** Resolve persisted effect dependencies before creating or replacing a WidgetTree. */
+	bool PrepareRetainerEffectMaterials(FUMGWidgetNode& Root,
 		TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError);
 
 }

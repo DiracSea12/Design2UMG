@@ -22,13 +22,17 @@ function instance(id, main, children = []) {
 
 (async () => {
   assert.equal(typeof api.collectComponentDependencies, 'function', 'dependency collector is exported');
-  const leaf = component('2:1', 'leaf-key', [node('2:2', 'TEXT')]);
+  const leafGeometry = node('2:3', 'VECTOR');
+  leafGeometry.fillGeometry = [{ data: 'M0 0 L8 0 L8 8 Z', windingRule: 'NONZERO' }];
+  const leaf = component('2:1', 'leaf-key', [node('2:2', 'TEXT'), leafGeometry]);
   const nested = instance('3:2', leaf);
   const parent = component('3:1', 'parent-key', [nested]);
   const other = component('4:1', 'other-key');
   const root = node('1:1', 'FRAME', [instance('1:2', parent), instance('1:3', parent), instance('1:4', other)]);
   const result = await api.collectComponentDependencies(root);
   assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.definitions[0].document.children[1].fillGeometry,
+    [{ path: 'M0 0 L8 0 L8 8 Z', windingRule: 'NONZERO' }]);
   assert.deepEqual(result.definitions.map(entry => entry.key), ['leaf-key', 'parent-key', 'other-key']);
   assert.equal(result.definitions.filter(entry => entry.key === 'parent-key').length, 1);
   assert.equal(result.definitions[1].document.children[0].componentId, '2:1');

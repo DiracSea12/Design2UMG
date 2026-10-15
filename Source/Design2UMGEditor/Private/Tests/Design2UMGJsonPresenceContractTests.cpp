@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGAutomationTestAdapter.h"
 #include "Misc/AutomationTest.h"
 
 #include "Dom/JsonObject.h"
@@ -124,8 +125,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUMGJsonInvalidOptionalTypesContractTest,
 
 bool FUMGJsonInvalidOptionalTypesContractTest::RunTest(const FString&)
 {
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid"), ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains, 8);
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid"), ELogVerbosity::Warning,
+		Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 8);
 	const FString Json = TEXT(R"JSON({
 		"RootWidget": {
 			"Type": "TextBlock",

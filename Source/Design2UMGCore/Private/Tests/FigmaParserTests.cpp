@@ -13,6 +13,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "FigmaTestDocBuilder.h"
+#include "VisualMapper.h"
 
 using namespace Design2UMGCoreTests;
 
@@ -223,8 +224,10 @@ bool FFigmaParserExpandedDropShadowUsesLayoutBoundsTest::RunTest(const FString&)
 		MakeLeafNode(TEXT("background"), TEXT("Background"), TEXT("RECTANGLE"), 40, 32, 210, 86,
 			FString::Printf(
 				TEXT(",\"absoluteRenderBounds\":%s,"
-					 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"offset\":{\"x\":0,\"y\":0},\"radius\":40}],"
-					 "\"fills\":[%s]"),
+					 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"offset\":{\"x\":0,\"y\":0},\"radius\":40,\"showShadowBehindNode\":true}],"
+					 "\"fillGeometry\":[{\"path\":\"M0 0 L210 0 L210 86 Z\",\"windingRule\":\"NONZERO\"},{\"path\":\"M10 10 L20 10 L20 20 Z\",\"windingRule\":\"EVENODD\"}],"
+						"\"strokeGeometry\":[{\"path\":\"M1 1 L209 1 L209 85 Z\",\"windingRule\":\"NONZERO\"}],"
+						"\"fills\":[%s]"),
 				*MakeBoundsJson(0, -8, 290, 166), *MakeSolidFillJson(1, 1, 1)))));
 
 	FDesignDocument Document;
@@ -238,6 +241,18 @@ bool FFigmaParserExpandedDropShadowUsesLayoutBoundsTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode>& Background = Document.Children[0]->Children[0];
 	TestEqual(TEXT("Drop-shadow node keeps layout width"), Background->Transform.Width.Value, 210.0f);
 	TestEqual(TEXT("Drop-shadow node keeps layout height"), Background->Transform.Height.Value, 86.0f);
+	const auto& Geometry = Background->Shape.PaintGeometry;
+	if (!TestTrue(TEXT("Fill and stroke geometry are independently retained"), Geometry.FillPaths.IsSet() && Geometry.StrokePaths.IsSet()))
+		return false;
+	if (!TestEqual(TEXT("All fill contours are retained"), Geometry.FillPaths.GetValue().Num(), 2))
+		return false;
+	TestEqual(TEXT("Stroke contour is retained"), Geometry.StrokePaths.GetValue().Num(), 1);
+	TestEqual(TEXT("Each contour keeps its own fill rule"), Geometry.FillPaths.GetValue()[1].FillRule, FString(TEXT("evenodd")));
+	FUMGWidgetNode Widget;
+	VisualMapper::ApplyVisualProperties(Widget, Background);
+	if (!TestEqual(TEXT("One normalized shadow"), Widget.Shadow.BoxShadows.Num(), 1))
+		return false;
+	TestTrue(TEXT("Shadow behind flag reaches the shared shadow layer"), Widget.Shadow.BoxShadows[0].bShowShadowBehindNode);
 	return true;
 }
 
@@ -344,7 +359,7 @@ bool FFigmaParserVisualExplicitClearTest::RunTest(const FString&)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeLeafNode(TEXT("explicit-clear"), TEXT(""), TEXT("RECTANGLE"), 0, 0, 80, 40,
-			TEXT(",\"fills\":[],\"effects\":[]")));
+			TEXT(",\"fills\":[],\"effects\":[],\"fillGeometry\":[]")));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma explicit-clear fixture parses"), FFigmaParser::ParseDocument(Json, Document));
@@ -359,6 +374,9 @@ bool FFigmaParserVisualExplicitClearTest::RunTest(const FString&)
 	TestTrue(TEXT("Empty effects are represented as an explicit shared clear"), Visual.bEffectsExplicitClear);
 	TestEqual(TEXT("Explicit fill clear has no fill layers"), Visual.Fills.Num(), 0);
 	TestEqual(TEXT("Explicit effect clear has no effects"), Visual.Effects.Num(), 0);
+	const auto& Geometry = Document.Children[0]->Shape.PaintGeometry;
+	TestTrue(TEXT("Known empty fill geometry stays distinct from missing geometry"), Geometry.FillPaths.IsSet() && Geometry.FillPaths.GetValue().IsEmpty());
+	TestFalse(TEXT("Missing stroke geometry stays missing"), Geometry.StrokePaths.IsSet());
 	return true;
 }
 
@@ -427,6 +445,7 @@ bool FFigmaParserEffectsTest::RunTest(const FString&)
 	TestEqual(TEXT("Second effect type"), EffectsFrame->Visual.Effects[1].Type, EDesignEffectType::Shadow);
 	TestEqual(TEXT("Second effect offset x"), EffectsFrame->Visual.Effects[1].Shadow.OffsetX, 2.0f);
 	TestEqual(TEXT("Second effect offset y"), EffectsFrame->Visual.Effects[1].Shadow.OffsetY, 4.0f);
+	TestFalse(TEXT("Omitted shadow behind flag uses the source default"), EffectsFrame->Visual.Effects[1].Shadow.bShowShadowBehindNode);
 
 	return true;
 }
@@ -655,15 +674,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FFigmaParserErrorInputTest::RunTest(const FString&)
 {
+	AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 2);
+	AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 2);
 	{
-		AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
-		AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 		FDesignDocument Doc;
 		TestFalse(TEXT("Empty string returns false"), FFigmaParser::ParseDocument(TEXT(""), Doc));
 	}
 	{
-		AddExpectedError(TEXT("Invalid Figma export JSON"), EAutomationExpectedErrorFlags::Contains, 1);
-		AddExpectedError(TEXT("Failed to parse JSON"), EAutomationExpectedErrorFlags::Contains, 1);
 		FDesignDocument Doc;
 		TestFalse(TEXT("Malformed JSON returns false"), FFigmaParser::ParseDocument(TEXT("{\"document\":"), Doc));
 	}

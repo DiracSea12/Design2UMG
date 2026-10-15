@@ -344,6 +344,7 @@ namespace VisualMapperFillTransfer
 		}
 
 		FUMGWidgetNode Overlay = MakeMultiFillOverlayShell(Widget);
+		Overlay.Shadow.BoxShadows = MoveTemp(Widget.Shadow.BoxShadows);
 		for (int32 FillIndex = 0; FillIndex < Node->Visual.Fills.Num(); ++FillIndex)
 		{
 			const FDesignFill& Fill = Node->Visual.Fills[FillIndex];

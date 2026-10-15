@@ -8,6 +8,7 @@
 #include "FigmaTestDocBuilder.h"
 #include "PenParser.h"
 #include "Misc/OutputDevice.h"
+#include "Misc/EngineVersionComparison.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetNodeAccess.h"
 
@@ -35,10 +36,12 @@ namespace
 			return true;
 		}
 
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
 		virtual bool CanBeUsedOnPanicThread() const override
 		{
 			return true;
 		}
+#endif
 
 		const FString& GetCaptured() const
 		{

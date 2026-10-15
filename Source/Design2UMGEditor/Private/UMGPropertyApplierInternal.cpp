@@ -4,11 +4,14 @@
 // typed-node applier in GetPropsApplierMap().
 
 #include "UMGPropertyApplierInternal.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 
 #include "UMGBrushPropertyApplier.h"
 #include "UMGPropertyApplierSupport.h"
 #include "UMGTextPropertyApplier.h"
 #include "UMGValueParsing.h"
+
+#include "Misc/EngineVersionComparison.h"
 
 #include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
@@ -38,7 +41,7 @@ namespace
 	void ApplyButtonProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
 		UButton* Button = CastChecked<UButton>(Widget);
-		FButtonStyle Style = Button->GetStyle();
+		FButtonStyle Style = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button);
 		if (Node.WidgetStyle.BackgroundColor.IsSet())
 		{
 			const FLinearColor BackgroundColor = Node.WidgetStyle.BackgroundColor.GetValue();
@@ -138,12 +141,20 @@ namespace
 				{TEXT("ScaleToFitY"), EStretch::ScaleToFitY},
 				{TEXT("ScaleToFill"), EStretch::ScaleToFill},
 				{TEXT("UserSpecified"), EStretch::UserSpecified},
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
 				{TEXT("UserSpecifiedWithClipping"), EStretch::UserSpecifiedWithClipping},
+#endif
 			};
 			if (const EStretch::Type* Stretch = StretchMap.Find(Node.WidgetStyle.Stretch.GetValue()))
 			{
 				ScaleBox->SetStretch(*Stretch);
 			}
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+			else if (Node.WidgetStyle.Stretch.GetValue() == TEXT("UserSpecifiedWithClipping"))
+			{
+				ScaleBox->SetStretch(EStretch::UserSpecified);
+			}
+#endif
 		}
 		if (Node.WidgetStyle.StretchDirection.IsSet())
 		{
@@ -158,6 +169,19 @@ namespace
 			}
 		}
 	}
+
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+	void ApplyScaleBoxCompatibilityClipping(UWidget* Widget, const FUMGWidgetNode& Node)
+	{
+		UScaleBox* ScaleBox = Cast<UScaleBox>(Widget);
+		if (ScaleBox
+			&& Node.WidgetStyle.Stretch.Get(FString()) == TEXT("UserSpecifiedWithClipping")
+			&& ScaleBox->GetClipping() == EWidgetClipping::Inherit)
+		{
+			ScaleBox->SetClipping(EWidgetClipping::ClipToBounds);
+		}
+	}
+#endif
 
 	void ApplyWidgetSwitcherProps(UWidget* Widget, const FUMGWidgetNode& Node)
 	{
@@ -277,5 +301,8 @@ namespace
 		}
 
 		ApplyCommonProperties(Widget, Node);
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		ApplyScaleBoxCompatibilityClipping(Widget, Node);
+#endif
 	}
 }

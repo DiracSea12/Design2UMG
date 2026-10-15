@@ -10,7 +10,7 @@
 #include "FigmaTestDocBuilder.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
-#include "Tests/Design2UMGMappedComponentTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Components/Widget.h"
@@ -57,6 +57,7 @@ namespace
 
 	FDesign2UMGComponentMappingConfig MakeDirectMappingConfig(const FString& WidgetClassPath)
 	{
+		ComponentFixtures::MappedClass();
 		FDesign2UMGComponentMappingConfig Config;
 		DesignComponentMapping::FComponentMappingEntry& Entry =
 			Config.Table.Entries.AddDefaulted_GetRef();
@@ -107,7 +108,7 @@ bool FComponentMappingIRMarkingTest::RunTest(const FString&)
 	TestTrue(TEXT("No mapping key before generation apply"), InstanceWidget->Source().MappedComponentKey.IsEmpty());
 
 	// Pre-generation matching: hit entries write the Key into the IR sidecar; misses/ordinary nodes are unaffected.
-	FDesign2UMGComponentMappingConfig Config = MakeDirectMappingConfig(TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget"));
+	FDesign2UMGComponentMappingConfig Config = MakeDirectMappingConfig(ComponentFixtures::MappedClassPath);
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
 		Data.RootWidget, Config, Data, BuildState);
@@ -148,7 +149,7 @@ bool FComponentMappingIRSetLevelMarkingTest::RunTest(const FString&)
 	Entry.Provider = TEXT("figma");
 	Entry.DocumentScope = TestScope;
 	Entry.ComponentKey = TEXT("published-set-key");
-	Entry.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	Entry.WidgetClass = ComponentFixtures::MappedClass()->GetPathName();
 
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(
@@ -179,7 +180,7 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(TempIni), true);
 	const FString IniContent =
 		TEXT("[/Design2UMG/ComponentMapping]\n")
-		TEXT("+Mappings=(Key=\"figma|scope-1|component-key-1\",WidgetClass=\"/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget\",")
+		TEXT("+Mappings=(Key=\"figma|scope-1|component-key-1\",WidgetClass=\"/Game/Design2UMG/TestFixtures/WBP_MappedComponent.WBP_MappedComponent_C\",")
 		TEXT("Inputs=((Source=\"label\",Target=\"Label\",Type=\"Text\"),(Source=\"enabled\",Target=\"EnabledFlag\",Type=\"Bool\")))\n")
 		TEXT("+Mappings=(Key=\"bad-key\",WidgetClass=\"/Script/UMG.TextBlock\")\n")
 		TEXT("+Mappings=(Key=\"pencil|scope-1|component-key-2\",WidgetClass=\"/Script/UMG.TextBlock\")\n")
@@ -189,6 +190,7 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 		TEXT("+Mappings=(Key=\"figma|scope-1|component-key-1\",WidgetClass=\"/Script/UMG.UserWidget\")\n");
 	TestTrue(TEXT("Write temp mapping ini"), FFileHelper::SaveStringToFile(IniContent, *TempIni));
 
+	ComponentFixtures::MappedClass();
 	const FDesign2UMGComponentMappingConfig Config = Design2UMGComponentMappingConfig::Load(TempIni);
 	IFileManager::Get().Delete(*TempIni, false, true);
 
@@ -203,7 +205,7 @@ bool FComponentMappingConfigLoadTest::RunTest(const FString&)
 	TestNotNull(TEXT("Fully valid entry kept"), ValidEntry);
 	if (ValidEntry)
 	{
-		TestEqual(TEXT("Valid entry class"), ValidEntry->WidgetClass, TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget"));
+		TestEqual(TEXT("Valid entry class"), ValidEntry->WidgetClass, ComponentFixtures::MappedClassPath);
 		TestEqual(TEXT("Valid entry keeps valid inputs"), ValidEntry->Inputs.Num(), 2);
 	}
 	const DesignComponentMapping::FComponentMappingEntry* PartialEntry =
@@ -244,6 +246,7 @@ namespace
 		const FString& WidgetClassPath,
 		const DesignComponentMapping::FComponentInputDeclaration& Input)
 	{
+		ComponentFixtures::MappedClass();
 		FDesign2UMGComponentMappingConfig Config;
 		DesignComponentMapping::FComponentMappingEntry& Entry = Config.Table.Entries.AddDefaulted_GetRef();
 		Entry.Key = Key;
@@ -354,9 +357,9 @@ bool FComponentMappingComponentTextFromSubtreeTest::RunTest(const FString&)
 	InnerText.Type = TEXT("TextBlock");
 	InnerText.Text.Text = FString(TEXT("Place Order"));
 
-	UDesign2UMGMappedComponentTestWidget* Instance =
-		NewObject<UDesign2UMGMappedComponentTestWidget>(GetTransientPackage());
-	TestTrue(TEXT("Target starts empty"), Instance->Label.IsEmpty());
+	UUserWidget* Instance =
+		NewObject<UUserWidget>(GetTransientPackage(), ComponentFixtures::MappedClass());
+	TestTrue(TEXT("Target starts empty"), ComponentFixtures::Read<FTextProperty>(Instance, TEXT("Label")).IsEmpty());
 
 	DesignComponentMapping::FComponentInputDeclaration Input;
 	Input.Source = TEXT("label");
@@ -366,12 +369,12 @@ bool FComponentMappingComponentTextFromSubtreeTest::RunTest(const FString&)
 
 	FDesign2UMGComponentMappingConfig Config = MakeSingleInputMappingConfig(
 		TEXT("figma|inherited-target-scope|mk-single-input"),
-		TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget"), Input);
+		ComponentFixtures::MappedClassPath, Input);
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	Design2UMGComponentMappingGeneration::ApplyMappedComponentInputs(Instance, Node, BuildState);
 
 	TestEqual(TEXT("Internal TEXT supplies the component text"),
-		Instance->Label.ToString(), TEXT("Place Order"));
+		ComponentFixtures::Read<FTextProperty>(Instance, TEXT("Label")).ToString(), TEXT("Place Order"));
 	FString AppliedMessage;
 	TestEqual(TEXT("Subtree text input applied once"),
 		CountMappingDiagnosticsByKind(BuildState, TEXT("mapping_input_applied"), &AppliedMessage), 1);
@@ -419,7 +422,7 @@ bool FComponentMappingPrototypeSubtreeInertTest::RunTest(const FString&)
 	Entry.Provider = TEXT("figma");
 	Entry.DocumentScope = TEXT("subtree-inert-scope");
 	Entry.ComponentKey = TEXT("mk-subtree-inert");
-	Entry.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	Entry.WidgetClass = ComponentFixtures::MappedClass()->GetPathName();
 
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
 	Design2UMGComponentMappingGeneration::ApplyMappingToWidgetTreeIR(

@@ -21,7 +21,10 @@ namespace UMGTextStyleApplication
 
 	void ApplyTypedFontInfo(FSlateFontInfo& FontInfo, const FUMGWidgetNode& Node, bool& bFontChanged);
 
-	void ApplyTypedTextLayoutProps(UTextLayoutWidget* TextWidget, const FUMGWidgetNode& Node);
+	void ApplyTypedTextLayoutProps(
+		UTextLayoutWidget* TextWidget,
+		const FUMGWidgetNode& Node,
+		const FShapedTextOptions* ShapedTextOptions = nullptr);
 
 	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color);
 	FTextBlockStyle ResolveRichTextBaseStyle(const URichTextBlock* RichTextBlock);

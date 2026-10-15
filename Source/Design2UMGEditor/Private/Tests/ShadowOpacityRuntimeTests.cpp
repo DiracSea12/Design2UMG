@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGImageTestUtils.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
@@ -48,7 +49,7 @@ bool FShadowOpacityRuntimeTest::RunTest(const FString&)
 		FString Error;
 		if (!TestTrue(TEXT("Render compiled widget"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 		FImage Image;
-		if (!TestTrue(TEXT("Decode rendered PNG"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+		if (!TestTrue(TEXT("Decode rendered PNG"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 		if (!TestTrue(TEXT("Expected pixel surface"), Image.Format == ERawImageFormat::BGRA8 && Image.SizeX >= 220 && Image.SizeY >= 160)) return false;
 		const FColor* Pixels = reinterpret_cast<const FColor*>(Image.RawData.GetData());
 		const FColor Pixel = Pixels[(Ellipse ? 40 : 60) * Image.SizeX + 160];

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGFontAccess.h"
+#include "Design2UMGTextLayoutAccess.h"
 #include "Misc/AutomationTest.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Design2UMGConverter.h"
@@ -22,6 +23,21 @@
 using namespace Design2UMGTestUtils;
 using namespace Design2UMGCoreTests;
 
+namespace
+{
+	const FString TestIconFontFamily = TEXT("MissingIconFamily_UnitTest");
+	const FString TestIconName = TEXT("dashboard");
+
+	FString RegisterKnownPuaTestIcon()
+	{
+		const FString Glyph = FString::ChrN(1, static_cast<TCHAR>(0xE871));
+		TMap<FString, FString> Glyphs;
+		Glyphs.Add(TestIconName, Glyph);
+		FFontResolver::RegisterKnownIconGlyphs(TestIconFontFamily, Glyphs, {});
+		return Glyph;
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingFallbackTest,
 	"Design2UMG.Unit.IconFont.NoMappingFallback",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -36,6 +52,8 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
 	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
 	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+	FFontResolver::ClearCache();
+	RegisterKnownPuaTestIcon();
 	Settings->IconFontAssetMap.Empty();
 	Settings->DefaultIconFontAssetPath.Empty();
 	Settings->MissingIconFontPlaceholder = TEXT("[missing-icon]");
@@ -46,6 +64,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 		Settings->IconFontAssetMap = SavedMap;
 		Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 		Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+		FFontResolver::ClearCache();
 		return false;
 	}
 	FDesignDocument Doc;
@@ -64,6 +83,7 @@ bool FIconFontNoMappingFallbackTest::RunTest(const FString& Parameters)
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	FFontResolver::ClearCache();
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingKeepIconNameTest,
@@ -72,9 +92,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontNoMappingKeepIconNameTest,
 bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 {
 	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
 	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
 	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
 	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+	FFontResolver::ClearCache();
+	RegisterKnownPuaTestIcon();
 	Settings->IconFontAssetMap.Empty();
 	Settings->DefaultIconFontAssetPath.Empty();
 	Settings->MissingIconFontPlaceholder.Empty();
@@ -85,6 +112,7 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 		Settings->IconFontAssetMap = SavedMap;
 		Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 		Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+		FFontResolver::ClearCache();
 		return false;
 	}
 	FDesignDocument Doc;
@@ -104,6 +132,7 @@ bool FIconFontNoMappingKeepIconNameTest::RunTest(const FString& Parameters)
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	FFontResolver::ClearCache();
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontLigatureFallbackUsesRegularWeightTest,
@@ -112,9 +141,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontLigatureFallbackUsesRegularWeightTest,
 bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Parameters)
 {
 	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
 	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
 	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
 	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+	FFontResolver::ClearCache();
+	RegisterKnownPuaTestIcon();
 	Settings->IconFontAssetMap.Empty();
 	Settings->DefaultIconFontAssetPath = TEXT("/Engine/EngineFonts/Roboto.Roboto");
 	Settings->MissingIconFontPlaceholder.Empty();
@@ -137,6 +173,8 @@ bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Para
 	FDesignDocument Doc;
 	TestTrue(TEXT("Icon weight fixture parse succeeds"), FPenParser::ParseDocument(Json, Doc));
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::FromSettings(Settings));
+	TestFalse(TEXT("Ordinary default font is not persisted as a family mapping"),
+		Data.IconFontMappingChanges.Upserts.Contains(TestIconFontFamily));
 	const FString ExpectedIconName = TEXT("dashboard");
 	const FUMGWidgetNode* IconNode = FindWidgetByProperty(Data.RootWidget, TEXT("IconName"), &ExpectedIconName);
 	TestTrue(TEXT("Icon widget exists"), IconNode != nullptr);
@@ -148,11 +186,84 @@ bool FIconFontLigatureFallbackUsesRegularWeightTest::RunTest(const FString& Para
 		TestEqual(TEXT("Ligature fallback icon keeps regular typeface without explicit fontWeight"),
 			GetWidgetProperty(*IconNode, TEXT("TypefaceFontName")),
 			TEXT("Regular"));
+		TestEqual(TEXT("Ordinary default font keeps the icon name instead of a known PUA glyph"),
+			GetWidgetProperty(*IconNode, TEXT("Text")),
+			TestIconName);
 	}
 
 	Settings->IconFontAssetMap = SavedMap;
 	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
 	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	FFontResolver::ClearCache();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontMappedAssetUsesKnownGlyphTest,
+	"Design2UMG.Unit.IconFont.MappedAssetUsesKnownGlyph",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIconFontMappedAssetUsesKnownGlyphTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	TestTrue(TEXT("Settings available"), Settings != nullptr);
+	if (!Settings)
+	{
+		return false;
+	}
+
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMap = Settings->IconFontAssetMap;
+	const FString SavedDefaultPath = Settings->DefaultIconFontAssetPath;
+	const FString SavedPlaceholder = Settings->MissingIconFontPlaceholder;
+	FFontResolver::ClearCache();
+	const FString KnownPuaGlyph = RegisterKnownPuaTestIcon();
+	Settings->IconFontAssetMap.Empty();
+	Settings->IconFontAssetMap.Add(
+		TestIconFontFamily,
+		TSoftObjectPtr<UFont>(FSoftObjectPath(TEXT("/Engine/EngineFonts/Roboto.Roboto"))));
+	Settings->DefaultIconFontAssetPath.Empty();
+	Settings->MissingIconFontPlaceholder.Empty();
+
+	const FString Json = TEXT(R"({
+		"children": [{
+			"id": "root",
+			"type": "frame",
+			"children": [{
+				"id": "icon1",
+				"type": "icon",
+				"library": "MissingIconFamily_UnitTest",
+				"icon": "dashboard",
+				"fontSize": 20,
+				"weight": 700
+			}]
+		}]
+	})");
+
+	FDesignDocument Doc;
+	TestTrue(TEXT("Mapped icon fixture parses"), FPenParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(
+		Doc,
+		FDesign2UMGConversionSettings::FromSettings(Settings));
+	const FUMGWidgetNode* IconNode = FindWidgetByProperty(
+		Data.RootWidget,
+		TEXT("IconName"),
+		&TestIconName);
+	TestTrue(TEXT("Mapped icon widget exists"), IconNode != nullptr);
+	if (IconNode)
+	{
+		TestEqual(TEXT("Mapped icon widget keeps its configured family asset"),
+			GetWidgetProperty(*IconNode, TEXT("FontFamily")),
+			TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+		TestEqual(TEXT("Mapped icon asset uses the registered glyph"),
+			GetWidgetProperty(*IconNode, TEXT("Text")),
+			KnownPuaGlyph);
+		TestEqual(TEXT("Mapped icon asset keeps authored icon weight semantics"),
+			GetWidgetProperty(*IconNode, TEXT("TypefaceFontName")),
+			TEXT("Bold"));
+	}
+
+	Settings->IconFontAssetMap = SavedMap;
+	Settings->DefaultIconFontAssetPath = SavedDefaultPath;
+	Settings->MissingIconFontPlaceholder = SavedPlaceholder;
+	FFontResolver::ClearCache();
 	return true;
 }
 
@@ -482,16 +593,18 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
 		ExpectedFont.FontObject = Font;
 		ExpectedFont.TypefaceFontName = FName(*Typeface);
-		ExpectedFont.Size = TextWidget->TextStyle.FontSize;
+		ExpectedFont.Size = Design2UMGFontAccess::ToNativeFontSize(TextWidget->TextStyle.FontSize);
 		ExpectedTextBlock->SetText(FText::FromString(TextWidget->Text.Text.Get(DesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
 		// Match generation: transparent default shadows must not add layout extent.
 		ExpectedTextBlock->SetShadowOffset(FVector2D::ZeroVector);
-		if (TextWidget->Text.LineHeightPercentage.IsSet())
-		{
-			ExpectedTextBlock->SetLineHeightPercentage(TextWidget->Text.LineHeightPercentage.GetValue());
-			ExpectedTextBlock->SetApplyLineHeightToBottomLine(true);
-		}
+			if (TextWidget->Text.LineHeightPercentage.IsSet())
+			{
+				Design2UMGTextLayoutAccess::FUpdate Update;
+				Update.LineHeightPercentage = TextWidget->Text.LineHeightPercentage;
+				Update.ApplyLineHeightToBottomLine = true;
+				Design2UMGTextLayoutAccess::Apply(*ExpectedTextBlock, Update);
+			}
 		TSharedRef<SWidget> ExpectedSlateWidget = ExpectedTextBlock->TakeWidget();
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		ExpectedSlateWidget->SlatePrepass(1.0f);
@@ -533,18 +646,19 @@ bool FExplicitPostScriptMeasurementGenerationParityTest::RunTest(const FString& 
 		UTextBlock* ExpectedTextBlock = NewObject<UTextBlock>();
 		FSlateFontInfo ExpectedFont = FTextBlockStyle::GetDefault().Font;
 		ExpectedFont.FontObject = Font;
-		ExpectedFont.Size = DefaultTypefaceWidget->TextStyle.FontSize;
+		ExpectedFont.Size = Design2UMGFontAccess::ToNativeFontSize(DefaultTypefaceWidget->TextStyle.FontSize);
 		ExpectedTextBlock->SetText(FText::FromString(
 			DefaultTypefaceWidget->Text.Text.Get(DefaultTypefaceDesignNode->Text.Content)));
 		ExpectedTextBlock->SetFont(ExpectedFont);
 		// Match generation: transparent default shadows must not add layout extent.
 		ExpectedTextBlock->SetShadowOffset(FVector2D::ZeroVector);
-		if (DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet())
-		{
-			ExpectedTextBlock->SetLineHeightPercentage(
-				DefaultTypefaceWidget->Text.LineHeightPercentage.GetValue());
-			ExpectedTextBlock->SetApplyLineHeightToBottomLine(true);
-		}
+			if (DefaultTypefaceWidget->Text.LineHeightPercentage.IsSet())
+			{
+				Design2UMGTextLayoutAccess::FUpdate Update;
+				Update.LineHeightPercentage = DefaultTypefaceWidget->Text.LineHeightPercentage;
+				Update.ApplyLineHeightToBottomLine = true;
+				Design2UMGTextLayoutAccess::Apply(*ExpectedTextBlock, Update);
+			}
 		TSharedRef<SWidget> ExpectedSlateWidget = ExpectedTextBlock->TakeWidget();
 		ExpectedSlateWidget->SlatePrepass(1.0f);
 		ExpectedSlateWidget->SlatePrepass(1.0f);
@@ -820,7 +934,7 @@ bool FInvalidProjectFontWidthFitKeepsSourceConversionTest::RunTest(const FString
 		FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* TextWidget = FindWidgetById(Data.RootWidget, TextNode->Id);
 	const float ExpectedFontSize =
-		TextNode->Text.FontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		TextNode->Text.FontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	TestNotNull(TEXT("Invalid project font text widget is generated"), TextWidget);
 	if (TextWidget)
 	{

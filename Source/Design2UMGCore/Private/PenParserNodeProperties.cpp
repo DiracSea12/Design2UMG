@@ -194,7 +194,7 @@ FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const 
 	}
 	Patch.Clip = Node.LayoutData.ExplicitClip;
 	Patch.LetterSpacing = Node.Text.LetterSpacing;
-	if (Node.Visual.Stroke.Fill.IsSet()) Patch.StrokeFill.Emplace(Node.Visual.Stroke.Fill);
+	if (Node.Visual.Stroke.Fill.IsSet()) Patch.StrokeFill.Emplace(Node.Visual.Stroke.Fill.GetValue());
 	// Pencil no-fill removes implicit stroke paint unless the fragment authors stroke paint too.
 	else if (Node.Visual.bFillExplicitClear) Patch.StrokeFill.Emplace();
 	if (JsonObj->HasField(TEXT("strokeWidth"))) Patch.StrokeThickness = Node.Visual.Stroke.Thickness;

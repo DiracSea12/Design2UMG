@@ -272,8 +272,14 @@ def test_evaluate_no_regression_checks_every_available_metric() -> None:
     original_loader = scoring.load_baseline_case_metrics
 
     def evaluate(baseline: dict, report: dict) -> dict:
-        scoring.load_baseline_case_metrics = lambda _case_dir, _pixel_tolerance: baseline
-        return scoring.evaluate_no_regression(report, None, 6)
+        scoring.load_baseline_case_metrics = lambda _case_dir, _pixel_tolerance: dict(
+            baseline, engine_version="5.7", rhi_backend="D3D12", rhi_feature_level="SM6")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log = Path(temp_dir) / "runtime.log"
+            log.write_text("LogRHI: RHI D3D12 with Feature Level SM6 is supported and will be used.\n",
+                           encoding="utf-8")
+            return scoring.evaluate_no_regression(dict(
+                report, engine_version="5.7", render_chain={"generation": {"log_path": str(log)}}), None, 6)
 
     complete_baseline = {
         "available": True,
@@ -744,9 +750,14 @@ def test_evidence_contract_shared_by_manifest_and_run_validation() -> None:
         summary = {}
         report = {
             "effective_reference_signature": {"sha256": "reference-hash"},
+            "engine_version": "5.7",
+            "rhi_backend": "D3D12",
             "baseline_compare_report_hash": "baseline-hash",
             "reference_root_case_path": "G:/SampleProject/Saved/ReferenceRoot/case-a",
         }
+        log = root / "runtime.log"
+        log.write_text("LogRHI: RHI D3D12 with Feature Level SM6 is supported and will be used.\n", encoding="utf-8")
+        report["render_chain"] = {"generation": {"log_path": str(log)}}
 
         manifest_source = rebuild_best.collect_source_input(root, "case-a", run_scope, summary, report, report_path)
         current_source = validate_run.current_source_input("case-a", root, run_scope, summary, report, report_path)
@@ -1191,8 +1202,6 @@ def test_run_editor_driver_waits_for_natural_exit_after_clean_shutdown() -> None
         driver_log_path = driver_path.with_suffix(".log")
         result_path = root / "ue_render_result.json"
         log_path = root / "unreal.log"
-        verify.write_json(result_path, {"success": True})
-        write_text(driver_log_path, "2026-06-12T00:00:00.000Z driver:start\n")
 
         class FakeProcess:
             pid = 12345
@@ -1216,6 +1225,8 @@ def test_run_editor_driver_waits_for_natural_exit_after_clean_shutdown() -> None
         original_sleep = suite_verify.time.sleep
         try:
             def fake_popen(command, stdout=None, stderr=None):
+                verify.write_json(result_path, {"success": True})
+                write_text(driver_log_path, "2026-06-12T00:00:00.000Z driver:start\n")
                 if stdout is not None:
                     stdout.write("LogExit: Exiting.\n")
                     stdout.flush()
@@ -1246,7 +1257,6 @@ def test_run_editor_driver_idle_timeout_is_not_refreshed_by_existing_start_marke
         root = Path(temp_dir)
         driver_path = root / "editor_driver_step-001.py"
         driver_path.write_text("", encoding="utf-8")
-        write_text(driver_path.with_suffix(".log"), "2026-06-12T00:00:00.000Z driver:start\n")
         result_path = root / "missing_result.json"
         log_path = root / "unreal.log"
 
@@ -1278,7 +1288,11 @@ def test_run_editor_driver_idle_timeout_is_not_refreshed_by_existing_start_marke
         original_time = suite_verify.time.time
         original_sleep = suite_verify.time.sleep
         try:
-            suite_verify.subprocess.Popen = lambda *args, **kwargs: fake_process
+            def fake_popen(*args, **kwargs):
+                write_text(driver_path.with_suffix(".log"), "2026-06-12T00:00:00.000Z driver:start\n")
+                return fake_process
+
+            suite_verify.subprocess.Popen = fake_popen
             suite_verify.time.time = fake_time
             suite_verify.time.sleep = lambda _seconds: None
             try:
@@ -1322,16 +1336,16 @@ def test_execute_automation_render_preserves_nonzero_editor_exit_code() -> None:
         )
 
         original_writer = verify.write_single_editor_driver_script
-        original_sync = verify.sync_project_plugin_build_id
+        original_validator = verify.validate_plugin_module_build_id
         original_runner = verify.run_editor
         try:
             verify.write_single_editor_driver_script = lambda output_dir, path: root / "driver.py"
-            verify.sync_project_plugin_build_id = lambda editor, plugin_root: None
+            verify.validate_plugin_module_build_id = lambda editor, plugin_root: None
             verify.run_editor = lambda *runner_args, **runner_kwargs: 3221225477
             result = verify.execute_automation_render(args, spec_path, log_path, spec)
         finally:
             verify.write_single_editor_driver_script = original_writer
-            verify.sync_project_plugin_build_id = original_sync
+            verify.validate_plugin_module_build_id = original_validator
             verify.run_editor = original_runner
         assert_equal(result["editor_exit_code"], 3221225477)
 
@@ -1369,7 +1383,7 @@ def test_single_run_final_exit_fails_when_generation_process_was_nonzero() -> No
     assert_equal(verify.determine_single_run_exit_code(False, 0), 1)
 
 
-def test_process_case_result_records_nonzero_editor_process_failure() -> None:
+def test_process_case_result_records_invalid_editor_evidence() -> None:
     state = {
         "args": SimpleNamespace(mode="asset"),
         "case": {"name": "case-a"},
@@ -1379,6 +1393,8 @@ def test_process_case_result_records_nonzero_editor_process_failure() -> None:
         "native_plan": {"available": False},
         "steps": {
             "asset_render": {
+                "editor_process_evidence": suite_verify.collect_editor_process_evidence(
+                    17, Path("case-a.log"), [], Path("driver.log")),
                 "result": {
                     "editor_exit_code": 17,
                     "log_path": "case-a.log",
@@ -1398,7 +1414,7 @@ def test_process_case_result_records_nonzero_editor_process_failure() -> None:
     assert result["editor_process_failed"]
 
 
-def test_suite_final_exit_fails_on_editor_process_nonzero() -> None:
+def test_suite_final_exit_fails_on_invalid_editor_evidence() -> None:
     args = SimpleNamespace(
         parallel_editors=1,
         idle_timeout_sec=180,
@@ -1568,8 +1584,8 @@ def main() -> None:
     test_run_editor_driver_idle_timeout_is_not_refreshed_by_existing_start_marker()
     test_execute_automation_render_preserves_nonzero_editor_exit_code()
     test_single_run_final_exit_fails_when_generation_process_was_nonzero()
-    test_process_case_result_records_nonzero_editor_process_failure()
-    test_suite_final_exit_fails_on_editor_process_nonzero()
+    test_process_case_result_records_invalid_editor_evidence()
+    test_suite_final_exit_fails_on_invalid_editor_evidence()
     test_process_case_results_uses_each_cases_editor_outcome()
     test_terminate_owned_editor_process_targets_only_passed_process()
     test_extend_deadline_never_shortens_existing_wait()

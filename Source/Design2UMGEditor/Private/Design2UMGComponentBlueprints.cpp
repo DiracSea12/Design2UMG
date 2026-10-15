@@ -550,29 +550,12 @@ UWidgetBlueprint* FDesign2UMGComponentBlueprintContext::Build(const FUMGWidgetDa
 		FDesign2UMGGeneratedComponent Generated;
 		Generated.Output = MakeShared<FDesign2UMGGenerationOutput>();
 		if (Existing[Key]) TouchedAssets.AddUnique(Existing[Key]);
-		if (Existing[Key])
 		{
-			FDesign2UMGGenerationManifestSidecar Manifest;
-			if (!Design2UMGGenerationManifest::TryLoadSidecarForAsset(Existing[Key]->GetOutermost()->GetName(), Manifest, Context.Error))
-				return Fail();
-			FDesignReimportRequest Request;
-			Request.TargetAssetPath = Existing[Key]->GetOutermost()->GetName();
-			const DesignImportPipeline::FReimportSession Session{nullptr, Request, Template, Effective, Budget};
-			FUMGPrototypeNavigationData ComponentNavigation;
-			int32 TransactionIndex = INDEX_NONE;
-			const FDesignReimportResult Updated = DesignImportPipeline::ApplyPreparedReimport(
-				Session, Existing[Key], Manifest, *Generated.Output, ComponentNavigation, TransactionIndex);
-			if (TransactionIndex != INDEX_NONE) GEditor->EndTransaction();
-			Generated.Output->Commit = Updated.Commit;
-			Generated.Output->MappingDiagnostics.Append(Updated.Diagnostics);
-			Generated.Output->MappingDiagnostics.Append(Updated.ComponentMappingDiagnostics);
-			if (Updated.bSucceeded) Generated.Blueprint = Existing[Key];
-		}
-		else
-		{
-			// New assets are discarded on failure, rather than undone into empty blueprints.
-			TGuardValue<ITransaction*> SuspendNewAssetUndo(GUndo, nullptr);
-			Generated.Blueprint = FUMGGenerator::BuildWidgetBlueprint(Template, Component.PackageFolder, &Effective, Generated.Output.Get(), nullptr, nullptr, Budget);
+			// Dependency assets are wholly generated and their saved hashes were checked before mutation.
+			// Rebuild the template tree; page reimport retains its separate user-content protection.
+			TGuardValue<ITransaction*> SuspendNewAssetUndo(GUndo, Existing[Key] ? GUndo : nullptr);
+			Generated.Blueprint = FUMGGenerator::BuildWidgetBlueprint(Template, Component.PackageFolder,
+				&Effective, Generated.Output.Get(), nullptr, Existing[Key], Budget);
 		}
 		if (!Generated.Blueprint)
 		{

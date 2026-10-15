@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "Design2UMGAssetRegistryAccess.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingGeneration.h"
@@ -11,6 +12,7 @@
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetRenderer.h"
+#include "RenderingThread.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UObject/SavePackage.h"
 #include "Design2UMGLog.h"
@@ -231,7 +233,7 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 		IAssetRegistry& AssetRegistry =
 			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 		FString TestPath = OutTarget.FullPath + TEXT(".") + OutTarget.AssetName;
-		if (!AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
+		if (!Design2UMGAssetRegistryAccess::GetAssetByObjectPath(AssetRegistry, FSoftObjectPath(TestPath)).IsValid())
 		{
 			return true;
 		}
@@ -244,9 +246,11 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 			NewName = FString::Printf(TEXT("%s_%d"), *OutTarget.AssetName, Suffix);
 			TestPath = PackagePath / NewName + TEXT(".") + NewName;
 			++Suffix;
-		} while (AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid() && Suffix <= MaxAttempts);
+		} while (Design2UMGAssetRegistryAccess::GetAssetByObjectPath(
+			AssetRegistry, FSoftObjectPath(TestPath)).IsValid() && Suffix <= MaxAttempts);
 
-		if (Suffix > MaxAttempts && AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(TestPath)).IsValid())
+		if (Suffix > MaxAttempts && Design2UMGAssetRegistryAccess::GetAssetByObjectPath(
+			AssetRegistry, FSoftObjectPath(TestPath)).IsValid())
 		{
 			UE_LOG(LogDesign2UMG, Error,
 				TEXT("Failed to generate a unique asset name for widget '%s' in package path '%s' after %d attempts; "
@@ -350,13 +354,34 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 
 		if (!ExistingGeneratedBlueprint)
 		{
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+			Result.Package->SetPackageFlags(PKG_NewlyCreated);
+#else
 			Result.Package->MarkAsNewlyCreated();
+#endif
 		}
 		else
 		{
-			Result.Blueprint->WidgetTree->Rename(
-				nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_NonTransactional);
-			Result.Blueprint->WidgetTree = NewObject<UWidgetTree>(Result.Blueprint, TEXT("WidgetTree"), RF_Transactional);
+			// Preserve the instanced WidgetTree object so editor undo can restore its references.
+			Result.Blueprint->WidgetTree->Modify();
+			TArray<UObject*> TreeObjects;
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+			GetObjectsWithOuter(Result.Blueprint->WidgetTree, TreeObjects, false);
+#else
+			GetObjectsWithOuter(Result.Blueprint->WidgetTree, TreeObjects, EGetObjectsFlags::None);
+#endif
+			for (UObject* Object : TreeObjects)
+			{
+				if (UWidget* Widget = Cast<UWidget>(Object))
+				{
+					Widget->Modify();
+					Widget->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
+				}
+			}
+			Result.Blueprint->WidgetTree->RootWidget = nullptr;
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
+		Result.Blueprint->WidgetTree->NamedSlotBindings.Reset();
+#endif
 		}
 
 		Result.Blueprint->Modify();
@@ -568,6 +593,11 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("SaveWidgetBlueprint: Widget Blueprint is null"));
 		return Result;
+	}
+	if (WBP->WidgetTree)
+	{
+		WBP->WidgetTree->ForEachWidget([](UWidget* Widget) { Widget->ReleaseSlateResources(true); });
+		FlushRenderingCommands();
 	}
 
 	Result.AssetPath = WBP->GetPathName();

@@ -16,11 +16,13 @@
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
 #include "ImageFillUtils.h"
+#include "PathWidgetBuilder.h"
 #include "PenParser.h"
 #include "DesignNodeSemantics.h"
 #include "SizeEstimator.h"
 #include "TextMeasurement.h"
 #include "UMGSchema.h"
+#include "VisualMapper.h"
 
 #include <limits>
 
@@ -865,10 +867,32 @@ bool FImageFillTransformModeIndependenceTest::RunTest(const FString& Parameters)
 
 	FDesignImageFill PlainStretch;
 	PlainStretch.Mode = EDesignImageMode::Stretch;
+	PlainStretch.Opacity = 0.4f;
 	FUMGWidgetNode PlainWidget;
 	ImageFillUtils::ApplyImageFillProperties(PlainWidget, PlainStretch);
+	TSharedPtr<FDesignNode> OpacityNode = MakeShared<FDesignNode>();
+	OpacityNode->Transform.Opacity = 0.5f;
+	VisualMapper::ApplyRenderTransformProperties(PlainWidget, OpacityNode);
 	TestFalse(TEXT("Identity stretch does not synthesize crop mode"), PlainWidget.Brush.Image.Mode.IsSet());
 	TestFalse(TEXT("Identity stretch does not synthesize image transform"), PlainWidget.Brush.Image.Transform.IsSet());
+	TestTrue(TEXT("Image paint alpha stays in brush tint while node opacity stays in render opacity"),
+		PlainWidget.Brush.BrushColor.IsSet()
+		&& FMath::IsNearlyEqual(PlainWidget.Brush.BrushColor.GetValue().A, 0.4f)
+		&& PlainWidget.Render.RenderOpacity.IsSet()
+		&& FMath::IsNearlyEqual(PlainWidget.Render.RenderOpacity.GetValue(), 0.5f));
+
+	OpacityNode->Type = EDesignNodeType::Path;
+	FDesignFill& PathFill = OpacityNode->Visual.Fills.AddDefaulted_GetRef();
+	PathFill.Type = EDesignFillType::Image;
+	PathFill.Image = PlainStretch;
+	PathFill.Image.Url = TEXT("test-image.png");
+	FUMGWidgetNode PathWidget = PathWidgetBuilder::CreatePathWidget(OpacityNode);
+	VisualMapper::ApplyVisualProperties(PathWidget, OpacityNode);
+	TestTrue(TEXT("Path image paint alpha is applied once by shared visual mapping"),
+		PathWidget.Brush.BrushColor.IsSet()
+		&& FMath::IsNearlyEqual(PathWidget.Brush.BrushColor.GetValue().A, 0.4f)
+		&& PathWidget.Render.RenderOpacity.IsSet()
+		&& FMath::IsNearlyEqual(PathWidget.Render.RenderOpacity.GetValue(), 0.5f));
 	return true;
 }
 

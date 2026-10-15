@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGConverter.h"
@@ -37,7 +38,7 @@ bool FTypedNodeEmptyStringStillAppliesTest::RunTest(const FString& Parameters)
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	TestTrue(TEXT("Explicit empty Text still clears widget text"), Widget->GetText().ToString().IsEmpty());
-	TestTrue(TEXT("Explicit empty HintText still clears widget hint"), Widget->GetHintText().ToString().IsEmpty());
+	TestTrue(TEXT("Explicit empty HintText still clears widget hint"), Design2UMGWidgetPropertyAccess::GetHintText(*Widget).ToString().IsEmpty());
 	return true;
 }
 
@@ -347,7 +348,7 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	Root.Shadow.ShadowBlur = 12.5f;
 	Root.Shadow.BoxShadows = {
 		{ FVector2D(4.25f, -6.5f), 12.0f, -3.0f, FLinearColor(0.0f, 0.0f, 0.0f, 1.0f) },
-		{ FVector2D(1.5f, 2.25f), 0.0f, 5.0f, FLinearColor(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ FVector2D(1.5f, 2.25f), 0.0f, 5.0f, FLinearColor(1.0f, 0.0f, 0.0f, 1.0f), true },
 	};
 	Root.Render.RenderOpacity = 0.875f;
 	Root.Render.RenderTransformScale = FVector2D(1.25f, 0.75f);
@@ -458,6 +459,7 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 			TestTrue(*FString::Printf(TEXT("Box shadow %d blur survives serialization"), LayerIndex), FMath::IsNearlyEqual(Actual.Blur, Expected.Blur));
 			TestTrue(*FString::Printf(TEXT("Box shadow %d spread survives serialization"), LayerIndex), FMath::IsNearlyEqual(Actual.Spread, Expected.Spread));
 			TestTrue(*FString::Printf(TEXT("Box shadow %d color survives serialization"), LayerIndex), Actual.Color.Equals(Expected.Color, 0.0001f));
+			TestEqual(*FString::Printf(TEXT("Box shadow %d behind flag survives serialization"), LayerIndex), Actual.bShowShadowBehindNode, Expected.bShowShadowBehindNode);
 		}
 	}
 	TestTrue(TEXT("Root render opacity survives serialization"), ParsedRoot.Render.RenderOpacity.IsSet() && FMath::IsNearlyEqual(ParsedRoot.Render.RenderOpacity.GetValue(), Root.Render.RenderOpacity.GetValue()));

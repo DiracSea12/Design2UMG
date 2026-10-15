@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 
+#include "Design2UMGFontAccess.h"
 #include "DesignTypeMapper.h"
 #include "FontResolver.h"
 #include "Fonts/SlateFontInfo.h"
@@ -17,7 +18,7 @@ namespace TextFontResolution
 			return {};
 		}
 
-		const float PointSize = SourceFontSizePx * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		const float PointSize = SourceFontSizePx * 72.0f / Design2UMGFontAccess::RenderDPI;
 		if (!FMath::IsFinite(PointSize)
 			|| PointSize <= 0.0f
 			|| PointSize > static_cast<float>(TNumericLimits<uint16>::Max()))

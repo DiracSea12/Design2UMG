@@ -361,30 +361,26 @@ static FString NormalizeWindingRule(const FString& InRule)
 	return TEXT("nonzero");
 }
 
-static bool ParseGeometryArray(
-	const TArray<TSharedPtr<FJsonValue>>* GeometryArr,
-	FString& OutPath,
-	FString& OutRule)
+static TOptional<TArray<FDesignGeometryPath>> ParseGeometryArray(
+	const TArray<TSharedPtr<FJsonValue>>* GeometryArr)
 {
 	if (!GeometryArr)
-		return false;
+		return {};
 
+	TArray<FDesignGeometryPath> Paths;
 	for (const TSharedPtr<FJsonValue>& GeometryVal : *GeometryArr)
 	{
 		const TSharedPtr<FJsonObject> GeometryObj = GeometryVal->AsObject();
 		if (!GeometryObj.IsValid())
 			continue;
-
 		const FString Path = GetString(GeometryObj, TEXT("path"));
 		if (Path.IsEmpty())
 			continue;
-
-		OutPath = Path;
-		OutRule = GetString(GeometryObj, TEXT("windingRule"));
-		return true;
+		FDesignGeometryPath& Geometry = Paths.AddDefaulted_GetRef();
+		Geometry.Path = Path;
+		Geometry.FillRule = NormalizeWindingRule(GetString(GeometryObj, TEXT("windingRule")));
 	}
-
-	return false;
+	return MoveTemp(Paths);
 }
 
 EDesignNodeType MapNodeType(const FString& FigmaType);
@@ -412,21 +408,20 @@ static bool ShouldSkipFigmaNodeType(const FString& FigmaType)
 
 static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
-	FString GeometryPath;
-	FString WindingRule;
+	FDesignPaintGeometry& Geometry = OutNode.Shape.PaintGeometry;
+	Geometry.FillPaths = ParseGeometryArray(GetArray(NodeObj, TEXT("fillGeometry")));
+	Geometry.StrokePaths = ParseGeometryArray(GetArray(NodeObj, TEXT("strokeGeometry")));
 
-	// Prefer fillGeometry (visual fill shape). Fallback to strokeGeometry for stroke-only vectors/lines.
-	if (!ParseGeometryArray(GetArray(NodeObj, TEXT("fillGeometry")), GeometryPath, WindingRule))
+	if (OutNode.Type == EDesignNodeType::Path || OutNode.Type == EDesignNodeType::Line
+		|| OutNode.Type == EDesignNodeType::Polygon || OutNode.Type == EDesignNodeType::Ellipse)
 	{
-		ParseGeometryArray(GetArray(NodeObj, TEXT("strokeGeometry")), GeometryPath, WindingRule);
-	}
-
-	if (!GeometryPath.IsEmpty())
-	{
-		OutNode.Shape.Geometry = GeometryPath;
-		if (!WindingRule.IsEmpty())
+		const auto* Paths = Geometry.FillPaths.IsSet() ? &Geometry.FillPaths.GetValue() : nullptr;
+		if (!Paths || Paths->IsEmpty())
+			Paths = Geometry.StrokePaths.IsSet() ? &Geometry.StrokePaths.GetValue() : nullptr;
+		if (Paths && !Paths->IsEmpty())
 		{
-			OutNode.Shape.FillRule = NormalizeWindingRule(WindingRule);
+			OutNode.Shape.Geometry = (*Paths)[0].Path;
+			OutNode.Shape.FillRule = (*Paths)[0].FillRule;
 		}
 	}
 }
@@ -712,13 +707,7 @@ static void ParseNodeVisualData(
 
 	OutNode.Visual.Stroke = ParseStroke(NodeObj);
 	CaptureFigmaStrokeMetadata(NodeObj, OutNode);
-	if (OutNode.Type == EDesignNodeType::Path
-		|| OutNode.Type == EDesignNodeType::Line
-		|| OutNode.Type == EDesignNodeType::Polygon
-		|| OutNode.Type == EDesignNodeType::Ellipse)
-	{
-		ParsePathGeometry(NodeObj, OutNode);
-	}
+	ParsePathGeometry(NodeObj, OutNode);
 
 	OutNode.Visual.CornerRadius = ParseCornerRadius(NodeObj);
 	ParseExplicitGeometryMask(NodeObj, OutNode);

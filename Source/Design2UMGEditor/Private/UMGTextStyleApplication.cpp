@@ -2,6 +2,10 @@
 
 #include "UMGTextStyleApplication.h"
 
+#include "Design2UMGWidgetPropertyAccess.h"
+
+#include "Design2UMGFontAccess.h"
+#include "Design2UMGTextLayoutAccess.h"
 #include "DesignResourceResolver.h"
 #include "UMGPropertyApplierSupport.h"
 #include "TextStyleUtils.h"
@@ -112,7 +116,7 @@ namespace UMGTextStyleApplication
 	{
 		if (FMath::IsFinite(Node.TextStyle.FontSize) && Node.TextStyle.FontSize > 0.0f)
 		{
-			FontInfo.Size = Node.TextStyle.FontSize;
+			FontInfo.Size = Design2UMGFontAccess::ToNativeFontSize(Node.TextStyle.FontSize);
 			bFontChanged = true;
 		}
 
@@ -140,7 +144,10 @@ namespace UMGTextStyleApplication
 		}
 	}
 
-	void ApplyTypedTextLayoutProps(UTextLayoutWidget* TextWidget, const FUMGWidgetNode& Node)
+	void ApplyTypedTextLayoutProps(
+		UTextLayoutWidget* TextWidget,
+		const FUMGWidgetNode& Node,
+		const FShapedTextOptions* ShapedTextOptions)
 	{
 		if (!TextWidget)
 		{
@@ -154,26 +161,20 @@ namespace UMGTextStyleApplication
 			TextWidget->SetJustification(Justification);
 		}
 
-		if (Node.Text.LineHeightPercentage.IsSet())
+		Design2UMGTextLayoutAccess::FUpdate Update;
+		Update.LineHeightPercentage = Node.Text.LineHeightPercentage;
+		if (Update.LineHeightPercentage.IsSet())
 		{
-			TextWidget->SetLineHeightPercentage(Node.Text.LineHeightPercentage.GetValue());
-			TextWidget->SetApplyLineHeightToBottomLine(true);
+			Update.ApplyLineHeightToBottomLine = true;
 		}
-
-		if (Node.Text.bAutoWrapText.IsSet())
+		Update.AutoWrapText = Node.Text.bAutoWrapText;
+		Update.WrapTextAt = Node.Text.WrapTextAt;
+		Update.Margin = Node.WidgetStyle.Padding;
+		if (ShapedTextOptions)
 		{
-			TextWidget->SetAutoWrapText(Node.Text.bAutoWrapText.GetValue());
+			Update.ShapedTextOptions = *ShapedTextOptions;
 		}
-
-		if (Node.Text.WrapTextAt.IsSet())
-		{
-			TextWidget->SetWrapTextAt(Node.Text.WrapTextAt.GetValue());
-		}
-
-		if (Node.WidgetStyle.Padding.IsSet())
-		{
-			TextWidget->SetMargin(Node.WidgetStyle.Padding.GetValue());
-		}
+		Design2UMGTextLayoutAccess::Apply(*TextWidget, Update);
 	}
 
 	FSlateBrush MakeTextDecorationBrush(const FLinearColor& Color)
@@ -216,7 +217,7 @@ namespace UMGTextStyleApplication
 		// native starting font before applying the resolved source font and style.
 		if (!DefaultStyle.Font.HasValidFont())
 		{
-			DefaultStyle.Font = GetDefault<UTextBlock>()->GetFont();
+			DefaultStyle.Font = Design2UMGWidgetPropertyAccess::GetFont(*GetDefault<UTextBlock>());
 		}
 		if (Node.Text.Color.IsSet())
 		{
@@ -249,7 +250,7 @@ namespace UMGTextStyleApplication
 		if (!RichTextBlock) return;
 
 		const FName GeneratedStyleSetName(*FString::Printf(TEXT("%s_D2UStyleSet"), *RichTextBlock->GetName()));
-		UDataTable* StyleSet = RichTextBlock->GetTextStyleSet();
+		UDataTable* StyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*RichTextBlock);
 		if (!StyleSet || StyleSet->GetOuter() != RichTextBlock)
 		{
 			StyleSet = NewObject<UDataTable>(RichTextBlock, GeneratedStyleSetName, RF_Public | RF_Transactional);
@@ -273,7 +274,7 @@ namespace UMGTextStyleApplication
 			if (!Style.TypefaceFontName.IsEmpty()) FontInfo.TypefaceFontName = FName(*Style.TypefaceFontName);
 			if (Style.FontSize.IsSet() && FMath::IsFinite(Style.FontSize.GetValue()) && Style.FontSize.GetValue() > 0.0f)
 			{
-				FontInfo.Size = Style.FontSize.GetValue();
+				FontInfo.Size = Design2UMGFontAccess::ToNativeFontSize(Style.FontSize.GetValue());
 			}
 			if (Style.LetterSpacing.IsSet() && FontInfo.Size > 0)
 			{

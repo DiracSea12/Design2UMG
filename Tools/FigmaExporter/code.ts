@@ -418,6 +418,23 @@ function buildTextStyle(node: TextNode, first?: StyledTextSegment): Record<strin
 
 // ── Node Serialization ──
 
+function copyGeometryPaths(node: SceneNode, out: RestNode): void {
+  if ('fillGeometry' in node) {
+    out.fillGeometry = node.fillGeometry.map(p => ({ path: p.data, windingRule: p.windingRule }));
+  }
+  if ('strokeGeometry' in node) {
+    out.strokeGeometry = node.strokeGeometry.map(p => ({ path: p.data, windingRule: p.windingRule }));
+  }
+}
+
+function retainRestGeometryPaths(node: SceneNode, restNodesById: Map<string, RestNode>): void {
+  const out = restNodesById.get(node.id);
+  if (out) copyGeometryPaths(node, out);
+  if ('children' in node) {
+    for (const child of node.children) retainRestGeometryPaths(child, restNodesById);
+  }
+}
+
 function serializeNode(node: SceneNode): RestNode | null {
   if (!node.visible && node.type !== 'COMPONENT' && node.type !== 'INSTANCE') return null;
 
@@ -471,19 +488,7 @@ function serializeNode(node: SceneNode): RestNode | null {
     out.strokes = node.strokes.map(serializePaint);
   }
 
-  // Geometry paths (fillGeometry / strokeGeometry)
-  if ('fillGeometry' in node) {
-    const fg = (node as any).fillGeometry as VectorPaths;
-    if (fg && fg.length > 0) {
-      out.fillGeometry = fg.map((p: VectorPath) => ({ path: p.data, windingRule: p.windingRule }));
-    }
-  }
-  if ('strokeGeometry' in node) {
-    const sg = (node as any).strokeGeometry as VectorPaths;
-    if (sg && sg.length > 0) {
-      out.strokeGeometry = sg.map((p: VectorPath) => ({ path: p.data, windingRule: p.windingRule }));
-    }
-  }
+  copyGeometryPaths(node, out);
 
   // Stroke weight
   if ('strokeWeight' in node) {
@@ -698,7 +703,9 @@ async function exportOfficialRestNode(node: SceneNode): Promise<RestNode | null>
   if (!('exportAsync' in node)) return null;
   try {
     const response = await (node as any).exportAsync({ format: 'JSON_REST_V1' });
-    return unwrapRestExportResponse(response, node.id);
+    const document = unwrapRestExportResponse(response, node.id);
+    if (document) retainRestGeometryPaths(node, indexRestNodes(document));
+    return document;
   } catch (error) {
     console.warn(`JSON_REST_V1 export failed for ${node.name}:`, error);
     return null;
@@ -998,6 +1005,7 @@ async function collectComponentDependencies(root: SceneNode): Promise<ComponentD
       if (!document || document.id !== component.id || document.type !== 'COMPONENT') {
         throw new Error('Component export did not contain its complete definition');
       }
+      retainRestGeometryPaths(component, indexRestNodes(document));
       applyComponentIdentities(document, instances);
       result.definitions.push({ ...source, document });
     } catch (error) {
@@ -1156,6 +1164,7 @@ if (typeof module !== 'undefined' && module.exports) {
     serializeEffect,
     buildTextStyle,
     serializeNode,
+    exportOfficialRestNode,
     unwrapRestExportResponse,
     collectReferencedComponents,
     collectComponentDependencies,

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import design2umg_auto_verify_suite as suite_verify
 
@@ -68,7 +69,8 @@ def main() -> None:
         editor_exit_code=0,
         editor_exit_codes=[0, 0],
         shards=[{"id": 0}, {"id": 1}],
-        shard_results=[{"id": 0, "cases": ["case-a"]}, {"id": 1, "cases": ["case-b"]}],
+        shard_results=[{"id": 0, "exit_code": 0, "cases": ["case-a"]},
+                       {"id": 1, "exit_code": 0, "cases": ["case-b"]}],
         post_workers=2,
         design_root=Path("G:/Designs"),
         output_root=Path("G:/Runs/suite_run"),
@@ -270,6 +272,57 @@ def main() -> None:
         assert_equal(len(case_summary_shards[0]["spec_paths"]), 3)
         missing_case_states = suite_verify.build_missing_case_states(states)
         assert_equal([state["case"]["name"] for state in missing_case_states], ["case-a"])
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        driver = root / "driver.py"
+        result = root / "result.json"
+        log = root / "editor.log"
+        driver_log = suite_verify.get_editor_driver_log_path(driver.resolve())
+        elapsed = [0.0]
+
+        def sleep(seconds):
+            elapsed[0] += seconds
+
+        def exited_process(*args, **kwargs):
+            return SimpleNamespace(poll=lambda: 3)
+
+        with patch.object(suite_verify.subprocess, "Popen", side_effect=exited_process), \
+                patch.object(suite_verify.time, "time", side_effect=lambda: elapsed[0]), \
+                patch.object(suite_verify.time, "sleep", side_effect=sleep):
+            try:
+                suite_verify.run_editor_driver(
+                    "EDITOR", "PROJECT", driver, [result], log, 1200, 1200)
+            except suite_verify.EditorDriverStartError:
+                pass
+            else:
+                raise AssertionError("Expected editor startup failure")
+        assert_equal(elapsed[0], 0.0)
+
+        def partial_process(*args, **kwargs):
+            driver_log.write_text("driver:start\n", encoding="utf-8")
+            return SimpleNamespace(poll=lambda: 3)
+
+        with patch.object(suite_verify.subprocess, "Popen", side_effect=partial_process), \
+                patch.object(suite_verify.time, "time", side_effect=lambda: elapsed[0]), \
+                patch.object(suite_verify.time, "sleep", side_effect=sleep):
+            assert_equal(suite_verify.run_editor_driver(
+                "EDITOR", "PROJECT", driver, [result], log, 1200, 1200), 3)
+        assert_equal(elapsed[0], float(suite_verify.EDITOR_GRACEFUL_EXIT_DEADLINE_SEC))
+        elapsed[0] = 0.0
+
+        for exit_code in [0, 3221225477]:
+            def completed_process(*args, **kwargs):
+                driver_log.write_text("driver:start\n", encoding="utf-8")
+                result.write_text("{}", encoding="utf-8")
+                return SimpleNamespace(poll=lambda: exit_code)
+
+            with patch.object(suite_verify.subprocess, "Popen", side_effect=completed_process), \
+                    patch.object(suite_verify.time, "time", side_effect=lambda: elapsed[0]), \
+                    patch.object(suite_verify.time, "sleep", side_effect=sleep):
+                assert_equal(suite_verify.run_editor_driver(
+                    "EDITOR", "PROJECT", driver, [result], log, 1200, 1200), exit_code)
+            assert_equal(elapsed[0], 0.0)
 
     print("suite report contract selftest passed")
 

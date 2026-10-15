@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "WidgetResourceBinder.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignImageResourceLimits.h"
 #include "DesignPathRasterizer.h"
 #include "DesignPathRasterDefaults.h"
@@ -28,7 +29,7 @@ namespace
 			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin), nullptr, Budget);
 		if (!Texture) return false;
 		Image->SetBrushFromTexture(Texture);
-		FSlateBrush Brush = Image->GetBrush();
+		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
 		Brush.ImageSize = FVector2D(Size.X / DesignPathRasterDefaults::Supersample, Size.Y / DesignPathRasterDefaults::Supersample);
 		Brush.Tiling = ESlateBrushTileType::NoTile;
 		Image->SetBrush(Brush);
@@ -76,7 +77,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	{
 		UTexture2D* Texture = ProceduralTexture;
 		ImageWidget->SetBrushFromTexture(Texture);
-		FSlateBrush Brush = ImageWidget->GetBrush();
+		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
 		Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 		Brush.Tiling = ESlateBrushTileType::NoTile;
 		ImageWidget->SetBrush(Brush);
@@ -119,12 +120,12 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 		return BindPathTexture(ImageWidget, Node, Budget);
 	}
 
-	const FSlateBrush OldBrush = ImageWidget->GetBrush();
+	const FSlateBrush OldBrush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
 	const FVector2D OldImageSize = OldBrush.ImageSize;
-	const FBox2f OldUVRegion = OldBrush.GetUVRegion();
+	const FBox2f OldUVRegion = Design2UMGWidgetPropertyAccess::GetUVRegion(OldBrush);
 
 	ImageWidget->SetBrushFromTexture(Texture);
-	FSlateBrush Brush = ImageWidget->GetBrush();
+	FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
 	Brush.Tiling = ESlateBrushTileType::NoTile;
 
 	const bool bHadSizeOverride = Node.WidgetStyle.WidthOverride.IsSet() || Node.WidgetStyle.HeightOverride.IsSet();
@@ -132,7 +133,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 
 	if (OldUVRegion.GetSize().GetMax() > KINDA_SMALL_NUMBER)
 	{
-		Brush.SetUVRegion(OldUVRegion);
+		Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, OldUVRegion);
 	}
 
 	UMGImageCropUtils::FImageCropRequest CropRequest;
@@ -145,7 +146,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 			[ImageWidget, &Brush](UTexture2D* Cropped)
 			{
 				ImageWidget->SetBrushFromTexture(Cropped);
-				Brush = ImageWidget->GetBrush();
+				Brush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
 			}, Budget);
 	}
 

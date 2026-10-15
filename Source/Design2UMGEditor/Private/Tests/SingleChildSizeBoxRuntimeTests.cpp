@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGImageTestUtils.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
@@ -90,7 +91,7 @@ bool FSingleChildSizeBoxRuntimeTest::RunTest(const FString&)
 				FString Error;
 				if (!TestTrue(TEXT("Render single-child sizing blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 				FImage& Image = Images.AddDefaulted_GetRef();
-				if (!TestTrue(TEXT("Decode sizing render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+				if (!TestTrue(TEXT("Decode sizing render"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 				TStrongObjectPtr<UUserWidget> Instance(NewObject<UUserWidget>(GetTransientPackage(), BP->GeneratedClass));
 				if (!TestTrue(TEXT("Initialize undersized instance"), Instance->Initialize())) return false;
 				const FVector2D SmallSize(40, 30);

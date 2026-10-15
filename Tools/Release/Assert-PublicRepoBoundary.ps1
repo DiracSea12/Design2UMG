@@ -88,14 +88,15 @@ $commonForbiddenRootNames = @(
 )
 
 $packageForbiddenRootNames = @(
+    'Fonts',
     'PenDesigns',
     'FigmaExports',
     'CODE_QUALITY_OPTIMIZATION_PLAN.md',
-    'Intermediate',
     'Saved'
 )
 
 $exportForbiddenRootNames = @(
+    'Fonts',
     'PenDesigns',
     'FigmaExports',
     'CODE_QUALITY_OPTIMIZATION_PLAN.md',
@@ -126,7 +127,6 @@ $commonForbiddenRecursivePathPatterns = @(
     'openspec',
     'Saved/Design2UMG/Automation',
     'Saved/Design2UMG/RejectedAutomation',
-    'Intermediate',
     'DerivedDataCache',
     'DDC',
     '.cache',
@@ -136,7 +136,8 @@ $commonForbiddenRecursivePathPatterns = @(
 )
 
 $exportForbiddenRecursivePathPatterns = @(
-    'Binaries'
+    'Binaries',
+    'Intermediate'
 )
 
 $publicSurfaceGlobs = @(
@@ -189,6 +190,20 @@ $forbiddenPathPatterns = @(
 
 $selfPath = (Resolve-Path -LiteralPath $PSCommandPath).Path
 $failures = @()
+
+if ($Mode -in @('Package', 'ExportWorkspace')) {
+    foreach ($required in @(
+        'LICENSE', 'README.md', 'README.zh-CN.md', 'CHANGELOG.md',
+        'KNOWN_LIMITATIONS.md', 'Design2UMG.uplugin',
+        'Tools/FigmaExporter/manifest.json', 'Tools/FigmaExporter/code.js',
+        'Tools/FigmaExporter/ui.html', 'Tools/FigmaExporter/README.md',
+        'Examples/SimpleCard.pen'
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $resolvedRoot $required) -PathType Leaf)) {
+            $failures += "Required public file missing: $required"
+        }
+    }
+}
 
 if ($Mode -eq 'SourceWorkspace') {
     $trackedPaths = @(git -C $resolvedRoot ls-files 2>$null)
@@ -249,6 +264,18 @@ if ($Mode -in @('Package', 'ExportWorkspace')) {
         foreach ($match in $matches) {
             $relative = Get-RelativeBoundaryPath -BasePath $resolvedRoot -Path $match.FullName
             $failures += "Forbidden $Mode path matched '$pattern': $relative"
+        }
+    }
+}
+
+# UAT retains generated includes and UBT's editor module import libraries.
+if ($Mode -eq 'Package') {
+    foreach ($file in (Get-ChildItem -LiteralPath $resolvedRoot -Recurse -Force -File)) {
+        $relative = (Get-RelativeBoundaryPath -BasePath $resolvedRoot -Path $file.FullName).Replace('\', '/')
+        if ($relative -match '(^|/)Intermediate/' -and
+            $relative -notmatch '^Intermediate/Build/(?:[^/]+/)+Inc/(?<generatedModule>Design2UMG(?:Core|Editor))/UHT/(?:Timestamp|\k<generatedModule>Classes\.h|[^/]+\.generated\.h|[^/]+\.gen\.cpp)$' -and
+            $relative -notmatch '^Intermediate/Build/Win64/(?:[^/]+/)?UnrealEditor(?:NU)?/Development/(?<module>Design2UMG(?:Core|Editor))/UnrealEditor-\k<module>\.lib$') {
+            $failures += "Unexpected packaged Intermediate file: $relative"
         }
     }
 }

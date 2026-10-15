@@ -111,7 +111,17 @@ namespace
 		AssignIfSet(Patch.Clip, Target.LayoutData.ExplicitClip);
 		AssignIfSet(Patch.LayoutGrow, Target.LayoutData.LayoutGrow);
 		AssignIfSet(Patch.SemanticPlaceholderSurface, Target.LayoutData.bSemanticPlaceholderSurface);
-		AssignIfSet(Patch.StrokeFill, Target.Visual.Stroke.Fill);
+		if (Patch.StrokeFill.IsSet())
+		{
+			if (Patch.StrokeFill->IsSet())
+			{
+				Target.Visual.Stroke.Fill = Patch.StrokeFill->GetValue();
+			}
+			else
+			{
+				Target.Visual.Stroke.Fill.Reset();
+			}
+		}
 		AssignIfSet(Patch.StrokeThickness, Target.Visual.Stroke.Thickness);
 		AssignIfSet(Patch.StrokeAlign, Target.Visual.Stroke.Align);
 		AssignIfSet(Patch.StrokeCap, Target.Visual.Stroke.Cap);

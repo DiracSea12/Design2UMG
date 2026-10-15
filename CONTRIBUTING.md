@@ -14,8 +14,8 @@ Put the plugin in one of the following:
 ```
 
 Requirements:
-- Unreal Engine 5.4+
-- Visual Studio 2022 (17.8+ recommended)
+- Unreal Engine: Windows / UE 5.7 is the current maintainer verification environment; report the exact version used for other combinations.
+- Visual Studio and Windows SDK versions supported by your chosen Unreal Engine installation.
 
 Build the plugin via UnrealBuildTool:
 

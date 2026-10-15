@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGAutomationTestAdapter.h"
 #include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
@@ -313,6 +314,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImportDiagnosticReportWriteFailureTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImportDiagnosticReportWriteFailureTest::RunTest(const FString&)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	using namespace Design2UMGReimportFixtures;
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/ReportFailure_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); };
@@ -340,8 +342,8 @@ bool FImportDiagnosticReportWriteFailureTest::RunTest(const FString&)
 	Document.MutableSourceDocument().SourceFilePath = FString::ChrN(512, TCHAR('x')) + TEXT(".pen");
 	DesignImportDiagnosticReport::FImportReportArtifacts Artifacts;
 	Artifacts.Commit = Commit;
-	AddExpectedMessagePlain(TEXT("could not write import diagnostic report"), ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains, 2);
+	ExpectedLogMessages.Expect(TEXT("could not write import diagnostic report"), ELogVerbosity::Warning,
+		Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 2);
 	TestFalse(TEXT("Import report write failure reaches the caller"),
 		DesignImportDiagnosticReport::Write(Document, Data, Artifacts));
 	TestFalse(TEXT("Reimport forwards report write failure"),
@@ -409,10 +411,10 @@ bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 	if (!CheckReport(Imported.Commit, TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
 	UWidgetBlueprint* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, *Imported.GeneratedAssetPath);
 	if (!TestNotNull(TEXT("Degraded import remains usable"), Blueprint)) return false;
-	UDesign2UMGComponentInputTestWidget* Instance = FixtureFindMappedInstance(Blueprint);
+	UUserWidget* Instance = FixtureFindMappedInstance(Blueprint);
 	if (!TestNotNull(TEXT("Mapped instance built"), Instance)) return false;
-	TestTrue(TEXT("Invalid bool preserves its default"), Instance->BoolValue);
-	TestEqual(TEXT("Later valid input still applied"), Instance->TextValue.ToString(), FString(TEXT("not-a-bool")));
+	TestTrue(TEXT("Invalid bool preserves its default"), ComponentFixtures::Read<FBoolProperty>(Instance, TEXT("BoolValue")));
+	TestEqual(TEXT("Later valid input still applied"), ComponentFixtures::Read<FTextProperty>(Instance, TEXT("TextValue")).ToString(), FString(TEXT("not-a-bool")));
 	FDesignReimportRequest ReimportRequest;
 	ReimportRequest.TargetAssetPath = Blueprint->GetPathName();
 	ReimportRequest.SettingsSnapshot = Settings;
@@ -424,7 +426,7 @@ bool FImportDiagnosticReportMappingOutcomeTest::RunTest(const FString&)
 		const FDesignReimportResult Result = DesignImportPipeline::Reimport(UpdatedDocument, ReimportRequest);
 		TestEqual(TEXT("Reimport exposes only current input degradation"), Result.bHasDegradation, !bValid);
 		TestEqual(TEXT("Reimport preserves instance identity"), FixtureFindMappedInstance(Blueprint), Instance);
-		TestFalse(TEXT("Invalid input retains the previously applied bool"), Instance->BoolValue);
+		TestFalse(TEXT("Invalid input retains the previously applied bool"), ComponentFixtures::Read<FBoolProperty>(Instance, TEXT("BoolValue")));
 		if (!CheckReport(Result.Commit, bValid ? TEXT("succeeded") : TEXT("succeeded_with_degradation"), TEXT("saved"))) return false;
 	}
 	Design2UMGEditorTests::FScopedFileFailures FileFailures;

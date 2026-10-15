@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignPathRasterizer.h"
 #include "PreBuildResourceNormalizer.h"
 #include "Misc/ScopeExit.h"
@@ -257,7 +258,7 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 	const int32 RootsBefore = CountRootedInstances();
 	Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure(Design2UMGEditorTests::IsPackageSaveTargetFile);
 	AddExpectedError(TEXT("Failed to save geometry mask material instance"), EAutomationExpectedErrorFlags::Contains, 1);
-	AddExpectedError(TEXT("Failed to create or persist geometry mask material"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("Failed to create or persist retainer effect material"), EAutomationExpectedErrorFlags::Contains, 1);
 	FDesign2UMGGenerationOutput Output;
 	TestNull(TEXT("Unsaved dependency fails generation"),
 		FUMGGenerator::BuildWidgetBlueprint(Data, PackagePath, nullptr, &Output, nullptr, Existing));
@@ -273,7 +274,7 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 	FString Error;
 	TArray<TStrongObjectPtr<UMaterialInterface>> Materials;
 	TestTrue(TEXT("Retry succeeds rather than returning a failed cached object"),
-		Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(Data.RootWidget, Materials, Error));
+		Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Data.RootWidget, Materials, Error));
 	UMaterialInterface* Retry = LoadObject<UMaterialInterface>(nullptr, *Data.RootWidget.Effect.EffectMaterial.GetValue());
 	if (TestNotNull(TEXT("Retry resolves a persisted material"), Retry))
 	{
@@ -351,7 +352,7 @@ bool FGeneratedTextureSaveFailureTest::RunTest(const FString&)
 			FUMGGenerator::BuildWidgetBlueprint(Data, Folder, nullptr, nullptr, nullptr, Existing))) return false;
 		UImage* Widget = Cast<UImage>(Existing->WidgetTree->FindWidget(TEXT("GeneratedImage")));
 		if (!TestNotNull(TEXT("Retry creates image widget"), Widget)) return false;
-		UTexture2D* Texture = Cast<UTexture2D>(Widget->GetBrush().GetResourceObject());
+		UTexture2D* Texture = Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*Widget).GetResourceObject());
 		if (!TestNotNull(TEXT("Retry uses a texture asset"), Texture)) return false;
 		const FString Filename = FPackageName::LongPackageNameToFilename(Texture->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
 		TestTrue(TEXT("Retry has a real persisted package, not the failed memory object"), IFileManager::Get().FileExists(*Filename));
@@ -736,7 +737,7 @@ bool FExistingTextureFailureIsolationTest::RunTest(const FString&)
 	const auto TextureIn = [](UWidgetBlueprint* Blueprint) -> UTexture2D*
 	{
 		UImage* Widget = Cast<UImage>(Blueprint->WidgetTree->FindWidget(TEXT("CroppedImage")));
-		return Widget ? Cast<UTexture2D>(Widget->GetBrush().GetResourceObject()) : nullptr;
+		return Widget ? Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*Widget).GetResourceObject()) : nullptr;
 	};
 	TStrongObjectPtr<UTexture2D> OldTexture(TextureIn(Existing));
 	if (!TestNotNull(TEXT("Initial dependent texture exists"), OldTexture.Get())) return false;

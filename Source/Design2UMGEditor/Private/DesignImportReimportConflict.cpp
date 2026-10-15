@@ -3,6 +3,7 @@
 #include "DesignImportReimportInternal.h"
 #include "DesignImportGeneration.h"
 
+#include "Design2UMGAssetRegistryAccess.h"
 #include "DesignImportDiagnosticReport.h"
 #include "UMGPrototypeAnimationBuilder.h"
 #include "Animation/WidgetAnimation.h"
@@ -207,7 +208,8 @@ namespace DesignImportPipeline
 		const FString PackageDir = FPaths::GetPath(TargetPackage);
 		const FString CopyName = FPaths::GetBaseFilename(TargetPackage) + TEXT("_Resolution");
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-		if (ARM.Get().GetAssetByObjectPath(FSoftObjectPath(PackageDir / CopyName + TEXT(".") + CopyName)).IsValid())
+		if (Design2UMGAssetRegistryAccess::GetAssetByObjectPath(
+			ARM.Get(), FSoftObjectPath(PackageDir / CopyName + TEXT(".") + CopyName)).IsValid())
 		{
 			AddReimportDiagnostic(
 				Result.Diagnostics,

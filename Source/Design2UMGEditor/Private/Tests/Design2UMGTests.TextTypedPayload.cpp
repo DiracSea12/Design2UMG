@@ -2,6 +2,7 @@
 
 // Typed text payload application and parity for the text widget family (TextBlock, editable text family, rich text, letter spacing, JSON round trips).
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
@@ -22,7 +23,9 @@
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
 #include "Engine/DataTable.h"
+#include "Misc/EngineVersionComparison.h"
 #include "UObject/UObjectGlobals.h"
+#include "Widgets/SWidget.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -30,6 +33,14 @@ using namespace Design2UMGTestUtils;
 
 namespace
 {
+	bool AreShapedTextOptionsEqual(const FShapedTextOptions& A, const FShapedTextOptions& B)
+	{
+		return A.bOverride_TextShapingMethod == B.bOverride_TextShapingMethod
+			&& A.bOverride_TextFlowDirection == B.bOverride_TextFlowDirection
+			&& (!A.bOverride_TextShapingMethod || A.TextShapingMethod == B.TextShapingMethod)
+			&& (!A.bOverride_TextFlowDirection || A.TextFlowDirection == B.TextFlowDirection);
+	}
+
 	// Shared creation/reading/assertion vocabulary for the typed-text-payload family tests.
 
 	template <typename T>
@@ -38,6 +49,34 @@ namespace
 		T* Widget = NewObject<T>(GetTransientPackage());
 		Test.TestNotNull(CreationLabel, Widget);
 		return Widget;
+	}
+
+	template <typename T>
+	bool TestMaterializedTextStyleUpdate(FAutomationTestBase& Test, const TCHAR* WidgetLabel)
+	{
+		T* Widget = NewTextFamilyWidget<T>(Test, WidgetLabel);
+		if (!Widget)
+		{
+			return false;
+		}
+
+		Widget->SetText(FText::FromString(TEXT("Hg")));
+		const TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
+		SlateWidget->SlatePrepass(1.0f);
+		const FVector2D InitialSize = SlateWidget->GetDesiredSize();
+
+		FUMGWidgetNode Node;
+		Node.TextStyle.FontSize = 72.0f;
+		Node.TextStyle.SourceFontSize = 72.0f;
+		FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
+
+		SlateWidget->SlatePrepass(1.0f);
+		const FVector2D UpdatedSize = SlateWidget->GetDesiredSize();
+		const bool bHeightIncreased = UpdatedSize.Y > InitialSize.Y + KINDA_SMALL_NUMBER;
+		Test.TestTrue(
+			FString::Printf(TEXT("%s updates its materialized Slate font metrics"), WidgetLabel),
+			bHeightIncreased);
+		return bHeightIncreased;
 	}
 
 	// UTextLayoutWidget reflected layout properties shared by the parity/serialization tests.
@@ -110,15 +149,15 @@ namespace
 	{
 		FTextFamilyWidgetState State;
 		State.Text = Widget->GetText().ToString();
-		State.Hint = Widget->GetHintText().ToString();
+		State.Hint = Design2UMGWidgetPropertyAccess::GetHintText(*Widget).ToString();
 		const FEditableTextBoxStyle& Style = Widget->WidgetStyle;
-		State.FontSize = Style.TextStyle.Font.Size;
-		State.TypefaceFontName = Style.TextStyle.Font.TypefaceFontName.ToString();
-		State.LetterSpacing = Style.TextStyle.Font.LetterSpacing;
-		State.FontObjectPath = Style.TextStyle.Font.FontObject ? Style.TextStyle.Font.FontObject->GetPathName() : FString();
-		State.StyleTextColor = Style.TextStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.FontSize = Design2UMGWidgetPropertyAccess::GetFont(Style).Size;
+		State.TypefaceFontName = Design2UMGWidgetPropertyAccess::GetFont(Style).TypefaceFontName.ToString();
+		State.LetterSpacing = Design2UMGWidgetPropertyAccess::GetFont(Style).LetterSpacing;
+		State.FontObjectPath = Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject->GetPathName() : FString();
+		State.StyleTextColor = Design2UMGWidgetPropertyAccess::GetTextColor(Style).GetSpecifiedColor();
 		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
-		State.Justification = Widget->GetJustification();
+		State.Justification = Design2UMGWidgetPropertyAccess::GetJustification(*Widget);
 		State.Shaping = Widget->ShapedTextOptions;
 		return State;
 	}
@@ -127,14 +166,14 @@ namespace
 	{
 		FTextFamilyWidgetState State;
 		State.Text = Widget->GetText().ToString();
-		State.Hint = Widget->GetHintText().ToString();
-		const FSlateFontInfo Font = Widget->GetFont();
+		State.Hint = Design2UMGWidgetPropertyAccess::GetHintText(*Widget).ToString();
+		const FSlateFontInfo Font = Design2UMGWidgetPropertyAccess::GetFont(*Widget);
 		State.FontSize = Font.Size;
 		State.TypefaceFontName = Font.TypefaceFontName.ToString();
 		State.LetterSpacing = Font.LetterSpacing;
 		State.FontObjectPath = Font.FontObject ? Font.FontObject->GetPathName() : FString();
 		State.StyleTextColor = Widget->WidgetStyle.ColorAndOpacity.GetSpecifiedColor();
-		State.Justification = Widget->GetJustification();
+		State.Justification = Design2UMGWidgetPropertyAccess::GetJustification(*Widget);
 		State.Shaping = Widget->ShapedTextOptions;
 		return State;
 	}
@@ -148,11 +187,11 @@ namespace
 		State.Text = Widget->GetText().ToString();
 		State.Hint = Widget->GetHintText().ToString();
 		const FEditableTextBoxStyle& Style = Widget->WidgetStyle;
-		State.FontSize = Style.TextStyle.Font.Size;
-		State.TypefaceFontName = Style.TextStyle.Font.TypefaceFontName.ToString();
-		State.LetterSpacing = Style.TextStyle.Font.LetterSpacing;
-		State.FontObjectPath = Style.TextStyle.Font.FontObject ? Style.TextStyle.Font.FontObject->GetPathName() : FString();
-		State.StyleTextColor = Style.TextStyle.ColorAndOpacity.GetSpecifiedColor();
+		State.FontSize = Design2UMGWidgetPropertyAccess::GetFont(Style).Size;
+		State.TypefaceFontName = Design2UMGWidgetPropertyAccess::GetFont(Style).TypefaceFontName.ToString();
+		State.LetterSpacing = Design2UMGWidgetPropertyAccess::GetFont(Style).LetterSpacing;
+		State.FontObjectPath = Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject->GetPathName() : FString();
+		State.StyleTextColor = Design2UMGWidgetPropertyAccess::GetTextColor(Style).GetSpecifiedColor();
 		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
 		State.bAutoWrap = Widget->GetAutoWrapText();
 		State.WrapTextAt = Widget->GetWrapTextAt();
@@ -165,7 +204,7 @@ namespace
 		FTextFamilyWidgetState State;
 		State.Text = Widget->GetText().ToString();
 		State.Hint = Widget->GetHintText().ToString();
-		const FSlateFontInfo Font = Widget->GetFont();
+		const FSlateFontInfo Font = Design2UMGWidgetPropertyAccess::GetFont(*Widget);
 		State.FontSize = Font.Size;
 		State.TypefaceFontName = Font.TypefaceFontName.ToString();
 		State.LetterSpacing = Font.LetterSpacing;
@@ -232,7 +271,7 @@ namespace
 				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Serialized.Margin.Bottom, 0.001f));
 		}
 		Test.TestTrue(FString::Printf(TEXT("%s typed and serialized icon shaping match"), WidgetLabel),
-			Typed.Shaping == Serialized.Shaping);
+			AreShapedTextOptionsEqual(Typed.Shaping, Serialized.Shaping));
 	}
 }
 
@@ -247,12 +286,12 @@ bool FTextBlockSourceShadowExtentTest::RunTest(const FString&)
 	Node.Type = TEXT("TextBlock");
 	Node.Text.Text = TEXT("Source label");
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
-	TestEqual(TEXT("No source shadow contributes no invisible layout extent"), Widget->GetShadowOffset(), FVector2D::ZeroVector);
+	TestEqual(TEXT("No source shadow contributes no invisible layout extent"), Design2UMGWidgetPropertyAccess::GetShadowOffset(*Widget), FVector2D::ZeroVector);
 	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
 	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
-	TestEqual(TEXT("Authored shadow offset is preserved"), Widget->GetShadowOffset(), FVector2D(2.0f, 3.0f));
-	TestEqual(TEXT("Authored shadow opacity is preserved"), Widget->GetShadowColorAndOpacity().A, 0.5f);
+	TestEqual(TEXT("Authored shadow offset is preserved"), Design2UMGWidgetPropertyAccess::GetShadowOffset(*Widget), FVector2D(2.0f, 3.0f));
+	TestEqual(TEXT("Authored shadow opacity is preserved"), Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*Widget).A, 0.5f);
 	return true;
 }
 
@@ -313,19 +352,19 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	const FShapedTextOptions* TypedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(TypedWidget);
 	const FShapedTextOptions* SerializedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(SerializedWidget);
 
-	TestEqual(TEXT("Typed node path keeps tooltip"), TypedWidget->GetToolTipText().ToString(), TEXT("Typed tooltip"));
+	TestEqual(TEXT("Typed node path keeps tooltip"), Design2UMGWidgetPropertyAccess::GetToolTipText(*TypedWidget).ToString(), TEXT("Typed tooltip"));
 	TestEqual(TEXT("Typed and serialized text match"), TypedWidget->GetText().ToString(), SerializedWidget->GetText().ToString());
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	TestTrue(TEXT("Typed text block color follows normalized typed node color"),
-		TypedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
+		Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*TypedWidget).GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
 	TestTrue(TEXT("Second text block color follows normalized typed node color"),
-		SerializedWidget->GetColorAndOpacity().GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestEqual(TEXT("Typed and serialized font size match"), TypedWidget->GetFont().Size, SerializedWidget->GetFont().Size);
-	TestEqual(TEXT("Typed and serialized typeface match"), TypedWidget->GetFont().TypefaceFontName, SerializedWidget->GetFont().TypefaceFontName);
-	TestEqual(TEXT("Typed and serialized letter spacing match"), TypedWidget->GetFont().LetterSpacing, SerializedWidget->GetFont().LetterSpacing);
+		Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*SerializedWidget).GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
+	TestEqual(TEXT("Typed and serialized font size match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).Size, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).Size);
+	TestEqual(TEXT("Typed and serialized typeface match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).TypefaceFontName, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).TypefaceFontName);
+	TestEqual(TEXT("Typed and serialized letter spacing match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).LetterSpacing, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).LetterSpacing);
 	TestEqual(TEXT("Typed and serialized font object path match"),
-		TypedWidget->GetFont().FontObject ? TypedWidget->GetFont().FontObject->GetPathName() : FString(),
-		SerializedWidget->GetFont().FontObject ? SerializedWidget->GetFont().FontObject->GetPathName() : FString());
+		Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).FontObject->GetPathName() : FString(),
+		Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).FontObject->GetPathName() : FString());
 	TestEqual(TEXT("Typed and serialized justification match"), TypedJustification, SerializedJustification);
 	TestTrue(TEXT("Typed and serialized auto-wrap match"), TypedWidget->GetAutoWrapText() == SerializedWidget->GetAutoWrapText());
 	TestTrue(TEXT("Typed and serialized wrap width match"), FMath::IsNearlyEqual(TypedWidget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
@@ -337,9 +376,9 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 		&& FMath::IsNearlyEqual(TypedMargin->Top, SerializedMargin->Top, 0.001f)
 		&& FMath::IsNearlyEqual(TypedMargin->Right, SerializedMargin->Right, 0.001f)
 		&& FMath::IsNearlyEqual(TypedMargin->Bottom, SerializedMargin->Bottom, 0.001f));
-	TestTrue(TEXT("Typed and serialized shadow offset match"), TypedWidget->GetShadowOffset().Equals(SerializedWidget->GetShadowOffset(), 0.001f));
+	TestTrue(TEXT("Typed and serialized shadow offset match"), Design2UMGWidgetPropertyAccess::GetShadowOffset(*TypedWidget).Equals(Design2UMGWidgetPropertyAccess::GetShadowOffset(*SerializedWidget), 0.001f));
 	TestTrue(TEXT("Typed and serialized shadow color match"),
-		TypedWidget->GetShadowColorAndOpacity().Equals(SerializedWidget->GetShadowColorAndOpacity(), 0.0001f));
+		Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*TypedWidget).Equals(Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*SerializedWidget), 0.0001f));
 	TestTrue(TEXT("Typed and serialized icon shaping match"),
 		TypedShaping
 		&& SerializedShaping
@@ -446,10 +485,24 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(EmptyTypedEditableText, EmptyTypedNode);
 
 	TestTrue(TEXT("Typed empty text clears EditableTextBox text"), EmptyTypedTextBox->GetText().ToString().IsEmpty());
-	TestTrue(TEXT("Typed empty hint clears EditableTextBox hint"), EmptyTypedTextBox->GetHintText().ToString().IsEmpty());
+	TestTrue(TEXT("Typed empty hint clears EditableTextBox hint"), Design2UMGWidgetPropertyAccess::GetHintText(*EmptyTypedTextBox).ToString().IsEmpty());
 	TestTrue(TEXT("Typed empty text clears EditableText text"), EmptyTypedEditableText->GetText().ToString().IsEmpty());
-	TestTrue(TEXT("Typed empty hint clears EditableText hint"), EmptyTypedEditableText->GetHintText().ToString().IsEmpty());
+	TestTrue(TEXT("Typed empty hint clears EditableText hint"), Design2UMGWidgetPropertyAccess::GetHintText(*EmptyTypedEditableText).ToString().IsEmpty());
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditableTextFamilyMaterializedStyleUpdateTest,
+	"Design2UMG.PropertyApplier.EditableTextFamilyMaterializedStyleUpdate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FEditableTextFamilyMaterializedStyleUpdateTest::RunTest(const FString& Parameters)
+{
+	bool bAllUpdated = true;
+	bAllUpdated &= TestMaterializedTextStyleUpdate<UEditableText>(*this, TEXT("EditableText"));
+	bAllUpdated &= TestMaterializedTextStyleUpdate<UEditableTextBox>(*this, TEXT("EditableTextBox"));
+	bAllUpdated &= TestMaterializedTextStyleUpdate<UMultiLineEditableText>(*this, TEXT("MultiLineEditableText"));
+	bAllUpdated &= TestMaterializedTextStyleUpdate<UMultiLineEditableTextBox>(*this, TEXT("MultiLineEditableTextBox"));
+	return bAllUpdated;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextTypedPayloadExplicitFalseFormattingFlagsTest,
@@ -590,7 +643,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	TestEqual(TEXT("Rich text source text applied"), Widget->GetText().ToString(), TEXT("<d2u_run_0>Hello </><d2u_run_1 href=\"https://docs.example.com\">Docs</>"));
-	TestEqual(TEXT("Rich text tooltip applied"), Widget->GetToolTipText().ToString(), TEXT("https://docs.example.com"));
+	TestEqual(TEXT("Rich text tooltip applied"), Design2UMGWidgetPropertyAccess::GetToolTipText(*Widget).ToString(), TEXT("https://docs.example.com"));
 	TestTrue(TEXT("Rich text auto wrap applied"), Widget->GetAutoWrapText());
 	TestTrue(TEXT("Rich text wrap width applied"), FMath::IsNearlyEqual(Widget->GetWrapTextAt(), 180.0f, 0.001f));
 	const FStructProperty* MarginProperty = FindFProperty<FStructProperty>(UTextLayoutWidget::StaticClass(), TEXT("Margin"));
@@ -607,7 +660,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	}
 
 	const FTextBlockStyle& DefaultStyle = Widget->GetCurrentDefaultTextStyle();
-	TestEqual(TEXT("Rich text default font size applied"), DefaultStyle.Font.Size, 18.0f);
+	TestEqual(TEXT("Rich text default font size applied"), static_cast<float>(DefaultStyle.Font.Size), 18.0f);
 	const FLinearColor ExpectedDefaultColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	TestTrue(TEXT("Rich text default color applied"),
 		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
@@ -616,7 +669,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rich text default style preserves preconfigured shadow offset"),
 		DefaultStyle.ShadowOffset == PreconfiguredStyle.ShadowOffset);
 
-	UDataTable* StyleSet = Widget->GetTextStyleSet();
+	UDataTable* StyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*Widget);
 	TestTrue(TEXT("Rich text style set created"), StyleSet != nullptr);
 	if (!StyleSet)
 	{
@@ -631,7 +684,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	TestEqual(TEXT("Sparse base row inherits default font size"), BaseRow->TextStyle.Font.Size, 18.0f);
+	TestEqual(TEXT("Sparse base row inherits default font size"), static_cast<float>(BaseRow->TextStyle.Font.Size), 18.0f);
 	TestTrue(TEXT("Sparse base row preserves base shadow color"),
 		BaseRow->TextStyle.ShadowColorAndOpacity.Equals(PreconfiguredStyle.ShadowColorAndOpacity, 0.0001f));
 
@@ -642,7 +695,11 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	TestEqual(TEXT("Link row uses the native integer font size"), LinkRow->TextStyle.Font.Size, 22);
+#else
 	TestTrue(TEXT("Link row preserves the exact fractional font size"), FMath::IsNearlyEqual(LinkRow->TextStyle.Font.Size, 22.5f, 0.001f));
+#endif
 	TestTrue(TEXT("Link row underline brush created"), LinkRow->TextStyle.UnderlineBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
 	TestTrue(TEXT("Link row color applied"),
 		LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
@@ -659,8 +716,12 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	TestEqual(TEXT("Rich text application uses the native integer subpoint size"), SubpointRow->TextStyle.Font.Size, 0);
+#else
 	TestTrue(TEXT("Rich text application preserves 0.375 point row sizes"),
 		FMath::IsNearlyEqual(SubpointRow->TextStyle.Font.Size, 0.375f, 0.001f));
+#endif
 
 	URichTextBlock* SerializedWidget = NewObject<URichTextBlock>(GetTransientPackage());
 	TestTrue(TEXT("Serialized RichTextBlock created"), SerializedWidget != nullptr);
@@ -675,8 +736,8 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 		Widget->GetText().ToString(),
 		SerializedWidget->GetText().ToString());
 	TestEqual(TEXT("Typed and serialized rich text tooltip match"),
-		Widget->GetToolTipText().ToString(),
-		SerializedWidget->GetToolTipText().ToString());
+		Design2UMGWidgetPropertyAccess::GetToolTipText(*Widget).ToString(),
+		Design2UMGWidgetPropertyAccess::GetToolTipText(*SerializedWidget).ToString());
 	TestTrue(TEXT("Typed and serialized rich text wrap width match"),
 		FMath::IsNearlyEqual(Widget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
 
@@ -693,7 +754,7 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Typed and serialized rich text default shadow offset match"),
 		DefaultStyle.ShadowOffset == SerializedDefaultStyle.ShadowOffset);
 
-	UDataTable* SerializedStyleSet = SerializedWidget->GetTextStyleSet();
+	UDataTable* SerializedStyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*SerializedWidget);
 	TestNotNull(TEXT("Serialized rich text style set exists"), SerializedStyleSet);
 	if (!SerializedStyleSet)
 	{
@@ -820,19 +881,19 @@ bool FTextFamilyTypedJsonSerializationCycleTest::RunTest(const FString& Paramete
 	ReadTextLayoutState(LayoutProperties, ParsedWidget, ParsedMargin, ParsedLineHeight, ParsedJustification, ParsedShaping);
 
 	TestEqual(TEXT("Serialization widget text matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
-	TestEqual(TEXT("Serialization widget hint matches"), ParsedWidget->GetHintText().ToString(), SourceWidget->GetHintText().ToString());
-	TestEqual(TEXT("Serialization widget font size matches"), ParsedWidget->WidgetStyle.TextStyle.Font.Size, SourceWidget->WidgetStyle.TextStyle.Font.Size);
-	TestEqual(TEXT("Serialization widget typeface matches"), ParsedWidget->WidgetStyle.TextStyle.Font.TypefaceFontName, SourceWidget->WidgetStyle.TextStyle.Font.TypefaceFontName);
-	TestEqual(TEXT("Serialization widget letter spacing matches"), ParsedWidget->WidgetStyle.TextStyle.Font.LetterSpacing, SourceWidget->WidgetStyle.TextStyle.Font.LetterSpacing);
+	TestEqual(TEXT("Serialization widget hint matches"), Design2UMGWidgetPropertyAccess::GetHintText(*ParsedWidget).ToString(), Design2UMGWidgetPropertyAccess::GetHintText(*SourceWidget).ToString());
+	TestEqual(TEXT("Serialization widget font size matches"), Design2UMGWidgetPropertyAccess::GetFont(ParsedWidget->WidgetStyle).Size, Design2UMGWidgetPropertyAccess::GetFont(SourceWidget->WidgetStyle).Size);
+	TestEqual(TEXT("Serialization widget typeface matches"), Design2UMGWidgetPropertyAccess::GetFont(ParsedWidget->WidgetStyle).TypefaceFontName, Design2UMGWidgetPropertyAccess::GetFont(SourceWidget->WidgetStyle).TypefaceFontName);
+	TestEqual(TEXT("Serialization widget letter spacing matches"), Design2UMGWidgetPropertyAccess::GetFont(ParsedWidget->WidgetStyle).LetterSpacing, Design2UMGWidgetPropertyAccess::GetFont(SourceWidget->WidgetStyle).LetterSpacing);
 	TestEqual(TEXT("Serialization widget font object path matches"),
-		ParsedWidget->WidgetStyle.TextStyle.Font.FontObject ? ParsedWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString(),
-		SourceWidget->WidgetStyle.TextStyle.Font.FontObject ? SourceWidget->WidgetStyle.TextStyle.Font.FontObject->GetPathName() : FString());
+		Design2UMGWidgetPropertyAccess::GetFont(ParsedWidget->WidgetStyle).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(ParsedWidget->WidgetStyle).FontObject->GetPathName() : FString(),
+		Design2UMGWidgetPropertyAccess::GetFont(SourceWidget->WidgetStyle).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(SourceWidget->WidgetStyle).FontObject->GetPathName() : FString());
 	const FLinearColor ExpectedSourceTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(SourceNode.Text.Color.GetValue());
 	const FLinearColor ExpectedParsedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(ParsedNode->Text.Color.GetValue());
 	TestTrue(TEXT("Source widget text color follows normalized source node color"),
-		SourceWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedSourceTextColor, 0.0001f));
+		Design2UMGWidgetPropertyAccess::GetTextColor(SourceWidget->WidgetStyle).GetSpecifiedColor().Equals(ExpectedSourceTextColor, 0.0001f));
 	TestTrue(TEXT("Parsed widget text color follows normalized parsed node color"),
-		ParsedWidget->WidgetStyle.TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedParsedTextColor, 0.0001f));
+		Design2UMGWidgetPropertyAccess::GetTextColor(ParsedWidget->WidgetStyle).GetSpecifiedColor().Equals(ExpectedParsedTextColor, 0.0001f));
 	TestTrue(TEXT("Source widget foreground color follows normalized source node color"),
 		SourceWidget->WidgetStyle.ForegroundColor.GetSpecifiedColor().Equals(ExpectedSourceTextColor, 0.0001f));
 	TestTrue(TEXT("Parsed widget foreground color follows normalized parsed node color"),
@@ -846,7 +907,7 @@ bool FTextFamilyTypedJsonSerializationCycleTest::RunTest(const FString& Paramete
 		&& FMath::IsNearlyEqual(ParsedMargin.Top, SourceMargin.Top, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedMargin.Right, SourceMargin.Right, 0.001f)
 		&& FMath::IsNearlyEqual(ParsedMargin.Bottom, SourceMargin.Bottom, 0.001f));
-	TestTrue(TEXT("Serialization widget shaping matches"), ParsedShaping == SourceShaping);
+	TestTrue(TEXT("Serialization widget shaping matches"), AreShapedTextOptionsEqual(ParsedShaping, SourceShaping));
 	return true;
 }
 
@@ -957,11 +1018,11 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	UTextBlock* ExplicitZeroWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Explicit zero widget created"));
 	if (ExplicitZeroWidget)
 	{
-		FSlateFontInfo FontInfo = ExplicitZeroWidget->GetFont();
+		FSlateFontInfo FontInfo = Design2UMGWidgetPropertyAccess::GetFont(*ExplicitZeroWidget);
 		FontInfo.LetterSpacing = 321;
 		ExplicitZeroWidget->SetFont(FontInfo);
 		FUMGWidgetTreeBuilder::ApplyWidgetProperties(ExplicitZeroWidget, ExplicitZeroNode);
-		TestEqual(TEXT("Explicit zero letter spacing applies"), ExplicitZeroWidget->GetFont().LetterSpacing, 0);
+		TestEqual(TEXT("Explicit zero letter spacing applies"), Design2UMGWidgetPropertyAccess::GetFont(*ExplicitZeroWidget).LetterSpacing, 0);
 	}
 
 	const FString NonZeroJson = SerializeSingleNode(NonZeroNode);
@@ -980,7 +1041,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	if (NonZeroWidget && ParsedNonZeroNode)
 	{
 		FUMGWidgetTreeBuilder::ApplyWidgetProperties(NonZeroWidget, *ParsedNonZeroNode);
-		TestEqual(TEXT("Pixel letter spacing converts to Slate tracking"), NonZeroWidget->GetFont().LetterSpacing, 63);
+		TestEqual(TEXT("Pixel letter spacing converts to Slate tracking"), Design2UMGWidgetPropertyAccess::GetFont(*NonZeroWidget).LetterSpacing, 63);
 	}
 
 	FUMGWidgetNode ScaledNegativeNode = ExplicitZeroNode;
@@ -993,9 +1054,9 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		FUMGWidgetTreeBuilder::ApplyWidgetProperties(ScaledNegativeWidget, ScaledNegativeNode);
 		// SlateTextShaper applies tracking * FontInfo.Size / 1000 and truncates to pixels.
 		// The source's 20px declaration must not replace the applied 12pt size here.
-		TestEqual(TEXT("Applied point size owns scaled negative letter-spacing conversion"), ScaledNegativeWidget->GetFont().LetterSpacing, -105);
+		TestEqual(TEXT("Applied point size owns scaled negative letter-spacing conversion"), Design2UMGWidgetPropertyAccess::GetFont(*ScaledNegativeWidget).LetterSpacing, -105);
 		TestEqual(TEXT("Scaled tracking preserves the requested negative pixel gap"),
-			static_cast<int32>(ScaledNegativeWidget->GetFont().LetterSpacing * ScaledNegativeWidget->GetFont().Size / 1000.0f), -1);
+			static_cast<int32>(Design2UMGWidgetPropertyAccess::GetFont(*ScaledNegativeWidget).LetterSpacing * Design2UMGWidgetPropertyAccess::GetFont(*ScaledNegativeWidget).Size / 1000.0f), -1);
 	}
 
 	URichTextBlock* RichTextWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Rich text spacing widget created"));
@@ -1005,7 +1066,7 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 		SpacingStyle.FontSize = 12.0f;
 		SpacingStyle.LetterSpacing = -1.25f;
 		UMGTextStyleApplication::ApplyRichTextStyleRows(RichTextWidget, { { TEXT("row"), SpacingStyle } });
-		const UDataTable* StyleSet = RichTextWidget->GetTextStyleSet();
+		const UDataTable* StyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*RichTextWidget);
 		const FRichTextStyleRow* Row = StyleSet
 			? StyleSet->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("LetterSpacingConversion"))
 			: nullptr;
@@ -1033,11 +1094,11 @@ bool FTextStyleLetterSpacingOptionalSemanticsTest::RunTest(const FString& Parame
 	UTextBlock* UnsetWidget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("Unset widget created"));
 	if (UnsetWidget)
 	{
-		FSlateFontInfo FontInfo = UnsetWidget->GetFont();
+		FSlateFontInfo FontInfo = Design2UMGWidgetPropertyAccess::GetFont(*UnsetWidget);
 		FontInfo.LetterSpacing = 321;
 		UnsetWidget->SetFont(FontInfo);
 		FUMGWidgetTreeBuilder::ApplyWidgetProperties(UnsetWidget, UnsetNode);
-		TestEqual(TEXT("Unset letter spacing does not apply"), UnsetWidget->GetFont().LetterSpacing, 321);
+		TestEqual(TEXT("Unset letter spacing does not apply"), Design2UMGWidgetPropertyAccess::GetFont(*UnsetWidget).LetterSpacing, 321);
 	}
 
 	return true;
@@ -1121,7 +1182,7 @@ bool FRichTextTypedJsonSerializationCycleTest::RunTest(const FString& Parameters
 
 	auto BuildStyleSnapshot = [&](URichTextBlock* Widget, const TCHAR* Context) -> FString
 	{
-		UDataTable* StyleSet = Widget->GetTextStyleSet();
+		UDataTable* StyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*Widget);
 		if (!StyleSet)
 		{
 			return FString();

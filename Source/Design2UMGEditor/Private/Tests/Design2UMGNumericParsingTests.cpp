@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Design2UMGAutomationTestAdapter.h"
 #include "Misc/AutomationTest.h"
 #include "Algo/Count.h"
 #include "UMGJsonParser.h"
@@ -60,8 +62,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageTransformJsonValidationTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImageTransformJsonValidationTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	const TCHAR* Inputs[] = { TEXT("1,0,0,0,1,0"), TEXT("bad,0,0,0,1,0"), TEXT("1,0,0,0,1,NaN"), TEXT("1,0,1e39,0,1,0"), TEXT("1,,0,0,0,1,0"), TEXT("1,0,0,0,1,0junk") };
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(Inputs) - 1);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(Inputs) - 1);
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Inputs); ++Index)
 	{
 		const bool bValid = Index == 0;
@@ -84,13 +87,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCornerRadiiStrictParsingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCornerRadiiStrictParsingTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	const TCHAR* Inputs[] = {
 		TEXT("1e1, +2.5, .75, 4."), TEXT("bad,2,3,4"), TEXT("1,NaN,3,4"), TEXT("1,2,Inf,4"),
 		TEXT("1,2,3,1e39"), TEXT("1,2,3,4junk"), TEXT("1,2,3,0junk"), TEXT("1,2,3,1e+"),
 		TEXT("1,,2,3,4"), TEXT(",1,2,3,4"), TEXT("1,2,3,4,"), TEXT("1,2,3"), TEXT("1,2,3,4,5")
 	};
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.CornerRadii"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(Inputs) - 1);
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Effect.GeometryMaskCornerRadii"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(Inputs) - 1);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Brush.CornerRadii"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(Inputs) - 1);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Effect.GeometryMaskCornerRadii"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(Inputs) - 1);
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Inputs); ++Index)
 	{
 		const bool bValid = Index == 0;
@@ -115,6 +119,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPaddingStrictParsingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPaddingStrictParsingTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	struct FCase { const TCHAR* JsonValue; TOptional<FMargin> Expected; };
 	const FCase Cases[] = {
 		{ TEXT("\" +2.5e0 \""), FMargin(2.5f) }, { TEXT("\"-1, 2e0, .5, 4.\""), FMargin(-1, 2, 0.5f, 4) },
@@ -123,7 +128,7 @@ bool FPaddingStrictParsingTest::RunTest(const FString& Parameters)
 		{ TEXT("\"1,,2,3,4\""), {} }, { TEXT("\"1,2,3,4,\""), {} }, { TEXT("\"1,2\""), {} },
 		{ TEXT("\"\""), {} }, { TEXT("null"), {} }, { TEXT("false"), {} }, { TEXT("10"), {} }
 	};
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid padding"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 6 * Algo::CountIf(Cases, [](const FCase& Case) { return !Case.Expected.IsSet(); }));
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid padding"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 6 * Algo::CountIf(Cases, [](const FCase& Case) { return !Case.Expected.IsSet(); }));
 	for (const FCase& Case : Cases)
 	{
 		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"NumericInput","WidgetStyle":{"Padding":%s,"SlotPadding":%s,"StrokePadding":%s,"StrokeMargin":%s},"Brush":{"BrushMargin":%s},"Slot":{"Padding":%s}}})"), Case.JsonValue, Case.JsonValue, Case.JsonValue, Case.JsonValue, Case.JsonValue, Case.JsonValue);
@@ -148,10 +153,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVector2DStrictParsingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVector2DStrictParsingTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	TestTrue(TEXT("Vector accepts signed numbers and exponents"), FUMGValueParser::ParseVector2D(TEXT(" +1.25e0, -2.5E1 ")).Equals(FVector2D(1.25, -25)));
 	const FVector2D Default(9, 11);
 	const TCHAR* InvalidInputs[] = { TEXT("bad,2"), TEXT("1,NaN"), TEXT("Inf,2"), TEXT("1,1e39"), TEXT("1,2junk"), TEXT("0junk,2"), TEXT("1e+,2"), TEXT("1 2,3"), TEXT("1,,2"), TEXT(",1,2"), TEXT("1,2,"), TEXT("1"), TEXT("") };
-	AddExpectedMessagePlain(TEXT("Invalid vector"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidInputs));
+	ExpectedLogMessages.Expect(TEXT("Invalid vector"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidInputs));
 	for (const TCHAR* Input : InvalidInputs)
 	{
 		TestTrue(FString::Printf(TEXT("Invalid vector '%s' retains caller default"), Input), FUMGValueParser::ParseVector2D(Input, Default).Equals(Default));
@@ -164,6 +170,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageCropStrictParsingTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FImageCropStrictParsingTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	const auto ParseCropNode = [this](const FString& Transform)
 	{
 		FUMGWidgetData Data;
@@ -182,7 +189,7 @@ bool FImageCropStrictParsingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Crop height is preserved"), Request.OutputHeight, 80);
 	const FString Previous = Design2UMGWidgetNodeAccess::SerializeImageTransform(Request.Transform);
 	const TCHAR* InvalidInputs[] = { TEXT("1,0,0,0,1,junk"), TEXT("1,0,0,0,1,NaN"), TEXT("1,0,0,0,1,1e39"), TEXT("1,,0,0,0,1,0") };
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidInputs));
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Brush.Image.Transform"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidInputs));
 	for (const TCHAR* Input : InvalidInputs)
 	{
 		Node = ParseCropNode(Input);
@@ -200,6 +207,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVectorJsonFailurePresenceTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FVectorJsonFailurePresenceTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	struct FCase { const TCHAR* Value; TOptional<FVector2D> Expected; };
 	const FCase Cases[] = {
 		{ TEXT("\"1.25,2.5\""), FVector2D(1.25, 2.5) }, { TEXT("\"0,0\""), FVector2D::ZeroVector },
@@ -207,7 +215,7 @@ bool FVectorJsonFailurePresenceTest::RunTest(const FString& Parameters)
 		{ TEXT("\"1,1e39\""), {} }, { TEXT("\"1,2junk\""), {} }, { TEXT("\"\""), {} },
 		{ TEXT("[1,2]"), {} }, { TEXT("{}"), {} }, { TEXT("null"), {} }, { TEXT("false"), {} }, { TEXT("12"), {} }
 	};
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid vector"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 13 * Algo::CountIf(Cases, [](const FCase& Case) { return !Case.Expected.IsSet(); }));
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid vector"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 13 * Algo::CountIf(Cases, [](const FCase& Case) { return !Case.Expected.IsSet(); }));
 	for (const FCase& Case : Cases)
 	{
 		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"TextBlock","Name":"VectorInput",
@@ -240,7 +248,7 @@ bool FVectorJsonFailurePresenceTest::RunTest(const FString& Parameters)
 		const FVector2D ExistingScale(3, 4);
 		Widget->SetRenderScale(ExistingScale);
 		FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
-		TestTrue(TEXT("Invalid scale does not change the real widget; explicit zero still applies"), Widget->GetRenderTransform().Scale.Equals(Case.Expected.Get(ExistingScale)));
+		TestTrue(TEXT("Invalid scale does not change the real widget; explicit zero still applies"), Design2UMGWidgetPropertyAccess::GetRenderTransform(*Widget).Scale.Equals(Case.Expected.Get(ExistingScale)));
 	}
 	return true;
 }
@@ -250,12 +258,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNumericJsonWrongTypeTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FNumericJsonWrongTypeTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	FUMGWidgetData Empty;
 	TestTrue(TEXT("Missing numeric fields are allowed without warnings"), FUMGJsonParser::ParseJson(TEXT(R"({"RootWidget":{"Type":"Image","Name":"NoFields"}})"), Empty));
 	const TCHAR* InvalidValues[] = { TEXT("null"), TEXT("[1,2,3,4]"), TEXT("{}"), TEXT("false"), TEXT("123"), TEXT("\"\"") };
 	for (const TCHAR* Field : { TEXT("Brush.Image.Transform"), TEXT("Brush.CornerRadii"), TEXT("Effect.GeometryMaskCornerRadii") })
 	{
-		AddExpectedMessagePlain(FString::Printf(TEXT("FUMGJsonParser: Invalid %s"), Field), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidValues));
+		ExpectedLogMessages.Expect(FString::Printf(TEXT("FUMGJsonParser: Invalid %s"), Field), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidValues));
 	}
 	for (const TCHAR* Value : InvalidValues)
 	{
@@ -276,6 +285,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNumericJsonFiniteScalarTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FNumericJsonFiniteScalarTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	struct FCase { const TCHAR* Value; bool bValid; TOptional<float> Radius; float Angle; };
 	const FCase Cases[] = {
 		{ TEXT("2.5"), true, 2.5f, 2.5f }, { TEXT("0"), true, 0.0f, 0.0f },
@@ -285,8 +295,8 @@ bool FNumericJsonFiniteScalarTest::RunTest(const FString& Parameters)
 		{ TEXT("null"), false, {}, 0.0f }, { TEXT("[]"), false, {}, 0.0f }
 	};
 	const int32 InvalidCount = Algo::CountIf(Cases, [](const FCase& Case) { return !Case.bValid; });
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid OutlineCornerRadius"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, InvalidCount);
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid RenderAngle"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, InvalidCount);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid OutlineCornerRadius"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, InvalidCount);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid RenderAngle"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, InvalidCount);
 	for (const FCase& Case : Cases)
 	{
 		const FString Json = FString::Printf(TEXT(R"({"RootWidget":{"Type":"Image","Name":"ScalarInput","Brush":{"OutlineCornerRadius":%s},"Render":{"RenderAngle":%s}}})"), Case.Value, Case.Value);

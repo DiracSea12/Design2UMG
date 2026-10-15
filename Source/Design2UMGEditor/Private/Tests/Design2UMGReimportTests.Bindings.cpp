@@ -14,7 +14,7 @@
 #include "MovieScene.h"
 #include "Components/NamedSlot.h"
 #include "UMGGenerator.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
@@ -60,7 +60,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
 	UWidget* LinkButton = WBP->WidgetTree->FindWidget(TEXT("fixture_link"));
-	UDesign2UMGComponentInputTestWidget* MappedBefore = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	UTextBlock* HeadBefore = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
 	if (!TestNotNull(TEXT("trigger button widget present"), LinkButton)
 		|| !TestNotNull(TEXT("mapped instance present"), MappedBefore)
@@ -70,7 +70,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 		return false;
 	}
 	const TWeakObjectPtr<UWidget> LinkWeak = LinkButton;
-	const TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = MappedBefore;
+	const TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 	const TWeakObjectPtr<UTextBlock> HeadWeak = HeadBefore;
 
 	// Add a project event binding through WidgetBindings, including its function graph.
@@ -115,10 +115,10 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	TestNotNull(TEXT("DevHandler function still resolvable"),
 		WBP->SkeletonGeneratedClass ? WBP->SkeletonGeneratedClass->FindFunctionByName(TEXT("DevHandler")) : nullptr);
 	TestNotNull(TEXT("project-added child preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectNote")));
-	if (UDesign2UMGComponentInputTestWidget* MappedV2 = Cast<UDesign2UMGComponentInputTestWidget>(MappedWeak.Get()))
+	if (UUserWidget* MappedV2 = ComponentFixtures::CastInput(MappedWeak.Get()))
 	{
 		TestTrue(TEXT("mapped identity preserved across v2"), MappedV2 == MappedBefore);
-		TestEqual(TEXT("mapped input refreshed in v2"), MappedV2->TextValue.ToString(), FString(TEXT("life-v2")));
+		TestEqual(TEXT("mapped input refreshed in v2"), ComponentFixtures::Read<FTextProperty>(MappedV2, TEXT("TextValue")).ToString(), FString(TEXT("life-v2")));
 	}
 	if (UTextBlock* HeadV2 = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
@@ -134,10 +134,10 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	{
 		TestTrue(TEXT("trigger button identity stable across both reimports"), LinkV3 == LinkWeak.Get());
 	}
-	if (UDesign2UMGComponentInputTestWidget* MappedV3 = Cast<UDesign2UMGComponentInputTestWidget>(MappedWeak.Get()))
+	if (UUserWidget* MappedV3 = ComponentFixtures::CastInput(MappedWeak.Get()))
 	{
 		TestTrue(TEXT("mapped identity stable across both reimports"), MappedV3 == MappedBefore);
-		TestEqual(TEXT("mapped input refreshed in v3"), MappedV3->TextValue.ToString(), FString(TEXT("life-v3")));
+		TestEqual(TEXT("mapped input refreshed in v3"), ComponentFixtures::Read<FTextProperty>(MappedV3, TEXT("TextValue")).ToString(), FString(TEXT("life-v3")));
 	}
 	if (UTextBlock* HeadV3 = Cast<UTextBlock>(HeadWeak.Get()))
 	{
@@ -253,9 +253,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportNamedSlotOwnershipTest,
 	"Design2UMG.SafeReimport.NamedSlotOwnership", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FSafeReimportNamedSlotOwnershipTest::RunTest(const FString&)
 {
+	// Blueprint compilation collects garbage; prepare the class before unrooted test objects.
+	UClass* const HostClass = ComponentFixtures::NamedSlotHostClass();
 	UWidgetBlueprint* Blueprint = NewObject<UWidgetBlueprint>(GetTransientPackage());
 	Blueprint->WidgetTree = NewObject<UWidgetTree>(Blueprint);
-	UUserWidget* Host = Blueprint->WidgetTree->ConstructWidget<UUserWidget>(UDesign2UMGComponentInputTestWidget::StaticClass(), TEXT("SlotHost"));
+	UUserWidget* Host = Blueprint->WidgetTree->ConstructWidget<UUserWidget>(HostClass, TEXT("SlotHost"));
 	Blueprint->WidgetTree->RootWidget = Host;
 	Host->WidgetTree = NewObject<UWidgetTree>(Host);
 	UNamedSlot* Slot = Host->WidgetTree->ConstructWidget<UNamedSlot>(UNamedSlot::StaticClass(), TEXT("Content"));

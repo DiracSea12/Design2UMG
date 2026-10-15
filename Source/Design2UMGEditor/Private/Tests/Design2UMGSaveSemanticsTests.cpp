@@ -1,8 +1,12 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGAssetRegistryAccess.h"
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Design2UMGAutomationTestAdapter.h"
 #include "DesignImportGeneration.h"
 #include "DesignBlueprintRenderPreparation.h"
 #include "UMGGenerator.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -10,12 +14,15 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
+#include "Components/RetainerBox.h"
+#include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
 #include "HAL/FileManager.h"
 #include "WidgetBlueprint.h"
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -29,6 +36,8 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "RenderingThread.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -96,7 +105,8 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 
 	AddExpectedError(TEXT("missing valid DesignTimeSize"), EAutomationExpectedErrorFlags::Contains, 2);
 	TestFalse(TEXT("Invalid Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess());
-	TestFalse(TEXT("Failed save leaves no registered asset"), AssetRegistry.GetAssetByObjectPath(OriginalObjectPath).IsValid());
+	TestFalse(TEXT("Failed save leaves no registered asset"),
+		Design2UMGAssetRegistryAccess::GetAssetByObjectPath(AssetRegistry, OriginalObjectPath).IsValid());
 	TestFalse(TEXT("Failed save clears the target package dirty flag"), TargetPackage->IsDirty());
 	TestEqual(TEXT("Failed save moves the Blueprint out of the target package"), Blueprint->GetOutermost(), GetTransientPackage());
 
@@ -110,7 +120,8 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 	TestTrue(TEXT("Existing Blueprint baseline save succeeds"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint).IsSuccess());
 	UPackage* ExistingPackage = ExistingBlueprint->GetOutermost();
 	const FSoftObjectPath ExistingObjectPath(ExistingBlueprint);
-	TestTrue(TEXT("Existing Blueprint is registered before save"), AssetRegistry.GetAssetByObjectPath(ExistingObjectPath).IsValid());
+	TestTrue(TEXT("Existing Blueprint is registered before save"),
+		Design2UMGAssetRegistryAccess::GetAssetByObjectPath(AssetRegistry, ExistingObjectPath).IsValid());
 	UUserWidget* ExistingCDO = ExistingBlueprint->GeneratedClass
 		? Cast<UUserWidget>(ExistingBlueprint->GeneratedClass->GetDefaultObject())
 		: nullptr;
@@ -122,7 +133,8 @@ bool FDesign2UMGFailedSaveDiscardsUnsavedAssetTest::RunTest(const FString& Param
 	ExistingCDO->DesignTimeSize = FVector2D::ZeroVector;
 	TestFalse(TEXT("Invalid existing Blueprint save fails"), FUMGGenerator::SaveWidgetBlueprint(ExistingBlueprint).IsSuccess());
 	TestEqual(TEXT("Failed save keeps an existing Blueprint in its package"), ExistingBlueprint->GetOutermost(), ExistingPackage);
-	TestTrue(TEXT("Failed save keeps an existing Blueprint registered"), AssetRegistry.GetAssetByObjectPath(ExistingObjectPath).IsValid());
+	TestTrue(TEXT("Failed save keeps an existing Blueprint registered"),
+		Design2UMGAssetRegistryAccess::GetAssetByObjectPath(AssetRegistry, ExistingObjectPath).IsValid());
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;
@@ -195,6 +207,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	const FString OutputPath = TEXT("/Game/Design2UMG/Automation/ReloadDirtyGuard");
 	DeleteGeneratedAssetsAtPath(OutputPath);
 
@@ -236,10 +249,9 @@ bool FDesign2UMGReloadSkipsDirtyBlueprintPackageTest::RunTest(const FString& Par
 		return false;
 	}
 
-	AddExpectedMessagePlain(
-		TEXT("has unsaved changes; skipping pre-render reload"),
+	ExpectedLogMessages.Expect(TEXT("has unsaved changes; skipping pre-render reload"),
 		ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains,
+		Design2UMGAutomationTestAdapter::EMessageMatch::Contains,
 		1);
 	const TWeakObjectPtr<UImage> UnreferencedObject(NewObject<UImage>(GetTransientPackage()));
 	UWidgetBlueprint* Kept = DesignBlueprintRenderPreparation::ReloadWidgetBlueprintForRender(Loaded);
@@ -296,6 +308,7 @@ void FDesign2UMGReloadRenderPreparationTest::GetTests(TArray<FString>& OutBeauti
 
 bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	const bool bDirtyBlueprint = Parameters.StartsWith(TEXT("Dirty"));
 	const bool bFailPreparation = Parameters.EndsWith(TEXT("Failure"));
 	const FString OutputPath = TEXT("/Game/Design2UMG/Automation/RenderPreparation/") + Parameters;
@@ -349,7 +362,7 @@ bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
 		BlueprintPackage->MarkPackageDirty();
 		// No test-owned strong reference may hide a missing GC guard in preparation.
 		Blueprint->ClearFlags(RF_Standalone);
-		AddExpectedMessagePlain(TEXT("has unsaved changes; skipping pre-render reload"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+		ExpectedLogMessages.Expect(TEXT("has unsaved changes; skipping pre-render reload"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 1);
 	}
 	TestEqual(TEXT("Fixture blueprint dirty state"), BlueprintPackage->IsDirty(), bDirtyBlueprint);
 	Texture->SRGB = false;
@@ -359,7 +372,7 @@ bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
 	if (bFailPreparation)
 	{
 		TexturePackage->SetPackageFlags(PKG_InMemoryOnly);
-		AddExpectedMessagePlain(TEXT("marked PKG_InMemoryOnly"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+		ExpectedLogMessages.Expect(TEXT("marked PKG_InMemoryOnly"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 1);
 	}
 	const TWeakObjectPtr<UImage> UnreferencedObject(NewObject<UImage>(GetTransientPackage()));
 	FBlueprintRenderPreparationOptions Preparation;
@@ -382,7 +395,7 @@ bool FDesign2UMGReloadRenderPreparationTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("Successful preparation has no error"), PreparationError.IsEmpty());
 		UImage* PreparedImage = Cast<UImage>(Prepared->WidgetTree->FindWidget(TEXT("PreparedImage")));
-		UTexture2D* PreparedTexture = PreparedImage ? Cast<UTexture2D>(PreparedImage->GetBrush().GetResourceObject()) : nullptr;
+		UTexture2D* PreparedTexture = PreparedImage ? Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*PreparedImage).GetResourceObject()) : nullptr;
 		if (TestNotNull(TEXT("Image retains its texture through package reload"), PreparedTexture))
 		{
 			TestTrue(TEXT("Texture was refreshed from its saved package"), PreparedTexture->SRGB);
@@ -509,6 +522,92 @@ bool FBlueprintCompileFailurePreservesDiskTest::RunTest(const FString&)
 		// Remove the deliberately invalid source before editor cleanup can compile it again.
 		Graph->RemoveNode(Call);
 		Graph->RemoveNode(Event);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTemplateSlateFailedSavePreservesStateTest,
+	"Design2UMG.Generation.TemplateSlateFailedSavePreservesState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTemplateSlateFailedSavePreservesStateTest::RunTest(const FString&)
+{
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/TemplateSlateFailedSave_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(
+		MakeSaveSemanticsWidgetData(TEXT("WBP_TemplateSlateFailedSave")), Folder);
+	if (!TestNotNull(TEXT("Blueprint exists before save failure"), Blueprint)) return false;
+	Blueprint->AddToRoot();
+	ON_SCOPE_EXIT
+	{
+		Blueprint->WidgetTree->ForEachWidget([](UWidget* Widget) { Widget->ReleaseSlateResources(true); });
+		FlushRenderingCommands();
+		Blueprint->RemoveFromRoot();
+		DeleteGeneratedAssetsAtPath(Folder);
+	};
+	URetainerBox* Retainer = Blueprint->WidgetTree->ConstructWidget<URetainerBox>();
+	UTextBlock* Text = Blueprint->WidgetTree->ConstructWidget<UTextBlock>();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 6
+	Blueprint->WidgetVariableNameToGuidMap.Add(Blueprint->WidgetTree->RootWidget->GetFName(), FGuid::NewGuid());
+	Blueprint->WidgetVariableNameToGuidMap.Add(Retainer->GetFName(), FGuid::NewGuid());
+	Blueprint->WidgetVariableNameToGuidMap.Add(Text->GetFName(), FGuid::NewGuid());
+#endif
+	CastChecked<UPanelWidget>(Blueprint->WidgetTree->RootWidget)->AddChild(Retainer);
+	Retainer->SetContent(Text);
+	FUMGWidgetNode RetainerNode;
+	RetainerNode.Type = TEXT("RetainerBox");
+	RetainerNode.Effect.bRetainRendering = true;
+	RetainerNode.Effect.EffectMaterial = TEXT("d2u.retainer.inner_shadow");
+	RetainerNode.Effect.TextureParameter = TEXT("Texture");
+	RetainerNode.Effect.EffectColor = FLinearColor(0.1f, 0.2f, 0.3f, 0.4f);
+	RetainerNode.Effect.EffectOffset = FVector2D(0.05f, -0.03f);
+	RetainerNode.Effect.EffectBlurUVStep = FVector2D(0.01f, 0.02f);
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Retainer, RetainerNode);
+	Retainer->TakeWidget();
+	const UMaterialInterface* Material = Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Retainer);
+	UMaterialInstanceDynamic* Effect = Retainer->GetEffectMaterial();
+	if (!TestNotNull(TEXT("Typed effect material exists"), Effect)) return false;
+	const FLinearColor ExpectedBlur = Effect->K2_GetVectorParameterValue(TEXT("BlurUVStep"));
+	Text->SetText(FText::FromString(TEXT("Saved text")));
+	if (!TestTrue(TEXT("Baseline asset saves"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
+	UPackage* Package = Blueprint->GetOutermost();
+	const FString File = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+	TArray<uint8> Before;
+	if (!TestTrue(TEXT("Saved bytes are readable"), FFileHelper::LoadFileToArray(Before, *File))) return false;
+	const FSlateFontInfo SavedFont = Design2UMGWidgetPropertyAccess::GetFont(*Text);
+	FSlateFontInfo UnsavedFont = SavedFont;
+	UnsavedFont.Size += 3;
+	Text->Modify();
+	Text->SetFont(UnsavedFont);
+	Text->SetText(FText::FromString(TEXT("Unsaved text")));
+	UUserWidget* CDO = CastChecked<UUserWidget>(Blueprint->GeneratedClass->GetDefaultObject());
+	CDO->Modify();
+	CDO->DesignTimeSize = FVector2D::ZeroVector;
+	Package->MarkPackageDirty();
+	Retainer->TakeWidget();
+	TestTrue(TEXT("Retainer Slate is materialized before failure"), Retainer->GetCachedWidget().IsValid());
+	TestTrue(TEXT("Text Slate is materialized before failure"), Text->GetCachedWidget().IsValid());
+	AddExpectedError(TEXT("missing valid DesignTimeSize"), EAutomationExpectedErrorFlags::Contains, 1);
+	const FDesign2UMGCommitResult Result = FUMGGenerator::SaveWidgetBlueprint(Blueprint);
+	TestFalse(TEXT("Invalid design size produces a real save failure"), Result.IsSuccess());
+	TestFalse(TEXT("Failed save releases Retainer Slate"), Retainer->GetCachedWidget().IsValid());
+	TestFalse(TEXT("Failed save releases Text Slate"), Text->GetCachedWidget().IsValid());
+	TestEqual(TEXT("Existing Blueprint retains package identity"), Blueprint->GetOutermost(), Package);
+	TestTrue(TEXT("Existing package retains unsaved changes"), Package->IsDirty());
+	TestEqual(TEXT("Unsaved text survives"), Text->GetText().ToString(), FString(TEXT("Unsaved text")));
+	TestEqual(TEXT("Font asset survives"), Design2UMGWidgetPropertyAccess::GetFont(*Text).FontObject, SavedFont.FontObject);
+	TestEqual(TEXT("Unsaved font size survives"), Design2UMGWidgetPropertyAccess::GetFont(*Text).Size, UnsavedFont.Size);
+	TestTrue(TEXT("Font asset was exercised"), SavedFont.FontObject != nullptr);
+	TestTrue(TEXT("Material property survives"), Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Retainer) == Material);
+	TestEqual(TEXT("Unsaved CDO edit survives"), CDO->DesignTimeSize, FVector2D::ZeroVector);
+	TArray<uint8> After;
+	TestTrue(TEXT("Disk version remains readable"), FFileHelper::LoadFileToArray(After, *File));
+	TestTrue(TEXT("Disk version is unchanged"), Before == After);
+	Retainer->TakeWidget();
+	UMaterialInstanceDynamic* RestoredEffect = Retainer->GetEffectMaterial();
+	if (TestNotNull(TEXT("Typed effect rebuilds after save failure"), RestoredEffect))
+	{
+		TestTrue(TEXT("Typed material parameters survive save failure and Slate rebuild"),
+			RestoredEffect->K2_GetVectorParameterValue(TEXT("BlurUVStep")).Equals(ExpectedBlur, 0.0001f));
 	}
 	return true;
 }

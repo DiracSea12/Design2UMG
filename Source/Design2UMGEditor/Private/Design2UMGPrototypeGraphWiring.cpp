@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGPrototypeGraphWiring.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Design2UMGPrototypeGraphWiringInternal.h"
 #include "Design2UMGLog.h"
 #include "UMGSchemaSourceExtensions.h"
@@ -139,7 +140,7 @@ void WireSimplePrototypeBindings(
 	{
 		if (UUserWidget* WidgetCDO = WBP->GeneratedClass->GetDefaultObject<UUserWidget>())
 		{
-			WidgetCDO->SetIsFocusable(true);
+			Design2UMGWidgetPropertyAccess::SetUserWidgetFocusable(*WidgetCDO, true);
 		}
 	}
 

@@ -1,13 +1,17 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEffectMaterialBuilder.h"
+
+#include "Design2UMGMaterialAccess.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Design2UMGLog.h"
 
 #include "Factories/MaterialFactoryNew.h"
 #include "HAL/FileManager.h"
 #include "HAL/CriticalSection.h"
+#if !UE_VERSION_OLDER_THAN(5, 2, 0)
 #include "MaterialDomain.h"
+#endif
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialExpressionComponentMask.h"
@@ -25,8 +29,11 @@
 #include "UObject/StrongObjectPtr.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
+#include "UMGValueParsing.h"
+#include "UMGWidgetNodeAccess.h"
 #include "Misc/SecureHash.h"
 #include "MaterialShared.h"
+#include "Serialization/MemoryWriter.h"
 
 namespace
 {
@@ -58,7 +65,8 @@ namespace
 	TStrongObjectPtr<UMaterial> GGeometryMaskRetainerMaterial;
 	TStrongObjectPtr<UMaterial> GInnerShadowRetainerMaterial;
 
-	bool SaveGeometryMaskAsset(UObject* Asset, const FString& FileName)
+
+	bool SaveGeneratedMaterialAsset(UObject* Asset, const FString& FileName)
 	{
 		UPackage* Package = Asset->GetOutermost();
 		FSavePackageArgs SaveArgs;
@@ -128,7 +136,7 @@ namespace
 	{
 		TExpression* Expression = NewObject<TExpression>(Material);
 		SetupExpression(Expression, InputName);
-		Material->GetExpressionCollection().AddExpression(Expression);
+		Design2UMGMaterialAccess::AddExpression(*Material, *Expression);
 
 		FCustomInput Input;
 		Input.InputName = InputName;
@@ -151,7 +159,7 @@ namespace
 		Mask->B = bB;
 		Mask->A = bA;
 		Mask->Input.Connect(0, Source);
-		Material->GetExpressionCollection().AddExpression(Mask);
+		Design2UMGMaterialAccess::AddExpression(*Material, *Mask);
 		return Mask;
 	}
 }
@@ -242,9 +250,9 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		);
 		if (!Resource || !Resource->GetGameThreadShaderMap() || !Resource->GetGameThreadShaderMap()->IsValidForRendering())
 		{
-			Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
+			Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
 		}
-		Material->EnsureIsComplete();
+		Design2UMGMaterialAccess::WaitForCompilation(*Material);
 		if (!ValidateCompiledSubtreeMaterial(Material, Root.Name, OutError)) return false;
 	}
 	if (!Material)
@@ -263,15 +271,15 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		UMaterialExpressionCustom* Shader = NewObject<UMaterialExpressionCustom>(Material);
 		Shader->OutputType = ECustomMaterialOutputType::CMOT_Float4;
 		Shader->Code = Code;
-		Material->GetExpressionCollection().AddExpression(Shader);
+		Design2UMGMaterialAccess::AddExpression(*Material, *Shader);
 		AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("Texture"));
 		AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, Shader, TEXT("UV"));
-		Material->GetEditorOnlyData()->EmissiveColor.Expression = AddComponentMask(Material, Shader, true, true, true, false);
-		Material->GetEditorOnlyData()->Opacity.Expression = AddComponentMask(Material, Shader, false, false, false, true);
+		Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = AddComponentMask(Material, Shader, true, true, true, false);
+		Material->GetExpressionInputForProperty(MP_Opacity)[0].Expression = AddComponentMask(Material, Shader, false, false, false, true);
 		Material->PreEditChange(nullptr);
 		Material->PostEditChange();
-		Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-		Material->EnsureIsComplete();
+		Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
+		Design2UMGMaterialAccess::WaitForCompilation(*Material);
 		if (!ValidateCompiledSubtreeMaterial(Material, Root.Name, OutError))
 		{
 			Material->ClearFlags(RF_Public | RF_Standalone);
@@ -301,18 +309,28 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 	{
 		return GForegroundBlurRetainerMaterial.Get();
 	}
+	constexpr TCHAR MaterialPackageName[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_LayerBlurRetainer");
+	constexpr TCHAR MaterialObjectPath[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_LayerBlurRetainer.D2U_LayerBlurRetainer");
+	if (UMaterial* ExistingMaterial = LoadObject<UMaterial>(nullptr, MaterialObjectPath))
+	{
+		Design2UMGMaterialAccess::RecompileForRendering(*ExistingMaterial);
+		GForegroundBlurRetainerMaterial.Reset(ExistingMaterial);
+		return ExistingMaterial;
+	}
 
 	UMaterialFactoryNew* MaterialFactory = GetMutableDefault<UMaterialFactoryNew>();
 	if (!MaterialFactory)
 	{
 		return nullptr;
 	}
+	UPackage* MaterialPackage = CreatePackage(MaterialPackageName);
+	if (!MaterialPackage) return nullptr;
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackage(),
-		TEXT("D2U_ForegroundBlurRetainer"),
-		RF_Transient,
+		MaterialPackage,
+		TEXT("D2U_LayerBlurRetainer"),
+		RF_Public | RF_Standalone,
 		nullptr,
 		GWarn));
 	if (!Material)
@@ -320,7 +338,6 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 		return nullptr;
 	}
 
-	Material->bIsPreviewMaterial = true;
 	Material->SetShadingModel(EMaterialShadingModel::MSM_Unlit);
 	Material->MaterialDomain = EMaterialDomain::MD_UI;
 	Material->BlendMode = EBlendMode::BLEND_AlphaComposite;
@@ -329,15 +346,20 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRe
 	BlurNode->OutputType = ECustomMaterialOutputType::CMOT_Float4;
 	BlurNode->Code = TEXT(R"(
 // Cross-shaped 5-tap blur: center 75/255 plus four taps at 45/255 each (sum = 1).
-float2 Step = max(BlurUVStep.rg, float2(0.00001, 0.00001));
-float4 Result = Texture.SampleLevel(TextureSampler, UV, 0) * (75.0 / 255.0);
-Result += Texture.SampleLevel(TextureSampler, UV + float2(Step.x, 0.0), 0) * (45.0 / 255.0);
-Result += Texture.SampleLevel(TextureSampler, UV - float2(Step.x, 0.0), 0) * (45.0 / 255.0);
-Result += Texture.SampleLevel(TextureSampler, UV + float2(0.0, Step.y), 0) * (45.0 / 255.0);
-Result += Texture.SampleLevel(TextureSampler, UV - float2(0.0, Step.y), 0) * (45.0 / 255.0);
+float2 Step = max(BlurUVStep.rg, float2(0.0, 0.0));
+float2 Taps[5] = { float2(0.0, 0.0), float2(Step.x, 0.0), float2(-Step.x, 0.0), float2(0.0, Step.y), float2(0.0, -Step.y) };
+float4 Result = float4(0.0, 0.0, 0.0, 0.0);
+[unroll] for (int Tap = 0; Tap < 5; ++Tap)
+{
+    float2 SampleUV = UV + Taps[Tap];
+    // Unpainted space outside the retained subtree contributes transparent color.
+    float Inside = all(SampleUV >= float2(0.0, 0.0)) && all(SampleUV <= float2(1.0, 1.0)) ? 1.0 : 0.0;
+    float Weight = Tap == 0 ? (75.0 / 255.0) : (45.0 / 255.0);
+    Result += Texture.SampleLevel(TextureSampler, SampleUV, 0) * Inside * Weight;
+}
 return Result;
 )");
-	Material->GetExpressionCollection().AddExpression(BlurNode);
+	Design2UMGMaterialAccess::AddExpression(*Material, *BlurNode);
 
 	AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, BlurNode, TEXT("Texture"));
 	AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, BlurNode, TEXT("UV"));
@@ -346,13 +368,20 @@ return Result;
 	UMaterialExpressionComponentMask* EmissiveMask = AddComponentMask(Material, BlurNode, true, true, true, false);
 	UMaterialExpressionComponentMask* OpacityMask = AddComponentMask(Material, BlurNode, false, false, false, true);
 
-	UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
-	EditorOnlyData->EmissiveColor.Expression = EmissiveMask;
-	EditorOnlyData->Opacity.Expression = OpacityMask;
+	Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = EmissiveMask;
+	Material->GetExpressionInputForProperty(MP_Opacity)[0].Expression = OpacityMask;
 
-	Material->AddToRoot();
 	Material->PreEditChange(nullptr);
 	Material->PostEditChange();
+	Design2UMGMaterialAccess::RecompileForRendering(*Material);
+	const FString MaterialFileName = FPackageName::LongPackageNameToFilename(
+		MaterialPackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(MaterialFileName), true);
+	if (!SaveGeneratedMaterialAsset(Material, MaterialFileName))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save foreground blur material package: %s"), *MaterialFileName);
+		return nullptr;
+	}
 
 	GForegroundBlurRetainerMaterial.Reset(Material);
 	return Material;
@@ -364,18 +393,28 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 	{
 		return GInnerShadowRetainerMaterial.Get();
 	}
+	constexpr TCHAR MaterialPackageName[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_InsetShadowRetainer");
+	constexpr TCHAR MaterialObjectPath[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_InsetShadowRetainer.D2U_InsetShadowRetainer");
+	if (UMaterial* ExistingMaterial = LoadObject<UMaterial>(nullptr, MaterialObjectPath))
+	{
+		Design2UMGMaterialAccess::RecompileForRendering(*ExistingMaterial);
+		GInnerShadowRetainerMaterial.Reset(ExistingMaterial);
+		return ExistingMaterial;
+	}
 
 	UMaterialFactoryNew* MaterialFactory = GetMutableDefault<UMaterialFactoryNew>();
 	if (!MaterialFactory)
 	{
 		return nullptr;
 	}
+	UPackage* MaterialPackage = CreatePackage(MaterialPackageName);
+	if (!MaterialPackage) return nullptr;
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
-		GetTransientPackage(),
-		TEXT("D2U_InnerShadowRetainer"),
-		RF_Transient,
+		MaterialPackage,
+		TEXT("D2U_InsetShadowRetainer"),
+		RF_Public | RF_Standalone,
 		nullptr,
 		GWarn));
 	if (!Material)
@@ -383,7 +422,6 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 		return nullptr;
 	}
 
-	Material->bIsPreviewMaterial = true;
 	Material->SetShadingModel(EMaterialShadingModel::MSM_Unlit);
 	Material->MaterialDomain = EMaterialDomain::MD_UI;
 	Material->BlendMode = EBlendMode::BLEND_AlphaComposite;
@@ -392,19 +430,24 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 	InnerShadowNode->OutputType = ECustomMaterialOutputType::CMOT_Float4;
 	InnerShadowNode->Code = TEXT(R"(
 // Cross-shaped 5-tap alpha blur: center 75/255 plus four taps at 45/255 each (sum = 1).
-float2 Step = max(BlurUVStep.rg, float2(0.00001, 0.00001));
+float2 Step = max(BlurUVStep.rg, float2(0.0, 0.0));
 float2 Offset = InnerShadowOffset.rg;
 float4 Base = Texture.SampleLevel(TextureSampler, UV, 0);
-float ShiftedAlpha = Texture.SampleLevel(TextureSampler, UV - Offset, 0).a * (75.0 / 255.0);
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(Step.x, 0.0), 0).a * (45.0 / 255.0);
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(Step.x, 0.0), 0).a * (45.0 / 255.0);
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset + float2(0.0, Step.y), 0).a * (45.0 / 255.0);
-ShiftedAlpha += Texture.SampleLevel(TextureSampler, UV - Offset - float2(0.0, Step.y), 0).a * (45.0 / 255.0);
-float ShadowMask = saturate((Base.a - ShiftedAlpha) * 4.0) * saturate(InnerShadowStrength);
-float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb, ShadowMask);
+float2 Taps[5] = { float2(0.0, 0.0), float2(Step.x, 0.0), float2(-Step.x, 0.0), float2(0.0, Step.y), float2(0.0, -Step.y) };
+float ShiftedAlpha = 0.0;
+[unroll] for (int Tap = 0; Tap < 5; ++Tap)
+{
+    float2 SampleUV = UV - Offset + Taps[Tap];
+    // The translated cutout is transparent outside its bounds, not edge-clamped.
+    float Inside = all(SampleUV >= float2(0.0, 0.0)) && all(SampleUV <= float2(1.0, 1.0)) ? 1.0 : 0.0;
+    float Weight = Tap == 0 ? (75.0 / 255.0) : (45.0 / 255.0);
+    ShiftedAlpha += Texture.SampleLevel(TextureSampler, SampleUV, 0).a * Inside * Weight;
+}
+float ShadowMask = saturate(Base.a - ShiftedAlpha) * saturate(InnerShadowStrength);
+float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb * Base.a, ShadowMask);
 return float4(OutRgb, Base.a);
 )");
-	Material->GetExpressionCollection().AddExpression(InnerShadowNode);
+	Design2UMGMaterialAccess::AddExpression(*Material, *InnerShadowNode);
 
 	AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, InnerShadowNode, TEXT("Texture"));
 	AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, InnerShadowNode, TEXT("UV"));
@@ -424,13 +467,20 @@ return float4(OutRgb, Base.a);
 	UMaterialExpressionComponentMask* EmissiveMask = AddComponentMask(Material, InnerShadowNode, true, true, true, false);
 	UMaterialExpressionComponentMask* OpacityMask = AddComponentMask(Material, InnerShadowNode, false, false, false, true);
 
-	UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
-	EditorOnlyData->EmissiveColor.Expression = EmissiveMask;
-	EditorOnlyData->Opacity.Expression = OpacityMask;
+	Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = EmissiveMask;
+	Material->GetExpressionInputForProperty(MP_Opacity)[0].Expression = OpacityMask;
 
-	Material->AddToRoot();
 	Material->PreEditChange(nullptr);
 	Material->PostEditChange();
+	Design2UMGMaterialAccess::RecompileForRendering(*Material);
+	const FString MaterialFileName = FPackageName::LongPackageNameToFilename(
+		MaterialPackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(MaterialFileName), true);
+	if (!SaveGeneratedMaterialAsset(Material, MaterialFileName))
+	{
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save inner shadow material package: %s"), *MaterialFileName);
+		return nullptr;
+	}
 
 	GInnerShadowRetainerMaterial.Reset(Material);
 	return Material;
@@ -450,9 +500,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	constexpr TCHAR MaterialObjectPath[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_GeometryMaskRetainerV15.D2U_GeometryMaskRetainerV15");
 	if (UMaterial* ExistingMaterial = LoadObject<UMaterial>(nullptr, MaterialObjectPath))
 	{
-		ExistingMaterial->ForceRecompileForRendering(EMaterialShaderPrecompileMode::Synchronous);
-		ExistingMaterial->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-		ExistingMaterial->EnsureIsComplete();
+		Design2UMGMaterialAccess::RecompileForRendering(*ExistingMaterial);
 		GGeometryMaskRetainerMaterial.Reset(ExistingMaterial);
 		return ExistingMaterial;
 	}
@@ -523,7 +571,7 @@ else
 }
 return Filtered * Mask;
 )");
-	Material->GetExpressionCollection().AddExpression(MaskNode);
+	Design2UMGMaterialAccess::AddExpression(*Material, *MaskNode);
 
 	AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, MaskNode, TEXT("Texture"));
 	AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, MaskNode, TEXT("UV"));
@@ -543,22 +591,19 @@ return Filtered * Mask;
 	UMaterialExpressionComponentMask* MaskedRgb = AddComponentMask(Material, MaskNode, true, true, true, false);
 	UMaterialExpressionComponentMask* MaskedAlpha = AddComponentMask(Material, MaskNode, false, false, false, true);
 
-	UMaterialEditorOnlyData* EditorOnlyData = Material->GetEditorOnlyData();
-	EditorOnlyData->EmissiveColor.Expression = MaskedRgb;
-	EditorOnlyData->Opacity.Expression = MaskedAlpha;
+	Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = MaskedRgb;
+	Material->GetExpressionInputForProperty(MP_Opacity)[0].Expression = MaskedAlpha;
 
 	Material->AddToRoot();
 	Material->PreEditChange(nullptr);
 	Material->PostEditChange();
-	Material->ForceRecompileForRendering(EMaterialShaderPrecompileMode::Synchronous);
-	Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-	Material->EnsureIsComplete();
+	Design2UMGMaterialAccess::RecompileForRendering(*Material);
 
 	const FString MaterialFileName = FPackageName::LongPackageNameToFilename(
 		MaterialPackageName,
 		FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(MaterialFileName), true);
-	if (!SaveGeometryMaskAsset(Material, MaterialFileName))
+	if (!SaveGeneratedMaterialAsset(Material, MaterialFileName))
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save geometry mask material package: %s"), *MaterialFileName);
 		return nullptr;
@@ -587,9 +632,7 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	const FString ObjectPath = FString::Printf(TEXT("%s.%s"), *PackageName, *InstanceName);
 	if (UMaterialInstanceConstant* ExistingInstance = LoadObject<UMaterialInstanceConstant>(nullptr, *ObjectPath))
 	{
-		ExistingInstance->ForceRecompileForRendering(EMaterialShaderPrecompileMode::Synchronous);
-		ExistingInstance->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-		ExistingInstance->EnsureIsComplete();
+		Design2UMGMaterialAccess::RecompileForRendering(*ExistingInstance);
 		return ExistingInstance;
 	}
 
@@ -616,15 +659,13 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 		FMaterialParameterInfo(TEXT("MaskCornerRadiiBottom")),
 		FLinearColor(CornerRadii.Z, CornerRadii.W, 0.0f, 0.0f));
 	Instance->PostEditChange();
-	Instance->ForceRecompileForRendering(EMaterialShaderPrecompileMode::Synchronous);
-	Instance->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-	Instance->EnsureIsComplete();
+	Design2UMGMaterialAccess::RecompileForRendering(*Instance);
 
 	const FString PackageFileName = FPackageName::LongPackageNameToFilename(
 		PackageName,
 		FPackageName::GetAssetPackageExtension());
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(PackageFileName), true);
-	if (!SaveGeometryMaskAsset(Instance.Get(), PackageFileName))
+	if (!SaveGeneratedMaterialAsset(Instance.Get(), PackageFileName))
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Failed to save geometry mask material instance: %s"), *PackageFileName);
 		return nullptr;
@@ -633,21 +674,136 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskReta
 	return Instance.Get();
 }
 
-bool Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(
+UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateRetainerEffectMaterial(
+	const FUMGEffectData& Effect, UMaterialInterface* ExistingMaterial)
+{
+	UMaterialInterface* Parent = ExistingMaterial;
+	if (Effect.EffectMaterial.IsSet())
+	{
+		const FString& Reference = Effect.EffectMaterial.GetValue();
+		if (Reference.IsEmpty()) return nullptr;
+		if (Reference == UMGPropertyKeys::RetainerForegroundBlurEffectRef)
+			Parent = GetOrCreateForegroundBlurRetainerMaterial();
+		else if (Reference == UMGPropertyKeys::RetainerInnerShadowEffectRef)
+			Parent = GetOrCreateInnerShadowRetainerMaterial();
+		else if (Reference == UMGPropertyKeys::RetainerGeometryMaskEffectRef)
+		{
+			Parent = Effect.GeometryMaskShape.IsSet() && Effect.GeometryMaskSize.IsSet()
+				&& Effect.GeometryMaskCornerRadii.IsSet()
+				? GetOrCreateGeometryMaskRetainerMaterial(Effect.GeometryMaskShape.GetValue(),
+					Effect.GeometryMaskSize.GetValue(), Effect.GeometryMaskCornerRadii.GetValue())
+				: GetOrCreateGeometryMaskRetainerMaterial();
+		}
+		else
+		{
+			Parent = LoadObject<UMaterialInterface>(nullptr, *Reference);
+			if (!Parent) Parent = FindObject<UMaterialInterface>(nullptr, *Reference);
+		}
+	}
+	if (!Parent) return nullptr;
+
+	TArray<TPair<FName, float>> Scalars;
+	TArray<TPair<FName, FLinearColor>> Vectors;
+	if (Effect.EffectBlurUVStep.IsSet())
+	{
+		const FVector2D& Step = Effect.EffectBlurUVStep.GetValue();
+		Vectors.Emplace(TEXT("BlurUVStep"), FLinearColor(Step.X, Step.Y, 0.0f, 0.0f));
+	}
+	if (Effect.EffectColor.IsSet())
+	{
+		const FLinearColor Color = FUMGValueParser::ParseColor(
+			Design2UMGWidgetNodeAccess::SerializeWidgetColor(Effect.EffectColor.GetValue()));
+		Vectors.Emplace(TEXT("InnerShadowColor"), Color);
+		Scalars.Emplace(TEXT("InnerShadowStrength"), Color.A);
+	}
+	if (Effect.EffectOffset.IsSet())
+	{
+		const FVector2D& Offset = Effect.EffectOffset.GetValue();
+		Vectors.Emplace(TEXT("InnerShadowOffset"), FLinearColor(Offset.X, Offset.Y, 0.0f, 0.0f));
+	}
+	if (Effect.GeometryMaskShape.IsSet())
+		Scalars.Emplace(TEXT("MaskShape"), Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse ? 0.0f : 1.0f);
+	if (Effect.GeometryMaskSize.IsSet())
+	{
+		const FVector2D& Size = Effect.GeometryMaskSize.GetValue();
+		Vectors.Emplace(TEXT("MaskSize"), FLinearColor(Size.X, Size.Y, 0.0f, 0.0f));
+	}
+	if (Effect.GeometryMaskCornerRadii.IsSet())
+	{
+		const FVector4& Radii = Effect.GeometryMaskCornerRadii.GetValue();
+		Vectors.Emplace(TEXT("MaskCornerRadiiTop"), FLinearColor(Radii.X, Radii.Y, 0.0f, 0.0f));
+		Vectors.Emplace(TEXT("MaskCornerRadiiBottom"), FLinearColor(Radii.Z, Radii.W, 0.0f, 0.0f));
+	}
+	bool bMatches = true;
+	for (const auto& Parameter : Scalars)
+	{
+		float Value = 0.0f;
+		bMatches &= Parent->GetScalarParameterValue(FMaterialParameterInfo(Parameter.Key), Value) && Value == Parameter.Value;
+	}
+	for (const auto& Parameter : Vectors)
+	{
+		FLinearColor Value;
+		bMatches &= Parent->GetVectorParameterValue(FMaterialParameterInfo(Parameter.Key), Value) && Value == Parameter.Value;
+	}
+	if (bMatches) return Parent;
+
+	// Parameter identity uses values, not process-local FName indices or rounded dimensions.
+	TArray<uint8> Identity;
+	FMemoryWriter Writer(Identity);
+	FString ParentPath = Parent->GetPathName();
+	Writer << ParentPath;
+	int32 ScalarCount = Scalars.Num(), VectorCount = Vectors.Num();
+	Writer << ScalarCount << VectorCount;
+	for (auto& Parameter : Scalars)
+	{
+		FString Name = Parameter.Key.ToString();
+		Writer << Name << Parameter.Value;
+	}
+	for (auto& Parameter : Vectors)
+	{
+		FString Name = Parameter.Key.ToString();
+		Writer << Name << Parameter.Value;
+	}
+	FSHAHash Hash;
+	FSHA1::HashBuffer(Identity.GetData(), Identity.Num(), Hash.Hash);
+	const FString Name = TEXT("D2U_Retainer_") + Hash.ToString();
+	const FString PackageName = TEXT("/Game/Design2UMG/GeneratedMaterials/RetainerInstances/") + Name;
+	const FString ObjectPath = PackageName + TEXT(".") + Name;
+	if (UMaterialInstanceConstant* Existing = FindObject<UMaterialInstanceConstant>(nullptr, *ObjectPath))
+		return Existing;
+	if (FPackageName::DoesPackageExist(PackageName))
+		return LoadObject<UMaterialInstanceConstant>(nullptr, *ObjectPath);
+
+	TStrongObjectPtr<UMaterialInstanceConstant> Instance(NewObject<UMaterialInstanceConstant>(
+		CreatePackage(*PackageName), *Name, RF_Public | RF_Standalone));
+	if (!Instance) return nullptr;
+	Instance->SetParentEditorOnly(Parent, false);
+	for (const auto& Parameter : Scalars)
+		Instance->SetScalarParameterValueEditorOnly(FMaterialParameterInfo(Parameter.Key), Parameter.Value);
+	for (const auto& Parameter : Vectors)
+		Instance->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(Parameter.Key), Parameter.Value);
+	Instance->PostEditChange();
+	Design2UMGMaterialAccess::CacheShadersForRendering(*Instance);
+	Design2UMGMaterialAccess::WaitForCompilation(*Instance);
+	const FString FileName = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FileName), true);
+	if (!SaveGeneratedMaterialAsset(Instance.Get(), FileName)) return nullptr;
+	return Instance.Get();
+}
+
+bool Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(
 	FUMGWidgetNode& Root, TArray<TStrongObjectPtr<UMaterialInterface>>& Materials, FString& OutError)
 {
 	for (FUMGWidgetNode& Child : Root.Children)
 	{
-		if (!PrepareGeometryMaskMaterials(Child, Materials, OutError)) return false;
+		if (!PrepareRetainerEffectMaterials(Child, Materials, OutError)) return false;
 	}
 	FUMGEffectData& Effect = Root.Effect;
-	if (Effect.EffectMaterial.Get(FString()) != UMGPropertyKeys::RetainerGeometryMaskEffectRef) return true;
-	UMaterialInterface* Material = Effect.GeometryMaskShape.IsSet() && Effect.GeometryMaskSize.IsSet() && Effect.GeometryMaskCornerRadii.IsSet()
-		? GetOrCreateGeometryMaskRetainerMaterial(Effect.GeometryMaskShape.GetValue(), Effect.GeometryMaskSize.GetValue(), Effect.GeometryMaskCornerRadii.GetValue())
-		: GetOrCreateGeometryMaskRetainerMaterial();
+	if (!Effect.EffectMaterial.IsSet() || Effect.EffectMaterial.GetValue().IsEmpty()) return true;
+	UMaterialInterface* Material = GetOrCreateRetainerEffectMaterial(Effect);
 	if (!Material)
 	{
-		OutError = FString::Printf(TEXT("Failed to create or persist geometry mask material for '%s'"), *Root.Name);
+		OutError = FString::Printf(TEXT("Failed to create or persist retainer effect material for '%s'"), *Root.Name);
 		return false;
 	}
 	Materials.Emplace(Material);

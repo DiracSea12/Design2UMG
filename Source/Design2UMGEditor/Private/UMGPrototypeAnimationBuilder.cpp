@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGPrototypeAnimationBuilder.h"
+#include "UObject/Package.h"
 #include "Misc/EngineVersionComparison.h"
 
 #include "Design2UMGLog.h"
@@ -13,6 +14,7 @@
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Channels/MovieSceneFloatChannel.h"
+#include "Channels/MovieSceneChannelProxy.h"
 #include "Components/WidgetSwitcher.h"
 #include "MovieScene.h"
 #include "Sections/MovieSceneFloatSection.h"
@@ -277,7 +279,9 @@ namespace
 			OpacityTrack->SetDisplayName(FText::FromString(TEXT("Render Opacity")));
 			UMovieSceneFloatSection* OpacitySection = Cast<UMovieSceneFloatSection>(OpacityTrack->CreateNewSection());
 			OpacitySection->SetRange(TRange<FFrameNumber>(0, EndFrame.Value + 1));
-			AddPrototypeFloatKeys(OpacitySection->GetChannel(), Animation->MovieScene, DurationSeconds, StartOpacity, EndOpacity, EasingType);
+			FMovieSceneFloatChannel* OpacityChannel = OpacitySection->GetChannelProxy().GetChannel<FMovieSceneFloatChannel>(0);
+			check(OpacityChannel);
+			AddPrototypeFloatKeys(*OpacityChannel, Animation->MovieScene, DurationSeconds, StartOpacity, EndOpacity, EasingType);
 			OpacityTrack->AddSection(*OpacitySection);
 		}
 

@@ -1,11 +1,17 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGMaterialAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Engine/TextureRenderTarget2D.h"
 #include "ImageUtils.h"
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+#include "MaterialShared.h"
+#else
 #include "MaterialDomain.h"
+#endif
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
@@ -50,17 +56,17 @@ bool FNativeTextMaterialRuntimeTest::RunTest(const FString&)
     Material->MaterialDomain = MD_UI;
     Material->BlendMode = BLEND_Translucent;
     UMaterialExpressionTextureCoordinate* UV = NewObject<UMaterialExpressionTextureCoordinate>(Material.Get());
-    Material->GetExpressionCollection().AddExpression(UV);
+    Design2UMGMaterialAccess::AddExpression(*Material, *UV);
     UMaterialExpressionComponentMask* Red = NewObject<UMaterialExpressionComponentMask>(Material.Get());
     Red->Input.Expression = UV;
     Red->R = true;
     Red->G = Red->B = Red->A = false;
-    Material->GetExpressionCollection().AddExpression(Red);
-    Material->GetEditorOnlyData()->EmissiveColor.Expression = Red;
+    Design2UMGMaterialAccess::AddExpression(*Material, *Red);
+    Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = Red;
     Material->PreEditChange(nullptr);
     Material->PostEditChange();
-    Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-    Material->EnsureIsComplete();
+    Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
+    Design2UMGMaterialAccess::WaitForCompilation(*Material);
 
     const FString Directory = FPaths::ProjectSavedDir() / TEXT("Design2UMG/NativeTextProbe");
     IFileManager::Get().MakeDirectory(*Directory, true);
@@ -118,28 +124,28 @@ UMaterial* CreateNativeRetainedTextMaterial(UObject* Outer, bool bPreservePaint 
     Material->MaterialDomain = MD_UI;
     Material->BlendMode = BLEND_AlphaComposite;
     auto* UV = NewObject<UMaterialExpressionTextureCoordinate>(Material);
-    Material->GetExpressionCollection().AddExpression(UV);
+    Design2UMGMaterialAccess::AddExpression(*Material, *UV);
     auto* Red = NewObject<UMaterialExpressionComponentMask>(Material);
     Red->Input.Expression = UV;
     Red->R = true;
     Red->G = Red->B = Red->A = false;
-    Material->GetExpressionCollection().AddExpression(Red);
+    Design2UMGMaterialAccess::AddExpression(*Material, *Red);
     auto* Texture = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
     Texture->ParameterName = TEXT("Texture");
     Texture->Texture = LoadObject<UTexture>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"));
     if (!Texture->Texture) return nullptr;
     Texture->SamplerType = SAMPLERTYPE_Color;
-    Material->GetExpressionCollection().AddExpression(Texture);
+    Design2UMGMaterialAccess::AddExpression(*Material, *Texture);
     auto* Multiply = NewObject<UMaterialExpressionMultiply>(Material);
     Multiply->A.Expression = Red;
     Multiply->B.Connect(4, Texture); // Texture sample alpha; premultiplied output.
-    Material->GetExpressionCollection().AddExpression(Multiply);
-    Material->GetEditorOnlyData()->EmissiveColor.Expression = bPreservePaint ? static_cast<UMaterialExpression*>(Texture) : Multiply;
-    Material->GetEditorOnlyData()->Opacity.Connect(4, Texture);
+    Design2UMGMaterialAccess::AddExpression(*Material, *Multiply);
+    Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = bPreservePaint ? static_cast<UMaterialExpression*>(Texture) : Multiply;
+    Material->GetExpressionInputForProperty(MP_Opacity)[0].Connect(4, Texture);
     Material->PreEditChange(nullptr);
     Material->PostEditChange();
-    Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-    Material->EnsureIsComplete();
+    Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
+    Design2UMGMaterialAccess::WaitForCompilation(*Material);
 
     return Material;
 }
@@ -229,7 +235,7 @@ bool RenderNativeTextProbeAsset(UWidgetBlueprint* Blueprint, TArray<FColor>& Pix
     {
         if (UMaterialInstanceDynamic* Effect = Retainer->GetEffectMaterial())
         {
-            Effect->GetMaterial()->EnsureIsComplete();
+            Design2UMGMaterialAccess::WaitForCompilation(*Effect->GetMaterial());
             Effect->GetMaterial()->RecacheUniformExpressions(true);
         }
     }

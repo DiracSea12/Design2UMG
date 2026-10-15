@@ -30,8 +30,10 @@ METRIC_FIELDS = (
 METRIC_EPSILON = 1e-9
 DEFAULT_PIXEL_TOLERANCE = 6
 CACHE_FILENAME = "_admissible_best_cache.json"
-CACHE_VERSION = 3
+CACHE_VERSION = 6
 EVIDENCE_EPOCH_FIELDS = (
+    "engine_version",
+    "rhi_backend",
     "source_design_artifact_hash",
     "reference_image_hash",
 )
@@ -43,6 +45,8 @@ def evidence_epoch_identity(source_input: dict) -> dict:
 
 def same_evidence_epoch(left: dict, right: dict) -> bool:
     return all(left.get(field) and left.get(field) == right.get(field) for field in EVIDENCE_EPOCH_FIELDS)
+
+
 def resolve_admissible_best_manifest(
     automation_root: Path,
     *,
@@ -53,6 +57,8 @@ def resolve_admissible_best_manifest(
     expected_names = set(expected_case_names)
     if not expected_names:
         raise ValueError("Historical validation requires a nonempty discovered case set")
+    if load_baseline_anchor(automation_root)[0] is None:
+        raise ValueError(f"Historical validation requires an accepted baseline anchor: {automation_root}")
 
     output_path = output_path or (automation_root / "_admissible_best_latest.json")
     manifest = rebuild_historical_best_manifest(automation_root)
@@ -68,6 +74,44 @@ def resolve_admissible_best_manifest(
     return output_path, manifest, "dynamic_history"
 
 
+def baseline_identity_digest(root: Path) -> str:
+    """Bind case identities and the runtime logs used to interpret them."""
+    scope = load_json(root / "run_scope.json")
+    names = scope.get("case_names")
+    if not isinstance(names, list) or not names or any(
+        not isinstance(name, str) or not name or name in (".", "..") or Path(name).name != name for name in names
+    ) or len(set(names)) != len(names):
+        raise ValueError(f"Invalid accepted baseline case scope: {root}")
+    reports = {}
+    logs = {}
+
+    def digest(path: Path) -> str:
+        result = hashlib.sha256()
+        try:
+            with path.open("rb") as file:
+                for block in iter(lambda: file.read(1024 * 1024), b""):
+                    result.update(block)
+        except OSError as exc:
+            raise ValueError(f"Accepted baseline identity evidence unreadable: {path}") from exc
+        return result.hexdigest()
+
+    for name in sorted(names):
+        path = root / name / "compare_report.json"
+        reports[name] = digest(path)
+        report = load_json(path)
+        chain = report.get("render_chain") or {}
+        paths = [(chain.get(mode) or {}).get("log_path") for mode in ("generation", "asset_render")]
+        paths = [Path(path).resolve() for path in paths if path]
+        if not paths:
+            raise ValueError(f"Accepted baseline runtime identity evidence missing: {path}")
+        for log in paths:
+            key = log.as_posix()
+            if key not in logs:
+                logs[key] = digest(log)
+    payload = json.dumps({"case_reports": reports, "runtime_logs": logs}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def load_baseline_anchor(automation_root: Path) -> tuple[Path | None, float]:
     """An explicit user acceptance starts a new history window, not a moving baseline."""
     pointer_path = automation_root / "_baseline.json"
@@ -75,12 +119,17 @@ def load_baseline_anchor(automation_root: Path) -> tuple[Path | None, float]:
         return None, 0.0
     pointer = load_json(pointer_path)
     name = pointer.get("run")
-    if pointer.get("schema") != 1 or not isinstance(name, str) or Path(name).name != name:
+    if pointer.get("schema") != 1 or not isinstance(name, str) or not name or name in (".", "..") or Path(name).name != name:
         raise ValueError(f"Invalid baseline pointer: {pointer_path}")
     root = automation_root / name
     for filename, field in (("summary.json", "summary_sha256"), ("run_scope.json", "scope_sha256")):
         if hashlib.sha256((root / filename).read_bytes()).hexdigest() != pointer.get(field):
             raise ValueError(f"Accepted baseline evidence changed: {root / filename}")
+    identity_digest = pointer.get("identity_evidence_sha256")
+    if not isinstance(identity_digest, str) or len(identity_digest) != 64:
+        raise ValueError(f"Accepted baseline identity binding missing: {pointer_path}")
+    if baseline_identity_digest(root) != identity_digest:
+        raise ValueError(f"Accepted baseline identity evidence changed: {root}")
     return root, float(pointer["accepted_at_unix"])
 
 
@@ -201,6 +250,16 @@ def classify_summary_admissibility(run_root: Path, summary: dict, *, accepted_ba
     if isinstance(completeness, dict) and bool(completeness.get("blocked")):
         return False, "summary_completeness_blocked"
 
+    editor_process = summary.get("editor_process") or {}
+    if isinstance(editor_process, dict):
+        failed = editor_process.get("failed")
+        if isinstance(failed, int) and failed > 0:
+            return False, "summary_editor_process_failed"
+
+    total = summary.get("total")
+    if accepted_baseline and isinstance(total, int) and total > 0:
+        return True, "user_accepted_baseline"
+
     no_regression = summary.get("no_regression") or {}
     if isinstance(no_regression, dict):
         no_regression_available = no_regression.get("available")
@@ -214,12 +273,9 @@ def classify_summary_admissibility(run_root: Path, summary: dict, *, accepted_ba
             return False, "summary_no_regression_failed"
 
     historical_validation = load_historical_validation(run_root)
-    total = summary.get("total")
     if (not isinstance(total, int) or total <= 0 or not isinstance(no_regression, dict)
             or no_regression.get("available") != total or no_regression.get("failed") != 0):
         return False, "summary_no_regression_unavailable"
-    if accepted_baseline:
-        return True, "user_accepted_baseline"
     if historical_validation is None:
         return False, "historical_validation_unavailable"
     if historical_validation is not None:
@@ -544,6 +600,7 @@ def rebuild_historical_best_manifest(automation_root: Path) -> dict:
     manifest = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "automation_root": str(automation_root),
+        "baseline_anchor": load_json(automation_root / "_baseline.json") if (automation_root / "_baseline.json").is_file() else None,
         "admissible_run_count": len(source_runs),
         "case_count": len(best_cases),
         "runs": source_runs,

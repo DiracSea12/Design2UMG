@@ -2,9 +2,27 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignTypeMapper.h"
+#include "Design2UMGFontAccess.h"
 #include "FontResolver.h"
+#include "Engine/FontFace.h"
+#include "UObject/Package.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFontAssetRegistryAccessTest,
+	"Design2UMG.FontResolver.AssetRegistryAccess",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFontAssetRegistryAccessTest::RunTest(const FString& Parameters)
+{
+	UFont* Font = NewObject<UFont>(GetTransientPackage());
+	const FAssetData FontAsset(Font);
+	const FAssetData FaceAsset(NewObject<UFontFace>(GetTransientPackage()));
+	TestTrue(TEXT("Font assets match the native class key"), Design2UMGFontAccess::IsFontAsset(FontAsset));
+	TestFalse(TEXT("Font faces are not font assets"), Design2UMGFontAccess::IsFontAsset(FaceAsset));
+	TestEqual(TEXT("Asset paths preserve the native object identity"),
+		FontAsset.ToSoftObjectPath().ToString(), Font->GetPathName());
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFontResolverIconAliasTableTest,
 	"Design2UMG.FontResolver.IconAliasTable",

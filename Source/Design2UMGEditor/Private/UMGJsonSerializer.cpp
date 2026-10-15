@@ -464,6 +464,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeShadowPayload(const FUMGSha
 			LayerObject->SetStringField(UMGJsonKeys::Offset, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Layer.Offset));
 			LayerObject->SetNumberField(UMGJsonKeys::Blur, Layer.Blur);
 			LayerObject->SetNumberField(UMGJsonKeys::Spread, Layer.Spread);
+			LayerObject->SetBoolField(UMGJsonKeys::ShowShadowBehindNode, Layer.bShowShadowBehindNode);
 			LayerObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Layer.Color));
 			BoxShadowArray.Add(MakeShared<FJsonValueObject>(LayerObject));
 		}

@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Design2UMGAutomationTestAdapter.h"
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "PreBuildResourceNormalizer.h"
@@ -190,7 +193,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanonicalImageInputBoundaryTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FCanonicalImageInputBoundaryTest::RunTest(const FString&)
 {
-	AddExpectedMessagePlain(TEXT("Invalid Brush.Image.Transform"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
+	ExpectedLogMessages.Expect(TEXT("Invalid Brush.Image.Transform"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 1);
 	const FString Input = TEXT(R"({"RootWidget":{"Type":"Overlay","Name":"Root","Children":[
 		{"Type":"Image","Name":"Canonical","Brush":{"Image":{"TexturePath":"/Game/Tex","Mode":"Tile","Transform":".5,0,.25,0,.75,.1"}},"WidgetStyle":{"WidthOverride":120}},
 		{"Type":"Image","Name":"RejectedCanonical","Brush":{"Image":{"Transform":"invalid"}}},
@@ -250,14 +254,14 @@ bool FTypedRichTextRowsBoundaryTest::RunTest(const FString&)
 	TestFalse(TEXT("Empty color retains inheritance semantics"), Row->Color.IsSet());
 	URichTextBlock* Widget = NewObject<URichTextBlock>(GetTransientPackage());
 	FTextBlockStyle Default = FTextBlockStyle::GetDefault();
-	Default.Font.Size = 17.0f;
+	Default.Font.Size = Design2UMGFontAccess::ToNativeFontSize(17.0f);
 	Widget->SetDefaultTextStyle(Default);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
-	UDataTable* Table = Widget->GetTextStyleSet();
+	UDataTable* Table = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*Widget);
 	if (!TestNotNull(TEXT("Typed rows materialize a style table"), Table)) return false;
 	const FRichTextStyleRow* Applied = Table->FindRow<FRichTextStyleRow>(TEXT("row"), TEXT("TypedRows"));
 	if (!TestNotNull(TEXT("Typed row is applied"), Applied)) return false;
-	TestEqual(TEXT("Invalid zero size does not replace the inherited point size"), Applied->TextStyle.Font.Size, 17.0f);
+	TestEqual(TEXT("Invalid zero size does not replace the inherited point size"), static_cast<float>(Applied->TextStyle.Font.Size), 17.0f);
 	TestTrue(TEXT("A hyperlink still supplies underline decoration"), Applied->TextStyle.UnderlineBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
 	TestTrue(TEXT("Strikethrough remains independent"), Applied->TextStyle.StrikeBrush.DrawAs != ESlateBrushDrawType::NoDrawType);
 	const FUMGWidgetNode Invalid = ParseRows(TEXT("not-json"));
@@ -295,13 +299,14 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedShapeNumericInputTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTypedShapeNumericInputTest::RunTest(const FString&)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	using FShape = FUMGVisualBrushData::FShapeData;
 	const TCHAR* FloatFields[] = { TEXT("Thickness"), TEXT("CornerRadius"), TEXT("BlurPadding") };
 	const TCHAR* InvalidFloats[] = { TEXT("1e39"), TEXT("-1e39"), TEXT("true"), TEXT("false"), TEXT("null"), TEXT("\"0.25\""), TEXT("[]"), TEXT("{}") };
 	for (const TCHAR* Field : FloatFields)
 	{
-		AddExpectedMessagePlain(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
-			ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidFloats));
+		ExpectedLogMessages.Expect(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
+			ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidFloats));
 		for (const TCHAR* Value : InvalidFloats)
 		{
 			FShape Expected;
@@ -313,8 +318,8 @@ bool FTypedShapeNumericInputTest::RunTest(const FString&)
 	const TCHAR* InvalidInts[] = { TEXT("2147483648"), TEXT("-2147483649"), TEXT("1e39"), TEXT("true"), TEXT("false"), TEXT("null"), TEXT("\"2\""), TEXT("[]"), TEXT("{}") };
 	for (const TCHAR* Field : IntFields)
 	{
-		AddExpectedMessagePlain(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
-			ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidInts));
+		ExpectedLogMessages.Expect(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
+			ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidInts));
 		for (const TCHAR* Value : InvalidInts)
 		{
 			FShape Expected;
@@ -338,17 +343,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTypedShapeAggregateInputTest,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FTypedShapeAggregateInputTest::RunTest(const FString&)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	using FShape = FUMGVisualBrushData::FShapeData;
 	const TCHAR* BadTypes[] = { TEXT("null"), TEXT("[]"), TEXT("true"), TEXT("false"), TEXT("42"), TEXT("\"text\"") };
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Shape;"), ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(BadTypes));
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Brush.Shape;"), ELogVerbosity::Warning,
+		Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(BadTypes));
 	for (const TCHAR* Value : BadTypes) CheckShapeInput(*this, Value, {});
 	CheckShapeInput(*this, TEXT("{}"), FShape{});
 
 	const TCHAR* InvalidRadii[] = { TEXT("null"), TEXT("{}"), TEXT("false"), TEXT("1"), TEXT("\"0,0,0,0\""), TEXT("[]"), TEXT("[0,1,2]"), TEXT("[0,1,2,3,4]") };
 	const TCHAR* InvalidComponents[] = { TEXT("true"), TEXT("false"), TEXT("null"), TEXT("\"0.5\""), TEXT("[]"), TEXT("{}"), TEXT("1e39"), TEXT("-1e39") };
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Brush.Shape.CornerRadii;"), ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(InvalidRadii) + 4 * UE_ARRAY_COUNT(InvalidComponents));
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Brush.Shape.CornerRadii;"), ELogVerbosity::Warning,
+		Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(InvalidRadii) + 4 * UE_ARRAY_COUNT(InvalidComponents));
 	FShape Expected;
 	Expected.CornerRadius = 0.5f;
 	for (const TCHAR* Value : InvalidRadii)
@@ -364,8 +370,8 @@ bool FTypedShapeAggregateInputTest::RunTest(const FString&)
 	}
 	for (const TCHAR* Field : { TEXT("Color"), TEXT("StripeColor") })
 	{
-		AddExpectedMessagePlain(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
-			ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, UE_ARRAY_COUNT(BadTypes) - 1);
+		ExpectedLogMessages.Expect(FString::Printf(TEXT("FUMGJsonParser: Invalid Brush.Shape.%s;"), Field),
+			ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, UE_ARRAY_COUNT(BadTypes) - 1);
 		for (int32 Index = 0; Index < UE_ARRAY_COUNT(BadTypes) - 1; ++Index)
 			CheckShapeInput(*this, FString::Printf(TEXT("{\"%s\":%s,\"CornerRadius\":0.5}"), Field, BadTypes[Index]), Expected);
 	}

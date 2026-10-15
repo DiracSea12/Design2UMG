@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/Build.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -301,7 +302,7 @@ bool FPreviewResourceLifetimeSuccessfulPreviewStillMaterializesTest::RunTest(con
 	UImage* Image = FindFirstImage(PreviewRoot);
 	TestNotNull(TEXT("Gradient Image exists in the preview tree"), Image);
 	TestTrue(TEXT("Gradient Image keeps its generated texture resource"),
-		Image != nullptr && Image->GetBrush().GetResourceObject() != nullptr);
+		Image != nullptr && Design2UMGWidgetPropertyAccess::GetBrush(*Image).GetResourceObject() != nullptr);
 
 	// On success the widget owns the texture, so this attempt's transient roots are dropped.
 	const TArray<UTexture2D*> RootedAfter = FProceduralShapeGenerator::GetRootedTextureSnapshot();
@@ -379,7 +380,7 @@ bool FPreviewResourceLifetimeFailureDoesNotDisturbAnotherLivePreviewTest::RunTes
 	TestNotNull(TEXT("Preview A widget exists"), WidgetA);
 	UImage* ImageA = WidgetA && WidgetA->WidgetTree ? FindFirstImage(WidgetA->WidgetTree->RootWidget) : nullptr;
 	TestNotNull(TEXT("Preview A gradient Image exists"), ImageA);
-	UObject* TextureA = ImageA ? ImageA->GetBrush().GetResourceObject() : nullptr;
+	UObject* TextureA = ImageA ? Design2UMGWidgetPropertyAccess::GetBrush(*ImageA).GetResourceObject() : nullptr;
 	TestNotNull(TEXT("Preview A keeps its generated texture"), TextureA);
 
 	const TArray<UTexture2D*> RootedBeforeB = FProceduralShapeGenerator::GetRootedTextureSnapshot();
@@ -398,7 +399,7 @@ bool FPreviewResourceLifetimeFailureDoesNotDisturbAnotherLivePreviewTest::RunTes
 	UWidget* RootWidgetA = (WidgetA && WidgetA->WidgetTree) ? WidgetA->WidgetTree->RootWidget : nullptr;
 	TestNotNull(TEXT("Preview A root widget is still set"), RootWidgetA);
 	TestTrue(TEXT("Preview A still references the same generated texture"),
-		ImageA != nullptr && ImageA->GetBrush().GetResourceObject() == TextureA);
+		ImageA != nullptr && Design2UMGWidgetPropertyAccess::GetBrush(*ImageA).GetResourceObject() == TextureA);
 	TestTrue(TEXT("Preview A texture was not marked garbage"),
 		TextureA != nullptr && !TextureA->IsUnreachable());
 	return true;
@@ -446,7 +447,7 @@ bool FPreviewImageAllocatesOnceTest::RunTest(const FString& Parameters)
 		TestEqual(Mode == 0 ? TEXT("Gradient allocates once") : TEXT("Local or preview-map affine crop allocates once"), Created.Num(), 1);
 		if (Image && Created.Num() == 1)
 		{
-			TestEqual(TEXT("The sole allocation is the bound texture"), Image->GetBrush().GetResourceObject(), static_cast<UObject*>(Created[0]));
+			TestEqual(TEXT("The sole allocation is the bound texture"), Design2UMGWidgetPropertyAccess::GetBrush(*Image).GetResourceObject(), static_cast<UObject*>(Created[0]));
 		}
 	}
 	return true;

@@ -14,6 +14,35 @@ namespace PenParser
 {
 namespace
 {
+	FString FoldPaintOpacityIntoResolvedColor(const FString& ResolvedColor, const float PaintOpacity)
+	{
+		if (PaintOpacity == 1.0f)
+		{
+			return ResolvedColor;
+		}
+
+		const FString Trimmed = ResolvedColor.TrimStartAndEnd();
+		const FString ExpandedHex = DesignColorUtils::ExpandShortHexLiteral(Trimmed);
+		FColor Color;
+		if ((ExpandedHex.Len() == 7 || ExpandedHex.Len() == 9)
+			&& DesignColorUtils::IsHexColorLiteral(ExpandedHex))
+		{
+			Color = DesignColorUtils::ParseHexColor(ExpandedHex);
+		}
+		else if (const FLinearColor* NamedColor = DesignColorUtils::GetNamedColors().Find(Trimmed.ToLower()))
+		{
+			Color = NamedColor->ToFColor(true);
+		}
+		else
+		{
+			return ResolvedColor;
+		}
+
+		Color.A = static_cast<uint8>(FMath::Clamp(
+			FMath::RoundToInt(static_cast<float>(Color.A) * PaintOpacity), 0, 255));
+		return DesignColorUtils::FormatLiteral(Color);
+	}
+
 	// Both Pencil gradient flavors parse stop colors the same way; they differ only
 	// in how a missing stop position is handled, which stays at the call sites.
 	FDesignGradientStop ParseGradientStopColor(const TSharedPtr<FJsonObject>& StopObj, const FDesignVariableResolver& Resolver)
@@ -402,7 +431,8 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		{
 			if (FDesignVariableResolver::IsVariableRef(ColorStr))
 				Result.SourceVar = ColorStr;
-			Result.SolidColor = Resolver.ResolveColor(ColorStr);
+			Result.SolidColor = FoldPaintOpacityIntoResolvedColor(
+				Resolver.ResolveColor(ColorStr), Result.Opacity);
 		}
 		return Result;
 	}
@@ -466,6 +496,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				if (!StopObj.IsValid())
 					continue;
 				FDesignGradientStop Stop = ParseGradientStopColor(StopObj, Resolver);
+				Stop.Color = FoldPaintOpacityIntoResolvedColor(Stop.Color, Result.Opacity);
 				TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position);
 				Result.Gradient.Colors.Add(Stop);
 			}
@@ -521,6 +552,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 					continue;
 
 				FDesignGradientStop Stop = ParseGradientStopColor(StopObj, Resolver);
+				Stop.Color = FoldPaintOpacityIntoResolvedColor(Stop.Color, Result.Opacity);
 				if (!TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position))
 					Stop.Position = Result.Gradient.Colors.Num() > 0 ? 1.0f : 0.0f;
 				Result.Gradient.Colors.Add(Stop);

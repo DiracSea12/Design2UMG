@@ -264,6 +264,8 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	Border.Bounds.H = 48.0f;
 	Border.Brush.BrushColor = FLinearColor::Transparent;
 	Border.WidgetStyle.Padding = FMargin(8.0f);
+	FUMGBoxShadowLayerData& BoxShadow = Border.Shadow.BoxShadows.AddDefaulted_GetRef();
+	BoxShadow.Spread = 3.0f;
 
 	FUMGWidgetNode Content;
 	Content.Type = TEXT("HorizontalBox");
@@ -272,6 +274,11 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	Border.Children.Add(MoveTemp(Content));
 
 	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
+	TestEqual(TEXT("Multi-fill overlay owns the node box shadow"), Wrapped.Shadow.BoxShadows.Num(), 1);
+	if (Wrapped.Shadow.BoxShadows.Num() == 1)
+	{
+		TestEqual(TEXT("Multi-fill overlay preserves box-shadow data"), Wrapped.Shadow.BoxShadows[0].Spread, 3.0f);
+	}
 	TestEqual(TEXT("Padded multi-fill keeps paint layers plus Border carrier"), Wrapped.Children.Num(), 3);
 	if (Wrapped.Children.Num() != 3)
 	{
@@ -279,6 +286,7 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	}
 	TestEqual(TEXT("Padding remains owned by Border"), Wrapped.Children[2].Type, FString(TEXT("Border")));
 	TestTrue(TEXT("Padding remains present"), Wrapped.Children[2].WidgetStyle.Padding.IsSet());
+	TestEqual(TEXT("Retained content does not duplicate the box shadow"), Wrapped.Children[2].Shadow.BoxShadows.Num(), 0);
 	return true;
 }
 

@@ -9,7 +9,8 @@ def main() -> None:
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         dynamic_manifest = {"cases": {"a": {}, "old": {}}}
-        with patch.object(history, "rebuild_historical_best_manifest", return_value=dynamic_manifest):
+        with patch.object(history, "rebuild_historical_best_manifest", return_value=dynamic_manifest), \
+                patch.object(history, "load_baseline_anchor", return_value=(root / "baseline", 0)):
             output, manifest, source = history.resolve_admissible_best_manifest(
                 root, expected_case_names={"a", "new"}
             )

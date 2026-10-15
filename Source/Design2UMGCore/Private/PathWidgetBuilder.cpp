@@ -4,7 +4,6 @@
 
 #include "Design2UMGLog.h"
 #include "DesignTypeMapper.h"
-#include "ImageFillUtils.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetTypes.h"
 
@@ -147,7 +146,7 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	{
 		Widget.Type = UMGWidgetTypes::Image;
 		Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
-		ImageFillUtils::ApplyImageFillProperties(Widget, PrimaryFill.Image);
+		// Shared visual mapping applies the image paint once.
 		ApplyPathSizeOverrides(Widget, Node);
 		return Widget;
 	}

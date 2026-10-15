@@ -51,16 +51,17 @@ The reload gate's `--run-root` mode derives assets from that same manifest, laun
 ## Low-cost checks and CI
 
 ```powershell
-python -m pip install Pillow
+python -m pip install -r Tools/requirements-validation.txt
 python Tools/run_validation_selftests.py
 pwsh -NoProfile -File Tools/Tests/Test-ValidationProcessIsolation.ps1
+python Tools/Tests/Test-ReleaseContracts.py
 npm --prefix Tools/FigmaExporter ci
 npm --prefix Tools/FigmaExporter test
 ```
 
 The Python runner compiles the tooling and runs every `design2umg_*_selftest.py`, failing on the first failure. The exporter uses its committed lockfile, compiles TypeScript and runs its Node tests. Public CI uses these same entry points. These tests generate small synthetic fixtures; they do not need or upload any user's design corpus.
 
-UE automation remains available through `Run-Design2UMGAutomationTests.ps1`. Full private visual regression is separate from GitHub-hosted checks and from the self-hosted packaged-plugin tests; neither a badge nor a zero-case scan is full visual evidence.
+UE automation remains available through `Run-Design2UMGAutomationTests.ps1`. Full private visual regression is separate from GitHub-hosted checks and from the self-hosted package compilation and installed-plugin tests; neither a badge nor a zero-case scan is full visual evidence.
 
 ## Snapshot tools and release boundaries
 

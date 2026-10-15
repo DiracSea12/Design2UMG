@@ -105,7 +105,14 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		Transition.Type = Source.Type.ToUpper();
 		Transition.Direction = Source.Direction.ToUpper();
 		Transition.EasingType = Source.EasingType.ToUpper();
-		Transition.HasMatchLayers = Source.MatchLayers;
+		if (Source.MatchLayers.IsSet())
+		{
+			Transition.HasMatchLayers = Source.MatchLayers.GetValue();
+		}
+		else
+		{
+			Transition.HasMatchLayers.Reset();
+		}
 
 		if (Source.Duration.IsSet())
 		{

@@ -7,11 +7,16 @@ on:
     branches: [master, main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   repository-hygiene:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Verify required files exist
         run: |
@@ -40,8 +45,16 @@ jobs:
       - name: Run Python validation helper selftests
         run: |
           python -m pip install --upgrade pip
-          python -m pip install Pillow
+          python -m pip install -r Tools/requirements-validation.txt
           python Tools/run_validation_selftests.py
+
+      - name: Test release package and candidate identity contracts
+        run: |
+          python Tools/Tests/Test-ReleaseContracts.py
+          python Tools/Tests/Test-EnginePluginSelection.py
+          python Tools/Tests/Test-EngineEvidenceIdentity.py
+          python Tools/Tests/Test-EditorProcessEvidence.py
+          python Tools/Tests/Test-RenderEvidenceIdentity.py
 
       - name: Test validation process isolation
         shell: pwsh
@@ -62,6 +75,7 @@ jobs:
           npm test
 
   build-plugin:
+    needs: repository-hygiene
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, windows, ue5]
     timeout-minutes: 60
@@ -73,6 +87,40 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Verify candidate identity and rebuild installed editor plugin
+        run: |
+          foreach ($name in @('UE_ROOT', 'DESIGN2UMG_RUNTIME_PROJECT', 'DESIGN2UMG_EDITOR_TARGET')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) {
+              throw "Required runner variable missing: $name"
+            }
+          }
+          ./Tools/Release/Assert-CleanWorkspace.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Candidate workspace is not clean: $LASTEXITCODE" }
+          $installed = ./Tools/CI/Assert-CandidatePlugin.ps1 -SourceRoot $pwd `
+            -EngineRoot $env:UE_ROOT -ProjectFile $env:DESIGN2UMG_RUNTIME_PROJECT -PassThru
+          foreach ($directory in @('Binaries', 'Intermediate')) {
+            $output = [IO.Path]::GetFullPath((Join-Path $installed $directory))
+            $pluginPrefix = [IO.Path]::GetFullPath($installed).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+            if (-not $output.StartsWith($pluginPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Build output is outside the installed plugin: $output"
+            }
+            if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
+          }
+          $build = Join-Path $env:UE_ROOT 'Engine/Build/BatchFiles/Build.bat'
+          & $build $env:DESIGN2UMG_EDITOR_TARGET Win64 Development `
+            "-Project=$env:DESIGN2UMG_RUNTIME_PROJECT" `
+            -Module=Design2UMGCore -Module=Design2UMGEditor `
+            -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
+          if ($LASTEXITCODE -ne 0) { throw "Editor build failed: $LASTEXITCODE" }
+          foreach ($module in @('Core', 'Editor')) {
+            $binary = Join-Path $installed "Binaries/Win64/UnrealEditor-Design2UMG$module.dll"
+            if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
+              throw "Candidate module was not rebuilt: $binary"
+            }
+          }
 
       - name: Build plugin package with RunUAT
         run: |
@@ -85,15 +133,18 @@ jobs:
             throw "RunUAT not found at: $uat"
           }
 
+          $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
           & $uat BuildPlugin `
             -Plugin="$pwd\Design2UMG.uplugin" `
-            -Package="$pwd\dist\Design2UMG" `
+            -Package="$packageRoot" `
             -Rocket `
+            -TargetPlatforms=Win64 `
             -StrictIncludes
+          if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed: $LASTEXITCODE" }
 
       - name: Strip maintainer-only files from packaged plugin
         run: |
-          $packageRoot = Join-Path $pwd "dist\Design2UMG"
+          $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
           if (-not (Test-Path $packageRoot)) {
             throw "BuildPlugin package output not found: $packageRoot"
           }
@@ -105,7 +156,6 @@ jobs:
             ".claude",
             ".codex",
             ".vs",
-            "Intermediate",
             "Saved",
             "openspec",
             "PenDesigns",
@@ -114,7 +164,11 @@ jobs:
           )
 
           foreach ($relativePath in $maintainerOnlyPaths) {
-            $targetPath = Join-Path $packageRoot $relativePath
+            $boundary = [IO.Path]::GetFullPath($packageRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+            $targetPath = [IO.Path]::GetFullPath((Join-Path $packageRoot $relativePath))
+            if (-not $targetPath.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Cleanup path is outside package root: $targetPath"
+            }
             if (Test-Path $targetPath) {
               Remove-Item -LiteralPath $targetPath -Recurse -Force
             }
@@ -122,18 +176,21 @@ jobs:
 
       - name: Verify packaged plugin excludes maintainer-only files
         run: |
-          $packageRoot = Join-Path $pwd "dist\Design2UMG"
+          $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot $packageRoot -Mode Package
 
       - name: Run focused Design2UMG automation tests
-        # The self-hosted runner validates the engine-installed plugin copy at
-        # Engine/Plugins/Marketplace/Design2UMG (same commit as this checkout).
+        # The self-hosted runner validates the installed plugin copy at
+        # the unique installed location, after source comparison and editor rebuild.
         # The packaged plugin is exercised by the UAT BuildPlugin -StrictIncludes
         # compile above plus the package boundary assertion.
         run: |
+          ./Tools/CI/Assert-CandidatePlugin.ps1 -SourceRoot $pwd `
+            -EngineRoot $env:UE_ROOT -ProjectFile $env:DESIGN2UMG_RUNTIME_PROJECT
           $project = $env:DESIGN2UMG_RUNTIME_PROJECT
           $editor = Join-Path $env:UE_ROOT "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
           $artifactRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Automation-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $automationUserDir = Join-Path $artifactRoot ("UserState-" + [Guid]::NewGuid().ToString("N"))
 
           if (-not $project) {
             throw "DESIGN2UMG_RUNTIME_PROJECT is not set on runner. Point it to the maintainer runtime project."
@@ -149,6 +206,12 @@ jobs:
             [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Http"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.LocalSource"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Save"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.RejectedReplacement"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.RetryReplacement"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Pencil.RetryTickerLifecycle"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Notifications"; Mode = "RenderOffscreen" },
@@ -160,11 +223,18 @@ jobs:
             [pscustomobject]@{ Filter = "Design2UMG.Unit.ParserBudget"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.PreviewWindow"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Resources.GeneratedTextureBudget"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Resources.GeneratedTexture.AssetNameBudget"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.ComponentBlueprints.SameSourceReimport"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.ComponentReimportPersistence.Save"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.ComponentReimportPersistence.Reimport"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.SafeReimport.Resources.SameSourceEffects"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Preview.ResourceLifetime"; Mode = "RenderOffscreen" }
           )
           $validationFailures = [System.Collections.Generic.List[string]]::new()
+          $runIndex = 0
           foreach ($testRun in $testRuns) {
-            $safeName = $testRun.Filter -replace '[^A-Za-z0-9._-]', '-'
+            $runIndex++
+            $safeName = '{0:D2}-{1}' -f $runIndex, ($testRun.Filter -replace '[^A-Za-z0-9._-]', '-')
             $runRoot = Join-Path $artifactRoot $safeName
             $reportRoot = Join-Path $runRoot "report"
             $filterLogPath = Join-Path $runRoot "automation.log"
@@ -175,6 +245,7 @@ jobs:
             # argument arrays mangle ExecCmds when passed through &.
             $argumentLine = (@(
               ('"{0}"' -f $project),
+              ('"-UserDir={0}"' -f $automationUserDir),
               '-NoSplash',
               '-NoSound',
               '-nop4',
@@ -191,7 +262,7 @@ jobs:
               $argumentLine += ' -RenderOffscreen'
             }
 
-            $process = Start-Process -FilePath $editor -ArgumentList $argumentLine -PassThru
+            $process = Start-Process -FilePath $editor -ArgumentList $argumentLine -PassThru -WindowStyle Hidden
             Wait-Process -Id $process.Id
             $process.Refresh()
             $processExitCode = $process.ExitCode
@@ -234,10 +305,41 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Prepare versioned release candidate and checksum
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $plugin = Get-Content (Join-Path $root 'Design2UMG/Design2UMG.uplugin') -Raw | ConvertFrom-Json
+          $engine = Get-Content (Join-Path $env:UE_ROOT 'Engine/Build/Build.version') -Raw | ConvertFrom-Json
+          if ($plugin.VersionName -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw 'Unexpected plugin version' }
+          $engineVersion = "$($engine.MajorVersion).$($engine.MinorVersion).$($engine.PatchVersion)"
+          $name = "Design2UMG-$($plugin.VersionName)-UE$engineVersion-Win64.zip"
+          $archive = Join-Path $root $name
+          Compress-Archive -LiteralPath (Join-Path $root 'Design2UMG') -DestinationPath $archive
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          [IO.File]::WriteAllText((Join-Path $root 'SHA256SUMS.txt'), "$hash  $name`n", $utf8)
+          $evidence = [ordered]@{
+            commit = $env:GITHUB_SHA
+            workflow_run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            plugin_version = $plugin.VersionName
+            engine_version = $engineVersion
+            platform = 'Win64'
+            archive = $name
+            sha256 = $hash
+            packaged_plugin_compile = 'passed'
+            focused_automation = 'passed on source-matched, rebuilt installed plugin'
+            packaged_game_runtime = 'not executed by this workflow'
+            full_visual_regression = 'separate maintainer evidence required'
+          }
+          [IO.File]::WriteAllText((Join-Path $root 'candidate.json'), ($evidence | ConvertTo-Json), $utf8)
+
       - name: Upload packaged plugin artifact
         uses: actions/upload-artifact@v7
         with:
           name: Design2UMG-BuildPlugin-${{ github.sha }}
-          path: dist/Design2UMG
+          path: |
+            ${{ runner.temp }}/Design2UMG-Package-${{ github.run_id }}-${{ github.run_attempt }}/*.zip
+            ${{ runner.temp }}/Design2UMG-Package-${{ github.run_id }}-${{ github.run_attempt }}/candidate.json
+            ${{ runner.temp }}/Design2UMG-Package-${{ github.run_id }}-${{ github.run_attempt }}/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

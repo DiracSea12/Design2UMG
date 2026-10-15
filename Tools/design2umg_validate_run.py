@@ -12,6 +12,9 @@ from design2umg_verify_lib.case_metrics import (
 from design2umg_verify_lib.compatibility import evaluate_report_compatibility
 from design2umg_verify_lib.evidence_contract import collect_source_input
 from design2umg_verify_lib.evidence_contract import same_source_input
+from design2umg_verify_lib.evidence_contract import (
+    engine_version_from_evidence, rhi_backend_from_evidence, rhi_feature_level_from_evidence,
+)
 from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 
@@ -168,6 +171,9 @@ def evaluate_historical_best_identity(current_case: dict, best_case: dict) -> di
     current_source_signature = current_case.get("source_signature") or {}
     current_reference_signature = current_case.get("effective_reference_signature") or {}
     current_identity = {
+        "engine_version": engine_version_from_evidence(current_case),
+        "rhi_backend": rhi_backend_from_evidence(current_case),
+        "rhi_feature_level": rhi_feature_level_from_evidence(current_case),
         "source_signature.sha1": (current_source_signature.get("sha1") or "") if isinstance(current_source_signature, dict) else "",
         "effective_reference_signature.sha1": (
             (current_reference_signature.get("sha1") or "") if isinstance(current_reference_signature, dict) else ""
@@ -183,6 +189,9 @@ def evaluate_historical_best_identity(current_case: dict, best_case: dict) -> di
         if not isinstance(source_input, dict):
             source_input = {}
         historical_identity = {
+            "engine_version": engine_version_from_evidence(metric_source),
+            "rhi_backend": rhi_backend_from_evidence(metric_source),
+            "rhi_feature_level": rhi_feature_level_from_evidence(metric_source),
             "source_signature.sha1": source_input.get("source_design_artifact_hash") or "",
             "effective_reference_signature.sha1": source_input.get("reference_image_hash") or "",
         }
@@ -211,11 +220,17 @@ def select_case_evidence_epoch(current_case: dict, best_case: dict) -> dict:
     """Select this input's history, including an epoch revisited after another input."""
     source_hash = (current_case.get("source_signature") or {}).get("sha1")
     reference_hash = (current_case.get("effective_reference_signature") or {}).get("sha1")
-    if not source_hash or not reference_hash:
+    engine_version = engine_version_from_evidence(current_case)
+    rhi_backend = rhi_backend_from_evidence(current_case)
+    rhi_feature_level = rhi_feature_level_from_evidence(current_case)
+    if not source_hash or not reference_hash or not engine_version or not rhi_backend:
         return best_case
     sources = [source for source in best_case.get("admitted_sources", [])
                if (source.get("source_input") or {}).get("source_design_artifact_hash") == source_hash
-               and (source.get("source_input") or {}).get("reference_image_hash") == reference_hash]
+               and (source.get("source_input") or {}).get("reference_image_hash") == reference_hash
+               and engine_version_from_evidence(source) == engine_version
+               and rhi_backend_from_evidence(source) == rhi_backend
+               and rhi_feature_level_from_evidence(source) == rhi_feature_level]
     if not sources:
         return best_case
     selected = dict(best_case, admitted_sources=sources)
@@ -612,11 +627,21 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     append_blocked_reason(result, "current_evidence_identity_missing",
                                           f"{case_name} is missing source or reference identity; it cannot seed an input baseline.")
                     continue
-                if best_case is not None:
-                    best_case = select_case_evidence_epoch(current_case, best_case)
                 resolved_current_metrics = resolve_case_metrics(output_root, case_name, current_case)
                 current_report_path = Path(resolved_current_metrics.get("report_path", ""))
                 current_report = load_json(current_report_path) if current_report_path.is_file() else {}
+                current_case = dict(current_case, engine_version=engine_version_from_evidence(current_report),
+                                    rhi_backend=rhi_backend_from_evidence(current_report), report_path=str(current_report_path))
+                if not current_case["engine_version"]:
+                    append_blocked_reason(result, "engine_identity_unavailable",
+                                          f"{case_name} lacks an engine version bound to its runtime evidence.")
+                    continue
+                if not current_case["rhi_backend"]:
+                    append_blocked_reason(result, "rhi_identity_unavailable",
+                                          f"{case_name} lacks an RHI bound to its runtime evidence.")
+                    continue
+                if best_case is not None:
+                    best_case = select_case_evidence_epoch(current_case, best_case)
                 current_reference_authority = (
                     ((current_report.get("reference_context") or {}).get("reference_authority") or {})
                 )
@@ -663,6 +688,16 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     continue
 
                 identity = evaluate_historical_best_identity(current_case, best_case)
+                if any(not source["rhi_backend"] for source in identity["historical_best_sources"]):
+                    append_blocked_reason(result, "rhi_identity_unavailable",
+                                          f"{case_name} lacks an RHI bound to its historical evidence.")
+                    continue
+                if not identity["current"]["engine_version"] or any(
+                    not source["engine_version"] for source in identity["historical_best_sources"]
+                ):
+                    append_blocked_reason(result, "engine_identity_unavailable",
+                                          f"{case_name} lacks an engine version bound to its current or historical evidence.")
+                    continue
                 if not identity["compatible"]:
                     result["historical_best_identity_incompatible_cases"].append(
                         {

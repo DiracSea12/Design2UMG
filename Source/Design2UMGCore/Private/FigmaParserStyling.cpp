@@ -363,6 +363,7 @@ TArray<FDesignEffect> ParseEffects(const TArray<TSharedPtr<FJsonValue>>& Effects
 			Effect.Shadow.OffsetY = Offset.IsValid() ? GetNumber(Offset, TEXT("y")) : 0.0f;
 			Effect.Shadow.Blur = GetNumber(EffObj, TEXT("radius"));
 			Effect.Shadow.Spread = GetNumber(EffObj, TEXT("spread"));
+			Effect.Shadow.bShowShadowBehindNode = GetBool(EffObj, TEXT("showShadowBehindNode"), false);
 			const float ShadowOpacity = GetNumber(EffObj, TEXT("opacity"), 1.0);
 			Effect.Shadow.Color = ColorToHex(GetObject(EffObj, TEXT("color")), ShadowOpacity);
 		}

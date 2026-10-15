@@ -54,6 +54,10 @@ namespace
 			return ++PollCount >= CancelOnPoll;
 		}
 
+		virtual void Serialize(const TCHAR*, ELogVerbosity::Type, const FName&) override
+		{
+		}
+
 	private:
 		int32 CancelOnPoll = 0;
 		int32 PollCount = 0;

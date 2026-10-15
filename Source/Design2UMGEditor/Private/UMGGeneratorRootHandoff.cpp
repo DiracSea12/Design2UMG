@@ -21,8 +21,8 @@ namespace UMGGeneratorRootHandoff
 		Prepared.Root = WidgetData.RootWidget;
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 				Prepared.Root, Prepared.ErrorMessage)
-			|| !Design2UMGEffectMaterialBuilder::PrepareGeometryMaskMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage)
-			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage))
+			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage)
+			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage))
 		{
 			return Prepared;
 		}

@@ -2,6 +2,8 @@
 
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 
+#include "Design2UMGWidgetPropertyAccess.h"
+
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "DesignSchema.h"
 #include "DesignTreeBudget.h"
@@ -76,7 +78,8 @@ namespace Design2UMGAutomationStructureSnapshot
 				const FString& Kind,
 				const FString& TypeField,
 				const FString& TypeValue,
-				const FString& Identity = FString())
+				const FString& Identity = FString(),
+				const FString& Text = FString())
 			{
 				TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
 				Record->SetStringField(TEXT("path"), Path);
@@ -86,6 +89,10 @@ namespace Design2UMGAutomationStructureSnapshot
 				if (!Identity.IsEmpty())
 				{
 					Record->SetStringField(TEXT("id"), Identity);
+				}
+				if (!Text.IsEmpty())
+				{
+					Record->SetStringField(TEXT("text"), Text);
 				}
 				StructureNodes.Add(MoveTemp(Record));
 			}
@@ -538,7 +545,7 @@ namespace Design2UMGAutomationStructureSnapshot
 				return FString();
 			}
 
-			const FSlateFontInfo& FontInfo = TextBlock->GetFont();
+			const FSlateFontInfo& FontInfo = Design2UMGWidgetPropertyAccess::GetFont(*TextBlock);
 			if (FontInfo.FontObject)
 			{
 				const FString FontObjectName = FontInfo.FontObject->GetName();
@@ -697,7 +704,17 @@ namespace Design2UMGAutomationStructureSnapshot
 			}
 
 			const FString Kind = ClassifyWidgetKindForStructure(Widget);
-			Stats.AddStructureNode(Path, Widget->GetName(), Kind, TEXT("class"), Widget->GetClass()->GetName());
+			FString NodeText;
+			if (const UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
+			{
+				NodeText = NormalizeStructureText(TextBlock->GetText().ToString());
+			}
+			else if (const URichTextBlock* RichText = Cast<URichTextBlock>(Widget))
+			{
+				NodeText = ResolveWidgetStructureText(RichText);
+			}
+			Stats.AddStructureNode(
+				Path, Widget->GetName(), Kind, TEXT("class"), Widget->GetClass()->GetName(), FString(), NodeText);
 			Stats.AddKind(Kind);
 			if (Kind == TEXT("container"))
 			{

@@ -15,6 +15,7 @@
 #include "Components/RetainerBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/SizeBox.h"
+#include "Components/TextBlock.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -665,6 +666,21 @@ bool FRichTextStructureSnapshotTest::RunTest(const FString&)
 	TestEqual(TEXT("Markup is excluded and entities decoded using Slate semantics"), Visible[0]->AsString(), FString(TEXT("A&B <C>")));
 	const TArray<TSharedPtr<FJsonValue>>& Nodes = Snapshot->GetArrayField(TEXT("structure_nodes"));
 	TestEqual(TEXT("Native type is classified without waiving structure checks"), Nodes[0]->AsObject()->GetStringField(TEXT("kind")), FString(TEXT("text")));
+	TestEqual(TEXT("Rich-text structure node records the decoded plain text"), Nodes[0]->AsObject()->GetStringField(TEXT("text")), FString(TEXT("A&B <C>")));
+
+	UWidgetTree* PlainTree = NewObject<UWidgetTree>();
+	UTextBlock* PlainText = PlainTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PlainLabel"));
+	PlainTree->RootWidget = PlainText;
+	PlainText->SetText(FText::FromString(TEXT("  dashboard\nstatus  ")));
+	const TSharedPtr<FJsonObject> PlainSnapshot =
+		Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(PlainTree);
+	if (!TestTrue(TEXT("Plain-text snapshot exists"), PlainSnapshot.IsValid())) return false;
+	const TArray<TSharedPtr<FJsonValue>>& PlainVisible = PlainSnapshot->GetArrayField(TEXT("visible_texts"));
+	if (!TestEqual(TEXT("Plain visible text remains recorded"), PlainVisible.Num(), 1)) return false;
+	TestEqual(TEXT("Plain visible text is normalized"), PlainVisible[0]->AsString(), FString(TEXT("dashboard status")));
+	const TArray<TSharedPtr<FJsonValue>>& PlainNodes = PlainSnapshot->GetArrayField(TEXT("structure_nodes"));
+	TestEqual(TEXT("Plain structure node records the same normalized raw text"),
+		PlainNodes[0]->AsObject()->GetStringField(TEXT("text")), FString(TEXT("dashboard status")));
 	return true;
 }
 

@@ -113,6 +113,7 @@ def main() -> None:
             "schema": 1, "run": baseline.name, "accepted_at_unix": 3000.0,
             "summary_sha256": hashlib.sha256((baseline / "summary.json").read_bytes()).hexdigest(),
             "scope_sha256": hashlib.sha256((baseline / "run_scope.json").read_bytes()).hexdigest(),
+            "identity_evidence_sha256": rebuild_best.baseline_identity_digest(baseline),
         })
         manifest = rebuild_best.rebuild_historical_best_manifest(root)
         assert manifest["cases"]["case_a"]["stable_changed_ratio"] == 0.20, manifest

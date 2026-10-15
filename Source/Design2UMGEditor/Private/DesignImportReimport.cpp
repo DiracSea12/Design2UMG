@@ -4,6 +4,7 @@
 #include "GeneratedAssetLifecycle.h"
 #include "DesignImageResourceLimits.h"
 #include "PreBuildResourceNormalizer.h"
+#include "Design2UMGEffectMaterialBuilder.h"
 
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGPrototypeAnimationBuilder.h"
@@ -196,7 +197,10 @@ namespace DesignImportPipeline
 		// Prepare persistent resources before mutating the old tree. Nested builds share this budget.
 		const FString PackagePath = FPackageName::GetLongPackagePath(WBP->GetOutermost()->GetName());
 		const FString AssetName = WBP->GetName();
+		TArray<TStrongObjectPtr<UMaterialInterface>> PreparedMaterials;
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(PreparedRoot, PrepareFailureReason)
+			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(PreparedRoot, PrepareFailureReason)
+			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(PreparedRoot, PreparedMaterials, PrepareFailureReason)
 			|| !FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 				PreparedRoot, PackagePath, AssetName, PrepareFailureReason, Budget))
 		{

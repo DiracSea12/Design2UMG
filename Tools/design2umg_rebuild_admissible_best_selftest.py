@@ -7,6 +7,11 @@ import design2umg_validate_run as validate_run
 
 
 def write_json(path: Path, payload: dict) -> None:
+    if "ue_result" in payload and "engine_version" in payload:
+        log = path.parent / "runtime.log"
+        log.write_text("LogInit: Engine Version: 5.7.1-0+UE5\n"
+                       "LogRHI: RHI D3D12 with Feature Level SM6 is supported and will be used.\n", encoding="utf-8")
+        payload = dict(payload, render_chain=dict(payload["render_chain"], generation={"log_path": str(log)}))
     rebuild.write_json(path, payload)
 
 
@@ -14,6 +19,8 @@ def compatible_report() -> dict:
     size = [100, 80]
     return {
         "comparison_mode": "native_size",
+        "engine_version": "5.7",
+        "rhi_backend": "D3D12",
         "candidate_size": size,
         "reference_context": {
             "render_size_authority": {
@@ -58,6 +65,7 @@ def binary_binding_payload() -> dict:
         },
         "validation_project_path": "G:/SampleProject/SampleProject.uproject",
         "engine_root": "E:/MockEngineRoot",
+        "engine_version": "5.7",
     }
 
 

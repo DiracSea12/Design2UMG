@@ -12,7 +12,7 @@
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
 
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Dom/JsonObject.h"
@@ -25,7 +25,7 @@
 
 namespace
 {
-	const TCHAR* FixtureTestWidgetClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	const TCHAR* FixtureTestWidgetClassPath = ComponentFixtures::MappedClassPath;
 
 	FString MakeFixtureConfigIniPath(const TCHAR* FileName)
 	{
@@ -60,6 +60,7 @@ namespace
 		const FString& Key,
 		const TArray<DesignComponentMapping::FComponentInputDeclaration>& Inputs)
 	{
+		ComponentFixtures::MappedClass();
 		FDesign2UMGComponentMappingConfig Config;
 		DesignComponentMapping::FComponentMappingEntry& Entry = Config.Table.Entries.AddDefaulted_GetRef();
 		Entry.Key = Key;
@@ -88,13 +89,13 @@ namespace
 
 	// Apply inputs to the instance after the node carries the hit marker. The caller owns the Config:
 	// BuildState stores only a Config pointer, whose lifetime must cover every use of BuildState.
-	UDesign2UMGComponentInputTestWidget* ApplyFixtureInputs(
+	UUserWidget* ApplyFixtureInputs(
 		FUMGWidgetNode& Node,
 		const FDesign2UMGComponentMappingConfig& Config,
 		FDesign2UMGComponentMappingBuildState& BuildState)
 	{
 		Node.MutableSource().MappedComponentKey = TEXT("figma|fixture-gen-scope|fixture-main-key");
-		UDesign2UMGComponentInputTestWidget* Instance = NewObject<UDesign2UMGComponentInputTestWidget>(GetTransientPackage());
+		UUserWidget* Instance = NewObject<UUserWidget>(GetTransientPackage(), ComponentFixtures::InputClass());
 		Design2UMGComponentMappingGeneration::ApplyMappedComponentInputs(Instance, Node, BuildState);
 		return Instance;
 	}
@@ -136,9 +137,10 @@ bool FDesign2UMGMappingConfigRejectsNonUserWidgetClassTest::RunTest(const FStrin
 	const FString IniContent =
 		TEXT("[/Design2UMG/ComponentMapping]\n")
 		TEXT("+Mappings=(Key=\"figma|fixture-cfg-scope|bad-class\",WidgetClass=\"/Script/UMG.TextBlock\")\n")
-		TEXT("+Mappings=(Key=\"figma|fixture-cfg-scope|good-class\",WidgetClass=\"/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget\")\n");
+		TEXT("+Mappings=(Key=\"figma|fixture-cfg-scope|good-class\",WidgetClass=\"/Game/Design2UMG/TestFixtures/WBP_MappedComponent.WBP_MappedComponent_C\")\n");
 	TestTrue(TEXT("write temp mapping ini"), WriteFixtureIni(IniPath, IniContent));
 
+	ComponentFixtures::MappedClass();
 	const FDesign2UMGComponentMappingConfig Config = Design2UMGComponentMappingConfig::Load(IniPath);
 	IFileManager::Get().Delete(*IniPath, false, true);
 
@@ -191,6 +193,7 @@ bool FDesign2UMGMappingConfigRejectsUnparseableLineTest::RunTest(const FString&)
 		TEXT("+Mappings=this-line-is-not-a-struct\n");
 	TestTrue(TEXT("write temp mapping ini"), WriteFixtureIni(IniPath, IniContent));
 
+	ComponentFixtures::MappedClass();
 	const FDesign2UMGComponentMappingConfig Config = Design2UMGComponentMappingConfig::Load(IniPath);
 	IFileManager::Get().Delete(*IniPath, false, true);
 
@@ -344,9 +347,9 @@ bool FDesign2UMGMappingComponentTextInputValueTest::RunTest(const FString&)
 	FDesign2UMGComponentMappingConfig ConfigWithText =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState StateWithText(ConfigWithText);
-	UDesign2UMGComponentInputTestWidget* InstanceWithText = ApplyFixtureInputs(NodeWithText, ConfigWithText, StateWithText);
+	UUserWidget* InstanceWithText = ApplyFixtureInputs(NodeWithText, ConfigWithText, StateWithText);
 	TestEqual(TEXT("component text written to declared target"),
-		InstanceWithText->TextValue.ToString(), TEXT("Checkout"));
+		ComponentFixtures::Read<FTextProperty>(InstanceWithText, TEXT("TextValue")).ToString(), TEXT("Checkout"));
 	FString AppliedMessage;
 	TestEqual(TEXT("applied diagnostic emitted once"),
 		CountDiagnosticsByKind(StateWithText, TEXT("mapping_input_applied"), &AppliedMessage), 1);
@@ -362,9 +365,9 @@ bool FDesign2UMGMappingComponentTextInputValueTest::RunTest(const FString&)
 	FDesign2UMGComponentMappingConfig ConfigWithoutText =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState StateWithoutText(ConfigWithoutText);
-	UDesign2UMGComponentInputTestWidget* InstanceWithoutText = ApplyFixtureInputs(NodeWithoutText, ConfigWithoutText, StateWithoutText);
+	UUserWidget* InstanceWithoutText = ApplyFixtureInputs(NodeWithoutText, ConfigWithoutText, StateWithoutText);
 	TestTrue(TEXT("target untouched when component has no text"),
-		InstanceWithoutText->TextValue.IsEmpty());
+		ComponentFixtures::Read<FTextProperty>(InstanceWithoutText, TEXT("TextValue")).IsEmpty());
 	FString SkippedMessage;
 	TestEqual(TEXT("missing text skipped with diagnostic"),
 		CountDiagnosticsByKind(StateWithoutText, TEXT("mapping_input_skipped"), &SkippedMessage), 1);
@@ -398,9 +401,9 @@ bool FDesign2UMGMappingComponentPropertyFallbackTest::RunTest(const FString&)
 	FDesign2UMGComponentMappingConfig BothConfig =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState BothState(BothConfig);
-	UDesign2UMGComponentInputTestWidget* BothInstance = ApplyFixtureInputs(BothNode, BothConfig, BothState);
+	UUserWidget* BothInstance = ApplyFixtureInputs(BothNode, BothConfig, BothState);
 	TestEqual(TEXT("componentProperties value wins over variantProperties"),
-		BothInstance->NameValue, FName(TEXT("Secondary")));
+		ComponentFixtures::Read<FNameProperty>(BothInstance, TEXT("NameValue")), FName(TEXT("Secondary")));
 	TestEqual(TEXT("componentProperties hit applies cleanly"),
 		CountDiagnosticsByKind(BothState, TEXT("mapping_input_applied")), 1);
 
@@ -410,9 +413,9 @@ bool FDesign2UMGMappingComponentPropertyFallbackTest::RunTest(const FString&)
 	FDesign2UMGComponentMappingConfig VariantOnlyConfig =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState VariantOnlyState(VariantOnlyConfig);
-	UDesign2UMGComponentInputTestWidget* VariantOnlyInstance = ApplyFixtureInputs(VariantOnlyNode, VariantOnlyConfig, VariantOnlyState);
+	UUserWidget* VariantOnlyInstance = ApplyFixtureInputs(VariantOnlyNode, VariantOnlyConfig, VariantOnlyState);
 	TestEqual(TEXT("variantProperties fallback supplies the value"),
-		VariantOnlyInstance->NameValue, FName(TEXT("Primary")));
+		ComponentFixtures::Read<FNameProperty>(VariantOnlyInstance, TEXT("NameValue")), FName(TEXT("Primary")));
 	FString VariantAppliedMessage;
 	TestEqual(TEXT("fallback apply diagnosed"),
 		CountDiagnosticsByKind(VariantOnlyState, TEXT("mapping_input_applied"), &VariantAppliedMessage), 1);
@@ -426,8 +429,8 @@ bool FDesign2UMGMappingComponentPropertyFallbackTest::RunTest(const FString&)
 	FDesign2UMGComponentMappingConfig MissingConfig =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState MissingState(MissingConfig);
-	UDesign2UMGComponentInputTestWidget* MissingInstance = ApplyFixtureInputs(MissingNode, MissingConfig, MissingState);
-	TestEqual(TEXT("target untouched when key is absent"), MissingInstance->NameValue, FName());
+	UUserWidget* MissingInstance = ApplyFixtureInputs(MissingNode, MissingConfig, MissingState);
+	TestEqual(TEXT("target untouched when key is absent"), ComponentFixtures::Read<FNameProperty>(MissingInstance, TEXT("NameValue")), FName());
 	FString MissingMessage;
 	TestEqual(TEXT("absent property key skipped with diagnostic"),
 		CountDiagnosticsByKind(MissingState, TEXT("mapping_input_skipped"), &MissingMessage), 1);
@@ -469,17 +472,17 @@ bool FDesign2UMGMappingInputTypeMismatchAndInvalidValuesTest::RunTest(const FStr
 	FDesign2UMGComponentMappingConfig Config =
 		MakeFixtureMappingConfig(TEXT("figma|fixture-gen-scope|fixture-main-key"), Inputs);
 	FDesign2UMGComponentMappingBuildState BuildState(Config);
-	UDesign2UMGComponentInputTestWidget* Instance = ApplyFixtureInputs(Node, Config, BuildState);
+	UUserWidget* Instance = ApplyFixtureInputs(Node, Config, BuildState);
 
 	TestTrue(TEXT("Skipped inputs mark generation as degraded"), BuildState.HasDegradation());
 
 	// All three failed inputs keep their default property values.
-	TestTrue(TEXT("text target untouched on type mismatch"), Instance->TextValue.IsEmpty());
-	TestTrue(TEXT("bool target keeps default on unparseable value"), Instance->BoolValue);
-	TestEqual(TEXT("double target keeps default on non-numeric value"), Instance->DoubleValue, 0.0);
+	TestTrue(TEXT("text target untouched on type mismatch"), ComponentFixtures::Read<FTextProperty>(Instance, TEXT("TextValue")).IsEmpty());
+	TestTrue(TEXT("bool target keeps default on unparseable value"), ComponentFixtures::Read<FBoolProperty>(Instance, TEXT("BoolValue")));
+	TestEqual(TEXT("double target keeps default on non-numeric value"), ComponentFixtures::Read<FDoubleProperty>(Instance, TEXT("DoubleValue")), 0.0);
 	// The single-precision float write succeeds.
 	TestEqual(TEXT("float target written through FFloatProperty branch"),
-		Instance->FloatValue, 2.5f);
+		ComponentFixtures::Read<FFloatProperty>(Instance, TEXT("FloatValue")), 2.5f);
 
 	// Check the diagnostic message fragments one by one.
 	int32 TypeMismatch = 0;

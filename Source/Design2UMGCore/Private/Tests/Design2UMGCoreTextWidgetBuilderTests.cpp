@@ -5,7 +5,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Design2UMGTextWidgetBuilder.h"
+#include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "DesignSchema.h"
 #include "Design2UMGSettings.h"
 #include "Dom/JsonObject.h"
@@ -71,7 +73,7 @@ bool FTextWidgetBuilderSourceFontSizeConversionContractTest::RunTest(const FStri
 	Node->Transform.bSourceHasHeight = true;
 
 	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
-	const float ExpectedFontSize = Node->Text.FontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+	const float ExpectedFontSize = Node->Text.FontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	TestTrue(TEXT("Builder uses the source px-to-point conversion"),
 		FMath::IsNearlyEqual(Widget.TextStyle.FontSize, ExpectedFontSize, 0.001f));
 	return true;
@@ -92,7 +94,7 @@ bool FTextWidgetBuilderSourceFontSizeFractionalContractTest::RunTest(const FStri
 	Node->Text.TextGrowth = EDesignTextGrowth::Auto;
 
 	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
-	const float ExpectedFontSize = Node->Text.FontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+	const float ExpectedFontSize = Node->Text.FontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	TestTrue(TEXT("Builder preserves the exact direct source px-to-point conversion"),
 		FMath::IsNearlyEqual(Widget.TextStyle.FontSize, ExpectedFontSize, 0.001f));
 	return true;
@@ -106,8 +108,12 @@ bool FTextMeasurementRuntimeProbeSubpointFontInfoContractTest::RunTest(const FSt
 	TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 	Request.FontSize = 0.375f;
 	const FSlateFontInfo FontInfo = TextMeasurementRuntimeProbe::BuildFontInfo(Request);
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	TestEqual(TEXT("Runtime probe uses native integer truncation for subpoint sizes"), FontInfo.Size, 0);
+#else
 	TestTrue(TEXT("Runtime probe font info preserves 0.375 point sizes"),
 		FMath::IsNearlyEqual(FontInfo.Size, 0.375f, 0.001f));
+#endif
 	return true;
 }
 
@@ -150,10 +156,10 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
 	Settings->ExplicitFontMappings.Empty();
 
-	// Reuse the real project font asset: the baseline shift reads hhea metrics
+	// Reuse the stable engine font asset: the baseline shift reads hhea metrics
 	// from the resolved font face, independent of its storage location.
-	UFont* Font = LoadObject<UFont>(nullptr, TEXT("/Game/Design2UMG/Fonts/Poppins.Poppins"));
-	if (!TestNotNull(TEXT("Baseline shift project font asset loaded"), Font))
+	UFont* Font = LoadObject<UFont>(nullptr, TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+	if (!TestNotNull(TEXT("Baseline shift engine font asset loaded"), Font))
 	{
 		Settings->ExplicitFontMappings = SavedMappings;
 		return false;
@@ -217,7 +223,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 		AscentTopWidget.Text.LineHeightBaselineShift.IsSet());
 
 	// Measure the actual rendered face even when it is supplied by Slate rather
-	// than a project font asset. This does not change which font is selected.
+	// than a mapped family alias. This does not change which font is selected.
 	Node->Text.bSourceHalfLeadingBaseline = true;
 	Node->Text.FontFamily = TEXT("D2UBaselineShiftUnmappedFamily");
 	const FUMGWidgetNode FallbackWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
@@ -237,7 +243,7 @@ bool FTextWidgetBuilderLineHeightBaselineShiftContractTest::RunTest(const FStrin
 	{
 		const float ExpectedShift = -((EngineNaturalSize.Y - Node->Text.FontSize * Node->Text.LineHeight)
 			+ EngineLineGapEm * Node->Text.FontSize) / 2.0f;
-		TestTrue(TEXT("Engine font shift uses the same metric rule as project fonts"),
+		TestTrue(TEXT("Engine font shift uses the same metric rule as mapped fonts"),
 			EngineFontWidget.Text.LineHeightBaselineShift.IsSet()
 			&& FMath::IsNearlyEqual(EngineFontWidget.Text.LineHeightBaselineShift.GetValue(), ExpectedShift, 0.001f));
 	}

@@ -27,9 +27,11 @@ namespace Design2UMGEditorTests
 #else
 		const FString& GetURL() const override { return Url; }
 #endif
-		const FString& GetEffectiveURL() const override { return Url; }
+#if !UE_VERSION_OLDER_THAN(5, 4, 0)
 		EHttpRequestStatus::Type GetStatus() const override { return EHttpRequestStatus::Succeeded; }
+		const FString& GetEffectiveURL() const override { return Url; }
 		EHttpFailureReason GetFailureReason() const override { return EHttpFailureReason::None; }
+#endif
 		FString GetURLParameter(const FString&) const override { return FString(); }
 		FString GetHeader(const FString& Name) const override
 		{
@@ -46,7 +48,11 @@ namespace Design2UMGEditorTests
 			return Result;
 		}
 		FString GetContentType() const override { return GetHeader(TEXT("Content-Type")); }
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+		int32 GetContentLength() const override { return Content.Num(); }
+#else
 		uint64 GetContentLength() const override { return Content.Num(); }
+#endif
 		const TArray<uint8>& GetContent() const override { return Content; }
 #if !UE_VERSION_OLDER_THAN(5, 8, 0)
 		TArray<uint8> TakeContent() override { return MoveTemp(Content); }

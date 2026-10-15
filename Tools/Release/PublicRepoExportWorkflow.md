@@ -11,7 +11,7 @@ Use this workflow when freezing a validated plugin state into a standalone GitHu
 ## Inputs
 
 - candidate commit SHA in the maintainer workspace
-- current public workflow badge expectation: only `repository-hygiene` from `.github/workflows/build.yml` is badge-backed today
+- current public workflow badge expectation: the complete `.github/workflows/build.yml` workflow, with self-hosted UE jobs conditional on event type and runner availability
 - successful self-hosted plugin build (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
 - successful `Automation RunTests Design2UMG`
 - successful full admissible summary:
@@ -29,6 +29,8 @@ Required public set:
 - `Config/`
 - `Docs/` except intentionally excluded archive/history folders
 - `Tools/Release/`
+- `Tools/FigmaExporter/` (exclude node_modules and other local build dependencies)
+- `Examples/` (only public examples with confirmed publication rights)
 - `README.md`
 - `KNOWN_LIMITATIONS.md`
 - `CONTRIBUTING.md`
@@ -43,6 +45,7 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - `Saved/`
 - `Intermediate/`
 - `Binaries/`
+- `Fonts/` (local font files are not release assets)
 - cache folders such as `.cache`, `.pytest_cache`, `DerivedDataCache/`, and `DDC/`
 - `.vs/`
 - `.claude/`, `.codex/`, `.cowork-temp/`, `AGENTS.md`, and `CLAUDE.md`
@@ -67,6 +70,26 @@ Excluded from public export unless they are first rewritten into generic reusabl
 - This repo relies on GitHub generated release notes from `.github/release.yml`; no separate release-notes template is checked in.
 
 ## Freeze Procedure
+
+The Windows self-hosted runner requires `UE_ROOT`, `DESIGN2UMG_RUNTIME_PROJECT`,
+and `DESIGN2UMG_EDITOR_TARGET` (the actual editor target name, not an inferred
+project filename). Provision the candidate source as the sole installed plugin
+before running CI. The workflow compares the descriptor, Source and Config file
+sets and SHA-256 hashes, then rebuilds the editor target. It never overwrites a
+developer's installed plugin automatically. Keep `RUNNER_TEMP` outside all UE
+plugin scan directories and close editor sessions before building.
+
+CI uses a per-run package directory under `RUNNER_TEMP`, not `dist` beneath an
+engine-installed checkout. It emits a versioned Win64 ZIP, `candidate.json` and
+`SHA256SUMS.txt`. Focused automation exercises the rebuilt installed copy, not the
+ZIP after installation. Complete the package-install and cooked-game checks in
+the release checklist separately, using the existing real project and only one
+discoverable plugin copy. No scratch runtime project is substituted.
+
+Actions artifacts expire after 14 days. After the remaining release checks pass,
+attach these exact files to the GitHub Release without rebuilding. Verify the
+downloaded ZIP against `SHA256SUMS.txt`. Candidate metadata explicitly separates
+focused automation from game-runtime and full visual evidence.
 
 1. Record the candidate commit SHA and the successful validation artifact paths.
 2. Create the release package with `RunUAT BuildPlugin -StrictIncludes` from that candidate, using a maintainer-provided UE runner and an explicit plugin path.

@@ -1,7 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 
+#include "Design2UMGFontAccess.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FontResolver.h"
@@ -33,7 +35,7 @@ namespace
 
 	float ExpectedExactPointSize(const float SourceFontSize)
 	{
-		return SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		return SourceFontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	}
 
 	bool TryMeasureSlateText(const TSharedPtr<FDesignNode>& Node, const float FontSize, FVector2D& OutSize)
@@ -46,7 +48,7 @@ namespace
 		}
 
 		FSlateFontInfo FontInfo = FTextBlockStyle::GetDefault().Font;
-		FontInfo.Size = FontSize;
+		FontInfo.Size = Design2UMGFontAccess::ToNativeFontSize(FontSize);
 		const FString FontAssetPath = FFontResolver::FindFontAssetPath(Node->Text.FontFamily);
 		if (!FontAssetPath.IsEmpty())
 		{
@@ -62,7 +64,9 @@ namespace
 			.Font(FontInfo)
 			// Source text without a shadow has no extra invisible layout extent.
 			.ShadowOffset(FVector2D::ZeroVector)
+#if !UE_VERSION_OLDER_THAN(5, 4, 0)
 			.ApplyLineHeightToBottomLine(false)
+#endif
 			.Text(FText::FromString(TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content)));
 		TextWidget->SlatePrepass(1.0f);
 		OutSize = TextWidget->GetDesiredSize();
@@ -190,7 +194,7 @@ bool FTextMeasurementInvalidSourceSizeTest::RunTest(const FString&)
 
 	const float AboveRendererLimitSourceSize =
 		(static_cast<float>(std::numeric_limits<uint16>::max()) + 1024.0f)
-		* static_cast<float>(FontConstants::RenderDPI)
+		* Design2UMGFontAccess::RenderDPI
 		/ 72.0f;
 	TestTrue(
 		TEXT("Converted size above the renderer uint16 limit resolves to zero"),

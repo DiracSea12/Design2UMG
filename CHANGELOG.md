@@ -7,6 +7,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [1.1.0] - Unreleased
 
 ### Changed
+- Release packages include the MIT license, user documentation, Figma exporter and public examples, and explicitly exclude local font binaries. Package/export checks reject missing required files and local Fonts directories.
+- Self-hosted CI checks installed plugin source identity, rebuilds the real project editor, uses an isolated package directory, and emits a versioned ZIP with candidate metadata and SHA-256. Game-runtime and full visual checks remain separate release requirements.
+- Installation guidance distinguishes source and precompiled downloads, verified engine environments, and password-style Figma token input. Validation dependencies are versioned.
 - `DesignImportUtils` (grab-bag of generation orchestration, render preparation, and URL helpers) split into `DesignImportGeneration` and `DesignBlueprintRenderPreparation`; the shared `IsHttpUrl` predicate moved next to its only semantic owner, `FDesignRemoteImageImporter`.
 - `FUMGWidgetUtils` and `UMGRenderUtils` split into `FUMGWidgetTreeBuilder` (tree construction and widget naming) and `FUMGWidgetRenderer` (rendering, unpremultiply, font-state dump); `UMGRenderUtils.cpp` removed.
 - Import pipeline generation-settings resolution (request, analysis, CDO fallback) collapsed into a single rule function in `DesignImportPipeline`.

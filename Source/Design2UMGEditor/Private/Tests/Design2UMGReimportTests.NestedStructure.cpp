@@ -6,7 +6,7 @@
 
 #include "Design2UMGGenerationManifest.h"
 #include "DesignImportPipeline.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/PanelWidget.h"
@@ -184,7 +184,7 @@ bool FSafeReimportNestedParentNoNoiseTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGComponentInputTestWidget* Mapped = FixtureFindMappedInstance(WBP);
+	UUserWidget* Mapped = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("nested mapped instance generated"), Mapped)
 		|| !TestTrue(TEXT("instance sits under InnerZone"),
 			Mapped->GetParent() && Mapped->GetParent()->GetFName() == FName(TEXT("InnerZone"))))
@@ -192,7 +192,7 @@ bool FSafeReimportNestedParentNoNoiseTest::RunTest(const FString&)
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = Mapped;
+	TWeakObjectPtr<UUserWidget> MappedWeak = Mapped;
 
 	// A structure-unchanged reimport (only the input value changes): no move-conflict noise.
 	const FDesignReimportResult Result = FixtureReimport(BuildDoc(TEXT("Pay Now")), FixtureMappedClassPath, TargetPackage);
@@ -201,12 +201,12 @@ bool FSafeReimportNestedParentNoNoiseTest::RunTest(const FString&)
 		FixtureCountKind(Result, TEXT("reimport_move_conflict")), 0);
 	TestEqual(TEXT("no moves applied"), FixtureCountKind(Result, TEXT("reimport_moved")), 0);
 
-	UDesign2UMGComponentInputTestWidget* MappedAfter = MappedWeak.Get();
+	UUserWidget* MappedAfter = MappedWeak.Get();
 	if (TestNotNull(TEXT("instance still alive"), MappedAfter))
 	{
 		TestEqual(TEXT("instance stays under the nested container"),
 			MappedAfter->GetParent()->GetFName(), FName(TEXT("InnerZone")));
-		TestEqual(TEXT("instance still refreshed normally"), MappedAfter->TextValue.ToString(), FString(TEXT("Pay Now")));
+		TestEqual(TEXT("instance still refreshed normally"), ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("TextValue")).ToString(), FString(TEXT("Pay Now")));
 	}
 	TestTrue(TEXT("instance refresh diagnosed"), FixtureHasMessage(Result, TEXT("reimport_updated"), TEXT("HeroButton")));
 

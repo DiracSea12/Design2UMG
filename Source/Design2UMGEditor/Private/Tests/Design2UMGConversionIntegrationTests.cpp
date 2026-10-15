@@ -6,6 +6,7 @@
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "UMGTextStyleApplication.h"
 
 #include "Components/TextBlock.h"
@@ -192,7 +193,11 @@ bool FTextStyleApplicationIntegrationTest::RunTest(const FString& Parameters)
 	bool bExactHalfFontChanged = false;
 	UMGTextStyleApplication::ApplyTypedFontInfo(ExactHalfFontInfo, HalfFontNode, bExactHalfFontChanged);
 	TestTrue(TEXT("Typed font application reports an exact half font change"), bExactHalfFontChanged);
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	TestEqual(TEXT("Typed font application uses native integer truncation for half sizes"), ExactHalfFontInfo.Size, 10);
+#else
 	TestTrue(TEXT("Typed font application preserves ordinary half font sizes"), FMath::IsNearlyEqual(ExactHalfFontInfo.Size, 10.5f, 0.001f));
+#endif
 
 	FUMGWidgetNode SubpointFontNode;
 	SubpointFontNode.TextStyle.FontSize = 0.375f;
@@ -200,8 +205,12 @@ bool FTextStyleApplicationIntegrationTest::RunTest(const FString& Parameters)
 	bool bSubpointFontChanged = false;
 	UMGTextStyleApplication::ApplyTypedFontInfo(SubpointFontInfo, SubpointFontNode, bSubpointFontChanged);
 	TestTrue(TEXT("Typed font application reports a subpoint font change"), bSubpointFontChanged);
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+	TestEqual(TEXT("Typed font application uses native integer truncation for subpoint sizes"), SubpointFontInfo.Size, 0);
+#else
 	TestTrue(TEXT("Typed font application preserves 0.375 point sizes"),
 		FMath::IsNearlyEqual(SubpointFontInfo.Size, 0.375f, 0.001f));
+#endif
 
 	UTextBlock* TextBlock = NewObject<UTextBlock>();
 	TestNotNull(TEXT("Text block can be allocated for typed layout smoke"), TextBlock);

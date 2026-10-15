@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "DesignLocalFontImport.h"
 #include "Design2UMGFontAccess.h"
+#include "Design2UMGSettings.h"
 #include "DesignSchema.h"
 #include "Design2UMGLog.h"
 #include "FontResolver.h"
@@ -16,6 +17,7 @@
 #include "Misc/ScopeExit.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
+#include "UObject/UObjectHash.h"
 #include "UObject/UObjectGlobals.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -116,6 +118,40 @@ namespace
 		if (!LocalAppData.IsEmpty()) Roots.Add(LocalAppData / TEXT("Microsoft/Windows/Fonts"));
 		return Roots;
 	}
+
+	bool SaveEmbeddedFont(UFont& Font, bool bSaveRequired, FString& OutError)
+	{
+		TMap<UFontFace*, EFontLoadingPolicy> PreviousPolicies;
+		ForEachObjectWithOuter(&Font, [&](UObject* Object)
+		{
+			UFontFace* Face = Cast<UFontFace>(Object);
+			if (IsValid(Face) && !Face->HasAnyFlags(RF_Transient) && Face->LoadingPolicy != EFontLoadingPolicy::Inline)
+			{
+				PreviousPolicies.Add(Face, Face->LoadingPolicy);
+				Face->LoadingPolicy = EFontLoadingPolicy::Inline;
+			}
+		}, false);
+		if (!bSaveRequired && PreviousPolicies.IsEmpty()) return true;
+		UPackage* Package = Font.GetOutermost();
+		const bool bWasDirty = Package->IsDirty();
+		const FString Filename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
+		const FString Directory = FPaths::GetPath(Filename);
+		const bool bCreatedDirectory = !IFileManager::Get().DirectoryExists(*Directory);
+		IFileManager::Get().MakeDirectory(*Directory, true);
+		FSavePackageArgs Args;
+		Args.TopLevelFlags = RF_Public | RF_Standalone;
+		Args.SaveFlags = SAVE_NoError;
+		if (!UPackage::SavePackage(Package, &Font, *Filename, Args))
+		{
+			for (const auto& Policy : PreviousPolicies) Policy.Key->LoadingPolicy = Policy.Value;
+			Package->SetDirtyFlag(bWasDirty);
+			if (bCreatedDirectory) IFileManager::Get().DeleteDirectory(*Directory, false, false);
+			OutError = TEXT("Failed to save local font: ") + Package->GetName();
+			return false;
+		}
+		return true;
+	}
+
 }
 
 bool ReadFace(const FString& Path, FFace& OutFace, FString& OutError)
@@ -226,12 +262,15 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 #endif
 			&& ExistingFace && ExistingFace->FontFaceData->GetData() == Bytes)
 		{
+			if (!SaveEmbeddedFont(*Font, false, OutError)) return false;
 			FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
 			return true;
 		}
 	}
 	const FName FaceName = MakeUniqueObjectName(Font, UFontFace::StaticClass(), FName(*(ResolvedTypeface.Replace(TEXT(" "), TEXT("")) + TEXT("Face"))));
 	UFontFace* Embedded = NewObject<UFontFace>(Font, FaceName, RF_Public);
+	// Embedded faces stay in their owning font package instead of sharing streamed sidecar names.
+	Embedded->LoadingPolicy = EFontLoadingPolicy::Inline;
 	Embedded->FontFaceData = FFontFaceData::MakeFontFaceData(MoveTemp(Bytes));
 	FTypefaceEntry Entry(Name);
 	Entry.Font = FFontData(Embedded);
@@ -245,12 +284,7 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 	Font->RuntimeFontSource = ERuntimeFontSource::Asset;
 #endif
 	Composite.MakeDirty();
-	const FString Filename = FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
-	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
-	FSavePackageArgs Args;
-	Args.TopLevelFlags = RF_Public | RF_Standalone;
-	Args.SaveFlags = SAVE_NoError;
-	if (!UPackage::SavePackage(Package, Font, *Filename, Args))
+	if (!SaveEmbeddedFont(*Font, true, OutError))
 	{
 		Composite = Previous;
 		Font->FontCacheType = OldCacheType;
@@ -259,13 +293,18 @@ bool ImportFace(const FFace& Face, const FString& PackageName, FString& OutError
 #endif
 		Embedded->ClearFlags(RF_Public | RF_Standalone);
 		Embedded->MarkAsGarbage();
-		if (bNew) { Font->ClearFlags(RF_Public | RF_Standalone); Font->MarkAsGarbage(); }
+		if (bNew)
+		{
+			Font->ClearFlags(RF_Public | RF_Standalone);
+			// Free the asset path before an immediate retry, without forcing garbage collection.
+			Font->Rename(*MakeUniqueObjectName(GetTransientPackage(), UFont::StaticClass()).ToString(),
+				GetTransientPackage(), REN_DontCreateRedirectors | REN_NonTransactional | REN_DoNotDirty);
+			Font->MarkAsGarbage();
+		}
 		Package->SetDirtyFlag(bWasDirty);
-		OutError = TEXT("Failed to save local font: ") + PackageName + TEXT(" <- ") + Face.Path;
 		return false;
 	}
 	if (bNew) FAssetRegistryModule::AssetCreated(Font);
-	FFontResolver::ClearCache();
 	if (!Face.Family.IsEmpty()) FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
 	UE_LOG(LogDesign2UMG, Log, TEXT("Local font imported: %s / %s <- %s"), *PackageName, *ResolvedTypeface, *Face.Path);
 	return true;
@@ -324,29 +363,44 @@ bool Prepare(const FDesignDocument& Document, TArray<FString>& OutWarnings, FStr
 	check(IsInGameThread());
 	TArray<FRequest> Requests;
 	Collect(Document.Children, Requests);
-		Requests.RemoveAll([&OutWarnings](const FRequest& Request)
+	for (int32 Index = 0; Index < Requests.Num();)
 	{
-		if (FFontResolver::HasExplicitFontMapping(Request.Family, Request.PostScript)) return true;
+		const FRequest& Request = Requests[Index];
 		const FString Path = FFontResolver::FindFontAssetPath(Request.Family, Request.PostScript);
+		const bool bAutomaticFont = Path.StartsWith(TEXT("/Game/Design2UMG/Fonts/"));
 		UFont* Font = !Path.StartsWith(TEXT("/Game/")) ? nullptr : LoadObject<UFont>(nullptr, *Path);
+		if (bAutomaticFont && Font && !SaveEmbeddedFont(*Font, false, OutError)) return false;
+		if (FFontResolver::HasExplicitFontMapping(Request.Family, Request.PostScript))
+		{
+			Requests.RemoveAt(Index);
+			continue;
+		}
 		const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
-		if (!Composite) return false;
+		if (!Composite)
+		{
+			++Index;
+			continue;
+		}
 		const FName Expected(*(FFontResolver::TypefaceNameForWeightValue(Request.Weight) + (Request.bItalic ? TEXT(" Italic") : TEXT(""))));
-			if (Composite->DefaultTypeface.Fonts.ContainsByPredicate([&](const FTypefaceEntry& Entry)
-			{
-				return Entry.Name == Expected && Entry.Font.HasFont();
-			})) return true;
-			if (!Path.StartsWith(TEXT("/Game/Design2UMG/Fonts/")))
-			{
-				const FString Warning = FString::Printf(
-					TEXT("Project font '%s' is outside the automatic font import directory and was left unchanged; requested family '%s', weight=%d, italic=%s is missing. Add that style to the font or explicitly map a complete font asset."),
-					*Path, *Request.Family, Request.Weight, Request.bItalic ? TEXT("true") : TEXT("false"));
-				OutWarnings.AddUnique(Warning);
-				UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
-				return true;
-			}
-			return false;
-	});
+		const bool bHasStyle = Composite->DefaultTypeface.Fonts.ContainsByPredicate([&](const FTypefaceEntry& Entry)
+		{
+			return Entry.Name == Expected && Entry.Font.HasFont();
+		});
+		if (!bHasStyle && bAutomaticFont)
+		{
+			++Index;
+			continue;
+		}
+		if (!bHasStyle)
+		{
+			const FString Warning = FString::Printf(
+				TEXT("Project font '%s' is outside the automatic font import directory and was left unchanged; requested family '%s', weight=%d, italic=%s is missing. Add that style to the font or explicitly map a complete font asset."),
+				*Path, *Request.Family, Request.Weight, Request.bItalic ? TEXT("true") : TEXT("false"));
+			OutWarnings.AddUnique(Warning);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
+		}
+		Requests.RemoveAt(Index);
+	}
 	if (Requests.IsEmpty()) return true;
 	FSourceIndex LocalIndex;
 	const TArray<FFace>& Faces = (SourceIndex ? *SourceIndex : LocalIndex).GetFaces();

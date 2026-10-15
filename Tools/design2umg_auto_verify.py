@@ -20,6 +20,7 @@ import design2umg_rebuild_admissible_best as rebuild_best
 import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib.json_io import content_file_signature as helper_content_file_signature
 from design2umg_verify_lib.diagnostics import EvidenceReadError
+from design2umg_verify_lib.evidence_contract import engine_version_from_evidence
 from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script
 from design2umg_verify_lib.json_io import load_json as helper_load_json
@@ -463,6 +464,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Design2UMG full automation visual verification")
     parser.add_argument("mode", choices=["pen", "local-figma", "figma-source", "asset"], help="Verification mode")
     parser.add_argument("--source", required=True, help="Source file path or Widget Blueprint asset path")
+    parser.add_argument("--no-font-asset-seed", action="store_true", help="Skip copying font .uasset files from source projects; preserve font assets already in the selected project.")
     parser.add_argument("--node", default="", help="Target frame/node id")
     parser.add_argument("--reference-provider", choices=["png", "figma", "pencil"], required=True)
     parser.add_argument("--reference", default="", help="Existing reference png path when provider=png")
@@ -545,9 +547,32 @@ def prepare_runtime_project(args, source_hints: list[str] | None = None) -> tupl
         if getattr(args, "project", "")
         else discover_runtime_project(source_hints)
     )
-    requested_plugin_root = requested_project.parent / "Plugins" / "Design2UMG"
-    project_plugin_root = requested_plugin_root if requested_plugin_root.is_dir() else plugin_root()
-    return str(requested_project), project_plugin_root
+    engine_root = Path(args.editor).resolve().parents[2]
+    project_root = requested_project.parent
+    search_roots = [engine_root / "Plugins", engine_root.parent / "Enterprise" / "Plugins",
+                    project_root / "Plugins", project_root / "Mods"]
+    for root in (engine_root, project_root):
+        search_roots.extend(root.glob("Platforms/*/Plugins"))
+        search_roots.extend(root.glob("Restricted/*/Plugins"))
+    descriptor = helper_load_json(requested_project)
+    search_roots.extend(project_root / path for path in descriptor.get("AdditionalPluginDirectories", []))
+    candidates = set()
+    visited = set()
+    for root in search_roots:
+        for directory, children, files in os.walk(root):
+            physical_directory = Path(directory).resolve()
+            if physical_directory in visited:
+                children[:] = []
+                continue
+            visited.add(physical_directory)
+            descriptors = [name for name in files if name.lower().endswith(".uplugin")]
+            if descriptors:
+                children[:] = []  # UE stops descending once a plugin directory is found.
+                if any(name.lower() == "design2umg.uplugin" for name in descriptors):
+                    candidates.add(physical_directory)
+    if len(candidates) != 1:
+        raise RuntimeError(f"Expected one discoverable Design2UMG plugin for the selected project and engine; found {len(candidates)}: {sorted(str(path) for path in candidates)}")
+    return str(requested_project), candidates.pop()
 
 
 def resolve_unreal_editor_path(raw_editor_path: str) -> str:
@@ -575,22 +600,24 @@ def resolve_unreal_editor_path(raw_editor_path: str) -> str:
     return str(editor)
 
 
-def sync_project_plugin_build_id(editor_path: str, project_plugin_root: Path):
+def validate_plugin_module_build_id(editor_path: str, project_plugin_root: Path):
+    """Check engine compatibility; build/install evidence binds source and DLL identities."""
     editor = Path(editor_path).resolve()
     engine_root = editor.parents[2]
     project_manifest = project_plugin_root / "Binaries" / "Win64" / "UnrealEditor.modules"
-    engine_manifest = engine_root / "Plugins" / "Marketplace" / "Design2UMG" / "Binaries" / "Win64" / "UnrealEditor.modules"
+    engine_manifest = engine_root / "Binaries" / "Win64" / "UnrealEditor.modules"
     if not project_manifest.is_file() or not engine_manifest.is_file():
-        return
+        raise RuntimeError(f"Missing module build metadata: {project_manifest} or {engine_manifest}")
     project_data = json.loads(project_manifest.read_text(encoding="utf-8-sig"))
     engine_data = json.loads(engine_manifest.read_text(encoding="utf-8-sig"))
     engine_build_id = engine_data.get("BuildId", "")
-    if not engine_build_id:
-        return
-    if project_data.get("BuildId") == engine_build_id:
-        return
-    project_data["BuildId"] = engine_build_id
-    project_manifest.write_text(json.dumps(project_data, ensure_ascii=False, indent=4), encoding="utf-8")
+    if not engine_build_id or project_data.get("BuildId") != engine_build_id:
+        raise RuntimeError(f"Plugin module BuildId does not match the selected engine; rebuild with that engine: {project_manifest}")
+    modules = project_data.get("Modules", {})
+    for name in ("Design2UMGCore", "Design2UMGEditor"):
+        filename = modules.get(name)
+        if not filename or Path(filename).name != filename or not (project_manifest.parent / filename).is_file():
+            raise RuntimeError(f"Missing plugin module {name}: {project_manifest}")
 
 
 def discover_local_font_seed_dirs(source_paths: list[str], destination_dir: Path | None = None) -> list[Path]:
@@ -1327,6 +1354,32 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
     asset_texts = normalize_structure_texts(asset_snapshot.get("visible_texts"))
     source_text_counter = Counter(source_texts)
     asset_text_counter = Counter(asset_texts)
+    source_nodes = [node for node in source_snapshot.get("structure_nodes") or [] if isinstance(node, dict)]
+    asset_nodes = [node for node in asset_snapshot.get("structure_nodes") or [] if isinstance(node, dict)]
+    correspondence_matches = result["tree_correspondence"].get("source_to_asset_matches") or []
+    icon_role_texts_excluded = []
+    for match in correspondence_matches:
+        if not isinstance(match, dict) or not match.get("parent_constrained"):
+            continue
+        source_index = match.get("source_index")
+        asset_index = match.get("asset_index")
+        if not isinstance(source_index, int) or not isinstance(asset_index, int):
+            continue
+        if not (0 <= source_index < len(source_nodes) and 0 <= asset_index < len(asset_nodes)):
+            continue
+        source_node = source_nodes[source_index]
+        asset_node = asset_nodes[asset_index]
+        if source_node.get("type") != "IconFont" or asset_node.get("kind") != "text":
+            continue
+        if match.get("method") not in {"id", "name", "generated_name"}:
+            continue
+        asset_text = normalize_structure_text(asset_node.get("text"))
+        if not asset_text or asset_text_counter.get(asset_text, 0) <= 0:
+            continue
+        asset_text_counter[asset_text] -= 1
+        if asset_text_counter[asset_text] == 0:
+            del asset_text_counter[asset_text]
+        icon_role_texts_excluded.append(asset_text)
     source_node_names = [str(name) for name in (source_snapshot.get("node_names") or []) if str(name)]
     asset_node_names = [str(name) for name in (asset_snapshot.get("node_names") or []) if str(name)]
 
@@ -1402,6 +1455,7 @@ def validate_structure_consistency(args, ue_result: dict, render_chain: dict, re
         "visible_texts_match": source_text_counter == asset_text_counter,
         "missing_texts": sorted((source_text_counter - asset_text_counter).elements()),
         "extra_texts": sorted((asset_text_counter - source_text_counter).elements()),
+        "icon_role_texts_excluded": sorted(icon_role_texts_excluded),
         "expansion_ratio": expansion_ratio,
     }
 
@@ -2089,7 +2143,7 @@ def execute_automation_render(args, spec_path: Path, log_path: Path, spec: dict)
     result_path = Path(spec["result_json_path"])
     write_json(spec_path, spec)
     driver_script_path = write_single_editor_driver_script(spec_path.parent, spec_path)
-    sync_project_plugin_build_id(args.editor, Path(args.project_plugin_root))
+    validate_plugin_module_build_id(args.editor, Path(args.project_plugin_root))
     editor_exit_code = run_editor(
         args.editor,
         args.project,
@@ -2349,6 +2403,7 @@ def compare_and_report(
         "reference_context": reference_context,
         "render_chain": render_chain,
         "structure_validation": structure_validation,
+        "engine_version": engine_version_from_evidence({"render_chain": render_chain}),
     }
     report_path = output_dir / "compare_report.json"
     write_json(report_path, report)
@@ -2434,6 +2489,7 @@ def main():
     args.editor = resolve_unreal_editor_path(args.editor)
     args.project, project_plugin_root = prepare_runtime_project(args, [args.source])
     args.project_plugin_root = str(project_plugin_root)
+    validate_plugin_module_build_id(args.editor, project_plugin_root)
     if args.dry_run_validate_paths:
         print("[OK] Design2UMG auto verify paths resolved.")
         print(f"project={args.project}")
@@ -2444,7 +2500,8 @@ def main():
     output_dir = (Path(args.output_dir) if args.output_dir else default_output_dir()).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    seed_runtime_font_assets(args.project, [args.source])
+    if not args.no_font_asset_seed:
+        seed_runtime_font_assets(args.project, [args.source])
     expected_design_size = get_expected_design_size(args.mode, args.source, args.node)
 
     reference_path, reference_context = prepare_reference(args, output_dir, expected_design_size)

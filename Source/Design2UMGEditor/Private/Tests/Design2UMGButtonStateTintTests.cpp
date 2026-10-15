@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
 #include "UMGPropertyApplierInternal.h"
 #include "UMGPropertyApplierSupport.h"
@@ -81,7 +82,7 @@ bool FButtonStateTintExplicitColorPrecedenceTest::RunTest(const FString& Paramet
 	Node.WidgetStyle.PressedColor = FLinearColor(0.7f, 0.5f, 0.3f, 0.65f);
 
 	UMGPropertyApplierInternal::ApplyWidgetProperties(Button, Node);
-	const FButtonStyle& Style = Button->GetStyle();
+	const FButtonStyle& Style = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button);
 	TestTrue(TEXT("Explicit hovered color overrides derived tint"),
 		Style.Hovered.TintColor.GetSpecifiedColor().Equals(Node.WidgetStyle.HoveredColor.GetValue()));
 	TestTrue(TEXT("Explicit pressed color overrides derived tint"),

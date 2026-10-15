@@ -286,6 +286,7 @@ struct FUMGBoxShadowLayerData
 	float Blur = 0.0f;
 	float Spread = 0.0f;
 	FLinearColor Color = FLinearColor::Transparent;
+	bool bShowShadowBehindNode = false;
 };
 
 struct FUMGShadowData

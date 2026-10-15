@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGAutomationTestAdapter.h"
 #include "Misc/AutomationTest.h"
 #include "UMGJsonParser.h"
 #include "UMGSchema.h"
@@ -126,11 +127,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FUMGJsonParserNumericBoundariesTest::RunTest(const FString&)
 {
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
 	// Large-exponent geometry must be rejected (not narrowed to Inf) while normal
 	// negative coordinates are preserved. Bounds fields are optional, so the parse
 	// still succeeds; only the offending value is dropped to its default.
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid X"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
-	AddExpectedMessagePlain(TEXT("FUMGJsonParser: Invalid Phase"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 3);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid X"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 1);
+	ExpectedLogMessages.Expect(TEXT("FUMGJsonParser: Invalid Phase"), ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Contains, 3);
 
 	// 1e100 is finite as double but past float range -> X is dropped (default 0),
 	// while Y=-20 (a negative coordinate) is kept.

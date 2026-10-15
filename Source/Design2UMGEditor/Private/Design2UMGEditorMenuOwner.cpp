@@ -14,6 +14,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "IDesktopPlatform.h"
 #include "Misc/App.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/MessageDialog.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -222,14 +223,24 @@ namespace
 		FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
 		if (Result.Commit.Status == EDesign2UMGCommitStatus::Conflict)
 		{
+			const FText ConflictMessage = LOCTEXT(
+				"ReimportFullConflictAsk",
+				"Reimport hit a full conflict: the asset and its manifest relationship is broken, so the asset was preserved.\nGenerate a side-by-side resolution copy from the new design? (the original stays untouched)");
+			const FText ConflictTitle = LOCTEXT("ReimportFullConflictTitle", "Design2UMG Reimport: full conflict");
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+			const EAppReturnType::Type Choice = FMessageDialog::Open(
+				EAppMsgType::YesNo,
+				EAppReturnType::No,
+				ConflictMessage,
+				&ConflictTitle);
+#else
 			const EAppReturnType::Type Choice = FMessageDialog::Open(
 				EAppMsgCategory::Warning,
 				EAppMsgType::YesNo,
 				EAppReturnType::No,
-				LOCTEXT(
-					"ReimportFullConflictAsk",
-					"Reimport hit a full conflict: the asset and its manifest relationship is broken, so the asset was preserved.\nGenerate a side-by-side resolution copy from the new design? (the original stays untouched)"),
-				LOCTEXT("ReimportFullConflictTitle", "Design2UMG Reimport: full conflict"));
+				ConflictMessage,
+				ConflictTitle);
+#endif
 			if (Choice == EAppReturnType::Yes)
 			{
 				Request.bGenerateResolutionCopy = true;

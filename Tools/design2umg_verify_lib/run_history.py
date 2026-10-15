@@ -38,6 +38,8 @@ def write_historical_best_validation(
         dict with keys: manifest_path, run_manifest_path, validation_path,
         validation, source.
     """
+    if output_root.parent.resolve() != automation_root.resolve():
+        raise ValueError("Historical window must contain the current run")
     run_manifest_path = output_root / "historical_best_manifest.json"
     # A single-case check still scans all history, but only publishes its own scope.
     destination = {} if publish_global_manifest else {"output_path": run_manifest_path}

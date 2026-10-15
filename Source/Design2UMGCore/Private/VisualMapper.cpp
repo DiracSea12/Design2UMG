@@ -186,6 +186,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 				Layer.Offset = FVector2D(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
 				Layer.Blur = Effect.Shadow.Blur;
 				Layer.Spread = Effect.Shadow.Spread;
+				Layer.bShowShadowBehindNode = Effect.Shadow.bShowShadowBehindNode;
 				Layer.Color = FUMGValueParser::ParseColor(
 					Effect.Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Effect.Shadow.Color);
 				++ShadowCount;

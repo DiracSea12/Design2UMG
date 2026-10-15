@@ -47,10 +47,10 @@ def main() -> None:
     assert_single_run_preserves_global_manifest()
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
-        output_root = root / "run-root"
         automation_root = root / "automation-root"
-        output_root.mkdir()
         automation_root.mkdir()
+        output_root = automation_root / "run-root"
+        output_root.mkdir()
 
         rebuild_best = FakeRebuildBestModule()
         validate_run = FakeValidateRunModule()
@@ -97,7 +97,8 @@ def assert_single_run_preserves_global_manifest() -> None:
         original = b'{"scope_case_names":["first","second"]}'
         global_manifest.write_bytes(original)
         validator = FakeValidateRunModule()
-        with patch.object(rebuild_best, "rebuild_historical_best_manifest", return_value={"cases": {}}) as scan:
+        with patch.object(rebuild_best, "rebuild_historical_best_manifest", return_value={"cases": {}}) as scan, \
+                patch.object(rebuild_best, "load_baseline_anchor", return_value=(automation_root / "baseline", 0)):
             result = write_historical_best_validation(
                 output_root, automation_root, rebuild_best, validator, write_json,
                 expected_case_names={"first"}, publish_global_manifest=False,

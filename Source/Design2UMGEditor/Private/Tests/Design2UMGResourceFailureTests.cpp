@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGAutomationTestAdapter.h"
 #include "Misc/Build.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -404,7 +405,7 @@ bool FResourceFailureUrlLimitFailureClearsWithLocalImagesTest::RunTest(const FSt
 		return false;
 	}
 
-	AddExpectedErrorPlain(TEXT("Too many unique remote images"), EAutomationExpectedErrorFlags::Contains, 2);
+	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("Too many unique remote images"), EAutomationExpectedErrorFlags::Contains, 2);
 	const int32 UrlLimit = DesignImageResources::FImageResourceLimits::DefaultMaxUrlsPerOperation;
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_ResourceFailure_UrlLimit");
@@ -478,7 +479,7 @@ bool FResourceFailureFigmaEmptyImagesDictionaryIsAllowedSubstituteTest::RunTest(
 {
 	// Plain string: the message contains "(s)", which would be read as a regex group
 	// by AddExpectedError's default regex matching.
-	AddExpectedErrorPlain(TEXT("requested image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
+	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("requested image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
 	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
@@ -524,7 +525,7 @@ bool FResourceFailureFigmaUnresolvedBitmapFillRefIsFailureTest::RunTest(const FS
 	// Only the required-ref message is expected here. The two missing-ref cases are
 	// reported separately now, so a required ref is no longer also logged as "will fall
 	// back to vector" - that message would contradict this test's whole point.
-	AddExpectedErrorPlain(TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
+	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
 	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
@@ -770,7 +771,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaSubstituteMustCoverEveryUs
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FResourceFailureFigmaSubstituteMustCoverEveryUseTest::RunTest(const FString& Parameters)
 {
-	AddExpectedErrorPlain(TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
+	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 	for (int32 CaseIndex = 0; CaseIndex < 3; ++CaseIndex)
 	{
 		const auto Document = MakeDocumentWithVectorRasterFallbackRef(TEXT("shared-ref"));

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
+#include "Async/Async.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
@@ -9,6 +10,7 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 #include "Editor.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/MessageDialog.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -27,6 +29,25 @@
 namespace
 {
 	constexpr float JsonEditDebounceSeconds = 0.5f;
+
+	const FSlateBrush* GetAppStyleBrush(const FName StyleName)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return FAppStyle::Get().GetBrush(StyleName);
+#else
+		return FAppStyle::GetBrush(StyleName);
+#endif
+	}
+
+	FSlateFontInfo GetAppStyleFont(const FName StyleName)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return FAppStyle::Get().GetFontStyle(StyleName);
+#else
+		return FAppStyle::GetFontStyle(StyleName);
+#endif
+	}
+
 	const TCHAR* DescribeFileState(EDesign2UMGFileState State)
 	{
 		switch (State)
@@ -96,7 +117,7 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 		[
 			SNew(STextBlock)
 			.Text(LOCTEXT("PreviewTitle", "Design2UMG Preview - Review and edit the generated JSON before creating the Widget Blueprint"))
-			.Font(FAppStyle::GetFontStyle("BoldFont"))
+			.Font(GetAppStyleFont("BoldFont"))
 		]
 
 		+ SVerticalBox::Slot()
@@ -124,7 +145,7 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 {
 	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.BorderImage(GetAppStyleBrush("ToolPanel.GroupBorder"))
 		.Padding(4)
 		[
 			SNew(SVerticalBox)
@@ -140,7 +161,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("UMGPreview", "UMG Preview (1:1)"))
-					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.Font(GetAppStyleFont("BoldFont"))
 				]
 			]
 
@@ -153,7 +174,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 				.VAlign(VAlign_Fill)
 				[
 					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					.BorderImage(GetAppStyleBrush("WhiteBrush"))
 					.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.02f, 1.0f))
 					.Padding(8)
 					[
@@ -170,7 +191,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildJsonEditorPanel()
 {
 	return SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.BorderImage(GetAppStyleBrush("ToolPanel.GroupBorder"))
 		.Padding(4)
 		[
 			SNew(SVerticalBox)
@@ -186,7 +207,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildJsonEditorPanel()
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("JsonEditor", "JSON Structure (Editable)"))
-					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.Font(GetAppStyleFont("BoldFont"))
 				]
 
 				+ SHorizontalBox::Slot()
@@ -231,7 +252,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		.Padding(0, 0, 0, 6)
 		[
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderImage(GetAppStyleBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.25f, 0.18f, 0.0f, 1.0f))
 			.Padding(FMargin(8, 4))
 			[
@@ -254,7 +275,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 			return CurrentImageResult.IsSet() && CurrentImageResult->HasFailures()
 				? EVisibility::Visible : EVisibility::Collapsed;
 		})
-		.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+		.BorderImage(GetAppStyleBrush("WhiteBrush"))
 		.BorderBackgroundColor(FLinearColor(0.25f, 0.18f, 0.0f, 1.0f))
 		.Padding(FMargin(8, 4))
 		[
@@ -598,7 +619,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderImage(GetAppStyleBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.1f, 0.02f, 0.02f, 1.0f))
 			.Padding(8)
 			[
@@ -618,7 +639,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 	// Show loading state first.
 	UMGPreviewContainer->SetContent(
 		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+		.BorderImage(GetAppStyleBrush("WhiteBrush"))
 		.BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 1.0f))
 		.Padding(8)
 		.HAlign(HAlign_Center)
@@ -676,7 +697,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		CleanupPreviewWidget();
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderImage(GetAppStyleBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.1f, 0.02f, 0.02f, 1.0f))
 			.Padding(8)
 			[
@@ -722,7 +743,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 			CleanupPreviewWidget();
 			UMGPreviewContainer->SetContent(
 				SNew(SBorder)
-				.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+				.BorderImage(GetAppStyleBrush("WhiteBrush"))
 				.BorderBackgroundColor(FLinearColor(0.1f, 0.05f, 0.02f, 1.0f))
 				.Padding(8)
 				[
@@ -742,7 +763,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderImage(GetAppStyleBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 1.0f))
 			.Padding(4)
 			[
@@ -775,7 +796,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 				FText::FromString(MaterializationResult.ErrorMessage));
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+			.BorderImage(GetAppStyleBrush("WhiteBrush"))
 			.BorderBackgroundColor(FLinearColor(0.1f, 0.05f, 0.02f, 1.0f))
 			.Padding(8)
 			[
@@ -787,8 +808,13 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		);
 		if (!MaterializationResult.ErrorMessage.IsEmpty())
 		{
+			const FText FailureTitle = LOCTEXT("PreviewResourceLimitTitle", "Design2UMG - Preview resource limit");
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+			FMessageDialog::Open(EAppMsgType::Ok, FailureMessage, &FailureTitle);
+#else
 			FMessageDialog::Open(EAppMsgType::Ok, FailureMessage,
-				LOCTEXT("PreviewResourceLimitTitle", "Design2UMG - Preview resource limit"));
+				FailureTitle);
+#endif
 		}
 	}
 }

@@ -8,6 +8,9 @@ from pathlib import Path
 
 import design2umg_auto_verify as verify
 import design2umg_render_rule as render_rule
+from design2umg_verify_lib.evidence_contract import (
+    engine_version_from_evidence, rhi_backend_from_evidence, rhi_feature_level_from_evidence,
+)
 
 
 NO_REGRESSION_EPSILON = 1.25e-4
@@ -82,6 +85,9 @@ def load_baseline_case_metrics(case_dir: Path | None, pixel_tolerance: int) -> d
         reason = "baseline_metrics_incomplete"
     return {
         "available": available,
+        "engine_version": engine_version_from_evidence(report),
+        "rhi_backend": rhi_backend_from_evidence(report),
+        "rhi_feature_level": rhi_feature_level_from_evidence(report),
         "reason": reason,
         "case_dir": str(case_dir),
         "report_path": str(report_path) if report_path.is_file() else "",
@@ -139,6 +145,33 @@ def evaluate_no_regression(report: dict, case_dir: Path | None, pixel_tolerance:
         else:
             reason = baseline.get("reason", "baseline_unavailable")
         result["reasons"].append(reason)
+        return result
+
+    current_engine = engine_version_from_evidence(report)
+    baseline_engine = baseline.get("engine_version")
+    result["engine_versions"] = {"current": current_engine, "baseline": baseline_engine}
+    if not current_engine or not baseline_engine or current_engine != baseline_engine:
+        result["available"] = False
+        result["reasons"].append("engine_identity_unavailable" if not current_engine or not baseline_engine
+                                 else "engine_identity_mismatch")
+        return result
+
+    current_rhi = rhi_backend_from_evidence(report)
+    baseline_rhi = baseline.get("rhi_backend")
+    result["rhi_backends"] = {"current": current_rhi, "baseline": baseline_rhi}
+    if not current_rhi or not baseline_rhi or current_rhi != baseline_rhi:
+        result["available"] = False
+        result["reasons"].append("rhi_identity_unavailable" if not current_rhi or not baseline_rhi
+                                 else "rhi_identity_mismatch")
+        return result
+
+    current_feature = rhi_feature_level_from_evidence(report)
+    baseline_feature = baseline.get("rhi_feature_level")
+    result["rhi_feature_levels"] = {"current": current_feature, "baseline": baseline_feature}
+    if not current_feature or not baseline_feature or current_feature != baseline_feature:
+        result["available"] = False
+        result["reasons"].append("rhi_feature_level_unavailable" if not current_feature or not baseline_feature
+                                 else "rhi_feature_level_mismatch")
         return result
 
     current_missing_metrics = [metric_name for metric_name in NO_REGRESSION_METRICS if result["current"].get(metric_name) is None]

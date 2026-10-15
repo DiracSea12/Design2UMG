@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGGenerator.h"
@@ -293,7 +294,7 @@ bool FNamedSlotOverflowWrapStructureStableTest::RunTest(const FString& Parameter
 	TestNotNull(TEXT("Wrapped second child has panel slot"), WrappedSecondSlot);
 	if (const UVerticalBoxSlot* WrappedVBoxSlot = Cast<UVerticalBoxSlot>(WrappedSecondSlot))
 	{
-		const FMargin Padding = WrappedVBoxSlot->GetPadding();
+		const FMargin Padding = Design2UMGWidgetPropertyAccess::GetPadding(*WrappedVBoxSlot);
 		TestTrue(TEXT("Wrapped second child padding is preserved"), FMath::IsNearlyEqual(Padding.Left, 3.0f, 0.01f) && FMath::IsNearlyEqual(Padding.Bottom, 7.0f, 0.01f));
 	}
 	else

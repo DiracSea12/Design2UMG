@@ -2,11 +2,12 @@
 
 // Safe reimport: matched-update refresh paths (design-owned refresh, sibling correspondence, kind change, geometry/visual refresh, diagnostics, disk-loaded assets).
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
 
 #include "Design2UMGGenerationManifest.h"
 #include "DesignImportPipeline.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -57,16 +58,16 @@ bool FSafeReimportMatchedUpdateTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGComponentInputTestWidget* MappedBefore = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("mapped instance generated"), MappedBefore))
 	{
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = MappedBefore;
+	TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 
 	// Simulate developer customization: edit a mapped input value, edit D2U text, add a project child widget.
-	MappedBefore->TextValue = FText::FromString(TEXT("Hacked"));
+	ComponentFixtures::Write<FTextProperty>(MappedBefore, TEXT("TextValue"), FText::FromString(TEXT("Hacked")));
 	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
 	{
 		Head->SetText(FText::FromString(TEXT("DevEdit")));
@@ -105,13 +106,13 @@ bool FSafeReimportMatchedUpdateTest::RunTest(const FString&)
 	}
 
 	// mapped instance: the same object (not replaced), class unchanged, inputs overwritten directly, outer layout updated, interior subtree not expanded.
-	UDesign2UMGComponentInputTestWidget* MappedAfter = MappedWeak.Get();
+	UUserWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("mapped instance still alive"), MappedAfter);
 	if (MappedAfter)
 	{
 		TestTrue(TEXT("mapped instance object identity preserved"), MappedAfter == MappedBefore);
 		TestEqual(TEXT("mapped instance class unchanged"), MappedAfter->GetClass()->GetPathName(), FString(FixtureMappedClassPath));
-		TestEqual(TEXT("declared input overwritten with latest design value"), MappedAfter->TextValue.ToString(), FString(TEXT("Pay Now")));
+		TestEqual(TEXT("declared input overwritten with latest design value"), ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("TextValue")).ToString(), FString(TEXT("Pay Now")));
 		// The component's interior subtree is not expanded: the inner label in the design never appears as a generated widget inside the host tree.
 		TestNull(TEXT("mapped component internals not expanded into the host tree"),
 			WBP->WidgetTree->FindWidget(TEXT("InnerLabel")));
@@ -267,7 +268,7 @@ bool FSafeReimportKindChangePositiveTest::RunTest(const FString&)
 	bool bHasMappedAfterV2 = false;
 	WBP->WidgetTree->ForEachWidget([&bHasMappedAfterV2](UWidget* Widget)
 	{
-		bHasMappedAfterV2 |= Widget->IsA<UDesign2UMGComponentInputTestWidget>();
+		bHasMappedAfterV2 |= Widget->IsA(ComponentFixtures::InputClass());
 	});
 	TestFalse(TEXT("old mapped instance replaced away"), bHasMappedAfterV2);
 	TestNotNull(TEXT("generated expansion present (component internals expanded)"),
@@ -294,11 +295,11 @@ bool FSafeReimportKindChangePositiveTest::RunTest(const FString&)
 	TestTrue(TEXT("reverse transition message names node and direction"),
 		FixtureHasMessageWithAll(Result, TEXT("reimport_kind_changed"), { TEXT("HeroButton"), TEXT("generated -> mapped") }));
 
-	UDesign2UMGComponentInputTestWidget* Remapped = FixtureFindMappedInstance(WBP);
+	UUserWidget* Remapped = FixtureFindMappedInstance(WBP);
 	TestNotNull(TEXT("mapped instance re-created"), Remapped);
 	if (Remapped)
 	{
-		TestEqual(TEXT("declared input written on the new instance"), Remapped->TextValue.ToString(), FString(TEXT("Checkout")));
+		TestEqual(TEXT("declared input written on the new instance"), ComponentFixtures::Read<FTextProperty>(Remapped, TEXT("TextValue")).ToString(), FString(TEXT("Checkout")));
 	}
 	TestNull(TEXT("generated expansion replaced away"), WBP->WidgetTree->FindWidget(TEXT("InnerLabel")));
 
@@ -426,7 +427,7 @@ bool FSafeReimportGeneratedGeometryVisualRefreshTest::RunTest(const FString&)
 		}
 
 		// Visual refresh: the ApplyWidgetProperties path (fills -> ColorAndOpacity) + the text content.
-		const FColor ColorAfter = StatusLine->GetColorAndOpacity().GetSpecifiedColor().ToFColor(true);
+		const FColor ColorAfter = Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*StatusLine).GetSpecifiedColor().ToFColor(true);
 		TestTrue(TEXT("text fill color refreshed from design"),
 			FMath::Abs(ColorAfter.R - 242) <= 1 && FMath::Abs(ColorAfter.G - 77) <= 1 && FMath::Abs(ColorAfter.B - 38) <= 1);
 		TestEqual(TEXT("text content refreshed from design"), StatusLine->GetText().ToString(), FString(TEXT("v2 line")));

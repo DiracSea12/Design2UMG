@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
 #include "ProceduralShapeGenerator.h"
 #include "WidgetResourceBinder.h"
@@ -179,7 +180,7 @@ bool FWidgetResourceBinderGradientDescriptorMaterialPath::RunTest(const FString&
 	UImage* ImageWidget = NewObject<UImage>();
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, nullptr);
 	TestTrue(TEXT("Descriptor-backed gradient material path still binds"), bBound);
-	TestTrue(TEXT("Gradient material path produces a brush resource"), ImageWidget->GetBrush().GetResourceObject() != nullptr);
+	TestTrue(TEXT("Gradient material path produces a brush resource"), Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject() != nullptr);
 	return true;
 }
 
@@ -203,7 +204,7 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 	TestTrue(TEXT("MaterialRef takes priority over TexturePath"), bBound);
 
 	// Verify the brush comes from a procedural texture with a nonzero ImageSize.
-	const FSlateBrush Brush = ImageWidget->GetBrush();
+	const FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
 	TestTrue(TEXT("Brush ImageSize set by material path"), Brush.ImageSize.X > 0.0f && Brush.ImageSize.Y > 0.0f);
 
 	return true;
@@ -240,7 +241,7 @@ bool FPropertyApplierExplicitEmptyMaterialRefBlocksTextureFallback::RunTest(cons
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 	TestTrue(TEXT("Image explicit empty MaterialRef blocks TexturePath fallback"),
-		ImageWidget->GetBrush().GetResourceObject() == nullptr);
+		Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject() == nullptr);
 
 	UBorder* BorderWidget = NewObject<UBorder>();
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(BorderWidget, Node);
@@ -267,7 +268,7 @@ bool FPropertyApplierBorderBrushColorSurvivesBrushMutation::RunTest(const FStrin
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(BorderWidget, Node);
 
 	TestTrue(TEXT("Border brush color survives final brush assignment"),
-		BorderWidget->GetBrushColor().Equals(ExpectedColor, 0.0001f));
+		Design2UMGWidgetPropertyAccess::GetBrushColor(*BorderWidget).Equals(ExpectedColor, 0.0001f));
 	TestTrue(TEXT("Border brush receives a resource when color needs an image brush"),
 		BorderWidget->Background.GetResourceObject() != nullptr);
 	return true;
@@ -287,7 +288,8 @@ bool FPropertyApplierUsesSharedAxisAlignedCropSemantics::RunTest(const FString& 
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
-	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
+	const FBox2f UVRegion = Design2UMGWidgetPropertyAccess::GetUVRegion(
+		Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget));
 	TestTrue(TEXT("Property applier axis crop preserves UV min X"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.25f, 0.0001f));
 	TestTrue(TEXT("Property applier axis crop preserves UV min Y"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10f, 0.0001f));
 	TestTrue(TEXT("Property applier axis crop preserves UV max X"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75f, 0.0001f));
@@ -317,7 +319,8 @@ bool FPropertyApplierNormalizesTypedAxisAlignedCropTransform::RunTest(const FStr
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
 	// Compute UV bounds directly from payload floats: (TX, TY) to (TX + A, TY + D).
-	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
+	const FBox2f UVRegion = Design2UMGWidgetPropertyAccess::GetUVRegion(
+		Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget));
 	TestTrue(TEXT("Typed crop transform reaches brush min X at full precision"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.2500004768371582f, 0.0000001f));
 	TestTrue(TEXT("Typed crop transform reaches brush min Y at full precision"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10000049322843552f, 0.0000001f));
 	TestTrue(TEXT("Typed crop transform reaches brush max X at full precision"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75000095367431641f, 0.0000001f));
@@ -342,7 +345,7 @@ bool FPropertyApplierUsesSharedAffineCropSemantics::RunTest(const FString& Param
 	UImage* ImageWidget = NewObject<UImage>();
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(ImageWidget, Node);
 
-	UTexture2D* BoundTexture = Cast<UTexture2D>(ImageWidget->GetBrush().GetResourceObject());
+	UTexture2D* BoundTexture = Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject());
 	if (!TestNotNull(TEXT("Property applier affine crop produces a texture"), BoundTexture))
 	{
 		return false;
@@ -350,8 +353,9 @@ bool FPropertyApplierUsesSharedAffineCropSemantics::RunTest(const FString& Param
 
 	TestEqual(TEXT("Property applier affine crop output width"), BoundTexture->GetSizeX(), 8);
 	TestEqual(TEXT("Property applier affine crop output height"), BoundTexture->GetSizeY(), 6);
-	TestEqual(TEXT("Property applier affine crop brush width"), ImageWidget->GetBrush().ImageSize.X, 8.0f);
-	TestEqual(TEXT("Property applier affine crop brush height"), ImageWidget->GetBrush().ImageSize.Y, 6.0f);
+	const auto BrushImageSize = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).ImageSize;
+	TestEqual(TEXT("Property applier affine crop brush width"), BrushImageSize.X, static_cast<decltype(BrushImageSize.X)>(8.0));
+	TestEqual(TEXT("Property applier affine crop brush height"), BrushImageSize.Y, static_cast<decltype(BrushImageSize.Y)>(6.0));
 	return true;
 }
 
@@ -384,7 +388,7 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, &TextureMap);
 
 	TestTrue(TEXT("Texture map binding succeeds"), bBound);
-	UTexture2D* BoundTexture = Cast<UTexture2D>(ImageWidget->GetBrush().GetResourceObject());
+	UTexture2D* BoundTexture = Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject());
 	if (!TestNotNull(TEXT("Bound brush texture exists"), BoundTexture))
 	{
 		return false;
@@ -393,8 +397,9 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	TestTrue(TEXT("Binder keeps affine-cropped texture instead of original source"), BoundTexture != SourceTexture);
 	TestEqual(TEXT("Affine crop output width"), BoundTexture->GetSizeX(), 8);
 	TestEqual(TEXT("Affine crop output height"), BoundTexture->GetSizeY(), 6);
-	TestEqual(TEXT("Brush image size follows affine crop width"), ImageWidget->GetBrush().ImageSize.X, 8.0f);
-	TestEqual(TEXT("Brush image size follows affine crop height"), ImageWidget->GetBrush().ImageSize.Y, 6.0f);
+	const auto BrushImageSize = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).ImageSize;
+	TestEqual(TEXT("Brush image size follows affine crop width"), BrushImageSize.X, static_cast<decltype(BrushImageSize.X)>(8.0));
+	TestEqual(TEXT("Brush image size follows affine crop height"), BrushImageSize.Y, static_cast<decltype(BrushImageSize.Y)>(6.0));
 	return true;
 }
 
@@ -422,14 +427,15 @@ bool FWidgetResourceBinderPreservesAxisAlignedCropAfterBinding::RunTest(const FS
 	const bool bBound = FWidgetResourceBinder::BindImageResource(ImageWidget, Node, &TextureMap);
 
 	TestTrue(TEXT("Texture map binding succeeds"), bBound);
-	UTexture2D* BoundTexture = Cast<UTexture2D>(ImageWidget->GetBrush().GetResourceObject());
+	UTexture2D* BoundTexture = Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject());
 	if (!TestNotNull(TEXT("Bound brush texture exists"), BoundTexture))
 	{
 		return false;
 	}
 
 	TestTrue(TEXT("Binder keeps source texture for axis-aligned crop"), BoundTexture == SourceTexture);
-	const FBox2f UVRegion = ImageWidget->GetBrush().GetUVRegion();
+	const FBox2f UVRegion = Design2UMGWidgetPropertyAccess::GetUVRegion(
+		Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget));
 	TestTrue(TEXT("Axis crop preserves UV min X"), FMath::IsNearlyEqual(UVRegion.Min.X, 0.25f, 0.0001f));
 	TestTrue(TEXT("Axis crop preserves UV min Y"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10f, 0.0001f));
 	TestTrue(TEXT("Axis crop preserves UV max X"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75f, 0.0001f));

@@ -2,10 +2,12 @@
 
 #include "Design2UMGEditorModule.h"
 
+#include "Design2UMGAssetRegistryAccess.h"
 #include "Design2UMGEditorCommandOwner.h"
 #include "Design2UMGEditorImportOrchestrator.h"
 #include "Design2UMGEditorMenuOwner.h"
 #include "Design2UMGFontMetrics.h"
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
@@ -54,7 +56,8 @@ namespace
 			Info.Hyperlink = FSimpleDelegate::CreateLambda([AssetPath]()
 			{
 				FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-				FAssetData AssetData = AssetRegistry.Get().GetAssetByObjectPath(FSoftObjectPath(AssetPath));
+				FAssetData AssetData = Design2UMGAssetRegistryAccess::GetAssetByObjectPath(
+					AssetRegistry.Get(), FSoftObjectPath(AssetPath));
 				if (!AssetData.IsValid())
 				{
 					return;
@@ -157,7 +160,7 @@ void FDesign2UMGEditorModule::ShutdownModule()
 
 void FDesign2UMGEditorModule::HandleFontAssetChanged(const FAssetData& AssetData)
 {
-	if (AssetData.AssetClassPath == UFont::StaticClass()->GetClassPathName())
+	if (Design2UMGFontAccess::IsFontAsset(AssetData))
 	{
 		FFontResolver::ClearCache();
 	}

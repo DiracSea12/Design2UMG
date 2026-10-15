@@ -65,6 +65,7 @@ def parse_args():
     parser.add_argument("--output-root", default="", help="Directory for suite outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
     parser.add_argument("--project", default="", help="Runtime project path. If omitted, DESIGN2UMG_RUNTIME_PROJECT is required. HostProject fallback and design-root inference are not supported.")
+    parser.add_argument("--no-font-asset-seed", action="store_true", help="Skip copying font .uasset files from source projects; preserve font assets already in the selected project.")
     parser.add_argument("--editor", default="", help="UnrealEditor executable path. If omitted, use DESIGN2UMG_UNREAL_EDITOR, or UE_ROOT to resolve Engine/Binaries/Win64/UnrealEditor.exe.")
     parser.add_argument("--dry-run-validate-paths", action="store_true", help="Resolve and validate the runtime project/editor paths, then exit before preparing references or launching Unreal.")
     parser.add_argument("--reference-provider", choices=["pencil"], default="pencil", help="Reference source for discovered pen cases")
@@ -634,6 +635,8 @@ def run_editor_driver(
 ) -> int:
     driver_script_path = driver_script_path.resolve()
     driver_log_path = get_editor_driver_log_path(driver_script_path)
+    for path in [driver_log_path, *result_paths]:
+        Path(path).unlink(missing_ok=True)
     command = [
         editor_path,
         project_path,
@@ -701,7 +704,13 @@ def run_editor_driver(
 
             time.sleep(2)
 
-    exit_deadline = time.time() + max(EDITOR_GRACEFUL_EXIT_DEADLINE_SEC, float(idle_timeout_sec))
+    if not editor_driver_started(driver_log_path):
+        raise EditorDriverStartError(
+            f"Editor exited before the automation driver started: "
+            f"exit_code={exit_code} driver_log={driver_log_path} log={log_path}"
+        )
+
+    exit_deadline = time.time() + EDITOR_GRACEFUL_EXIT_DEADLINE_SEC
     while time.time() < exit_deadline:
         current_result_count = sum(1 for path in result_paths if path.is_file())
         if current_result_count >= len(result_paths):
@@ -718,13 +727,50 @@ def run_editor_driver(
             exit_deadline = extend_deadline(exit_deadline, max(EDITOR_GRACEFUL_EXIT_DEADLINE_SEC, 10.0))
         time.sleep(1)
 
-    if not editor_driver_started(driver_log_path):
-        raise EditorDriverStartError(
-            f"Editor exited before the automation driver started: "
-            f"exit_code={exit_code} driver_log={driver_log_path} log={log_path}"
-        )
-
     return exit_code
+
+
+def collect_editor_process_evidence(exit_code: int, log_path: Path, result_paths: list,
+                                    driver_log_path: Path) -> dict:
+    normal_exit = False
+    crash_reported = False
+    log_readable = False
+    try:
+        with log_path.open(encoding="utf-8-sig", errors="replace") as log:
+            for line in log:
+                normal_exit |= "LogExit: Exiting." in line
+                crash_reported |= "Fatal error:" in line or (
+                    "LogWindows:" in line and any(marker in line for marker in (
+                        "Unhandled Exception:", "=== Critical error:")))
+        log_readable = True
+    except OSError:
+        pass
+    driver_complete = False
+    try:
+        with driver_log_path.open(encoding="utf-8-sig", errors="replace") as log:
+            driver_complete = any(line.strip().endswith(" driver:complete") for line in log)
+    except OSError:
+        pass
+    results_complete = bool(result_paths)
+    for path in result_paths:
+        try:
+            if not isinstance(json.loads(Path(path).read_text(encoding="utf-8-sig")), dict):
+                results_complete = False
+        except (OSError, ValueError):
+            results_complete = False
+    if crash_reported:
+        reason = "explicit_crash_evidence"
+    elif not log_readable or not results_complete:
+        reason = "incomplete_process_evidence"
+    elif not driver_complete:
+        reason = "driver_incomplete"
+    elif exit_code != 0 and not normal_exit:
+        reason = "abnormal_exit_unconfirmed"
+    else:
+        reason = ""
+    return {"valid": not reason, "reason": reason, "exit_code": exit_code,
+            "normal_exit_logged": normal_exit, "crash_reported": crash_reported,
+            "driver_complete": driver_complete, "result_files_complete": results_complete}
 
 
 def run_execution_shard(
@@ -756,14 +802,21 @@ def run_execution_shard(
         log_cmds,
     )
 
+    driver_log_path = get_editor_driver_log_path(driver_script_path)
+    process_evidence = collect_editor_process_evidence(exit_code, suite_log_path, shard["result_paths"],
+                                                      driver_log_path)
     for state in shard["states"]:
         for step in state["steps"].values():
             step["editor_exit_code"] = exit_code
+            step["editor_process_evidence"] = process_evidence
 
     return {
         "shard_id": shard["id"],
         "exit_code": exit_code,
         "log_path": str(suite_log_path),
+        "driver_log_path": str(driver_log_path),
+        "result_paths": [str(path) for path in shard["result_paths"]],
+        "editor_process_evidence": process_evidence,
         "spec_count": len(shard["spec_paths"]),
     }
 
@@ -925,6 +978,10 @@ def run_execution_steps(
                     print(f"[EDITOR_STEP_RETRY] {case_name}:{step_key} driver did not start; retrying", flush=True)
                     time.sleep(5)
             step["editor_exit_code"] = exit_code
+            driver_log_path = get_editor_driver_log_path(driver_script_path)
+            process_evidence = collect_editor_process_evidence(exit_code, log_path,
+                [step["result_json_path"]], driver_log_path)
+            step["editor_process_evidence"] = process_evidence
             if not step["result_json_path"].is_file():
                 raise RuntimeError(
                     f"Step isolation editor did not produce result json: "
@@ -936,6 +993,9 @@ def run_execution_steps(
                     "shard_id": step_index,
                     "exit_code": exit_code,
                     "log_path": str(log_path),
+                    "driver_log_path": str(driver_log_path),
+                    "result_paths": [str(step["result_json_path"])],
+                    "editor_process_evidence": process_evidence,
                     "spec_count": 1,
                     "editor_isolation": "step",
                     "case_name": case_name,
@@ -1178,7 +1238,8 @@ def process_case_result(state: dict, suite_exit_code: int, suite_log_path: Path)
     fallback_errors = [step.get("fallback_error", "") for step in state["steps"].values() if step.get("fallback_error")]
     editor_process_fields = {
         "editor_exit_code": suite_exit_code,
-        "editor_process_failed": suite_exit_code != 0,
+        "editor_process_failed": not state["steps"] or not all(
+            step["editor_process_evidence"]["valid"] for step in state["steps"].values()),
     }
 
     if args.mode == "asset":
@@ -1540,7 +1601,12 @@ def build_suite_summary(
         if item.get("no_regression_required") and not item.get("no_regression_available")
     )
     blocked_cases = [item for item in case_results if item.get("blocked")]
-    editor_process_failures = sum(1 for code in editor_exit_codes if code != 0)
+    if editor_exit_codes != [item["exit_code"] for item in shard_results]:
+        raise ValueError("Editor exit codes do not match execution results")
+    process_evidence = [collect_editor_process_evidence(item["exit_code"],
+        Path(item.get("log_path") or ""), item.get("result_paths") or [],
+        Path(item.get("driver_log_path") or "")) for item in shard_results]
+    editor_process_failures = sum(not item["valid"] for item in process_evidence)
     ir_golden_cases = [item for item in case_results if item.get("ir_golden_available")]
     ir_golden_passed = sum(1 for item in ir_golden_cases if item.get("ir_golden_passed"))
     geometry_golden_cases = [item for item in case_results if item.get("geometry_golden_available")]
@@ -1563,7 +1629,8 @@ def build_suite_summary(
         "editor_isolation": args.editor_isolation,
         "idle_timeout_sec": args.idle_timeout_sec,
         "startup_timeout_sec": args.startup_timeout_sec,
-        "execution_shards": shard_results,
+        "execution_shards": [{**item, "editor_process_evidence": evidence}
+                             for item, evidence in zip(shard_results, process_evidence)],
         "post_workers_requested": args.post_workers,
         "post_workers_used": post_workers,
         "design_root": str(design_root),
@@ -1770,14 +1837,19 @@ def main():
         print(f"figma_export_roots={effective_figma_export_roots}")
         return 0
 
+    history_root = output_root.parent
+    if rebuild_best.load_baseline_anchor(history_root)[0] is None:
+        raise ValueError(f"Historical validation requires an accepted baseline anchor: {history_root}")
+
     args.game_output_explicit = bool(normalize_game_output_path(args.game_output))
     args.effective_game_output_root = resolve_effective_suite_game_output_root(args.game_output, suite_start_time)
     if not args.include and not args.exclude:
         print(f"full discovery: {len(cases)} cases from {design_root} and {len(effective_figma_export_roots)} Figma export roots")
     if args.game_output_explicit:
         validate_explicit_suite_game_output_root(args.effective_game_output_root, cases)
-    verify.sync_project_plugin_build_id(args.editor, project_plugin_root)
-    verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
+    verify.validate_plugin_module_build_id(args.editor, project_plugin_root)
+    if not args.no_font_asset_seed:
+        verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
     record_effective_game_output_root(run_scope_path, args)
     reference_cache_root = reference_cache.resolve_reference_cache_root(args, output_root)
     if reference_cache_root:
@@ -1898,7 +1970,7 @@ def main():
     print(f"[VISUAL_REVIEW] report={visual_review_path}")
     history_result = write_historical_best_validation(
         output_root,
-        output_root.parent,
+        history_root,
         rebuild_best,
         validate_run_tool,
         verify.write_json,

@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
-#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/EngineVersionComparison.h"
+#if WITH_DEV_AUTOMATION_TESTS && !UE_VERSION_OLDER_THAN(5, 3, 0)
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -62,9 +63,11 @@ bool FNativeFractionalRunHeightTest::RunTest(const FString&)
     const auto Owner = SNew(STextBlock);
     const FTextBlockStyle EqualStyle = FTextBlockStyle().SetFont(EqualInfo).SetColorAndOpacity(FLinearColor::White);
     const FTextBlockStyle FractionalStyle = FTextBlockStyle().SetFont(FractionalInfo).SetColorAndOpacity(FLinearColor::White);
-    const auto Layout = FSlateTextLayout::Create(&Owner.Get(), EqualStyle);
-    Layout->SetLineHeightPercentage(Factor);
-    Layout->SetApplyLineHeightToBottomLine(true);
+	    const auto Layout = FSlateTextLayout::Create(&Owner.Get(), EqualStyle);
+	    Layout->SetLineHeightPercentage(Factor);
+#if !UE_VERSION_OLDER_THAN(5, 4, 0)
+	    Layout->SetApplyLineHeightToBottomLine(true);
+#endif
     TArray<FTextLayout::FNewLineData> Lines;
     for (int32 Index = 0; Index < 3; ++Index)
     {
@@ -85,8 +88,12 @@ bool FNativeFractionalRunHeightTest::RunTest(const FString&)
     for (int32 Mode = 0; Mode < 2; ++Mode)
     {
         FTextBlockStyle Style = FTextBlockStyle().SetFont(Mode == 0 ? OriginalFont : EqualInfo).SetColorAndOpacity(FLinearColor::White);
-        const auto Widget = SNew(SRichTextBlock).Text(FText::FromString(TEXT("AV WiWi\nAV WiWi")))
-            .TextStyle(&Style).LineHeightPercentage(Mode == 0 ? 1.f : Factor).ApplyLineHeightToBottomLine(true);
+	        const auto Widget = SNew(SRichTextBlock).Text(FText::FromString(TEXT("AV WiWi\nAV WiWi")))
+	            .TextStyle(&Style).LineHeightPercentage(Mode == 0 ? 1.f : Factor)
+#if !UE_VERSION_OLDER_THAN(5, 4, 0)
+	            .ApplyLineHeightToBottomLine(true)
+#endif
+	            ;
         const FVector2D Size(300.f, 140.f);
         TStrongObjectPtr<UTextureRenderTarget2D> Target(FWidgetRenderer::CreateTargetFor(Size, TF_Nearest, false));
         if (!TestNotNull(TEXT("Render target"), Target.Get())) return false;

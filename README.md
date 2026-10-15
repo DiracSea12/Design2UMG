@@ -4,7 +4,7 @@ Validation tools accept your own case directory and discover its actual size. Th
 
 Convert design files into Unreal Engine 5 UMG Widget Blueprints.
 
-[![Repository Hygiene](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml)
+[![Plugin CI](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml/badge.svg)](https://github.com/DiracSea12/Design2UMG/actions/workflows/build.yml)
 
 Chinese companion: [README.zh-CN.md](README.zh-CN.md)
 
@@ -35,11 +35,11 @@ This repo intentionally separates contributor-facing validation from maintainer 
 | Layer | Purpose | Who runs it |
 |------|------|------|
 | `repository-hygiene` | Public repo boundary and required-file checks | GitHub Actions on push / PR |
-| `maintainer build and automation` | Package the plugin, run focused Unreal automation, and upload the artifact | Maintainer-local verification, outside hosted CI |
+| `maintainer build and automation` | Package the plugin, run focused Unreal automation, and upload the artifact | Maintainer-provided self-hosted Windows runner |
 | `public smoke / public validate` | Local build plus focused validation / repro commands | Contributors and maintainers |
 | `maintainer formal admissible gate` | Full discovered case set release gate | Maintainers only |
 
-The workflow badge above reflects the tracked `Plugin CI` workflow, whose hosted portion runs repository hygiene. Unreal packaging and automation are maintainer-local verifications and do not run in hosted CI; external PRs run only repository hygiene. This is not presented as a public hosted UE formal gate.
+The badge reflects the whole `Plugin CI` workflow, not one job. Hosted checks include repository hygiene and tool tests. Maintainer pushes, same-repository PRs and manual runs additionally request the self-hosted UE job; without a runner it stays queued. Fork PRs run hosted checks only. This badge is not full visual or packaged-game evidence.
 
 For a plain-language coverage boundary and a contributor-versus-maintainer split, see [Docs/ValidationGovernance/TestCoverageBoundary.md](Docs/ValidationGovernance/TestCoverageBoundary.md).
 
@@ -56,7 +56,7 @@ For a plain-language coverage boundary and a contributor-versus-maintainer split
 
 ## Requirements
 
-- Unreal Engine 5.4+
+- Unreal Engine: Windows / UE 5.7 is the current maintainer verification environment. Other versions and platforms need their own build and runtime evidence; older 5.4+ wording is not a verified support matrix.
 - Pencil desktop app (optional, for MCP bridge/debug tooling)
 - Figma Personal Access Token (optional, for Figma import)
 
@@ -69,7 +69,14 @@ Copy the plugin into either location:
 <Project>/Plugins/Design2UMG/
 ```
 
-Enable `Design2UMG` in `Edit > Plugins`.
+Use exactly one installation location; never keep both copies enabled/discoverable.
+
+- **Source download:** install the C++ toolchain required by your UE version and build the project editor target; see [CONTRIBUTING](CONTRIBUTING.md). A Blueprint-only project also needs a compatible precompiled package or a C++ build setup.
+- **Precompiled download:** use a release ZIP matching the stated UE version and platform. Extract the `Design2UMG` directory into one of the locations above. Source archives from GitHub are not precompiled plugins.
+- Close the editor before replacing an installation. Enable `Design2UMG` in `Edit > Plugins` and restart.
+- Import `Examples/SimpleCard.pen` first. Font binaries are not bundled: map your licensed project fonts in the plugin preferences and read missing-font diagnostics rather than assuming pixel parity.
+
+Release ZIPs include the license, installation instructions, Figma exporter and public examples. CI candidate downloads expire; stable downloads belong on GitHub Releases. Contributor validation scripts require the source checkout; the precompiled bundle is not a complete development workspace.
 
 ## Quick Start
 
@@ -89,12 +96,15 @@ Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--
 
 ### 2. Import from Figma
 
+Prefer **Design2UMG > Import from Figma...**, which provides a password-style token field. Do not paste tokens into console history, screenshots or shared transcripts.
+
+The console entry below is for explicit local scripting only; it takes a token value, not an environment-variable name:
+
 ```text
 Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>
 ```
 
-Use a token from a secure source such as local user settings or environment provisioning.
-Do not treat command-line token literals as a recommended team workflow.
+A secure source does not prevent leakage after a value is expanded into a command. Prefer the dialog for interactive imports; keep scripting inputs and output private.
 
 ### 3. Import local Figma export JSON
 
@@ -195,7 +205,7 @@ Key options:
 ## Repository And Release Checks
 
 - `repository-hygiene`: the public GitHub Actions check that verifies required repo files and blocks tracked maintainer-local paths.
-- `maintainer build and automation`: the packaging and Unreal automation job in `.github/workflows/build.yml`; it triggers on maintainer pushes, same-repository PRs, and manual dispatches but runs only on a self-hosted Windows runner (registered with `UE_ROOT` and `DESIGN2UMG_RUNTIME_PROJECT`). When no runner is registered the job stays queued; hosted CI then covers repository hygiene only, and packaging and automation are maintainer-local verifications. It validates the package boundary, runs focused generation, Figma parser, and lifecycle tests against the engine-installed plugin copy from the same checkout, exercises the packaged plugin itself through the UAT `BuildPlugin -StrictIncludes` compile plus the package boundary assertion, and uploads the artifact.
+- `maintainer build and automation`: the packaging and Unreal automation job in `.github/workflows/build.yml`; it triggers on maintainer pushes, same-repository PRs, and manual dispatches but runs only on a self-hosted Windows runner (registered with `UE_ROOT`, `DESIGN2UMG_RUNTIME_PROJECT` and `DESIGN2UMG_EDITOR_TARGET`). When no runner is registered the job stays queued; hosted CI then covers repository hygiene only, and packaging and automation are maintainer-local verifications. It validates the package boundary, runs focused generation, Figma parser, and lifecycle tests against the unique installed plugin after descriptor/Source/Config hash comparison with the checkout and an editor-target rebuild, exercises the packaged plugin itself through the UAT `BuildPlugin -StrictIncludes` compile plus the package boundary assertion, and uploads the artifact.
 - `public smoke/public validate`: contributor-facing build and validation steps used for smoke checks and local repro, using explicit `--project` / `--editor` values or the matching environment variables; do not present them as the release gate.
 - `maintainer formal admissible gate`: the maintainer-owned full discovered admissible case set release gate documented in `Docs/ValidationProtocol.md`.
 - `Tools/README.md`: the short index for contributor-facing helpers versus maintainer-only workflows.

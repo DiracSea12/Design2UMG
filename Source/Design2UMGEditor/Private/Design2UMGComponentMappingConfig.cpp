@@ -4,6 +4,7 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
 #include "Misc/FileHelper.h"
@@ -29,7 +30,7 @@ namespace
 		{
 			return false;
 		}
-		const UScriptStruct* Struct = FDesignComponentMappingEntryLine::StaticStruct();
+		UScriptStruct* Struct = FDesignComponentMappingEntryLine::StaticStruct();
 		const TCHAR* Buffer = *Line;
 		return Struct->ImportText(Buffer, &OutEntry, nullptr, PPF_None, nullptr, Struct->GetName()) != nullptr;
 	}
@@ -66,7 +67,11 @@ namespace Design2UMGComponentMappingConfig
 		}
 		// CombineFromBuffer goes through full ini symbol semantics (including +Mappings array-append lines);
 		// FConfigFile::Read must not be used: it ignores +/- command prefixes.
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		ConfigFile.CombineFromBuffer(IniText);
+#else
 		ConfigFile.CombineFromBuffer(IniText, IniPath);
+#endif
 		TArray<FString> Lines;
 		ConfigFile.GetArray(MappingSection, MappingArrayKey, Lines);
 

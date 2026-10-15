@@ -35,9 +35,12 @@ namespace ImageFillUtils
 			Widget.Brush.Image.Mode = TEXT("Fit");
 		}
 
+		// Paint alpha belongs to the brush; node opacity also affects its shadow.
 		if (Image.Opacity < 1.0f)
 		{
-			Widget.Render.RenderOpacity = Image.Opacity;
+			FLinearColor Tint = Widget.Brush.BrushColor.Get(FLinearColor::White);
+			Tint.A *= Image.Opacity;
+			Widget.Brush.BrushColor = Tint;
 		}
 	}
 }

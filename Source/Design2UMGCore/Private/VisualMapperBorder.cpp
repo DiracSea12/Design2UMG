@@ -439,6 +439,15 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 		LayoutMapper::ApplyPadding(Border, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
 
 	TransferBorderStrokeProperties(Border, Widget);
+	if (Node->Visual.Stroke.HasStroke()
+		&& Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside
+		&& Node->LayoutData.ExplicitPadding.IsSet()
+		&& (Node->LayoutData.Layout == EDesignLayout::Horizontal
+			|| Node->LayoutData.Layout == EDesignLayout::Vertical))
+	{
+		// Authored flow padding is measured from the box, not its centered outline.
+		Border.WidgetStyle.StrokePadding.Reset();
+	}
 
 	// Absolute positions measured from expanded visual bounds already include the
 	// outside stroke inset. Border padding would apply an additional offset.

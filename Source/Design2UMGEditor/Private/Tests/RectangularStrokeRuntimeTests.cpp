@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGImageTestUtils.h"
 #include "PenParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
@@ -142,7 +143,7 @@ bool FSingleFlowPositionElisionTest::RunTest(const FString&)
 			FString Error;
 			if (!TestTrue(TEXT("Render single flow blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 			FImage& Image = Images.AddDefaulted_GetRef();
-			if (!TestTrue(TEXT("Decode single flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+			if (!TestTrue(TEXT("Decode single flow render"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 		}
 		TestTrue(TEXT("Ignored coordinates preserve every pixel after flow promotion"), Images[0].RawData == Images[1].RawData);
 	}
@@ -220,7 +221,7 @@ bool FSingleAutoFlowPositionElisionTest::RunTest(const FString&)
 			FString Error;
 			if (!TestTrue(TEXT("Render fixed-child flow blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 			FImage& Image = Images.AddDefaulted_GetRef();
-			if (!TestTrue(TEXT("Decode fixed-child flow render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+			if (!TestTrue(TEXT("Decode fixed-child flow render"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 		}
 		TestTrue(TEXT("Elision preserves normal and overflowing pixels against the original flow"), Images[0].RawData == Images[1].RawData);
 	}
@@ -351,7 +352,7 @@ bool FStrokeSizeConstraintPromotionTest::RunTest(const FString&)
 		FString Error;
 		if (!TestTrue(TEXT("Render constrained stroke blueprint"), FUMGWidgetRenderer::RenderWidgetToPng(BP, Png, Size, &Error))) return false;
 		FImage& Image = Images.AddDefaulted_GetRef();
-		if (!TestTrue(TEXT("Decode constrained stroke render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+		if (!TestTrue(TEXT("Decode constrained stroke render"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 	}
 	TestTrue(TEXT("Removing unpainted surface preserves every pixel"), Images[0].RawData == Images[1].RawData);
 	return true;
@@ -481,7 +482,7 @@ bool FCompactRectangularStrokeTest::RunTest(const FString&)
 			FIntPoint Size;
 			FString Error;
 			return TestTrue(TEXT("Render stroke"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))
-			&& TestTrue(TEXT("Decode stroke"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image));
+			&& TestTrue(TEXT("Decode stroke"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image));
 		};
 		FImage Actual, Expected;
 		if (!Render(Compact, Actual) || !Render(FourSides, Expected)) return false;
@@ -548,7 +549,7 @@ bool FRectangularStrokeRuntimeTest::RunTest(const FString&)
 		FString Error;
 		if (!TestTrue(TEXT("Compiled widget renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 		FImage Image;
-		if (!TestTrue(TEXT("Decode runtime pixels"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+		if (!TestTrue(TEXT("Decode runtime pixels"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 		if (!TestTrue(TEXT("Expected BGRA8 image"), Image.Format == ERawImageFormat::BGRA8)) return false;
 		if (!TestTrue(TEXT("Rendered image contains panel"), Image.SizeX > 50 && Image.SizeY > 40)) return false;
 		const FColor* Pixels = reinterpret_cast<const FColor*>(Image.RawData.GetData());

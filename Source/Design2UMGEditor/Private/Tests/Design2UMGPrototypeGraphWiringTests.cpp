@@ -1,12 +1,14 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Design2UMGConverter.h"
 #include "DesignImportPipeline.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "Design2UMGTestUtils.h"
-#include "Tests/Design2UMGMappedComponentTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
@@ -475,7 +477,11 @@ namespace
 			return Tracks;
 		}
 		const UMovieScene* MovieScene = Animation->MovieScene;
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+		Tracks.Append(MovieScene->GetMasterTracks());
+#else
 		Tracks.Append(MovieScene->GetTracks());
+#endif
 		for (const FMovieSceneBinding& Binding : MovieScene->GetBindings())
 		{
 			for (const UMovieSceneTrack* Track : Binding.GetTracks())
@@ -1614,7 +1620,7 @@ bool FFigmaPrototypeKeyboardGraphWiringTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Compiled class carries the OnKeyUp override"),
 		GeneratedClass ? GeneratedClass->FindFunctionByName(TEXT("OnKeyUp")) : nullptr);
 	const UUserWidget* WidgetCDO = GeneratedClass ? GeneratedClass->GetDefaultObject<UUserWidget>() : nullptr;
-	TestTrue(TEXT("Generated class CDO is focusable"), WidgetCDO && WidgetCDO->IsFocusable());
+	TestTrue(TEXT("Generated class CDO is focusable"), WidgetCDO && Design2UMGWidgetPropertyAccess::IsUserWidgetFocusable(*WidgetCDO));
 
 	// Runtime: drive both overrides through ProcessEvent with the FKeyEvent parms layout.
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -2509,7 +2515,7 @@ bool FFigmaPrototypeDualTargetOverlayMappedComponentTest::RunTest(const FString&
 	Entry.Provider = TEXT("figma");
 	Entry.DocumentScope = TEXT("mirror-mapping-file-key");
 	Entry.ComponentKey = TEXT("component-key-primary");
-	Entry.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	Entry.WidgetClass = ComponentFixtures::MappedClass()->GetPathName();
 
 	FUMGPrototypeNavigationData NavigationData;
 	UWidgetBlueprint* WBP = FUMGGenerator::BuildWidgetBlueprint(
@@ -2524,10 +2530,10 @@ bool FFigmaPrototypeDualTargetOverlayMappedComponentTest::RunTest(const FString&
 
 	// Built tree: BOTH the original (inside the switcher page) and the mirror (inside the hosted
 	// mirror page) resolved to the mapped project widget class.
-	UDesign2UMGMappedComponentTestWidget* OriginalInstance = WBP->WidgetTree
-		? Cast<UDesign2UMGMappedComponentTestWidget>(WBP->WidgetTree->FindWidget(TEXT("MappedButton"))) : nullptr;
-	UDesign2UMGMappedComponentTestWidget* MirrorInstance = WBP->WidgetTree
-		? Cast<UDesign2UMGMappedComponentTestWidget>(WBP->WidgetTree->FindWidget(FName(*MirrorInstanceName))) : nullptr;
+	UUserWidget* OriginalInstance = WBP->WidgetTree
+		? ComponentFixtures::CastMapped(WBP->WidgetTree->FindWidget(TEXT("MappedButton"))) : nullptr;
+	UUserWidget* MirrorInstance = WBP->WidgetTree
+		? ComponentFixtures::CastMapped(WBP->WidgetTree->FindWidget(FName(*MirrorInstanceName))) : nullptr;
 	if (!TestTrue(TEXT("Original instance resolved to the mapped project class"), OriginalInstance != nullptr)
 		|| !TestTrue(TEXT("Mirror instance resolved to the mapped project class"), MirrorInstance != nullptr))
 	{
@@ -2699,7 +2705,7 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 	}
 
 	TestTrue(TEXT("Switcher translation starts at the origin"),
-		Switcher->GetRenderTransform().Translation.Equals(FVector2D::ZeroVector));
+		Design2UMGWidgetPropertyAccess::GetRenderTransform(*Switcher).Translation.Equals(FVector2D::ZeroVector));
 
 	TriggerButton->OnClicked.Broadcast();
 	TestEqual(TEXT("Page switch waits for the outgoing delay"), Switcher->GetActiveWidgetIndex(), 0);
@@ -2775,7 +2781,7 @@ bool FFigmaPrototypeMoveOutTransitionRuntimeSmokeTest::RunTest(const FString& Pa
 
 	TestEqual(TEXT("MOVE_OUT completes the page switch"), Switcher->GetActiveWidgetIndex(), 1);
 	TestTrue(TEXT("MOVE_OUT keeps the switcher translation at the origin after residual animation frames"),
-		Switcher->GetRenderTransform().Translation.Equals(FVector2D::ZeroVector));
+		Design2UMGWidgetPropertyAccess::GetRenderTransform(*Switcher).Translation.Equals(FVector2D::ZeroVector));
 	TestFalse(TEXT("Outgoing animation is no longer playing at the end"),
 		WidgetInstance->IsAnimationPlaying(OutgoingAnimation));
 

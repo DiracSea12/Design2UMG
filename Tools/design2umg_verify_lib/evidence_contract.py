@@ -1,7 +1,11 @@
 from pathlib import Path
+import json
+import re
 
 
 SOURCE_INPUT_COMPARE_FIELDS = (
+    "engine_version",
+    "rhi_backend",
     "case",
     "source_authority",
     "source_design_artifact",
@@ -13,6 +17,99 @@ SOURCE_INPUT_COMPARE_FIELDS = (
     "run_scope_case_names",
     "run_scope_include_pattern",
 )
+
+
+def engine_version_from_evidence(payload: dict) -> str:
+    """Resolve one UE minor version from the bound report and its runtime logs."""
+    payloads = [payload]
+    report_path = payload.get("report_path")
+    if report_path:
+        try:
+            report = json.loads(Path(report_path).read_text(encoding="utf-8-sig"))
+            if isinstance(report, dict):
+                payloads.append(report)
+        except (OSError, ValueError):
+            pass
+    versions = set()
+    for item in payloads:
+        for version in (item.get("engine_version"), (item.get("binary_binding") or {}).get("engine_version"),
+                        (item.get("source_input") or {}).get("engine_version")):
+            if version:
+                match = re.fullmatch(r"(\d+\.\d+)(?:\.\d+)?(?:-[^\s]+)?", str(version))
+                if not match:
+                    return ""
+                versions.add(match.group(1))
+        chain = item.get("render_chain") or {}
+        for mode in ("generation", "asset_render"):
+            log_path = (chain.get(mode) or {}).get("log_path")
+            if not log_path:
+                continue
+            try:
+                with Path(log_path).open(encoding="utf-8-sig", errors="replace") as log:
+                    for line in log:
+                        match = re.search(r"LogInit: Engine Version: (\d+\.\d+)\.", line)
+                        if match:
+                            versions.add(match.group(1))
+                            break
+            except OSError:
+                pass
+    return next(iter(versions)) if len(versions) == 1 else ""
+
+
+def rhi_identity_from_evidence(payload: dict) -> tuple[str, str]:
+    """Resolve the backend and feature level confirmed by every bound render process."""
+    payloads = [payload]
+    if payload.get("report_path"):
+        try:
+            report = json.loads(Path(payload["report_path"]).read_text(encoding="utf-8-sig"))
+            if isinstance(report, dict):
+                payloads.append(report)
+        except (OSError, ValueError):
+            pass
+    declared = set()
+    declared_features = set()
+    identities = set()
+    for item in payloads:
+        for backend in (item.get("rhi_backend"), (item.get("source_input") or {}).get("rhi_backend")):
+            if backend:
+                declared.add(str(backend))
+        for feature in (item.get("rhi_feature_level"), (item.get("source_input") or {}).get("rhi_feature_level")):
+            if feature:
+                declared_features.add(str(feature))
+        for mode in ("generation", "asset_render"):
+            log_path = ((item.get("render_chain") or {}).get(mode) or {}).get("log_path")
+            if not log_path:
+                continue
+            confirmed = False
+            try:
+                with Path(log_path).open(encoding="utf-8-sig", errors="replace") as log:
+                    for line in log:
+                        match = re.search(r"LogRHI: RHI (\w+) with Feature Level (\w+) is supported and will be used\.", line)
+                        if not match:
+                            match = re.search(
+                                r"Log(\w+)RHI: (?:Display: )?Creating \1 RHI with Max Feature Level (\w+)", line
+                            )
+                        if match:
+                            identities.add((match.group(1), match.group(2)))
+                            confirmed = True
+                            break
+            except OSError:
+                return "", ""
+            if not confirmed:
+                return "", ""
+    if len(identities) == 1:
+        backend, feature = next(iter(identities))
+        if (not declared or declared == {backend}) and (not declared_features or declared_features == {feature}):
+            return backend, feature
+    return "", ""
+
+
+def rhi_backend_from_evidence(payload: dict) -> str:
+    return rhi_identity_from_evidence(payload)[0]
+
+
+def rhi_feature_level_from_evidence(payload: dict) -> str:
+    return rhi_identity_from_evidence(payload)[1]
 
 
 def first_dict(*payloads: dict, keys: tuple[str, ...]) -> dict:
@@ -166,6 +263,8 @@ def collect_source_input(
             "run_scope_include_pattern": run_scope.get("include_pattern") or "",
         }
     payload.setdefault("case", case_name)
+    payload["engine_version"] = engine_version_from_evidence(report)
+    payload["rhi_backend"] = rhi_backend_from_evidence(report)
     payload.setdefault("report_path", str(report_path))
     payload.setdefault("run_root", str(run_root))
     return payload

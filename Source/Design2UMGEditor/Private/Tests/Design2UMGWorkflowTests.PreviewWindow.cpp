@@ -10,6 +10,7 @@
 #include "Design2UMGGenerationManifest.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "HAL/FileManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/ScopeExit.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
@@ -66,6 +67,15 @@ struct FDesign2UMGPreviewWindowTestAccess
 
 namespace
 {
+	TSharedRef<SDesign2UMGPreviewWindow> GetPreviewWindowContent(SWindow& Window)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return StaticCastSharedRef<SDesign2UMGPreviewWindow>(ConstCastSharedRef<SWidget>(Window.GetContent()));
+#else
+		return StaticCastSharedRef<SDesign2UMGPreviewWindow>(Window.GetContent());
+#endif
+	}
+
 	constexpr TCHAR PreviewHarnessAnalyzerWidgetName[] = TEXT("WBP_SpyPreviewHarness");
 	constexpr TCHAR PreviewHarnessAnalyzerRootName[] = TEXT("SpyPreviewHarnessRoot");
 
@@ -1083,8 +1093,7 @@ bool FPreviewWindowPipelineCarriesExplicitMaterializationSnapshotTest::RunTest(c
 		return false;
 	}
 
-	TSharedRef<SDesign2UMGPreviewWindow> PreviewWindow =
-		StaticCastSharedRef<SDesign2UMGPreviewWindow>(ActiveWindow->GetContent());
+	TSharedRef<SDesign2UMGPreviewWindow> PreviewWindow = GetPreviewWindowContent(*ActiveWindow);
 	TestTrue(TEXT("Pipeline preview stores explicit materialization snapshot on first refresh"),
 		FDesign2UMGPreviewWindowTestAccess::LatestApprovedSnapshotHasMaterializationSettings(PreviewWindow.Get()));
 	TestEqual(TEXT("Pipeline preview keeps override count through dialog seam"),
@@ -1253,7 +1262,7 @@ bool FPreviewPipelineGenerationRetryTest::RunTest(const FString& Parameters)
     Pump.PumpSlate(6);
     TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
     if (!TestTrue(TEXT("Pipeline window exists"), Window.IsValid())) return false;
-    auto Preview = StaticCastSharedRef<SDesign2UMGPreviewWindow>(Window->GetContent());
+    auto Preview = GetPreviewWindowContent(*Window);
     bool bClosed = false;
     Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda([&bClosed](const TSharedRef<SWindow>&) { bClosed = true; }));
     const FString RetryPath = Request.OutputPath + TEXT("_Retry");

@@ -10,7 +10,7 @@
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -34,8 +34,8 @@ namespace Design2UMGReimportFixtures
 	inline const TCHAR* FixtureReimportScope = TEXT("fixture-reimport-doc-9f31");
 	inline const TCHAR* FixtureReimportOtherScope = TEXT("fixture-reimport-other-2c66");
 	inline const TCHAR* FixtureReimportComponentKey = TEXT("fixture-reimport-comp-key");
-	inline const TCHAR* FixtureMappedClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
-	inline const TCHAR* FixtureOtherMappedClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
+	inline const TCHAR* FixtureMappedClassPath = ComponentFixtures::InputClassPath;
+	inline const TCHAR* FixtureOtherMappedClassPath = ComponentFixtures::MappedClassPath;
 	inline const TCHAR* FixtureMappingKey = TEXT("figma|fixture-reimport-doc-9f31|fixture-reimport-comp-key");
 
 	// ---------------------------------------------------------------------------
@@ -108,6 +108,8 @@ namespace Design2UMGReimportFixtures
 
 	inline FDesign2UMGImportSettingsSnapshot MakeFixtureSnapshot(const TCHAR* MappedClassPath)
 	{
+		ComponentFixtures::InputClass();
+		ComponentFixtures::MappedClass();
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
 		if (MappedClassPath)
@@ -251,12 +253,12 @@ namespace Design2UMGReimportFixtures
 		return FPackageName::LongPackageNameToFilename(PackageName, FPackageName::GetAssetPackageExtension());
 	}
 
-	inline UDesign2UMGComponentInputTestWidget* FixtureFindMappedInstance(UWidgetBlueprint* WBP)
+	inline UUserWidget* FixtureFindMappedInstance(UWidgetBlueprint* WBP)
 	{
-		UDesign2UMGComponentInputTestWidget* Found = nullptr;
+		UUserWidget* Found = nullptr;
 		WBP->WidgetTree->ForEachWidget([&Found](UWidget* Widget)
 		{
-			if (UDesign2UMGComponentInputTestWidget* Candidate = Cast<UDesign2UMGComponentInputTestWidget>(Widget))
+			if (UUserWidget* Candidate = ComponentFixtures::CastInput(Widget))
 			{
 				Found = Candidate;
 			}

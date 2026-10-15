@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignOptionalValues.h"
 #include "UMGSchemaSourceExtensions.generated.h"
 
 USTRUCT()
@@ -26,7 +27,7 @@ struct FUMGPrototypeTransitionData
 	FString EasingJson;
 
 	UPROPERTY()
-	TOptional<bool> HasMatchLayers;
+	FDesignOptionalBool HasMatchLayers;
 
 	UPROPERTY()
 	FString OutgoingAnimationName;
@@ -76,7 +77,7 @@ struct FUMGSourceNodeData
 	UPROPERTY() FString OverridesJson;
 
 	UPROPERTY()
-	TOptional<bool> HasIsExposedInstance;
+	FDesignOptionalBool HasIsExposedInstance;
 
 	/** Conversion-time marker: this node carries a resolvable Figma component identity and is a Component Mapping candidate. */
 	UPROPERTY()

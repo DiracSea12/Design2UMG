@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved.
 // SPDX-License-Identifier: MIT
 
+#include "Design2UMGMaterialAccess.h"
 #include "Misc/AutomationTest.h"
 #include "UMGGenerator.h"
 #include "UMGPropertyKeys.h"
@@ -87,7 +88,7 @@ bool FSubtreeShadowShaderFailureTest::RunTest(const FString&)
 	UMaterial* Material = LoadObject<UMaterial>(nullptr, *Prepared.Effect.EffectMaterial.GetValue());
 	if (!TestNotNull(TEXT("Load isolated material"), Material)) return false;
 	UMaterialExpressionCustom* Shader = nullptr;
-	for (UMaterialExpression* Expression : Material->GetExpressions())
+	for (UMaterialExpression* Expression : Design2UMGMaterialAccess::GetExpressions(*Material))
 	{
 		if (UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expression)) { Shader = Custom; break; }
 	}
@@ -99,15 +100,15 @@ bool FSubtreeShadowShaderFailureTest::RunTest(const FString&)
 		Shader->Code = OriginalCode;
 		Material->PreEditChange(nullptr);
 		Material->PostEditChange();
-		Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-		Material->EnsureIsComplete();
+		Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
+		Design2UMGMaterialAccess::WaitForCompilation(*Material);
 	};
 	AddExpectedError(TEXT("D2U_ExpectedMissingShaderSymbol"), EAutomationExpectedErrorFlags::Contains, 0);
 	Shader->Code = TEXT("return D2U_ExpectedMissingShaderSymbol;");
 	Material->PreEditChange(nullptr);
 	Material->PostEditChange();
-	Material->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-	Material->EnsureIsComplete();
+	Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
+	Design2UMGMaterialAccess::WaitForCompilation(*Material);
 	const FMaterialResource* Resource = Material->GetMaterialResource(
 #if UE_VERSION_OLDER_THAN(5, 7, 0)
 		GMaxRHIFeatureLevel

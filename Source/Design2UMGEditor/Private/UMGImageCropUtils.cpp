@@ -2,6 +2,7 @@
 
 #include "UMGImageCropUtils.h"
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "ProceduralShapeGenerator.h"
 #include "DesignImageResourceLimits.h"
 
@@ -55,7 +56,7 @@ bool UMGImageCropUtils::TryApplyCropToBrush(
 	const FUMGVisualBrushData::FImageTransformData& Transform = Request.Transform;
 	if (CanUseUvRegion(Transform))
 	{
-		InOutBrush.SetUVRegion(FBox2f(
+		Design2UMGWidgetPropertyAccess::SetUVRegion(InOutBrush, FBox2f(
 			FVector2f(Transform.TX, Transform.TY),
 			FVector2f(Transform.TX + Transform.A, Transform.TY + Transform.D)));
 		InOutBrush.Tiling = ESlateBrushTileType::NoTile;

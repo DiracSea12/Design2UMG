@@ -6,9 +6,10 @@
 
 #include "Design2UMGGenerationManifest.h"
 #include "DesignImportPipeline.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/NamedSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
@@ -80,11 +81,11 @@ bool FSafeReimportAddedNodesTest::RunTest(const FString&)
 	}
 
 	// The new mapped instance joins and its inputs are already written per the design.
-	UDesign2UMGComponentInputTestWidget* Sidekick = Cast<UDesign2UMGComponentInputTestWidget>(WBP->WidgetTree->FindWidget(TEXT("Sidekick")));
+	UUserWidget* Sidekick = ComponentFixtures::CastInput(WBP->WidgetTree->FindWidget(TEXT("Sidekick")));
 	TestNotNull(TEXT("new mapped instance added"), Sidekick);
 	if (Sidekick)
 	{
-		TestEqual(TEXT("new mapped instance input written"), Sidekick->TextValue.ToString(), FString(TEXT("Jump In")));
+		TestEqual(TEXT("new mapped instance input written"), ComponentFixtures::Read<FTextProperty>(Sidekick, TEXT("TextValue")).ToString(), FString(TEXT("Jump In")));
 	}
 
 	// The manifest records the new relations.
@@ -124,6 +125,45 @@ bool FSafeReimportAddedNodesTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 // safe remove, positive - a purely D2U-owned node is deleted safely;
 // a node the design deleted but the project already removed from the asset is only dropped from the records (no error, no wrongful delete).
+// ---------------------------------------------------------------------------
+// Named-slot content removal uses the same subtree deletion path as reimport.
+// ---------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeleteNamedSlotContentSubtreeTest,
+	"Design2UMG.SafeReimport.DeleteNamedSlotContentSubtree",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FDeleteNamedSlotContentSubtreeTest::RunTest(const FString&)
+{
+	// Blueprint compilation collects garbage; prepare the class before unrooted test objects.
+	UClass* const HostClass = ComponentFixtures::NamedSlotHostClass();
+	UWidgetBlueprint* Blueprint = NewObject<UWidgetBlueprint>(GetTransientPackage());
+	Blueprint->WidgetTree = NewObject<UWidgetTree>(Blueprint);
+	UUserWidget* Host = Blueprint->WidgetTree->ConstructWidget<UUserWidget>(
+		HostClass, TEXT("SlotHost"));
+	Blueprint->WidgetTree->RootWidget = Host;
+	Host->WidgetTree = NewObject<UWidgetTree>(Host);
+	UNamedSlot* Slot = Host->WidgetTree->ConstructWidget<UNamedSlot>(UNamedSlot::StaticClass(), TEXT("Content"));
+	Host->WidgetTree->RootWidget = Slot;
+	UTextBlock* Content = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("NamedSlotContent"));
+	Host->SetContentForSlot(TEXT("Content"), Content);
+	if (!TestTrue(TEXT("Fixture content is attached to named slot"), Host->GetContentForSlot(TEXT("Content")) == Content))
+	{
+		return false;
+	}
+
+	if (!TestTrue(TEXT("Fixture host has native transactional flag"), Host->HasAnyFlags(RF_Transactional)))
+	{
+		return false;
+	}
+	DesignWidgetBlueprintUtils::DeleteSubtreeSilently(Blueprint, Content);
+
+	TestNull(TEXT("Named slot content is detached"), Host->GetContentForSlot(TEXT("Content")));
+	TestTrue(TEXT("Named slot host participates in transaction"), Host->HasAnyFlags(RF_Transactional));
+	TestNull(TEXT("Removed named-slot widget is absent from tree"), Blueprint->WidgetTree->FindWidget(TEXT("NamedSlotContent")));
+	TestEqual(TEXT("Removed named-slot widget is rehomed"), Content->GetOuter(), static_cast<UObject*>(GetTransientPackage()));
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportRemovePureNodeTest,
@@ -288,13 +328,13 @@ bool FSafeReimportKindChangeProjectContentTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGComponentInputTestWidget* MappedBefore = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("mapped instance generated"), MappedBefore))
 	{
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = MappedBefore;
+	TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 
 	// The developer binding hangs on the mapped instance (the subtree root): the old subtree is no longer purely D2U-owned.
 	FDelegateEditorBinding ProjectBinding;
@@ -308,7 +348,7 @@ bool FSafeReimportKindChangeProjectContentTest::RunTest(const FString&)
 	const FDesignReimportResult Result = FixtureReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("reimport itself succeeds (conflict is per-node)"), Result.bSucceeded);
 
-	UDesign2UMGComponentInputTestWidget* MappedAfter = MappedWeak.Get();
+	UUserWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("mapped instance kept"), MappedAfter);
 	if (MappedAfter)
 	{

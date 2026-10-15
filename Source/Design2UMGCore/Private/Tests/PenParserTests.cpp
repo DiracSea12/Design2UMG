@@ -767,8 +767,36 @@ bool FPenParserGradientFillsTest::RunTest(const FString&)
 		const FDesignFill& Fill = N->Visual.TopmostFill();
 		TestEqual(TEXT("structured gradient fill type"), Fill.Type, EDesignFillType::Gradient);
 		TestEqual(TEXT("structured gradient stop count"), Fill.Gradient.Colors.Num(), 2);
+		TestEqual(TEXT("default paint opacity preserves gradient color identity"),
+			Fill.Gradient.Colors[0].Color, FString(TEXT("#AAF0FA")));
 		TestEqual(TEXT("pencil rotation 225 -> -315"), Fill.Gradient.Rotation, -315.0f);
 	}
+
+	FDesignDocument OpacityDoc;
+	const FString OpacityJson = TEXT(R"JSON({"version":"2.17","children":[
+		{"id":"solid-opacity","name":"SolidOpacity","type":"frame","width":20,"height":20,
+		 "fill":{"type":"color","opacity":0.5,"color":"#80402080"}},
+		{"id":"gradient-opacity","name":"GradientOpacity","type":"frame","width":20,"height":20,
+		 "fill":{"type":"gradient","opacity":0.25,"colors":[
+			{"color":"#58C8E880","position":0},{"color":"#AAF0FA","position":1}]}}
+	]})JSON");
+	if (!TestTrue(TEXT("Paint opacity fixture parses"), FPenParser::ParseDocument(OpacityJson, OpacityDoc))
+		|| !TestEqual(TEXT("Paint opacity fixture child count"), OpacityDoc.Children.Num(), 2))
+	{
+		return false;
+	}
+
+	const FDesignFill& SolidFill = OpacityDoc.Children[0]->Visual.TopmostFill();
+	TestTrue(TEXT("Solid paint opacity metadata retained"), FMath::IsNearlyEqual(SolidFill.Opacity, 0.5f));
+	TestEqual(TEXT("Solid paint opacity multiplies authored alpha"),
+		SolidFill.SolidColor, FString(TEXT("#80402040")));
+
+	const FDesignFill& GradientFill = OpacityDoc.Children[1]->Visual.TopmostFill();
+	TestTrue(TEXT("Gradient paint opacity metadata retained"), FMath::IsNearlyEqual(GradientFill.Opacity, 0.25f));
+	TestEqual(TEXT("Gradient paint opacity multiplies stop alpha"),
+		GradientFill.Gradient.Colors[0].Color, FString(TEXT("#58C8E820")));
+	TestEqual(TEXT("Gradient paint opacity multiplies opaque stop alpha"),
+		GradientFill.Gradient.Colors[1].Color, FString(TEXT("#AAF0FA40")));
 
 	return true;
 }

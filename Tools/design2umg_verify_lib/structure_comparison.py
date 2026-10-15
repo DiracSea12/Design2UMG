@@ -263,8 +263,8 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
     def typed_projection_candidates(source_node: dict, used_indices: set[int]) -> list[int]:
         # Icon-font nodes retain their source role as text, but the runtime
         # widget name can come from the resolved glyph mapping (for example
-        # ``IconFont_Widget`` -> ``uJzgY``). Only use this fallback for the
-        # explicit IconFont type and keep the normal parent/sibling checks.
+        # ``IconFont_Widget`` -> ``uJzgY``). This fallback supports structure
+        # auditing only; type and path alone do not establish node identity.
         if str(source_node.get("type") or "") != "IconFont":
             return []
         return [
@@ -274,6 +274,7 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
 
     used_asset_indices: set[int] = set()
     source_to_asset: dict[int, int] = {}
+    source_match_methods: dict[int, str] = {}
     unmatched_names: list[str] = []
     source_index_by_path = {path: index for index, path in enumerate(source_paths) if path}
     for source_index, source_node in enumerate(source_nodes):
@@ -287,27 +288,34 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
             index for index in asset_by_id.get(source_identity, [])
             if index not in used_asset_indices
         ] if source_identity else []
-        if identity_candidates:
-            # A stable source ID is stronger evidence than a display name.
-            # Keep it even when a wrapper changed the ancestor path; otherwise
-            # the audit hides the very tree relocation it is meant to expose.
-            candidates = identity_candidates
-        else:
-            candidates = [index for index in asset_by_name.get(source_name, []) if index not in used_asset_indices]
-            candidates += [
-                index for index in generated_name_candidates(source_name)
-                if index not in used_asset_indices and index not in candidates
-            ]
-            candidates += [
-                index for index in fallback_name_candidates(source_node, used_asset_indices)
-                if index not in used_asset_indices
-                and index not in candidates
-                and node_kind(asset_nodes[index]) == node_kind(source_node)
-            ]
-            candidates += [
-                index for index in typed_projection_candidates(source_node, used_asset_indices)
-                if index not in used_asset_indices and index not in candidates
-            ]
+        name_candidates = [
+            index for index in asset_by_name.get(source_name, [])
+            if index not in used_asset_indices
+        ]
+        generated_candidates = [
+            index for index in generated_name_candidates(source_name)
+            if index not in used_asset_indices
+        ]
+        fallback_candidates = [
+            index for index in fallback_name_candidates(source_node, used_asset_indices)
+            if node_kind(asset_nodes[index]) == node_kind(source_node)
+        ]
+        typed_candidates = typed_projection_candidates(source_node, used_asset_indices)
+        candidate_groups = [
+            ("id", identity_candidates),
+            ("name", name_candidates),
+            ("generated_name", generated_candidates),
+            ("fallback_name", fallback_candidates),
+            ("typed_projection", typed_candidates),
+        ]
+
+        candidates: list[int] = []
+        candidate_methods: dict[int, str] = {}
+        for method, group in candidate_groups:
+            for index in group:
+                if index not in candidates:
+                    candidates.append(index)
+                    candidate_methods[index] = method
 
         if expected_parent_asset is not None and not identity_candidates:
             parent_candidates = [
@@ -330,16 +338,25 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
         chosen = (same_kind or candidates)[0]
         used_asset_indices.add(chosen)
         source_to_asset[source_index] = chosen
+        source_match_methods[source_index] = candidate_methods[chosen]
 
     result["matched_source_nodes"] = len(source_to_asset)
     result["unmatched_source_names"] = unmatched_names[:20]
 
     asset_to_source = {asset_index: source_index for source_index, asset_index in source_to_asset.items()}
+    source_to_asset_matches = []
     for source_index, asset_index in source_to_asset.items():
         source_parent_path = parent_path(source_paths[source_index])
         source_parent_index = source_index_by_path.get(source_parent_path) if source_parent_path is not None else None
         asset_parent_index = nearest_matched_asset_ancestor(asset_index, asset_to_source)
         asset_parent_source_index = asset_to_source.get(asset_parent_index) if asset_parent_index is not None else None
+        source_to_asset_matches.append({
+            "source_index": source_index,
+            "asset_index": asset_index,
+            "method": source_match_methods[source_index],
+            "parent_constrained": source_parent_index is not None
+            and source_parent_index == asset_parent_source_index,
+        })
         result["named_parent_path_compared"] += 1
         if source_parent_index == asset_parent_source_index:
             result["named_parent_path_matches"] += 1
@@ -439,4 +456,5 @@ def compute_tree_correspondence(source_snapshot: dict | None, asset_snapshot: di
     result["source_to_asset_indices"] = [
         [source_index, asset_index] for source_index, asset_index in sorted(source_to_asset.items())
     ]
+    result["source_to_asset_matches"] = source_to_asset_matches
     return result

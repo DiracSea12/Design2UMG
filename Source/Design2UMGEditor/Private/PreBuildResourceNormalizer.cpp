@@ -12,6 +12,7 @@
 #include "Engine/Texture2D.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
+#include "Misc/Crc.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "RenderingThread.h"
@@ -37,12 +38,25 @@ namespace
 
 	// Archive bytes retain optional presence and exact values. TMap/TSet compare the
 	// complete key; their hash is only an index, never resource identity.
-	using FTextureRequestKey = TArray<uint8>;
+	struct FTextureRequestKey
+	{
+		TArray<uint8> Bytes;
+
+		bool operator==(const FTextureRequestKey& Other) const
+		{
+			return Bytes == Other.Bytes;
+		}
+
+		friend uint32 GetTypeHash(const FTextureRequestKey& Key)
+		{
+			return FCrc::MemCrc32(Key.Bytes.GetData(), Key.Bytes.Num());
+		}
+	};
 
 	FTextureRequestKey MakePathTextureKey(const FUMGWidgetNode& Node)
 	{
 		FTextureRequestKey Key;
-		FMemoryWriter Writer(Key);
+		FMemoryWriter Writer(Key.Bytes);
 		FUMGPathData Path = Node.Path;
 		auto Width = Node.WidgetStyle.WidthOverride;
 		auto Height = Node.WidgetStyle.HeightOverride;
@@ -64,7 +78,7 @@ namespace
 	FTextureRequestKey MakeProceduralTextureKey(FUMGProceduralResourceRequest Request)
 	{
 		FTextureRequestKey Key;
-		FMemoryWriter Writer(Key);
+		FMemoryWriter Writer(Key.Bytes);
 		Writer << Request.MaterialRef << Request.MaterialParams << Request.WidthOverride
 			<< Request.HeightOverride << Request.ShadowBlur << Request.BrushColor;
 		bool bHasShape = Request.Shape.IsSet();
@@ -87,7 +101,7 @@ namespace
 	FTextureRequestKey MakeImageTransformTextureKey(FString TexturePath, UMGImageCropUtils::FImageCropRequest Request)
 	{
 		FTextureRequestKey Key;
-		FMemoryWriter Writer(Key);
+		FMemoryWriter Writer(Key.Bytes);
 		auto& Transform = Request.Transform;
 		Writer << TexturePath << Transform.A << Transform.B << Transform.TX
 			<< Transform.C << Transform.D << Transform.TY << Request.OutputWidth << Request.OutputHeight;
@@ -157,8 +171,18 @@ namespace
 	{
 		// Changed output gets a new asset. Never mutate a dependency still referenced
 		// by the old WidgetTree, even when a later resource or Blueprint save fails.
-		const FString AssetName = FString::Printf(TEXT("%s_%dx%d_%d_%s"), *AssetStem,
+		FString AssetName = FString::Printf(TEXT("%s_%dx%d_%d_%s"), *AssetStem,
 			Width, Height, static_cast<int32>(Filter), *FMD5::HashBytes(RawData.GetData(), RawData.Num()));
+		// Keep generated filenames compact enough for nested Windows cook paths.
+		if (AssetName.Len() > 64)
+		{
+			const FTCHARToUTF8 Identity(*AssetName);
+			int32 PrefixLength = 31;
+			// Keep a UTF-16 surrogate pair intact at the truncation boundary.
+			if (AssetName[PrefixLength - 1] >= 0xD800 && AssetName[PrefixLength - 1] <= 0xDBFF) --PrefixLength;
+			AssetName = AssetName.Left(PrefixLength) + TEXT("_")
+				+ FMD5::HashBytes(reinterpret_cast<const uint8*>(Identity.Get()), Identity.Length());
+		}
 		const FString LongPackageName = ImportPath / AssetName;
 		if (!FPackageName::IsValidLongPackageName(LongPackageName)) return false;
 		const FString ObjectPath = LongPackageName + TEXT(".") + AssetName;

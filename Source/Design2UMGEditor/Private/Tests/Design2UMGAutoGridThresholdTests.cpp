@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "GeneratedAssetLifecycle.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
 #include "UMGGenerator.h"
@@ -83,7 +84,9 @@ namespace
 			}
 			if (const UUniformGridSlot* GridSlot = Cast<UUniformGridSlot>(Widget->Slot))
 			{
-				Slots.Add(FIntPoint(GridSlot->GetRow(), GridSlot->GetColumn()));
+			Slots.Add(FIntPoint(
+				Design2UMGWidgetPropertyAccess::GetRow(*GridSlot),
+				Design2UMGWidgetPropertyAccess::GetColumn(*GridSlot)));
 			}
 			else
 			{

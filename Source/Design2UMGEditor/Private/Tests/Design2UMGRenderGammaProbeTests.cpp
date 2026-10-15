@@ -15,7 +15,7 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateImageBrush.h"
 #include "Editor.h"
-#include "RHIGlobals.h"
+#include "RHI.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 

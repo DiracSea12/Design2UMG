@@ -22,6 +22,8 @@
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Misc/EngineVersionComparison.h"
+#include "UObject/UObjectGlobals.h"
 
 #include "Components/Widget.h"
 #include "Components/PanelSlot.h"
@@ -314,7 +316,9 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 	UWidget* NewWidget = WidgetTree->ConstructWidget<UWidget>(WidgetClass, WidgetName);
 	if (GenerationSettings && GenerationSettings->ComponentBlueprints)
 	{
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
 		if (UNamedSlot* NamedSlot = Cast<UNamedSlot>(NewWidget)) NamedSlot->bExposeOnInstanceOnly = true;
+#endif
 	}
 	if (!NewWidget)
 	{
@@ -426,7 +430,11 @@ UClass* FUMGWidgetTreeBuilder::ResolveWidgetClass(const FString& TypeName)
 	}
 
 	FString ClassName = FString::Printf(TEXT("U%s"), *TypeName);
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+	UClass* FoundClass = FindObject<UClass>(ANY_PACKAGE, *ClassName);
+#else
 	UClass* FoundClass = FindFirstObject<UClass>(*ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
+#endif
 	if (FoundClass && FoundClass->IsChildOf(UWidget::StaticClass()))
 	{
 		DynamicClassCache.Add(TypeName, FoundClass);

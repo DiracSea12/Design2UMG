@@ -4,6 +4,7 @@
 #include "UMGValueParsing.h"
 #include "WidgetLayoutAdapter.h"
 #include "Design2UMGLog.h"
+#include "Misc/EngineVersionComparison.h"
 
 #include "Components/PanelSlot.h"
 #include "Components/CanvasPanelSlot.h"
@@ -114,10 +115,14 @@ namespace
 		SS->SetVerticalAlignment(FUMGValueParser::ToSlateVerticalAlignment(S.VerticalAlignment));
 		if (FUMGValueParser::IsFillSizeRule(S.SizeRule))
 		{
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+			UE_LOG(LogDesign2UMG, Warning, TEXT("ScrollBox slot Fill sizing requires UE 5.2 or newer; native Auto sizing was retained."));
+#else
 			FSlateChildSize Size;
 			Size.SizeRule = ESlateSizeRule::Fill;
 			Size.Value = S.FillWeight;
 			SS->SetSize(Size);
+#endif
 		}
 	}
 
@@ -176,9 +181,16 @@ namespace
 	void ApplySafeZoneSlot(UPanelSlot* Slot, const FUMGSlotData& S)
 	{
 		USafeZoneSlot* SZ = CastChecked<USafeZoneSlot>(Slot);
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+		SZ->Padding = S.Padding;
+		SZ->HAlign = FUMGValueParser::ToSlateHorizontalAlignment(S.HorizontalAlignment);
+		SZ->VAlign = FUMGValueParser::ToSlateVerticalAlignment(S.VerticalAlignment);
+		SZ->SynchronizeProperties();
+#else
 		SZ->SetPadding(S.Padding);
 		SZ->SetHorizontalAlignment(FUMGValueParser::ToSlateHorizontalAlignment(S.HorizontalAlignment));
 		SZ->SetVerticalAlignment(FUMGValueParser::ToSlateVerticalAlignment(S.VerticalAlignment));
+#endif
 	}
 
 	const TMap<UClass*, FApplySlotFunc>& GetSlotApplierMap()

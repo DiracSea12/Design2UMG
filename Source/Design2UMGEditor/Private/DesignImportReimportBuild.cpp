@@ -9,6 +9,7 @@
 #include "Components/PanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Misc/EngineVersionComparison.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/UObjectHash.h"
 #include "WidgetBlueprint.h"
@@ -213,14 +214,48 @@ namespace DesignImportPipeline
 			return ReplaceReimportWidget(Node, Instance, Shared, UpdatedOwned);
 		}
 
+		TArray<UWidget*> OldContents;
+		TArray<TStrongObjectPtr<UWidget>> OldWidgets;
+		for (const FName Slot : Slots)
+		{
+			UWidget* Content = Instance->GetContentForSlot(Slot);
+			OldContents.Add(Content);
+			const auto KeepOwnedWidget = [&](UWidget* Child)
+			{
+				if (Child->GetOuter() == Shared.WidgetTree) OldWidgets.Emplace(Child);
+			};
+			if (Content)
+			{
+				KeepOwnedWidget(Content);
+				UWidgetTree::ForWidgetAndChildren(Content, KeepOwnedWidget);
+			}
+		}
+		TStrongObjectPtr<UWidgetTree> OldContentTree(NewObject<UWidgetTree>(GetTransientPackage()));
+		bool bCommitted = false;
+		// The build guard discards replacements before this guard restores original owners.
+		ON_SCOPE_EXIT
+		{
+			if (!bCommitted) for (const TStrongObjectPtr<UWidget>& Old : OldWidgets)
+			{
+				if (Old->GetOuter() != Shared.WidgetTree
+					&& !Old->Rename(*Old->GetName(), Shared.WidgetTree, REN_DontCreateRedirectors | REN_NonTransactional))
+					AddReimportDiagnostic(*Shared.Diagnostics, ReimportDiagnosticKinds::ApplyFailed,
+						TEXT("Could not restore instance override owner: ") + Old->GetName());
+			}
+		};
 		FReimportWidgetBuild Build(Shared);
+		// Keep old content intact but release its names while preparing replacements.
+		for (const TStrongObjectPtr<UWidget>& Old : OldWidgets)
+		{
+			Old->Modify();
+			if (!Old->Rename(*Old->GetName(), OldContentTree.Get(), REN_DontCreateRedirectors | REN_NonTransactional))
+				return Fail(TEXT("Could not stage existing instance overrides"));
+		}
 		TStrongObjectPtr<UUserWidget> Prepared(NewObject<UUserWidget>(GetTransientPackage(), Instance->GetClass()));
 		if (!Context.ApplyInstance(Prepared.Get(), Shared.WidgetTree, Node, *Shared.GenerationSettings,
 			nullptr, &Shared.DesignSize, &Build.State, Shared.Budget))
 			return Fail(TEXT("Could not prepare instance overrides; existing content preserved"));
 
-		TArray<UWidget*> OldContents;
-		for (const FName Slot : Slots) OldContents.Add(Instance->GetContentForSlot(Slot));
 		Instance->Modify();
 		for (int32 Index = 0; Index < Slots.Num(); ++Index)
 		{
@@ -245,6 +280,7 @@ namespace DesignImportPipeline
 			if (Content) DeleteD2UOwnedSubtreeSilently(Shared.WBP, Content, UpdatedOwned);
 		}
 		Build.Commit();
+		bCommitted = true;
 		return Instance;
 	}
 }

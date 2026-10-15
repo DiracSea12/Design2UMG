@@ -277,6 +277,20 @@ assert.ok(components.cmp1.componentPropertyDefinitions, 'component definitions m
 assert.ok(componentSets.set1.variantGroupProperties, 'variant group properties missing');
 
 (async () => {
+  const restChild = { id: vectorNode.id, type: 'VECTOR', fills: [{ type: 'SOLID' }], size: { x: 32, y: 32 } };
+  const restRoot = { id: 'geometry-root', type: 'FRAME', children: [restChild] };
+  const official = await api.exportOfficialRestNode({
+    id: restRoot.id, type: 'FRAME', fillGeometry: [], strokeGeometry: [], children: [{
+      ...vectorNode, strokeGeometry: [{ data: 'M1 1 L9 1 L9 2 Z', windingRule: 'EVENODD' }],
+    }],
+    exportAsync: async () => ({ document: restRoot }),
+  });
+  assert.equal(official, restRoot, 'official REST fields should not be replaced by manual serialization');
+  assert.deepEqual(official.fillGeometry, []);
+  assert.deepEqual(official.strokeGeometry, []);
+  assert.deepEqual(restChild.fillGeometry, [{ path: vectorNode.fillGeometry[0].data, windingRule: 'NONZERO' }]);
+  assert.deepEqual(restChild.strokeGeometry, [{ path: 'M1 1 L9 1 L9 2 Z', windingRule: 'EVENODD' }]);
+  assert.deepEqual(restChild.size, { x: 32, y: 32 });
   const images = new Map();
   await api.collectImages({
     type: 'RECTANGLE',

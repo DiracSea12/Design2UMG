@@ -49,6 +49,39 @@ namespace DesignWidgetBlueprintUtils
 		bool bRemoved = Tree->RemoveWidget(Root);
 		if (Root->GetParent() == nullptr)
 		{
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+			bool bNamedSlotContentRemoved = false;
+			Tree->ForEachWidget([&](UWidget* HostWidget)
+			{
+				if (bNamedSlotContentRemoved)
+				{
+					return;
+				}
+
+				if (INamedSlotInterface* Host = Cast<INamedSlotInterface>(HostWidget))
+				{
+					FName SlotName = NAME_None;
+					TArray<FName> SlotNames;
+					Host->GetSlotNames(SlotNames);
+					for (const FName CandidateSlotName : SlotNames)
+					{
+						if (Host->GetContentForSlot(CandidateSlotName) == Root)
+						{
+							SlotName = CandidateSlotName;
+							break;
+						}
+					}
+					if (!SlotName.IsNone())
+					{
+						HostWidget->SetFlags(RF_Transactional);
+						HostWidget->Modify();
+						Host->SetContentForSlot(SlotName, nullptr);
+						bNamedSlotContentRemoved = true;
+					}
+				}
+			});
+			bRemoved |= bNamedSlotContentRemoved;
+#else
 			UWidget* HostWidget = FWidgetBlueprintEditorUtils::FindNamedSlotHostWidgetForContent(Root, Tree);
 			if (TScriptInterface<INamedSlotInterface> Host = TScriptInterface<INamedSlotInterface>(HostWidget))
 			{
@@ -56,10 +89,13 @@ namespace DesignWidgetBlueprintUtils
 				HostWidget->Modify();
 				bRemoved |= FWidgetBlueprintEditorUtils::RemoveNamedSlotHostContent(Root, Host);
 			}
+#endif
 		}
 
+#if !UE_VERSION_OLDER_THAN(5, 3, 0)
 		UUserWidget* CDO = Blueprint->GeneratedClass
 			? Blueprint->GeneratedClass->GetDefaultObject<UUserWidget>() : nullptr;
+#endif
 		for (UWidget* Widget : RemovedWidgets)
 		{
 			const FName Name = Widget->GetFName();
@@ -71,6 +107,7 @@ namespace DesignWidgetBlueprintUtils
 			{
 				FBlueprintEditorUtils::RemoveVariableNodes(Blueprint, Name);
 			}
+#if !UE_VERSION_OLDER_THAN(5, 3, 0)
 			if (CDO && CDO->GetDesiredFocusWidgetName() == Name)
 			{
 				CDO->SetFlags(RF_Transactional);
@@ -89,6 +126,7 @@ namespace DesignWidgetBlueprintUtils
 					}
 				}
 			}
+#endif
 			Widget->Rename(nullptr, GetTransientPackage());
 		}
 		if (bRemoved)

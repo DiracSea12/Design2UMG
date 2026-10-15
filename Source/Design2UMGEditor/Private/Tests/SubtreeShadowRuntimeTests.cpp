@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "Design2UMGImageTestUtils.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
@@ -139,7 +140,7 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 	}
 	FImage Image;
 	FFileHelper::SaveArrayToFile(Png, *(FPaths::ProjectSavedDir() / (TEXT("SubtreeShadow-") + Parameters + TEXT(".png"))));
-	if (!TestTrue(TEXT("PNG decodes"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+	if (!TestTrue(TEXT("PNG decodes"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 	if (!TestTrue(TEXT("Expected output dimensions and pixel format"),
 		Image.SizeX == 240 && Image.SizeY == 120 + TranslateY + (bChildOverflow ? 40 : 0) && Image.Format == ERawImageFormat::BGRA8)) return false;
 	const FColor* Pixels = reinterpret_cast<const FColor*>(Image.RawData.GetData());
@@ -244,7 +245,7 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 	}
 	FImage RepeatedImage;
 	if (!TestTrue(TEXT("Repeated PNG decodes"),
-		FImageUtils::DecompressImage(RepeatedPng.GetData(), RepeatedPng.Num(), RepeatedImage))) return false;
+		Design2UMGImageTestUtils::DecodeToBGRA8(RepeatedPng.GetData(), RepeatedPng.Num(), RepeatedImage))) return false;
 	TestEqual(TEXT("Repeated rendering preserves dimensions"), RepeatedSize, Size);
 	TestTrue(TEXT("Repeated rendering preserves every pixel"), RepeatedImage.RawData == Image.RawData);
 	return true;

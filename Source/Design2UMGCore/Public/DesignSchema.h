@@ -134,6 +134,19 @@ struct FDesignVisualNodeData
 	}
 };
 
+struct FDesignGeometryPath
+{
+	FString Path;
+	FString FillRule;
+};
+
+struct FDesignPaintGeometry
+{
+	// Source presence distinguishes known empty geometry from unexported geometry.
+	TOptional<TArray<FDesignGeometryPath>> FillPaths;
+	TOptional<TArray<FDesignGeometryPath>> StrokePaths;
+};
+
 struct FDesignShapeNodeData
 {
 	float InnerRadius = 0.0f;
@@ -142,6 +155,7 @@ struct FDesignShapeNodeData
 	int32 PolygonCount = 6;
 	FString Geometry;
 	FString FillRule = TEXT("nonzero");
+	FDesignPaintGeometry PaintGeometry;
 };
 
 /**

@@ -53,6 +53,62 @@ namespace DesignRemoteImageImporterInternal
 
 		bool ExtractUrlHost(const FString& Url, FString& OutHost)
 		{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+			const int32 SchemeEnd = Url.Find(TEXT("://"), ESearchCase::CaseSensitive);
+			if (SchemeEnd == INDEX_NONE) return false;
+
+			const int32 AuthorityStart = SchemeEnd + 3;
+			int32 AuthorityEnd = Url.Len();
+			for (const TCHAR Delimiter : {TEXT('/'), TEXT('?'), TEXT('#')})
+			{
+				const int32 DelimiterIndex = Url.Find(
+					FString::Chr(Delimiter), ESearchCase::CaseSensitive, ESearchDir::FromStart, AuthorityStart);
+				if (DelimiterIndex != INDEX_NONE) AuthorityEnd = FMath::Min(AuthorityEnd, DelimiterIndex);
+			}
+
+			const FString Authority = Url.Mid(AuthorityStart, AuthorityEnd - AuthorityStart);
+			if (Authority.IsEmpty() || Authority.Contains(TEXT("@"))) return false;
+
+			auto IsValidPort = [](const FString& PortText)
+			{
+				int32 Port = 0;
+				return !PortText.IsEmpty() && PortText.IsNumeric()
+					&& LexTryParseString(Port, *PortText) && Port > 0 && Port <= 65535;
+			};
+
+			if (Authority.StartsWith(TEXT("[")))
+			{
+				const int32 ClosingBracket = Authority.Find(TEXT("]"));
+				if (ClosingBracket <= 1) return false;
+				OutHost = Authority.Mid(1, ClosingBracket - 1);
+				const FString PortSuffix = Authority.Mid(ClosingBracket + 1);
+				if ((!PortSuffix.IsEmpty() && (!PortSuffix.StartsWith(TEXT(":"))
+					|| !IsValidPort(PortSuffix.Mid(1)))) || OutHost.Contains(TEXT("%")))
+				{
+					return false;
+				}
+			}
+			else
+			{
+				const int32 Colon = Authority.Find(TEXT(":"));
+				if (Colon != INDEX_NONE)
+				{
+					if (Authority.Find(TEXT(":"), ESearchCase::CaseSensitive, ESearchDir::FromEnd) != Colon
+						|| !IsValidPort(Authority.Mid(Colon + 1)))
+					{
+						return false;
+					}
+					OutHost = Authority.Left(Colon);
+				}
+				else
+				{
+					OutHost = Authority;
+				}
+			}
+			while (OutHost.RemoveFromEnd(TEXT("."))) {}
+			OutHost.ToLowerInline();
+			return !OutHost.IsEmpty();
+#else
 			CURLU* Parsed = curl_url();
 			if (!Parsed) return false;
 			const FTCHARToUTF8 Utf8Url(*Url);
@@ -75,6 +131,7 @@ namespace DesignRemoteImageImporterInternal
 			curl_free(Zone);
 			curl_url_cleanup(Parsed);
 			return bValid && !OutHost.IsEmpty();
+#endif
 		}
 
 	}
@@ -334,7 +391,13 @@ namespace DesignRemoteImageImporterInternal
 			}
 			if (!bWasSuccessful || !Response.IsValid())
 			{
-				State->ErrorString = Request.IsValid() && Request->GetFailureReason() == EHttpFailureReason::TimedOut
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+				const TOptional<float> RequestTimeout = Request.IsValid() ? Request->GetTimeout() : TOptional<float>();
+				const bool bRequestTimedOut = RequestTimeout.IsSet() && Request->GetElapsedTime() >= RequestTimeout.GetValue();
+#else
+				const bool bRequestTimedOut = Request.IsValid() && Request->GetFailureReason() == EHttpFailureReason::TimedOut;
+#endif
+				State->ErrorString = bRequestTimedOut
 					? TEXT("Network request timed out") : TEXT("Network request failed");
 				return;
 			}
@@ -382,7 +445,11 @@ namespace DesignRemoteImageImporterInternal
 			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
 			const uint64 MaxCompressedBytes)
 		{
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+			Request->OnRequestProgress().BindLambda(
+#else
 			Request->OnRequestProgress64().BindLambda(
+#endif
 				[State, MaxCompressedBytes](FHttpRequestPtr ProgressRequest, uint64, uint64 BytesReceived)
 				{
 					if (BytesReceived > MaxCompressedBytes)
@@ -482,6 +549,7 @@ namespace DesignRemoteImageImporterInternal
 		 * Reject excess chunks before buffering or billing; accepted bytes are not refunded.
 		 * Return false when the HTTP backend does not support streaming.
 		 */
+#if !UE_VERSION_OLDER_THAN(5, 3, 0)
 		bool InstallBudgetedStreamReceive(
 			const TSharedRef<IHttpRequest, ESPMode::ThreadSafe>& Request,
 			const TSharedRef<FDownloadState, ESPMode::ThreadSafe>& State,
@@ -510,6 +578,7 @@ namespace DesignRemoteImageImporterInternal
 				}));
 #endif
 		}
+#endif
 
 		/** Requests that have neither finished nor been given a terminal reason by the wait loop. */
 		int32 CountUnfinishedRequests(const TArray<FPendingRequest>& Pending)
@@ -661,7 +730,7 @@ namespace DesignRemoteImageImporterInternal
 
 	namespace
 	{
-		struct FPublicImageTransfer
+		struct FCurlImageTransfer
 		{
 			FString Url;
 			CURL* Handle = nullptr;
@@ -670,14 +739,14 @@ namespace DesignRemoteImageImporterInternal
 			uint64 MaxBytes;
 			bool bBlockedDestination = false;
 
-			FPublicImageTransfer(const FString& InUrl,
+			FCurlImageTransfer(const FString& InUrl,
 				const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& InBudget,
 				uint64 InMaxBytes) : Url(InUrl), Budget(InBudget), MaxBytes(InMaxBytes) {}
 		};
 
 		curl_socket_t OpenPublicImageSocket(void* UserData, curlsocktype Purpose, curl_sockaddr* Address)
 		{
-			FPublicImageTransfer& Transfer = *static_cast<FPublicImageTransfer*>(UserData);
+			FCurlImageTransfer& Transfer = *static_cast<FCurlImageTransfer*>(UserData);
 			TConstArrayView<uint8> Bytes;
 			if (Address->family == AF_INET)
 			{
@@ -699,9 +768,9 @@ namespace DesignRemoteImageImporterInternal
 			return socket(Address->family, Address->socktype, Address->protocol);
 		}
 
-		size_t ReceivePublicImage(char* Data, size_t Size, size_t Count, void* UserData)
+		size_t ReceiveImageChunk(char* Data, size_t Size, size_t Count, void* UserData)
 		{
-			FPublicImageTransfer& Transfer = *static_cast<FPublicImageTransfer*>(UserData);
+			FCurlImageTransfer& Transfer = *static_cast<FCurlImageTransfer*>(UserData);
 			if (Size != 0 && Count > static_cast<size_t>(MAX_int32) / Size)
 			{
 				return 0;
@@ -736,7 +805,7 @@ namespace DesignRemoteImageImporterInternal
 			return CURLE_OK;
 		}
 
-		void DownloadPublicImages(const TArray<FString>& Urls, const float TimeoutSeconds,
+		void DownloadImagesWithCurl(const TArray<FString>& Urls, const float TimeoutSeconds, const bool bAllowUnsafeRemoteUrls,
 			const DesignImageResources::FImageResourceLimits& Limits,
 			const TSharedRef<FImagePayloadIO::FBulkDownloadBudget, ESPMode::ThreadSafe>& Budget,
 			TMap<FString, FUrlDownloadResult>& OutResults,
@@ -747,37 +816,45 @@ namespace DesignRemoteImageImporterInternal
 			FSslModule::Get();
 			const bool bCurlReady = curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
 			CURLM* Multi = bCurlReady ? curl_multi_init() : nullptr;
-			TArray<TUniquePtr<FPublicImageTransfer>> Transfers;
+			TArray<TUniquePtr<FCurlImageTransfer>> Transfers;
 			for (const FString& Url : Urls)
 			{
 				FUrlDownloadResult& Result = OutResults.FindOrAdd(Url);
 				Result = FUrlDownloadResult();
-			if (!FImagePayloadIO::ValidateRemoteUrl(Url, false, Result.Error))
-			{
-				Result.FailureCategory = EDesignImageDiagnosticCategory::Validation;
-				continue;
-			}
-				auto Transfer = MakeUnique<FPublicImageTransfer>(Url, Budget, Limits.MaxCompressedBytes);
+				if (!FImagePayloadIO::ValidateRemoteUrl(Url, bAllowUnsafeRemoteUrls, Result.Error))
+				{
+					Result.FailureCategory = EDesignImageDiagnosticCategory::Validation;
+					continue;
+				}
+				auto Transfer = MakeUnique<FCurlImageTransfer>(Url, Budget, Limits.MaxCompressedBytes);
 				Transfer->Handle = Multi ? curl_easy_init() : nullptr;
 				CURL* Handle = Transfer->Handle;
 				const FTCHARToUTF8 Utf8Url(*Url);
+				const FString ProxyAddress = bAllowUnsafeRemoteUrls ? FHttpModule::Get().GetProxyAddress() : FString();
+				const FTCHARToUTF8 Utf8Proxy(*ProxyAddress);
 				const long TimeoutMs = static_cast<long>(FMath::Clamp(static_cast<double>(TimeoutSeconds) * 1000.0, 1000.0, 2147483647.0));
 				const bool bConfigured = Handle
 					&& curl_easy_setopt(Handle, CURLOPT_URL, Utf8Url.Get()) == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_PROTOCOLS_STR, "https") == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_REDIR_PROTOCOLS_STR, "https") == CURLE_OK
+#if LIBCURL_VERSION_NUM < 0x075500
+					&& curl_easy_setopt(Handle, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | (bAllowUnsafeRemoteUrls ? CURLPROTO_HTTP : 0))) == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS | (bAllowUnsafeRemoteUrls ? CURLPROTO_HTTP : 0))) == CURLE_OK
+#else
+					&& curl_easy_setopt(Handle, CURLOPT_PROTOCOLS_STR, bAllowUnsafeRemoteUrls ? "http,https" : "https") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_REDIR_PROTOCOLS_STR, bAllowUnsafeRemoteUrls ? "http,https" : "https") == CURLE_OK
+#endif
 					&& curl_easy_setopt(Handle, CURLOPT_FOLLOWLOCATION, 1L) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_MAXREDIRS, 10L) == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_PROXY, "") == CURLE_OK
+					&& curl_easy_setopt(Handle, CURLOPT_PROXY, Utf8Proxy.Get()) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_FRESH_CONNECT, 1L) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_FORBID_REUSE, 1L) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_SSL_VERIFYPEER, 1L) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_SSL_VERIFYHOST, 2L) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_CAINFO, nullptr) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_SSL_CTX_FUNCTION, &ConfigureImageCertificates) == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_OPENSOCKETFUNCTION, &OpenPublicImageSocket) == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_OPENSOCKETDATA, Transfer.Get()) == CURLE_OK
-					&& curl_easy_setopt(Handle, CURLOPT_WRITEFUNCTION, &ReceivePublicImage) == CURLE_OK
+					&& (bAllowUnsafeRemoteUrls
+						|| (curl_easy_setopt(Handle, CURLOPT_OPENSOCKETFUNCTION, &OpenPublicImageSocket) == CURLE_OK
+							&& curl_easy_setopt(Handle, CURLOPT_OPENSOCKETDATA, Transfer.Get()) == CURLE_OK))
+					&& curl_easy_setopt(Handle, CURLOPT_WRITEFUNCTION, &ReceiveImageChunk) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_WRITEDATA, Transfer.Get()) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_PRIVATE, Transfer.Get()) == CURLE_OK
 					&& curl_easy_setopt(Handle, CURLOPT_USERAGENT, "Design2UMG/RemoteImageImporter") == CURLE_OK
@@ -811,7 +888,7 @@ namespace DesignRemoteImageImporterInternal
 				while (CURLMsg* Message = curl_multi_info_read(Multi, &Queued))
 				{
 					if (Message->msg != CURLMSG_DONE) continue;
-					FPublicImageTransfer* Transfer = nullptr;
+					FCurlImageTransfer* Transfer = nullptr;
 					curl_easy_getinfo(Message->easy_handle, CURLINFO_PRIVATE, &Transfer);
 					long Status = 0;
 					curl_easy_getinfo(Message->easy_handle, CURLINFO_RESPONSE_CODE, &Status);
@@ -836,9 +913,13 @@ namespace DesignRemoteImageImporterInternal
 						{
 							Result.Error = TEXT("HTTPS connection failed; non-public destination candidates were rejected");
 						}
+						else if (Message->data.result == CURLE_OPERATION_TIMEDOUT)
+						{
+							Result.Error = TEXT("Network request timed out");
+						}
 						else if (Message->data.result != CURLE_OK)
 						{
-							Result.Error = FString::Printf(TEXT("HTTPS image request failed: %s (HTTP %ld)"),
+							Result.Error = FString::Printf(TEXT("Image request failed: %s (HTTP %ld)"),
 								UTF8_TO_TCHAR(curl_easy_strerror(Message->data.result)), Status);
 						}
 						else if (Status < 200 || Status >= 300)
@@ -867,7 +948,7 @@ namespace DesignRemoteImageImporterInternal
 				Result.Data.Reset();
 				Result.FailureCategory = GetDownloadFailureCategory(*Transfer->State);
 				Result.Error = !Transfer->State->ErrorString.IsEmpty() ? Transfer->State->ErrorString
-						: bCancelled ? TEXT("cancelled by user") : TEXT("HTTPS transfer manager failed");
+						: bCancelled ? TEXT("cancelled by user") : TEXT("Image transfer manager failed");
 				}
 			}
 			if (Multi) curl_multi_cleanup(Multi);
@@ -884,9 +965,12 @@ namespace DesignRemoteImageImporterInternal
 		TMap<FString, FUrlDownloadResult>& OutResults,
 		const TFunction<bool()>& IsCancellationRequested)
 	{
+#if UE_VERSION_OLDER_THAN(5, 3, 0)
+		DownloadImagesWithCurl(Urls, TimeoutSeconds, bAllowUnsafeRemoteUrls, Limits, BulkBudget, OutResults, IsCancellationRequested);
+#else
 		if (!bAllowUnsafeRemoteUrls)
 		{
-			DownloadPublicImages(Urls, TimeoutSeconds, Limits, BulkBudget, OutResults, IsCancellationRequested);
+			DownloadImagesWithCurl(Urls, TimeoutSeconds, false, Limits, BulkBudget, OutResults, IsCancellationRequested);
 			return;
 		}
 		const float EffectiveTimeoutSeconds = FMath::Max(1.0f, TimeoutSeconds);
@@ -933,6 +1017,7 @@ namespace DesignRemoteImageImporterInternal
 
 		// Stage 3 - hand each outcome to its result entry.
 		CollectResults(Pending, bUserCancelled, OutResults);
+#endif
 	}
 
 	bool FImagePayloadIO::DecodeToBGRA8(

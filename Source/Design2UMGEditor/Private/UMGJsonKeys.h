@@ -22,5 +22,6 @@ namespace UMGJsonKeys
 	inline constexpr const TCHAR* Offset = TEXT("Offset");
 	inline constexpr const TCHAR* Blur = TEXT("Blur");
 	inline constexpr const TCHAR* Spread = TEXT("Spread");
+	inline constexpr const TCHAR* ShowShadowBehindNode = TEXT("ShowShadowBehindNode");
 	inline constexpr const TCHAR* SourceFontSize = TEXT("SourceFontSize");
 }

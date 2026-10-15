@@ -908,6 +908,7 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 				{
 					Layer.Spread = Val;
 				}
+				TryGetStrictBoolField(*LayerObject, UMGJsonKeys::ShowShadowBehindNode, Layer.bShowShadowBehindNode);
 				if (TryGetStrictStringField(*LayerObject, UMGPropertyKeys::Color, Str))
 				{
 					Layer.Color = FUMGValueParser::ParseColor(Str);

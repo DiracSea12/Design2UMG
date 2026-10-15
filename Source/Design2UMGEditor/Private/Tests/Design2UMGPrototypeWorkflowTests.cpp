@@ -19,10 +19,13 @@
 #include "Components/WidgetSwitcher.h"
 #include "Editor.h"
 #include "Engine/LatentActionManager.h"
+#include "Misc/EngineVersionComparison.h"
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
 #include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
+#include "WidgetBlueprintExtension.h"
+#endif
 #include "UObject/UnrealType.h"
 #include "WidgetBlueprint.h"
-#include "WidgetBlueprintExtension.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -73,6 +76,25 @@ namespace
 		}
 		return Count;
 	}
+
+	int32 CountGeneratedDesign2UMGExtensions(UWidgetBlueprintGeneratedClass& GeneratedClass)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return 0;
+#else
+		return CountDesign2UMGExtensions(
+			GeneratedClass.GetExtensions(UWidgetBlueprintGeneratedClassExtension::StaticClass()));
+#endif
+	}
+
+	int32 CountBlueprintDesign2UMGExtensions(UWidgetBlueprint& Blueprint)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return 0;
+#else
+		return CountDesign2UMGExtensions(UWidgetBlueprintExtension::GetExtensions(&Blueprint));
+#endif
+	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeGraphNavigationWorkflowTest,
@@ -112,9 +134,9 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	}
 
 	TestEqual(TEXT("Generated class carries no plugin-custom extensions"),
-		CountDesign2UMGExtensions(GeneratedClass->GetExtensions(UWidgetBlueprintGeneratedClassExtension::StaticClass())), 0);
+		CountGeneratedDesign2UMGExtensions(*GeneratedClass), 0);
 	TestEqual(TEXT("Widget blueprint carries no plugin-custom extensions"),
-		CountDesign2UMGExtensions(UWidgetBlueprintExtension::GetExtensions(Blueprint)), 0);
+		CountBlueprintDesign2UMGExtensions(*Blueprint), 0);
 
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	UUserWidget* WidgetInstance = World ? CreateWidget<UUserWidget>(World, GeneratedClass) : nullptr;

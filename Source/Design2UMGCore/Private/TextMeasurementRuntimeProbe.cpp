@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "TextMeasurementRuntimeProbe.h"
+#include "Design2UMGFontAccess.h"
+#include "Design2UMGTextLayoutAccess.h"
 #include "Design2UMGFontMetrics.h"
 
 #include "Components/TextBlock.h"
@@ -24,7 +26,7 @@ namespace TextMeasurementRuntimeProbe
 		FSlateFontInfo FontInfo = FTextBlockStyle::GetDefault().Font;
 		if (FMath::IsFinite(Request.FontSize) && Request.FontSize > 0.0f)
 		{
-			FontInfo.Size = Request.FontSize;
+			FontInfo.Size = Design2UMGFontAccess::ToNativeFontSize(Request.FontSize);
 		}
 
 		if (!Request.FontAssetPath.IsEmpty())
@@ -333,19 +335,20 @@ bool TextMeasurementRuntimeProbe::TryMeasureTextBlockDesiredSize(const FTextBloc
 		return false;
 	}
 
-	// Reuse one rooted probe across measurements: every input the measurement reads
-	// (text, font, justification, line-height, wrap settings) is reassigned below and
-	// each STextBlock setter invalidates the cached text layout, so the desired size
-	// depends only on the current request instead of probe history.
+	// Reuse one rooted probe across measurements. Every input measurement
+	// reassigns text, font and the complete layout batch before prepass, so the
+	// desired size depends only on the current request instead of probe history.
 	UTextBlock& ProbeTextBlock = GTextBlockProbe.Acquire();
 
 	ProbeTextBlock.SetText(FText::FromString(Request.Text));
 	ProbeTextBlock.SetFont(BuildFontInfo(Request));
 	ProbeTextBlock.SetJustification(ToSlateJustification(Request.TextAlign));
-	ProbeTextBlock.SetLineHeightPercentage(Request.LineHeightPercentage);
-	ProbeTextBlock.SetApplyLineHeightToBottomLine(Request.bApplyExplicitLineHeight);
-	ProbeTextBlock.SetAutoWrapText(Request.bAutoWrapText);
-	ProbeTextBlock.SetWrapTextAt(Request.WrapTextAt);
+	Design2UMGTextLayoutAccess::FUpdate LayoutUpdate;
+	LayoutUpdate.LineHeightPercentage = Request.LineHeightPercentage;
+	LayoutUpdate.ApplyLineHeightToBottomLine = Request.bApplyExplicitLineHeight;
+	LayoutUpdate.AutoWrapText = Request.bAutoWrapText;
+	LayoutUpdate.WrapTextAt = Request.WrapTextAt;
+	Design2UMGTextLayoutAccess::Apply(ProbeTextBlock, LayoutUpdate);
 
 	TSharedRef<SWidget> SlateWidget = ProbeTextBlock.TakeWidget();
 	SlateWidget->SlatePrepass(1.0f);

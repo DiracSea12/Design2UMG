@@ -18,8 +18,11 @@
 #include "UObject/Linker.h"
 #include "UObject/Package.h"
 #include "UObject/PackageReload.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UObject/UObjectGlobals.h"
 #include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Widget.h"
 
 namespace
 {
@@ -224,6 +227,11 @@ namespace DesignBlueprintRenderPreparation
 				*PackageName);
 		}
 
+		// Template Slate resources belong to this blueprint, not to garbage collection.
+		if (WidgetBlueprint->WidgetTree)
+		{
+			WidgetBlueprint->WidgetTree->ForEachWidget([](UWidget* Widget) { Widget->ReleaseSlateResources(true); });
+		}
 		const bool bResetTransientState = Preparation && Preparation->bResetTransientRenderState;
 		if (bResetTransientState)
 		{

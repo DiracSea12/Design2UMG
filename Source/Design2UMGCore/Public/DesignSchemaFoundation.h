@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignOptionalValues.h"
 #include "DesignSchemaFoundation.generated.h"
 
 /**
@@ -177,16 +178,16 @@ struct FDesignGradient
 	float Rotation = 0.0f;
 
 	UPROPERTY()
-	TOptional<FVector2D> StartPoint;
+	FDesignOptionalVector2D StartPoint;
 
 	UPROPERTY()
-	TOptional<FVector2D> EndPoint;
+	FDesignOptionalVector2D EndPoint;
 
 	UPROPERTY()
-	TOptional<FVector2D> Center;
+	FDesignOptionalVector2D Center;
 
 	UPROPERTY()
-	TOptional<FVector2D> Size;
+	FDesignOptionalVector2D Size;
 
 	UPROPERTY()
 	TArray<FDesignGradientStop> Colors;
@@ -252,7 +253,7 @@ struct FDesignImageFill
 	float Opacity = 1.0f;
 
 	UPROPERTY()
-	TOptional<float> ScalingFactor;
+	FDesignOptionalFloat ScalingFactor;
 
 	UPROPERTY()
 	FDesignImageTransform Transform;
@@ -313,6 +314,53 @@ struct FDesignFill
 		Fill.Type = EDesignFillType::Color;
 		Fill.SolidColor = Color;
 		return Fill;
+	}
+};
+
+USTRUCT()
+struct FDesignOptionalFill
+{
+	GENERATED_BODY()
+
+	FDesignOptionalFill() = default;
+	FDesignOptionalFill(const FDesignFill& InValue) : bIsSet(true), Value(InValue) {}
+
+	UPROPERTY()
+	bool bIsSet = false;
+
+	UPROPERTY()
+	FDesignFill Value;
+
+	FDesignOptionalFill& operator=(const FDesignFill& InValue)
+	{
+		bIsSet = true;
+		Value = InValue;
+		return *this;
+	}
+
+	bool IsSet() const { return bIsSet; }
+
+	FDesignFill& GetValue()
+	{
+		checkf(bIsSet, TEXT("FDesignOptionalFill has no value."));
+		return Value;
+	}
+
+	const FDesignFill& GetValue() const
+	{
+		checkf(bIsSet, TEXT("FDesignOptionalFill has no value."));
+		return Value;
+	}
+
+	FDesignFill Get(const FDesignFill& DefaultValue) const { return bIsSet ? Value : DefaultValue; }
+
+	FDesignFill* operator->() { return &GetValue(); }
+	const FDesignFill* operator->() const { return &GetValue(); }
+
+	void Reset()
+	{
+		bIsSet = false;
+		Value = FDesignFill();
 	}
 };
 
@@ -391,7 +439,7 @@ struct FDesignStroke
 	FDesignStrokeThickness Thickness;
 
 	UPROPERTY()
-	TOptional<FDesignFill> Fill;
+	FDesignOptionalFill Fill;
 
 	UPROPERTY()
 	EDesignStrokeCap Cap = EDesignStrokeCap::Butt;
@@ -554,7 +602,7 @@ struct FDesignTextRun
 	FString FontPostScriptName;
 
 	UPROPERTY()
-	TOptional<float> FontSize;
+	FDesignOptionalFloat FontSize;
 
 	UPROPERTY()
 	FString FontWeight;
@@ -563,16 +611,16 @@ struct FDesignTextRun
 	FString FontStyle;
 
 	UPROPERTY()
-	TOptional<float> LineHeight;
+	FDesignOptionalFloat LineHeight;
 
 	UPROPERTY()
-	TOptional<float> LetterSpacing;
+	FDesignOptionalFloat LetterSpacing;
 
 	UPROPERTY()
-	TOptional<bool> bUnderline;
+	FDesignOptionalBool bUnderline;
 
 	UPROPERTY()
-	TOptional<bool> bStrikethrough;
+	FDesignOptionalBool bStrikethrough;
 
 	UPROPERTY()
 	FString Href;
@@ -643,6 +691,9 @@ struct FDesignShadow
 
 	UPROPERTY()
 	bool bInner = false;
+
+	UPROPERTY()
+	bool bShowShadowBehindNode = false;
 
 	UPROPERTY()
 	float OffsetX = 0.0f;

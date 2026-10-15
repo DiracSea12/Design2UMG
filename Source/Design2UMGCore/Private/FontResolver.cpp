@@ -2,6 +2,7 @@
 
 #include "FontResolver.h"
 #include "FontResolverInternal.h"
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
@@ -103,7 +104,7 @@ namespace
 		ARM.Get().GetAssetsByPath(FName(TEXT("/Engine/EngineFonts")), FontAssets, false);
 		for (const FAssetData& Asset : FontAssets)
 		{
-			if (Asset.AssetClassPath != UFont::StaticClass()->GetClassPathName())
+			if (!Design2UMGFontAccess::IsFontAsset(Asset))
 			{
 				continue;
 			}
@@ -113,7 +114,7 @@ namespace
 				continue;
 			}
 
-			const FString ObjectPath = Asset.GetObjectPathString();
+			const FString ObjectPath = Asset.ToSoftObjectPath().ToString();
 			if (IsUsableResolvedFontPath(ObjectPath))
 			{
 				OutPath = ObjectPath;
@@ -279,14 +280,14 @@ namespace
 			IAssetRegistry& AR = ARM.Get();
 
 			TArray<FAssetData> FontAssets;
-			AR.GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+			AR.GetAssetsByClass(Design2UMGFontAccess::GetAssetClassKey(), FontAssets, true);
 			for (const FAssetData& Asset : FontAssets)
 			{
 				if (!Asset.PackagePath.ToString().StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
 				{
 					continue;
 				}
-				AddIndexedFontAssetName(Asset.AssetName.ToString(), Asset.GetObjectPathString());
+				AddIndexedFontAssetName(Asset.AssetName.ToString(), Asset.ToSoftObjectPath().ToString());
 			}
 
 			bProjectFontIndexBuilt = true;

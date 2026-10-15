@@ -22,7 +22,6 @@ namespace
 	// UV step for foreground blur when node size is unresolved.
 	constexpr float InvalidNodeBlurUVStepComponent = 1.0f / 512.0f;
 	// Foreground-blur strength floor and strength-to-UV-step scale.
-	constexpr float MinBlurStrengthForUVStep = 0.5f;
 	constexpr float BlurStrengthToUVStepScale = 0.35f;
 
 	// Bounds relative to the node's layout origin, before its own render transform.
@@ -88,7 +87,7 @@ namespace
 
 		const float Width = FMath::Max(1.0f, Node->Transform.Width.Value);
 		const float Height = FMath::Max(1.0f, Node->Transform.Height.Value);
-		const float EffectiveBlur = FMath::Max(MinBlurStrengthForUVStep, BlurStrength) * BlurStrengthToUVStepScale;
+		const float EffectiveBlur = FMath::Max(0.0f, BlurStrength) * BlurStrengthToUVStepScale;
 		return FVector2D(EffectiveBlur / Width, EffectiveBlur / Height);
 	}
 

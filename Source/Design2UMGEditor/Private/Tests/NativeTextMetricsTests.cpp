@@ -1,8 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Design2UMGFontAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
 
-#if WITH_DEV_AUTOMATION_TESTS
+#if WITH_DEV_AUTOMATION_TESTS && !UE_VERSION_OLDER_THAN(5, 3, 0)
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
 #include "Fonts/FontMeasure.h"

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGConverter.h"
 #include "FontResolver.h"
 #include "FigmaParser.h"
@@ -774,7 +775,7 @@ bool FFigmaTextFitUsesAuthoredMinimumSizeTest::RunTest(const FString& Parameters
 			Label->TextStyle.FontSize > 0.0f
 			&& Label->TextStyle.FontSize <= SourceFontSize + 0.01f);
 		const float ExpectedCompiledFontSize =
-			SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+			SourceFontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 		TestTrue(*FString::Printf(TEXT("Single-line fit text '%s' should use the source px-to-point conversion"), *ExpectedText),
 			FMath::IsNearlyEqual(Label->TextStyle.FontSize, ExpectedCompiledFontSize, 0.01f));
 		return true;

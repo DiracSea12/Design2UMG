@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #if WITH_DEV_AUTOMATION_TESTS
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Design2UMGImageTestUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
@@ -9,6 +11,7 @@
 #include "Design2UMGSettings.h"
 #include "DesignImportPipeline.h"
 #include "DesignImportGeneration.h"
+#include "DesignBlueprintRenderPreparation.h"
 #include "UMGWidgetTypes.h"
 #include "Design2UMGEditorImportServices.h"
 #include "Design2UMGLocalFigmaImport.h"
@@ -26,12 +29,13 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "UMGWidgetTreeBuilder.h"
 #include "UMGWidgetRenderer.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 #include "Automation/Design2UMGAutomationStructureSnapshot.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/TextBlock.h"
 #include "Components/PanelWidget.h"
+#include "Components/RetainerBox.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_CustomEvent.h"
@@ -70,6 +74,11 @@ namespace
 		 {"id":"label","name":"Label","type":"TEXT","characters":"Default","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":0,"y":0,"width":90,"height":24}}]}}]}})JSON"), *SecondText);
 	}
 
+	FString MakePaddedComponentImportJson()
+	{
+		return TEXT(R"JSON({"fileKey":"component-persistence-test","document":{"id":"root","name":"Parent","type":"FRAME","absoluteBoundingBox":{"x":0,"y":0,"width":310,"height":80},"children":[{"id":"a","name":"First","type":"INSTANCE","absoluteBoundingBox":{"x":10,"y":10,"width":128,"height":40},"layoutMode":"HORIZONTAL","primaryAxisSizingMode":"FIXED","counterAxisSizingMode":"FIXED","paddingLeft":9,"paddingRight":9,"paddingTop":8,"paddingBottom":8,"itemSpacing":4,"children":[{"id":"a;label","name":"Label","type":"TEXT","characters":"Confirm","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":19,"y":18,"width":48,"height":24}},{"id":"a;wrapper","name":"Wrapper","type":"FRAME","absoluteBoundingBox":{"x":71,"y":18,"width":58,"height":24},"children":[{"id":"a;wrapped-label","name":"WrappedLabel","type":"TEXT","characters":"Accept","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":71,"y":18,"width":58,"height":24}}]}],"componentId":"main","mainComponentKey":"button-key"},{"id":"b","name":"Second","type":"INSTANCE","absoluteBoundingBox":{"x":160,"y":10,"width":128,"height":40},"layoutMode":"HORIZONTAL","primaryAxisSizingMode":"FIXED","counterAxisSizingMode":"FIXED","paddingLeft":9,"paddingRight":9,"paddingTop":8,"paddingBottom":8,"itemSpacing":4,"children":[{"id":"b;label","name":"Label","type":"TEXT","characters":"Cancel","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":169,"y":18,"width":48,"height":24}},{"id":"b;wrapper","name":"Wrapper","type":"FRAME","absoluteBoundingBox":{"x":221,"y":18,"width":58,"height":24},"children":[{"id":"b;wrapped-label","name":"WrappedLabel","type":"TEXT","characters":"Reject","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":221,"y":18,"width":58,"height":24}}]}],"componentId":"main","mainComponentKey":"button-key"}]},"design2umgComponentDependencies":{"schemaVersion":1,"instances":{"a":{"id":"main","key":"button-key"},"b":{"id":"main","key":"button-key"}},"errors":[],"definitions":[{"id":"main","key":"button-key","name":"Button","document":{"id":"main","name":"Button","type":"COMPONENT","absoluteBoundingBox":{"x":0,"y":0,"width":128,"height":40},"layoutMode":"HORIZONTAL","primaryAxisSizingMode":"FIXED","counterAxisSizingMode":"FIXED","paddingLeft":9,"paddingRight":9,"paddingTop":8,"paddingBottom":8,"itemSpacing":4,"children":[{"id":"main;label","name":"Label","type":"TEXT","characters":"Default","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":9,"y":8,"width":48,"height":24}},{"id":"main;wrapper","name":"Wrapper","type":"FRAME","absoluteBoundingBox":{"x":61,"y":8,"width":58,"height":24},"children":[{"id":"main;wrapped-label","name":"WrappedLabel","type":"TEXT","characters":"Wrapped","style":{"fontSize":16,"fontFamily":"Roboto"},"absoluteBoundingBox":{"x":61,"y":8,"width":58,"height":24}}]}]}}]}})JSON");
+	}
+
 	TArray<UUserWidget*> FindInstances(UWidgetTree* Tree)
 	{
 		TArray<UUserWidget*> Result;
@@ -83,6 +92,45 @@ namespace
 		Tree->ForEachWidget([&](UWidget* Widget) { if (const UTextBlock* Text = Cast<UTextBlock>(Widget)) Result.Add(Text->GetText().ToString()); });
 		return Result;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentSameSourceReimportTest,
+	"Design2UMG.ComponentBlueprints.SameSourceReimport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentSameSourceReimportTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Source parses"), FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")), Document))) return false;
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/SameSourceReimport_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	FDesign2UMGGenerationOutput FirstOutput;
+	UWidgetBlueprint* First = DesignImportGeneration::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &FirstOutput);
+	if (!TestNotNull(TEXT("Fresh component import succeeds"), First)) return false;
+	TArray<FString> Names = FirstOutput.Manifest.D2UOwnedNames;
+	Names.Sort();
+	TArray<uint8> BeforePng;
+	FIntPoint Size;
+	FString Error;
+	if (!TestTrue(TEXT("Fresh component renders"), FUMGWidgetRenderer::RenderWidgetToPng(First, BeforePng, Size, &Error))) return false;
+	for (int32 Repeat = 0; Repeat < 2; ++Repeat)
+	{
+		FDesign2UMGGenerationOutput Output;
+		UWidgetBlueprint* Updated = DesignImportGeneration::GenerateWidgetBlueprint(
+			FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
+		if (!TestNotNull(TEXT("Same-source reimport succeeds"), Updated)) return false;
+		TestTrue(TEXT("Reimport retains the root asset"), Updated == First);
+		TArray<FString> UpdatedNames = Output.Manifest.D2UOwnedNames;
+		UpdatedNames.Sort();
+		TestTrue(TEXT("Same source preserves every owned widget name"), UpdatedNames == Names);
+		TArray<uint8> AfterPng;
+		if (!TestTrue(TEXT("Reimported component renders"), FUMGWidgetRenderer::RenderWidgetToPng(Updated, AfterPng, Size, &Error))) return false;
+		FImage Before, After;
+		if (!TestTrue(TEXT("Both renders decode"), Design2UMGImageTestUtils::DecodeToBGRA8(BeforePng.GetData(), BeforePng.Num(), Before)
+			&& Design2UMGImageTestUtils::DecodeToBGRA8(AfterPng.GetData(), AfterPng.Num(), After))) return false;
+		TestTrue(TEXT("Same source preserves every rendered pixel"), Before.RawData == After.RawData);
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentDefinitionWarningsTest,
@@ -110,12 +158,12 @@ bool FComponentDefinitionWarningsTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentDependencyPartialSyncTest,
-	"Design2UMG.ComponentBlueprints.DependencyPartialSync",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentDependencyCompleteSyncTest,
+	"Design2UMG.ComponentBlueprints.DependencyCompleteSync",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
+bool FComponentDependencyCompleteSyncTest::RunTest(const FString&)
 {
-	const FString Folder = TEXT("/Game/Design2UMG/Automation/DependencyPartialSync_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/DependencyCompleteSync_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
 	FDesignDocument Document;
 	const FString Source = MakeComponentImportJson(TEXT("Cancel"));
@@ -127,7 +175,7 @@ bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
 	if (!TestNotNull(TEXT("First component batch saved"), First)) return false;
 	TestEqual(TEXT("Fresh complete batch is ordinary success"), Initial.Commit.Status, EDesign2UMGCommitStatus::Succeeded);
 
-	// A new page shares the existing dependency: only its component merge can produce partial sync.
+	// A new page shares a wholly generated dependency without retaining stale template nodes.
 	FDesignDocument SecondDocument;
 	if (!TestTrue(TEXT("Parse second page"), FFigmaParser::ParseDocument(
 		Source.Replace(TEXT("\"id\":\"root\""), TEXT("\"id\":\"second-root\"")), SecondDocument))) return false;
@@ -138,14 +186,14 @@ bool FComponentDependencyPartialSyncTest::RunTest(const FString&)
 	if (!TestNotNull(TEXT("New page built"), Second)
 		|| !TestEqual(TEXT("One shared dependency"), Output.Components.Num(), 1)) return false;
 	TestTrue(TEXT("Page itself is new"), Second != First);
-	TestTrue(TEXT("Existing dependency carries its apply degradation"), Output.Components[0].Output->bHasDegradation);
-	TestTrue(TEXT("Dependency degradation survives new root assembly"), Output.bHasDegradation);
-	TestTrue(TEXT("Component partial synchronization is explained"), Output.MappingDiagnostics.ContainsByPredicate(
+	TestFalse(TEXT("Wholly generated dependency updates completely"), Output.Components[0].Output->bHasDegradation);
+	TestFalse(TEXT("Complete dependency leaves the page undegraded"), Output.bHasDegradation);
+	TestFalse(TEXT("Component does not retain unmatched owned nodes"), Output.MappingDiagnostics.ContainsByPredicate(
 		[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("reimport_partial_sync"); }));
 	const FDesign2UMGCommitResult Saved = FUMGGenerator::SaveWidgetBlueprint(Second, &Output, &Navigation);
-	TestEqual(TEXT("Dependency-only degradation reaches the batch commit"), Saved.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
-	TestEqual(TEXT("Dependency save also reports degradation"), Output.Components[0].Output->Commit.Status,
-		EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestEqual(TEXT("Complete batch saves normally"), Saved.Status, EDesign2UMGCommitStatus::Succeeded);
+	TestEqual(TEXT("Dependency save is complete"), Output.Components[0].Output->Commit.Status,
+		EDesign2UMGCommitStatus::Succeeded);
 	return true;
 }
 
@@ -183,7 +231,7 @@ bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
 	Entry.DocumentScope = TEXT("component-blueprint-test");
 	Entry.ComponentKey = TEXT("override-key");
 	Entry.Key = Entry.Provider + TEXT("|") + Entry.DocumentScope + TEXT("|") + Entry.ComponentKey;
-	Entry.WidgetClass = UDesign2UMGComponentInputTestWidget::StaticClass()->GetPathName();
+	Entry.WidgetClass = ComponentFixtures::InputClass()->GetPathName();
 	auto& Input = Entry.Inputs.AddDefaulted_GetRef();
 	Input.Source = TEXT("label");
 	Input.Target = TEXT("BoolValue");
@@ -195,13 +243,13 @@ bool FComponentOverrideInputDegradationTest::RunTest(const FString&)
 	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
 		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
 	if (!TestNotNull(TEXT("Skipped override input does not fail generation"), Blueprint)) return false;
-	UDesign2UMGComponentInputTestWidget* Mapped = nullptr;
+	UUserWidget* Mapped = nullptr;
 	Blueprint->WidgetTree->ForEachWidget([&](UWidget* Widget)
 	{
-		if (auto* Candidate = Cast<UDesign2UMGComponentInputTestWidget>(Widget)) Mapped = Candidate;
+		if (auto* Candidate = ComponentFixtures::CastInput(Widget)) Mapped = Candidate;
 	});
 	if (!TestNotNull(TEXT("Override actually materializes the mapped class"), Mapped)) return false;
-	TestTrue(TEXT("Invalid override input preserves default bool"), Mapped->BoolValue);
+	TestTrue(TEXT("Invalid override input preserves default bool"), ComponentFixtures::Read<FBoolProperty>(Mapped, TEXT("BoolValue")));
 	TestTrue(TEXT("Override input diagnostic reaches root output"), Output.MappingDiagnostics.ContainsByPredicate(
 		[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("mapping_input_skipped"); }));
 	TestTrue(TEXT("Override input degradation reaches root output"), Output.bHasDegradation);
@@ -955,7 +1003,7 @@ bool FRemoteSetMappingDependencyTest::RunTest(const FString&)
 	Mapping.DocumentScope = TEXT("component-blueprint-test");
 	Mapping.ComponentKey = TEXT("published-set");
 	Mapping.Key = TEXT("figma|component-blueprint-test|published-set");
-	Mapping.WidgetClass = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
+	Mapping.WidgetClass = ComponentFixtures::InputClassPath;
 	Design2UMGEditorImportServices::FFigmaImportService Owner;
 	bool Resolved = false;
 	const auto Session = MakeShared<Design2UMGEditorImportServices::FFigmaImportSession>(
@@ -1154,8 +1202,8 @@ bool FComponentBlueprintRealDesignTest::RunTest(const FString&)
 		if (!TestTrue(TEXT("Flat control renders"), FUMGWidgetRenderer::RenderWidgetToPng(Flat, FlatPng, FlatSize, &Error))) return false;
 		TestEqual(TEXT("Nesting retains the real design output dimensions"), NestedSize, FlatSize);
 		FImage NestedImage, FlatImage;
-		if (TestTrue(TEXT("Decode generated renders"), FImageUtils::DecompressImage(NestedPng.GetData(), NestedPng.Num(), NestedImage)
-			&& FImageUtils::DecompressImage(FlatPng.GetData(), FlatPng.Num(), FlatImage)))
+		if (TestTrue(TEXT("Decode generated renders"), Design2UMGImageTestUtils::DecodeToBGRA8(NestedPng.GetData(), NestedPng.Num(), NestedImage)
+			&& Design2UMGImageTestUtils::DecodeToBGRA8(FlatPng.GetData(), FlatPng.Num(), FlatImage)))
 		{
 			TestTrue(TEXT("Independent component assets preserve every rendered pixel of the existing source conversion"), NestedImage.RawData == FlatImage.RawData);
 		}
@@ -1186,14 +1234,14 @@ namespace
 			// Named-slot content is reached through both the host binding and child tree.
 			if (VisitedLabels.Contains(RichText)) return;
 			VisitedLabels.Add(RichText);
-			UDataTable* Table = RichText->GetTextStyleSet();
+			UDataTable* Table = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*RichText);
 			if (!Test.TestNotNull(TEXT("Rich text retains its style table"), Table)) return;
 			Tables.Add(Table);
 			const FRichTextStyleRow* Row = Table->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), TEXT("Persistence test"), false);
 			if (!Test.TestNotNull(TEXT("Overridden style row persists"), Row)) return;
 			Test.TestNotNull(TEXT("Embedded style resolves its font asset"), Row->TextStyle.Font.FontObject.Get());
 			Test.TestEqual(TEXT("Per-run bold face persists"), Row->TextStyle.Font.TypefaceFontName, FName(TEXT("Bold")));
-			Test.TestEqual(TEXT("Per-run source24px maps to18pt"), Row->TextStyle.Font.Size, 18.0f);
+			Test.TestEqual(TEXT("Per-run source24px maps to18pt"), static_cast<float>(Row->TextStyle.Font.Size), 18.0f);
 			const FLinearColor Color = Row->TextStyle.ColorAndOpacity.GetSpecifiedColor();
 			bRed |= Color.Equals(FLinearColor::Red);
 			bGreen |= Color.Equals(FLinearColor::Green);
@@ -1243,7 +1291,7 @@ bool FComponentRichTextSaveTest::RunTest(const FString&)
 	FString Error;
 	if (!TestTrue(TEXT("Saved mixed-style parent renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
 	FImage Rendered;
-	if (!TestTrue(TEXT("Decode mixed-style runtime image"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Rendered)) ||
+	if (!TestTrue(TEXT("Decode mixed-style runtime image"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Rendered)) ||
 		!TestTrue(TEXT("Runtime image uses BGRA8"), Rendered.Format == ERawImageFormat::BGRA8)) return false;
 	int32 RedPixels = 0, GreenPixels = 0;
 	const FColor* Pixels = reinterpret_cast<const FColor*>(Rendered.RawData.GetData());
@@ -1287,8 +1335,8 @@ bool FComponentRichTextReloadTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Read pre-reload pixels"), FFileHelper::LoadFileToArray(BeforePng, *Manifest->GetStringField(TEXT("png")))) ||
 		!TestTrue(TEXT("Reloaded assets render"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, AfterPng, Size, &Error))) return false;
 	FImage Before, After;
-	if (!TestTrue(TEXT("Decode both renders"), FImageUtils::DecompressImage(BeforePng.GetData(), BeforePng.Num(), Before)
-		&& FImageUtils::DecompressImage(AfterPng.GetData(), AfterPng.Num(), After))) return false;
+	if (!TestTrue(TEXT("Decode both renders"), Design2UMGImageTestUtils::DecodeToBGRA8(BeforePng.GetData(), BeforePng.Num(), Before)
+		&& Design2UMGImageTestUtils::DecodeToBGRA8(AfterPng.GetData(), AfterPng.Num(), After))) return false;
 	TestEqual(TEXT("Reload preserves render width"), After.SizeX, Before.SizeX);
 	TestEqual(TEXT("Reload preserves render height"), After.SizeY, Before.SizeY);
 	TestTrue(TEXT("Reload preserves every rendered mixed-style pixel"), Before.RawData == After.RawData);
@@ -1543,7 +1591,7 @@ bool FComponentMappingFailureFallbackTest::RunTest(const FString&)
 	Entry.WidgetClass = TEXT("/Script/CoreUObject.Object");
 	auto& Override = Settings.ClassOverrides.AddDefaulted_GetRef();
 	Override.NamePattern = TEXT("First");
-	Override.WidgetClass = UDesign2UMGComponentInputTestWidget::StaticClass();
+	Override.WidgetClass = ComponentFixtures::InputClass();
 	const FString Folder = TEXT("/Game/Design2UMG/Automation/MappingFallback_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	FDesign2UMGGenerationOutput Output;
 	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
@@ -1884,4 +1932,156 @@ bool FComponentBulkSharesGeneratedTextureBudgetTest::RunTest(const FString&)
 		}));
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentTreeRenderSlateCleanupTest,
+	"Design2UMG.Components.Rendering.ReleasesTemplateSlateResources", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentTreeRenderSlateCleanupTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Component source parses"), FFigmaParser::ParseDocument(MakeComponentImportJson(TEXT("Cancel")), Document))) return false;
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/RenderResourceLifetime_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UWidgetBlueprint* Blueprint = nullptr;
+	ON_SCOPE_EXIT
+	{
+		if (Blueprint)
+		{
+			if (Blueprint->WidgetTree && Blueprint->WidgetTree->RootWidget)
+				Blueprint->WidgetTree->RootWidget->ReleaseSlateResources(true);
+			Blueprint->RemoveFromRoot();
+		}
+		Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder);
+	};
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	FDesign2UMGGenerationOutput Output;
+	Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, &Settings, &Output);
+	if (!TestNotNull(TEXT("Component blueprint saves"), Blueprint)) return false;
+	Blueprint->AddToRoot();
+	if (!TestTrue(TEXT("Fixture creates reusable component dependencies"), Output.Components.Num() > 0)) return false;
+	URetainerBox* Retainer = Blueprint->WidgetTree->ConstructWidget<URetainerBox>();
+	Retainer->SetContent(Blueprint->WidgetTree->RootWidget);
+	Blueprint->WidgetTree->RootWidget = Retainer;
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+	Blueprint->WidgetVariableNameToGuidMap.Add(Retainer->GetFName(), FGuid::NewGuid());
+#endif
+	Blueprint->MarkPackageDirty();
+	Retainer->TakeWidget();
+	TestTrue(TEXT("Retainer materializes template Slate before preparation"), Retainer->GetCachedWidget().IsValid());
+	if (!TestTrue(TEXT("Template saves after materialization"), FUMGGenerator::SaveWidgetBlueprint(Blueprint).IsSuccess())) return false;
+	TestFalse(TEXT("Save releases template Slate resources"), Retainer->GetCachedWidget().IsValid());
+	Blueprint->MarkPackageDirty();
+	Retainer->TakeWidget();
+	FBlueprintRenderPreparationOptions Preparation;
+	Preparation.bResetTransientRenderState = true;
+	FString PreparationError;
+	if (!TestNotNull(TEXT("Render preparation preserves unsaved blueprint"), DesignBlueprintRenderPreparation::ReloadWidgetBlueprintForRender(
+		Blueprint, &Preparation, &PreparationError))) return false;
+	TestFalse(TEXT("Render preparation releases template Slate before garbage collection"), Retainer->GetCachedWidget().IsValid());
+	for (int32 RenderIndex = 0; RenderIndex < 2; ++RenderIndex)
+	{
+		TArray<uint8> Png;
+		FIntPoint Size;
+		if (!TestTrue(TEXT("Component template renders"), FUMGWidgetRenderer::RenderWidgetTreeToPng(Blueprint, Png, Size))) return false;
+		int32 NestedWidgetCount = 0;
+		TSet<UWidget*> RenderedWidgets;
+		Blueprint->WidgetTree->ForEachWidget([&RenderedWidgets](UWidget* Widget) { RenderedWidgets.Add(Widget); });
+		Blueprint->WidgetTree->ForEachWidgetAndDescendants([&RenderedWidgets](UWidget* Widget) { RenderedWidgets.Add(Widget); });
+		for (UWidget* Widget : RenderedWidgets)
+		{
+			if (Widget->IsA<UUserWidget>()) ++NestedWidgetCount;
+			TestFalse(TEXT("Rendered template releases its cached Slate widget"), Widget->GetCachedWidget().IsValid());
+		}
+		TestTrue(TEXT("Fixture covers nested user widgets"), NestedWidgetCount > 0);
+		CollectGarbage(RF_NoFlags, true);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentReimportPersistenceSaveTest,
+	"Design2UMG.ComponentReimportPersistence.Save", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentReimportPersistenceSaveTest::RunTest(const FString&)
+{
+	const FString StatePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ComponentReimport/Persistence.json");
+	if (!TestFalse(TEXT("Preserve pending persistence fixture"), IFileManager::Get().FileExists(*StatePath))) return false;
+	const FString Source = MakePaddedComponentImportJson();
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Padded component source parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/ComponentPersistence_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	bool bSavedFixture = false;
+	ON_SCOPE_EXIT { if (!bSavedFixture) Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FDesign2UMGGenerationOutput Output;
+	UWidgetBlueprint* Blueprint = DesignImportGeneration::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, nullptr, &Output);
+	if (!TestNotNull(TEXT("Padded component batch saves"), Blueprint)) return false;
+	TArray<uint8> Png;
+	FIntPoint Size;
+	FString Error;
+	if (!TestTrue(TEXT("Saved component renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(StatePath), true);
+	if (!TestTrue(TEXT("Save first-process pixels"), FFileHelper::SaveArrayToFile(Png, *(FPaths::ChangeExtension(StatePath, TEXT("png")))))) return false;
+	TSharedRef<FJsonObject> State = MakeShared<FJsonObject>();
+	State->SetNumberField(TEXT("process_id"), FPlatformProcess::GetCurrentProcessId());
+	State->SetStringField(TEXT("folder"), Folder);
+	State->SetStringField(TEXT("asset_path"), Blueprint->GetPathName());
+	State->SetStringField(TEXT("source"), Source);
+	TArray<TSharedPtr<FJsonValue>> Names;
+	for (const FString& Name : Output.Manifest.D2UOwnedNames) Names.Add(MakeShared<FJsonValueString>(Name));
+	State->SetArrayField(TEXT("owned_names"), Names);
+	FString Json;
+	FJsonSerializer::Serialize(State, TJsonWriterFactory<>::Create(&Json));
+	bSavedFixture = FFileHelper::SaveStringToFile(Json, *StatePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	TestTrue(TEXT("Record persistence fixture"), bSavedFixture);
+	return bSavedFixture;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentReimportPersistenceReimportTest,
+	"Design2UMG.ComponentReimportPersistence.Reimport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentReimportPersistenceReimportTest::RunTest(const FString&)
+{
+	const FString StatePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ComponentReimport/Persistence.json");
+	FString Json;
+	TSharedPtr<FJsonObject> State;
+	if (!TestTrue(TEXT("Load previous-process fixture"), FFileHelper::LoadFileToString(Json, *StatePath)
+		&& FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), State) && State.IsValid())) return false;
+	if (!TestTrue(TEXT("Reimport occurs in a different editor process"),
+		static_cast<uint32>(State->GetNumberField(TEXT("process_id"))) != FPlatformProcess::GetCurrentProcessId())) return false;
+	const FString Folder = State->GetStringField(TEXT("folder"));
+	ON_SCOPE_EXIT
+	{
+		Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder);
+		IFileManager::Get().Delete(*StatePath);
+		IFileManager::Get().Delete(*FPaths::ChangeExtension(StatePath, TEXT("png")));
+	};
+	UWidgetBlueprint* Existing = LoadObject<UWidgetBlueprint>(nullptr, *State->GetStringField(TEXT("asset_path")));
+	if (!TestNotNull(TEXT("Load saved component page and dependencies"), Existing)) return false;
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Same source parses after restart"), FFigmaParser::ParseDocument(State->GetStringField(TEXT("source")), Document))) return false;
+	FDesign2UMGGenerationOutput Output;
+	UWidgetBlueprint* Updated = DesignImportGeneration::GenerateWidgetBlueprint(
+		FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults()), Folder, nullptr, &Output);
+	if (!TestNotNull(TEXT("Restarted same-source reimport saves"), Updated)) return false;
+	TestTrue(TEXT("Root asset identity is retained"), Updated == Existing);
+	TestTrue(TEXT("The page retains generated component dependencies"), !Output.Components.IsEmpty());
+	for (const FDesign2UMGGeneratedComponent& Component : Output.Components)
+	{
+		if (!TestTrue(TEXT("Dependency output records whole-asset ownership"), Component.Output.IsValid() && Component.Output->Manifest.bWholeAssetOwned)) return false;
+		TestFalse(TEXT("Whole generated dependency does not retain stale nested nodes"), Component.Output->MappingDiagnostics.ContainsByPredicate(
+			[](const FDesign2UMGMappingDiagnostic& Diagnostic) { return Diagnostic.Kind == TEXT("reimport_partial_sync"); }));
+	}
+	TArray<FString> ExpectedNames;
+	for (const TSharedPtr<FJsonValue>& Name : State->GetArrayField(TEXT("owned_names"))) ExpectedNames.Add(Name->AsString());
+	TArray<FString> ActualNames = Output.Manifest.D2UOwnedNames;
+	ExpectedNames.Sort(); ActualNames.Sort();
+	TestTrue(TEXT("Owned names remain stable across restart and reimport"), ExpectedNames == ActualNames);
+	TArray<uint8> BeforePng, AfterPng;
+	FIntPoint Size;
+	FString Error;
+	if (!TestTrue(TEXT("Read first-process pixels"), FFileHelper::LoadFileToArray(BeforePng, *FPaths::ChangeExtension(StatePath, TEXT("png"))))
+		|| !TestTrue(TEXT("Reimported component renders"), FUMGWidgetRenderer::RenderWidgetToPng(Updated, AfterPng, Size, &Error))) return false;
+	FImage Before, After;
+	if (!TestTrue(TEXT("Both process images decode"), Design2UMGImageTestUtils::DecodeToBGRA8(BeforePng.GetData(), BeforePng.Num(), Before)
+		&& Design2UMGImageTestUtils::DecodeToBGRA8(AfterPng.GetData(), AfterPng.Num(), After))) return false;
+	TestTrue(TEXT("Restart and reimport preserve every rendered pixel"), Before.RawData == After.RawData);
+	return true;
+}
+
 #endif

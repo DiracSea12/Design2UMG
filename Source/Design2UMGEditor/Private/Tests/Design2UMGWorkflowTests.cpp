@@ -1,5 +1,9 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Design2UMGAutomationTestAdapter.h"
+#include "Design2UMGFontAccess.h"
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
 #include "Design2UMGTestUtils.h"
@@ -10,6 +14,7 @@
 #include "FigmaTestDocBuilder.h"
 #include "PenParser.h"
 #include "UMGGenerator.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "PreBuildResourceNormalizer.h"
 #include "Blueprint/UserWidget.h"
@@ -19,12 +24,17 @@
 #include "Components/GridPanel.h"
 #include "Components/GridSlot.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Components/TextBlock.h"
+#include "Misc/EngineVersionComparison.h"
+#if !UE_VERSION_OLDER_THAN(5, 1, 0)
 #include "Extensions/WidgetBlueprintGeneratedClassExtension.h"
+#include "WidgetBlueprintExtension.h"
+#endif
 #include "Misc/Paths.h"
+#include "Misc/PackageName.h"
 #include "RHI.h"
 #include "Engine/Texture2D.h"
-#include "WidgetBlueprintExtension.h"
 #if WITH_AUTOMATION_WORKER
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
@@ -46,6 +56,25 @@ namespace
 			}
 		}
 		return Count;
+	}
+
+	int32 CountGeneratedDesign2UMGPrefixedExtensions(UWidgetBlueprintGeneratedClass& GeneratedClass)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return 0;
+#else
+		return CountDesign2UMGPrefixedExtensions(
+			GeneratedClass.GetExtensions(UWidgetBlueprintGeneratedClassExtension::StaticClass()));
+#endif
+	}
+
+	int32 CountBlueprintDesign2UMGPrefixedExtensions(UWidgetBlueprint& Blueprint)
+	{
+#if UE_VERSION_OLDER_THAN(5, 1, 0)
+		return 0;
+#else
+		return CountDesign2UMGPrefixedExtensions(UWidgetBlueprintExtension::GetExtensions(&Blueprint));
+#endif
 	}
 
 	FMargin ReadTextWidgetMargin(const UTextBlock* TextBlock)
@@ -149,9 +178,9 @@ bool FPenWelcomeWrapFontSizingTest::RunTest(const FString& Parameters)
 		ProTipsPadding.Bottom));
 
 	const float ExpectedWelcomeBodySize =
-		WelcomeBody->TextStyle.SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		WelcomeBody->TextStyle.SourceFontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	const float ExpectedProTipsSize =
-		ProTips->TextStyle.SourceFontSize * 72.0f / static_cast<float>(FontConstants::RenderDPI);
+		ProTips->TextStyle.SourceFontSize * 72.0f / Design2UMGFontAccess::RenderDPI;
 	TestTrue(TEXT("Welcome body uses the source px-to-point conversion"),
 		FMath::IsNearlyEqual(WelcomeBody->TextStyle.FontSize, ExpectedWelcomeBodySize, 0.01f));
 	TestTrue(TEXT("Pro tips uses the source px-to-point conversion"),
@@ -214,9 +243,9 @@ bool FFigmaInstanceMetadataWorkflowTest::RunTest(const FString& Parameters)
 	// itself must stay structurally pure: no plugin-custom (Design2UMG*) extension is baked in, and the former
 	// Figma widget-metadata records are no longer collected.
 	TestEqual(TEXT("Generated class carries no plugin-custom extensions"),
-		CountDesign2UMGPrefixedExtensions(GeneratedClass->GetExtensions(UWidgetBlueprintGeneratedClassExtension::StaticClass())), 0);
+		CountGeneratedDesign2UMGPrefixedExtensions(*GeneratedClass), 0);
 	TestEqual(TEXT("Widget blueprint carries no plugin-custom extensions"),
-		CountDesign2UMGPrefixedExtensions(UWidgetBlueprintExtension::GetExtensions(Blueprint)), 0);
+		CountBlueprintDesign2UMGPrefixedExtensions(*Blueprint), 0);
 
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	TestTrue(TEXT("Editor world exists"), World != nullptr);
@@ -375,11 +404,41 @@ bool FFigmaOverflowDirectionRuntimeWorkflowTest::RunTest(const FString& Paramete
 		return false;
 	}
 
-	TestEqual(TEXT("ScrollBox orientation is vertical"), ScrollBox->GetOrientation(), Orient_Vertical);
+	TestEqual(TEXT("ScrollBox orientation is vertical"), Design2UMGWidgetPropertyAccess::GetScrollBoxOrientation(*ScrollBox), Orient_Vertical);
 	TestEqual(TEXT("ScrollBox keeps child count"), ScrollBox->GetChildrenCount(), 2);
-	TestEqual(TEXT("ScrollBox hides scrollbar by default"), ScrollBox->GetScrollBarVisibility(), ESlateVisibility::Hidden);
+	TestEqual(TEXT("ScrollBox hides scrollbar by default"), Design2UMGWidgetPropertyAccess::GetScrollBarVisibility(*ScrollBox), ESlateVisibility::Hidden);
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FScrollBoxFillVersionContractTest,
+	"Design2UMG.WidgetBlueprint.ScrollBoxFillVersionContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FScrollBoxFillVersionContractTest::RunTest(const FString&)
+{
+	Design2UMGAutomationTestAdapter::FScopedExpectedMessages ExpectedLogMessages(*this);
+	UScrollBox* ScrollBox = NewObject<UScrollBox>();
+	UTextBlock* Child = NewObject<UTextBlock>(ScrollBox);
+	UScrollBoxSlot* Slot = Cast<UScrollBoxSlot>(ScrollBox->AddChild(Child));
+	if (!TestNotNull(TEXT("ScrollBox child slot exists"), Slot))
+	{
+		return false;
+	}
+
+	FUMGSlotData SlotData;
+	SlotData.SizeRule = EUMGSlotSizeRule::Fill;
+	SlotData.FillWeight = 2.5f;
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+	ExpectedLogMessages.Expect(TEXT("ScrollBox slot Fill sizing requires UE 5.2 or newer; native Auto sizing was retained."),
+		ELogVerbosity::Warning, Design2UMGAutomationTestAdapter::EMessageMatch::Exact, 1);
+#endif
+	FUMGWidgetTreeBuilder::ApplySlotProperties(Slot, SlotData);
+#if !UE_VERSION_OLDER_THAN(5, 2, 0)
+	const FSlateChildSize AppliedSize = Slot->GetSize();
+	TestEqual(TEXT("Native ScrollBox Fill rule is retained"), AppliedSize.SizeRule, ESlateSizeRule::Fill);
+	TestTrue(TEXT("Native ScrollBox Fill weight is retained"), FMath::IsNearlyEqual(AppliedSize.Value, 2.5f));
+#endif
 	return true;
 }
 
@@ -462,20 +521,20 @@ bool FFigmaGridSlotSemanticsRuntimeWorkflowTest::RunTest(const FString& Paramete
 		return false;
 	}
 
-	TestEqual(TEXT("Tail runtime row"), TailSlot->GetRow(), 0);
-	TestEqual(TEXT("Tail runtime column"), TailSlot->GetColumn(), 1);
-	TestEqual(TEXT("Tail runtime horizontal align"), TailSlot->GetHorizontalAlignment(), HAlign_Center);
-	TestEqual(TEXT("Tail runtime vertical align"), TailSlot->GetVerticalAlignment(), VAlign_Bottom);
-	const FMargin TailPadding = TailSlot->GetPadding();
+	TestEqual(TEXT("Tail runtime row"), Design2UMGWidgetPropertyAccess::GetRow(*TailSlot), 0);
+	TestEqual(TEXT("Tail runtime column"), Design2UMGWidgetPropertyAccess::GetColumn(*TailSlot), 1);
+	TestEqual(TEXT("Tail runtime horizontal align"), Design2UMGWidgetPropertyAccess::GetHorizontalAlignment(*TailSlot), HAlign_Center);
+	TestEqual(TEXT("Tail runtime vertical align"), Design2UMGWidgetPropertyAccess::GetVerticalAlignment(*TailSlot), VAlign_Bottom);
+	const FMargin TailPadding = Design2UMGWidgetPropertyAccess::GetPadding(*TailSlot);
 	TestTrue(TEXT("Tail runtime inner left gap"), FMath::IsNearlyEqual(TailPadding.Left, 6.0f, 0.01f));
 	TestTrue(TEXT("Tail runtime bottom gap"), FMath::IsNearlyEqual(TailPadding.Bottom, 12.0f, 0.01f));
 
-	TestEqual(TEXT("Hero runtime row"), HeroSlot->GetRow(), 1);
-	TestEqual(TEXT("Hero runtime column"), HeroSlot->GetColumn(), 0);
-	TestEqual(TEXT("Hero runtime column span"), HeroSlot->GetColumnSpan(), 2);
-	TestEqual(TEXT("Hero runtime horizontal align"), HeroSlot->GetHorizontalAlignment(), HAlign_Center);
-	TestEqual(TEXT("Hero runtime vertical align"), HeroSlot->GetVerticalAlignment(), VAlign_Bottom);
-	const FMargin HeroPadding = HeroSlot->GetPadding();
+	TestEqual(TEXT("Hero runtime row"), Design2UMGWidgetPropertyAccess::GetRow(*HeroSlot), 1);
+	TestEqual(TEXT("Hero runtime column"), Design2UMGWidgetPropertyAccess::GetColumn(*HeroSlot), 0);
+	TestEqual(TEXT("Hero runtime column span"), Design2UMGWidgetPropertyAccess::GetColumnSpan(*HeroSlot), 2);
+	TestEqual(TEXT("Hero runtime horizontal align"), Design2UMGWidgetPropertyAccess::GetHorizontalAlignment(*HeroSlot), HAlign_Center);
+	TestEqual(TEXT("Hero runtime vertical align"), Design2UMGWidgetPropertyAccess::GetVerticalAlignment(*HeroSlot), VAlign_Bottom);
+	const FMargin HeroPadding = Design2UMGWidgetPropertyAccess::GetPadding(*HeroSlot);
 	TestTrue(TEXT("Hero runtime top gap"), FMath::IsNearlyEqual(HeroPadding.Top, 12.0f, 0.01f));
 	TestTrue(TEXT("Hero runtime right outer edge has no extra gap"), FMath::IsNearlyEqual(HeroPadding.Right, 0.0f, 0.01f));
 
@@ -762,6 +821,50 @@ bool FPreBuildNormalizerProceduralTextureBeforeAfterDiffTest::RunTest(const FStr
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeneratedTextureAssetNameBudgetTest,
+	"Design2UMG.Resources.GeneratedTexture.AssetNameBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGeneratedTextureAssetNameBudgetTest::RunTest(const FString& Parameters)
+{
+	if (GUsingNullRHI) return true;
+	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/TextureAssetNameBudget");
+	const FString Prefix = FString::ChrN(80, TEXT('p'));
+	FUMGWidgetNode Input;
+	Input.Type = TEXT("CanvasPanel");
+	Input.Bounds = {0, 0, 64, 64};
+	Input.Children.Add(MakePathImageNode(TEXT("texture_node"), TEXT("M 0 0 L 32 0 L 32 32 Z")));
+	Input.Children[0].Name = FString::ChrN(90, TEXT('n')) + TEXT("资源");
+	FUMGWidgetNode Root = Input;
+	FString Error;
+	TestTrue(TEXT("Persist generated texture"), FPreBuildResourceNormalizer::NormalizePathTextures(Root, OutputPath, Prefix, &Error));
+	const FString Path = SnapNode(Root.Children[0]).TexturePath;
+	TestFalse(TEXT("Generated texture path is set"), Path.IsEmpty());
+	TestTrue(TEXT("Generated asset name fits the shared 64-character budget"), FPackageName::GetLongPackageAssetName(FPackageName::ObjectPathToPackageName(Path)).Len() <= 64);
+	TestEqual(TEXT("Source node name is unchanged"), Root.Children[0].Name, Input.Children[0].Name);
+	UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *Path);
+	TArray64<uint8> Pixels;
+	TestTrue(TEXT("Saved texture contains pixels"), Texture && Texture->Source.GetMipData(Pixels, 0) && !Pixels.IsEmpty());
+	FUMGWidgetNode Repeated = Input;
+	TestTrue(TEXT("Identical input can be saved again"), FPreBuildResourceNormalizer::NormalizePathTextures(Repeated, OutputPath, Prefix, &Error));
+	TestEqual(TEXT("Identical input keeps its asset identity"), SnapNode(Repeated.Children[0]).TexturePath, Path);
+	FUMGWidgetNode OtherName = Input;
+	OtherName.Children[0].Name = FString::ChrN(90, TEXT('n')) + TEXT("资产");
+	TestTrue(TEXT("A different Unicode stem can be saved"), FPreBuildResourceNormalizer::NormalizePathTextures(OtherName, OutputPath, Prefix, &Error));
+	const FString OtherPath = SnapNode(OtherName.Children[0]).TexturePath;
+	TestTrue(TEXT("Shortening preserves the full stem identity"), OtherPath != Path);
+	TestTrue(TEXT("Other name also fits the budget"), FPackageName::GetLongPackageAssetName(FPackageName::ObjectPathToPackageName(OtherPath)).Len() <= 64);
+	FUMGWidgetNode SupplementaryName = Input;
+	const FString SupplementaryPrefix = FString::ChrN(30, TEXT('p')) + TEXT("\U0001F600") + FString::ChrN(50, TEXT('p'));
+	TestTrue(TEXT("Supplementary Unicode stem can be saved"), FPreBuildResourceNormalizer::NormalizePathTextures(SupplementaryName, OutputPath, SupplementaryPrefix, &Error));
+	const FString SupplementaryAsset = FPackageName::GetLongPackageAssetName(FPackageName::ObjectPathToPackageName(SnapNode(SupplementaryName.Children[0]).TexturePath));
+	TestFalse(TEXT("Supplementary Unicode asset name is set"), SupplementaryAsset.IsEmpty());
+	const FTCHARToUTF8 SupplementaryUtf8(*SupplementaryAsset);
+	TestEqual(TEXT("Shortened name preserves complete Unicode characters"), FString(UTF8_TO_TCHAR(SupplementaryUtf8.Get())), SupplementaryAsset);
+	TestTrue(TEXT("Supplementary Unicode name also fits the budget"), SupplementaryAsset.Len() <= 64);
+	DeleteGeneratedAssetsAtPath(OutputPath);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreBuildNormalizerPathTextureCacheDedupTest,
 	"Design2UMG.PreBuildResourceNormalizer.PathTexture.CacheDedup",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -836,8 +939,9 @@ bool FPreBuildNormalizerImageTransformTextureTest::RunTest(const FString& Parame
 		TestFalse(TEXT("Persisted texture is not duplicate-transient"), PersistedTexture->HasAnyFlags(RF_DuplicateTransient));
 		TestTrue(TEXT("Persisted texture is public"), PersistedTexture->HasAnyFlags(RF_Public));
 		TestTrue(TEXT("Persisted texture is standalone"), PersistedTexture->HasAnyFlags(RF_Standalone));
-		TestEqual(TEXT("Persisted texture width matches the requested output"), PersistedTexture->GetSizeX(), 8);
-		TestEqual(TEXT("Persisted texture height matches the requested output"), PersistedTexture->GetSizeY(), 6);
+		// Platform mips can be enlarged by engine texture settings; persistence owns the source pixels.
+		TestEqual(TEXT("Persisted source width matches the requested output"), static_cast<int64>(PersistedTexture->Source.GetSizeX()), int64{8});
+		TestEqual(TEXT("Persisted source height matches the requested output"), static_cast<int64>(PersistedTexture->Source.GetSizeY()), int64{6});
 	}
 
 	DeleteGeneratedAssetsAtPath(OutputPath);

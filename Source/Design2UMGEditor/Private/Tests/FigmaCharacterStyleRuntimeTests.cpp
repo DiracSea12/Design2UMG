@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved.
 // SPDX-License-Identifier: MIT
 
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Design2UMGImageTestUtils.h"
 #include "Misc/AutomationTest.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
@@ -53,7 +55,7 @@ bool FFigmaCharacterColorRuntimeTest::RunTest(const FString&)
 		return false;
 	}
 	FImage Image;
-	if (!TestTrue(TEXT("PNG decodes"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+	if (!TestTrue(TEXT("PNG decodes"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
 	if (!TestTrue(TEXT("Rendered pixel format"), Image.Format == ERawImageFormat::BGRA8)) return false;
 	int32 RedCount = 0;
 	int32 BlueCount = 0;
@@ -89,7 +91,7 @@ bool FRichTextDefaultFontTest::RunTest(const FString&)
 	UMGTextStyleApplication::ApplyRichTextDefaultStyle(RichText, Node);
 	TestEqual(TEXT("An unresolved source font uses the same native font as plain text"),
 		RichText->GetCurrentDefaultTextStyle().Font.FontObject,
-		GetDefault<UTextBlock>()->GetFont().FontObject);
+		Design2UMGWidgetPropertyAccess::GetFont(*GetDefault<UTextBlock>()).FontObject);
 	TestEqual(TEXT("Requested typeface survives default font initialization"),
 		RichText->GetCurrentDefaultTextStyle().Font.TypefaceFontName, FName(TEXT("Regular")));
 	return true;

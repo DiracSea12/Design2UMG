@@ -8,7 +8,7 @@
 #include "Design2UMGGenerationManifest.h"
 #include "DesignImportPipeline.h"
 #include "UMGGenerator.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/TextBlock.h"
@@ -45,7 +45,7 @@ bool FSafeReimportManifestInputSchemaTest::RunTest(const FString&)
 		Mapped.DesignNodeId = TEXT("fixture-m-1");
 		Mapped.WidgetName = TEXT("W1");
 		Mapped.MappedKey = TEXT("figma|unit-scope-1|k");
-		Mapped.MappedClass = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
+		Mapped.MappedClass = ComponentFixtures::InputClassPath;
 		Mapped.bMatchedAtSetLevel = true;
 		FDesign2UMGMappedInputRecord Input;
 		Input.Source = TEXT("label");

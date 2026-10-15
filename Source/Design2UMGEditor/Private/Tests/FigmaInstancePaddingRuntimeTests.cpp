@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Misc/AutomationTest.h"
+#include "Design2UMGImageTestUtils.h"
 #include "FigmaParser.h"
 #include "Design2UMGConverter.h"
 #include "UMGGenerator.h"
@@ -63,7 +64,7 @@ bool FFigmaNestedStretchPaddingRuntimeTest::RunTest(const FString&)
  FString Error;
  if (!TestTrue(TEXT("Generated widget renders"), FUMGWidgetRenderer::RenderWidgetToPng(Blueprint, Png, Size, &Error))) return false;
  FImage Image;
- if (!TestTrue(TEXT("Decode runtime render"), FImageUtils::DecompressImage(Png.GetData(), Png.Num(), Image))) return false;
+ if (!TestTrue(TEXT("Decode runtime render"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
  if (!TestTrue(TEXT("BGRA8 runtime pixels"), Image.Format == ERawImageFormat::BGRA8)) return false;
  const FColor* Pixels = reinterpret_cast<const FColor*>(Image.RawData.GetData());
  int32 MinX = Image.SizeX, MinY = Image.SizeY, MaxX = -1, MaxY = -1;

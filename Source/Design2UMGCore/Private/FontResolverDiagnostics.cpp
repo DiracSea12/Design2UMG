@@ -2,6 +2,7 @@
 
 #include "FontResolver.h"
 #include "FontResolverInternal.h"
+#include "Design2UMGFontAccess.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
 #include "Components/Widget.h"
@@ -74,13 +75,13 @@ namespace
 
 		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		TArray<FAssetData> FontAssets;
-		AssetRegistryModule.Get().GetAssetsByClass(UFont::StaticClass()->GetClassPathName(), FontAssets, true);
+		AssetRegistryModule.Get().GetAssetsByClass(Design2UMGFontAccess::GetAssetClassKey(), FontAssets, true);
 
 		TSet<FString> MatchingObjectPaths;
 		const FString ImportedName = NormalizeFontLookupKey(FPackageName::GetLongPackageAssetName(FFontResolver::MakeImportedFamilyPackageName(Family)));
 		for (const FAssetData& Asset : FontAssets)
 		{
-			const FString ObjectPath = Asset.GetObjectPathString();
+			const FString ObjectPath = Asset.ToSoftObjectPath().ToString();
 			if (IsProjectFontAssetPath(ObjectPath)
 				&& (NormalizeFontLookupKey(Asset.AssetName.ToString()) == NormalizedFamily
 					|| NormalizeFontLookupKey(Asset.AssetName.ToString()) == ImportedName))

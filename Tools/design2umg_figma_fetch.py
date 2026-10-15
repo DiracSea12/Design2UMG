@@ -129,7 +129,7 @@ def main():
         images_dir = outdir / "images"
         images_dir.mkdir(exist_ok=True)
 
-        sub = http_json(f"{API}/files/{key}/nodes?ids={urllib.parse.quote(node_id)}", token)
+        sub = http_json(f"{API}/files/{key}/nodes?ids={urllib.parse.quote(node_id)}&geometry=paths", token)
         node_doc = (sub.get("nodes") or {}).get(node_id, {}).get("document")
         if node_doc is None:
             sys.exit(f"node {node_id} not returned")

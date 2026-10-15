@@ -2,7 +2,9 @@
 
 // Effect wrappers: blur / inner shadow / drop shadow / geometry mask conversion, retainer material application, and effect JSON round trips.
 
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "Misc/EngineVersionComparison.h"
+#include "Misc/PackageName.h"
 #include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
@@ -141,6 +143,12 @@ bool FInnerShadowRetainerWrapperTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Inner shadow normalized offset Y preserved"), FMath::IsNearlyEqual(Data.RootWidget.Effect.EffectOffset.GetValue().Y, 0.0375f, 0.0001f));
 	TestTrue(TEXT("Inner shadow color alpha preserved"), FMath::IsNearlyEqual(Data.RootWidget.Effect.EffectColor.GetValue().A, 0.4f, 0.01f));
 	TestTrue(TEXT("Inner shadow wrapper keeps child"), Data.RootWidget.Children.Num() == 1);
+
+	Doc.Children[0]->Visual.Effects[0].Shadow.Blur = 0.0f;
+	const FUMGWidgetData SharpShadow = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("Zero blur remains sharp on both axes"),
+		SharpShadow.RootWidget.Effect.EffectBlurUVStep.IsSet()
+		&& SharpShadow.RootWidget.Effect.EffectBlurUVStep.GetValue().IsNearlyZero());
 	return true;
 }
 
@@ -356,14 +364,20 @@ bool FRetainerEffectMaterialApplicationTest::RunTest(const FString& Parameters)
 	Node.Effect.EffectBlurUVStep = FVector2D(0.01f, 0.02f);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
+	Widget->TakeWidget();
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("RetainerBox dynamic effect material created"), DynamicEffect != nullptr);
+	const UMaterialInterface* EffectInterface = Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Widget);
+	const UMaterial* EffectParent = EffectInterface ? EffectInterface->GetMaterial() : nullptr;
+	TestTrue(TEXT("Foreground blur parent is a saved material asset"),
+		EffectParent && !EffectParent->HasAnyFlags(RF_Transient)
+		&& FPackageName::DoesPackageExist(EffectParent->GetOutermost()->GetName()));
 	if (!DynamicEffect)
 	{
 		return false;
 	}
 
-	TestEqual(TEXT("RetainerBox texture parameter kept"), Widget->GetTextureParameter(), FName(TEXT("Texture")));
+	TestEqual(TEXT("RetainerBox texture parameter kept"), Design2UMGWidgetPropertyAccess::GetRetainerTextureParameter(*Widget), FName(TEXT("Texture")));
 	const FLinearColor BlurUVStep = DynamicEffect->K2_GetVectorParameterValue(TEXT("BlurUVStep"));
 	TestTrue(TEXT("RetainerBox blur UV step X applied"), FMath::IsNearlyEqual(BlurUVStep.R, 0.01f, 0.0001f));
 	TestTrue(TEXT("RetainerBox blur UV step Y applied"), FMath::IsNearlyEqual(BlurUVStep.G, 0.02f, 0.0001f));
@@ -392,9 +406,10 @@ bool FGeometryMaskRetainerMaterialApplicationTest::RunTest(const FString& Parame
 	Node.Effect.GeometryMaskCornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
+	Widget->TakeWidget();
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("Geometry mask dynamic material created"), DynamicEffect != nullptr);
-	const UMaterialInterface* EffectMaterial = Widget->GetEffectMaterialInterface();
+	const UMaterialInterface* EffectMaterial = Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Widget);
 	TestTrue(TEXT("Geometry mask material instance survives generated asset reload"),
 		EffectMaterial
 		&& EffectMaterial->GetMaterial()
@@ -467,6 +482,7 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 	}
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
+	PayloadWidget->TakeWidget();
 	UMaterialInstanceDynamic* PayloadEffect = PayloadWidget->GetEffectMaterial();
 	TestTrue(TEXT("Typed payload dynamic effect material created"), PayloadEffect != nullptr);
 	if (!PayloadEffect)
@@ -480,8 +496,14 @@ bool FInnerShadowRetainerMaterialApplicationTest::RunTest(const FString& Paramet
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
+	Widget->TakeWidget();
 	UMaterialInstanceDynamic* DynamicEffect = Widget->GetEffectMaterial();
 	TestTrue(TEXT("Inner shadow dynamic effect material created"), DynamicEffect != nullptr);
+	const UMaterialInterface* EffectInterface = Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Widget);
+	const UMaterial* EffectParent = EffectInterface ? EffectInterface->GetMaterial() : nullptr;
+	TestTrue(TEXT("Inner shadow parent is a saved material asset"),
+		EffectParent && !EffectParent->HasAnyFlags(RF_Transient)
+		&& FPackageName::DoesPackageExist(EffectParent->GetOutermost()->GetName()));
 	if (!DynamicEffect)
 	{
 		return false;
@@ -533,16 +555,16 @@ bool FRetainerTypedPayloadExplicitFalseAndRenderingPhaseTest::RunTest(const FStr
 	TypedWidget->SetRetainRendering(true);
 	TypedWidget->SetRenderingPhase(0, 1);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
-	TestFalse(TEXT("Typed retainer widget applies explicit false RetainRendering"), TypedWidget->IsRetainRendering());
-	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase"), TypedWidget->GetPhase(), 3);
-	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase count"), TypedWidget->GetPhaseCount(), 5);
+	TestFalse(TEXT("Typed retainer widget applies explicit false RetainRendering"), Design2UMGWidgetPropertyAccess::IsRetainRendering(*TypedWidget));
+	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase"), Design2UMGWidgetPropertyAccess::GetRetainerPhase(*TypedWidget), 3);
+	TestEqual(TEXT("Typed retainer widget applies RenderingPhase phase count"), Design2UMGWidgetPropertyAccess::GetRetainerPhaseCount(*TypedWidget), 5);
 
 	PayloadWidget->SetRetainRendering(true);
 	PayloadWidget->SetRenderingPhase(0, 1);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
-	TestFalse(TEXT("Payload retainer widget applies explicit false RetainRendering"), PayloadWidget->IsRetainRendering());
-	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase"), PayloadWidget->GetPhase(), 3);
-	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase count"), PayloadWidget->GetPhaseCount(), 5);
+	TestFalse(TEXT("Payload retainer widget applies explicit false RetainRendering"), Design2UMGWidgetPropertyAccess::IsRetainRendering(*PayloadWidget));
+	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase"), Design2UMGWidgetPropertyAccess::GetRetainerPhase(*PayloadWidget), 3);
+	TestEqual(TEXT("Payload retainer widget applies RenderingPhase phase count"), Design2UMGWidgetPropertyAccess::GetRetainerPhaseCount(*PayloadWidget), 5);
 	return true;
 }
 

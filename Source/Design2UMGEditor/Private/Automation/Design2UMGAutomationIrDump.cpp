@@ -574,6 +574,7 @@ namespace
 					LayerFields.Add(FJsonField(TEXT("Color"), RenderColor(Layer.Color)));
 					LayerFields.Add(FJsonField(TEXT("Offset"), RenderVector2D(Layer.Offset)));
 					AddFloat(LayerFields, TEXT("Spread"), Layer.Spread);
+					AddBool(LayerFields, TEXT("ShowShadowBehindNode"), Layer.bShowShadowBehindNode);
 					return RenderObject(LayerFields);
 				})));
 		return RenderObject(Fields);
@@ -619,7 +620,10 @@ namespace
 		AddString(Fields, TEXT("ComponentPropertiesJson"), Source.ComponentPropertiesJson);
 		AddString(Fields, TEXT("VariantPropertiesJson"), Source.VariantPropertiesJson);
 		AddString(Fields, TEXT("OverridesJson"), Source.OverridesJson);
-		AddOptionalBool(Fields, TEXT("HasIsExposedInstance"), Source.HasIsExposedInstance);
+		if (Source.HasIsExposedInstance.IsSet())
+		{
+			AddBool(Fields, TEXT("HasIsExposedInstance"), Source.HasIsExposedInstance.GetValue());
+		}
 		AddBool(Fields, TEXT("MappedComponentCandidate"), Source.bMappedComponentCandidate);
 		AddString(Fields, TEXT("MappedComponentKey"), Source.MappedComponentKey);
 		return RenderObject(Fields);
@@ -693,7 +697,10 @@ namespace
 		AddFloat(Fields, TEXT("DurationSeconds"), Transition.DurationSeconds);
 		AddString(Fields, TEXT("EasingType"), Transition.EasingType);
 		AddString(Fields, TEXT("EasingJson"), Transition.EasingJson);
-		AddOptionalBool(Fields, TEXT("HasMatchLayers"), Transition.HasMatchLayers);
+		if (Transition.HasMatchLayers.IsSet())
+		{
+			AddBool(Fields, TEXT("HasMatchLayers"), Transition.HasMatchLayers.GetValue());
+		}
 		AddString(Fields, TEXT("OutgoingAnimationName"), Transition.OutgoingAnimationName);
 		AddString(Fields, TEXT("IncomingAnimationName"), Transition.IncomingAnimationName);
 		return RenderObject(Fields);

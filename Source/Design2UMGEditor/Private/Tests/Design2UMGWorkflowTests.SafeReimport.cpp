@@ -10,7 +10,7 @@
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
 #include "UMGGenerator.h"
-#include "Tests/Design2UMGMappedComponentTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "Blueprint/UserWidget.h"
@@ -25,7 +25,6 @@
 #include "Misc/PackageName.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
 #include "UObject/Package.h"
 #include "WidgetBlueprint.h"
 
@@ -38,8 +37,8 @@ namespace
 	using Design2UMGTestUtils::DeleteOutputDirectory;
 
 	const TCHAR* ReimportTestScope = TEXT("safe-reimport-file-key");
-	const TCHAR* MappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGMappedComponentTestWidget");
-	const TCHAR* OtherMappedTestClassPath = TEXT("/Script/Design2UMGEditor.Design2UMGComponentInputTestWidget");
+	const TCHAR* MappedTestClassPath = ComponentFixtures::MappedClassPath;
+	const TCHAR* OtherMappedTestClassPath = ComponentFixtures::InputClassPath;
 
 	// ---------------------------------------------------------------------------
 	// Figma fixture builders (v1/v2/v3 share the same node assembly)
@@ -143,6 +142,8 @@ namespace
 
 	FDesign2UMGImportSettingsSnapshot MakeReimportSnapshot(const TCHAR* MappedClassPath)
 	{
+		ComponentFixtures::InputClass();
+		ComponentFixtures::MappedClass();
 		FDesign2UMGImportSettingsSnapshot Snapshot;
 		Snapshot.ConversionSettings = FDesign2UMGConversionSettings::Defaults();
 		if (MappedClassPath)
@@ -238,10 +239,10 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGMappedComponentTestWidget* MappedBefore = nullptr;
+	UUserWidget* MappedBefore = nullptr;
 	WBP->WidgetTree->ForEachWidget([&MappedBefore](UWidget* Widget)
 	{
-		if (UDesign2UMGMappedComponentTestWidget* Candidate = Cast<UDesign2UMGMappedComponentTestWidget>(Widget))
+		if (UUserWidget* Candidate = ComponentFixtures::CastMapped(Widget))
 		{
 			MappedBefore = Candidate;
 		}
@@ -288,11 +289,11 @@ bool FSafeReimportLifecycleTest::RunTest(const FString&)
 
 	UWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("Mapped instance still alive"), MappedAfter);
-	if (UDesign2UMGMappedComponentTestWidget* Mapped = Cast<UDesign2UMGMappedComponentTestWidget>(MappedAfter))
+	if (UUserWidget* Mapped = ComponentFixtures::CastMapped(MappedAfter))
 	{
 		TestTrue(TEXT("Mapped instance not replaced"), Mapped == MappedBefore);
 		TestEqual(TEXT("Declared input overwritten with latest design value"),
-			Mapped->Label.ToString(), TEXT("Pay Now"));
+			ComponentFixtures::Read<FTextProperty>(Mapped, TEXT("Label")).ToString(), TEXT("Pay Now"));
 		// Outer layout updated: the button moves down from y=24 to y=88.
 		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Mapped->Slot))
 		{
@@ -443,10 +444,10 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGMappedComponentTestWidget* MappedBefore = nullptr;
+	UUserWidget* MappedBefore = nullptr;
 	WBP->WidgetTree->ForEachWidget([&MappedBefore](UWidget* Widget)
 	{
-		if (UDesign2UMGMappedComponentTestWidget* Candidate = Cast<UDesign2UMGMappedComponentTestWidget>(Widget))
+		if (UUserWidget* Candidate = ComponentFixtures::CastMapped(Widget))
 		{
 			MappedBefore = Candidate;
 		}
@@ -458,7 +459,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 		DeleteOutputDirectory(OutputPath);
 		return false;
 	}
-	TWeakObjectPtr<UDesign2UMGMappedComponentTestWidget> MappedWeak = MappedBefore;
+	TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 
 	// v2: FrameA deleted; FrameC added and adopts the same button (designNodeId unchanged, still mapped).
 	const FString V2 = MakeReimportDoc(FString::Printf(
@@ -473,7 +474,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
 	// Instance alive + identity preserved: the same object, rehung under the new container FrameC.
-	UDesign2UMGMappedComponentTestWidget* MappedAfter = MappedWeak.Get();
+	UUserWidget* MappedAfter = MappedWeak.Get();
 	TestNotNull(TEXT("nested mapped instance survived the container swap"), MappedAfter);
 	UWidget* NewContainer = WBP->WidgetTree->FindWidget(TEXT("FrameC"));
 	TestNotNull(TEXT("new container added"), NewContainer);
@@ -483,7 +484,7 @@ bool FSafeReimportNestedInstanceMigrationTest::RunTest(const FString&)
 		TestEqual(TEXT("instance reparented under the new container"),
 			MappedAfter->GetParent()->GetFName(), NewContainer->GetFName());
 		TestEqual(TEXT("declared input overwritten with the v2 design value"),
-			MappedAfter->Label.ToString(), TEXT("Pay Now"));
+			ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("Label")).ToString(), TEXT("Pay Now"));
 	}
 
 	// The old container is kept conservatively (the subtree holds live instances; no whole delete).
@@ -584,7 +585,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 	bool bHasExpandedLabel = false;
 	WBP->WidgetTree->ForEachWidget([&bHasMappedInstance, &bHasExpandedLabel](UWidget* Widget)
 	{
-		bHasMappedInstance |= Widget->IsA<UDesign2UMGMappedComponentTestWidget>();
+		bHasMappedInstance |= Widget->IsA(ComponentFixtures::MappedClass());
 		bHasExpandedLabel |= (Widget->GetFName() == FName(TEXT("Label")));
 	});
 	TestTrue(TEXT("Old generated subtree replaced with mapped instance"), bHasMappedInstance && !bHasExpandedLabel);
@@ -611,7 +612,7 @@ bool FSafeReimportKindChangedTest::RunTest(const FString&)
 	bool bHasMappedAfterV3 = false;
 	WBP->WidgetTree->ForEachWidget([&bHasMappedAfterV3](UWidget* Widget)
 	{
-		bHasMappedAfterV3 |= Widget->IsA<UDesign2UMGMappedComponentTestWidget>();
+		bHasMappedAfterV3 |= Widget->IsA(ComponentFixtures::MappedClass());
 	});
 	TestFalse(TEXT("Mapped instance replaced back with generated expansion"), bHasMappedAfterV3);
 	TestNotNull(TEXT("Generated expansion restored"), WBP->WidgetTree->FindWidget(TEXT("Label")));
@@ -652,17 +653,17 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	ProjectBinding.FunctionName = TEXT("HandleLinkClick");
 	WBP->Bindings.Add(ProjectBinding);
 	// 2) edit the mapped instance's input value (must not be refreshed under a Mapped Class conflict).
-	TWeakObjectPtr<UDesign2UMGMappedComponentTestWidget> MappedBefore;
+	TWeakObjectPtr<UUserWidget> MappedBefore;
 	WBP->WidgetTree->ForEachWidget([&MappedBefore](UWidget* Widget)
 	{
-		if (UDesign2UMGMappedComponentTestWidget* Candidate = Cast<UDesign2UMGMappedComponentTestWidget>(Widget))
+		if (UUserWidget* Candidate = ComponentFixtures::CastMapped(Widget))
 		{
 			MappedBefore = Candidate;
 		}
 	});
-	if (UDesign2UMGMappedComponentTestWidget* Mapped = MappedBefore.Get())
+	if (UUserWidget* Mapped = MappedBefore.Get())
 	{
-		Mapped->Label = FText::FromString(TEXT("Hacked"));
+		ComponentFixtures::Write<FTextProperty>(Mapped, TEXT("Label"), FText::FromString(TEXT("Hacked")));
 	}
 
 	// v2: both interactions remain (URL changed); the mapping points at another class.
@@ -676,13 +677,13 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	TestTrue(TEXT("v2 reimport itself succeeds (conflicts are per-node)"), Result.bSucceeded);
 
 	// Conflict 1: Mapped Class changed -> instance kept, not replaced, inputs not overwritten.
-	UDesign2UMGMappedComponentTestWidget* MappedAfter = Cast<UDesign2UMGMappedComponentTestWidget>(MappedBefore.Get());
+	UUserWidget* MappedAfter = ComponentFixtures::CastMapped(MappedBefore.Get());
 	TestNotNull(TEXT("Mapped instance kept"), MappedAfter);
 	if (MappedAfter)
 	{
 		TestEqual(TEXT("Mapped instance class unchanged"), MappedAfter->GetClass()->GetPathName(), FString(MappedTestClassPath));
 		TestEqual(TEXT("Inputs not overwritten on mapped-class conflict"),
-			MappedAfter->Label.ToString(), TEXT("Hacked"));
+			ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("Label")).ToString(), TEXT("Hacked"));
 	}
 	TestTrue(TEXT("Mapped class conflict diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_mapped_class_conflict")) == 1);
 

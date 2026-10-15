@@ -7,6 +7,8 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Candidate commit SHA recorded
 - [ ] Scope summary prepared (feature/fix/docs/chore)
 - [ ] Included file list reviewed
+- [ ] Package includes LICENSE, both READMEs, changelog, limitations, the Figma exporter and public examples
+- [ ] Package contains no local Fonts directory; third-party redistribution permission is recorded before adding any bundled font
 - [ ] Excluded local-only files confirmed
 - [ ] Export plan reviewed against `Tools/Release/PublicRepoExportWorkflow.md`
 - [ ] GitHub Release draft targets this exact candidate commit / tag
@@ -31,6 +33,8 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] CLI plaintext token path is marked as compatibility only
 - [ ] Real tokens are absent from public logs, command transcripts, screenshots, and release artifacts
 - [ ] Runtime logs do not print token values
+- [ ] Reachable Git history and release archives checked for credentials and private design material; findings resolved before publishing, without rewriting history implicitly
+- [ ] Example designs, screenshots and embedded images have confirmed publication rights; root MIT licensing is not used to assume rights to third-party assets
 - [ ] Known web font auto import is documented as experimental / optional, not as the primary offline-safe workflow
 
 ## 5. Quality Gates
@@ -38,6 +42,9 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Public smoke validation command is documented separately from the release gate
 - [ ] Public smoke checks are described as contribution confidence checks, not as the formal admissible gate
 - [ ] Self-hosted BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
+- [ ] Installed plugin source matches the candidate, no duplicate plugin is present, and the real project's editor target was rebuilt before automation
+- [ ] Actual packaged plugin installed as the only copy and tested in the existing real project; source-matched installed-copy automation alone does not satisfy this item
+- [ ] Generated assets saved and reloaded, then exercised in a cooked game with the plugin's editor modules absent; record the map, Widget asset, build configuration and results
 - [ ] Focused automation tests passed (`Automation RunTests Design2UMG`)
 - [ ] The complete discovered user/maintainer corpus was validated against its own frozen baseline; private sources, references and raw reports remain private
 - [ ] Any coverage visibility is limited to the actually collected public/self-hosted scope; no percentage badge is published without a real collection job
@@ -52,7 +59,7 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Version follows semantic versioning (`MAJOR.MINOR.PATCH`)
 - [ ] Public docs describe the maintainer validation boundary without exposing maintainer absolute paths
 - [ ] Public docs do not claim a hosted full UE formal gate, public CI matrix, or coverage badge
-- [ ] Any badge explanation only maps the current public badge to `repository-hygiene`; it does not imply hosted BuildPlugin or hosted formal-gate coverage
+- [ ] Badge explanation describes the entire workflow (hosted checks plus eligible self-hosted jobs), not an individual job or a full visual/game-runtime gate
 
 ## 7. GitHub Release Notes and Assets
 
@@ -62,6 +69,9 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Release notes clearly separate public smoke evidence, self-hosted BuildPlugin evidence, and maintainer formal admissible evidence
 - [ ] Release notes do not claim a hosted full UE gate or a public formal admissible gate
 - [ ] Uploaded artifact is the packaged plugin output from the validated candidate commit, not a raw engine workspace copy
+- [ ] Version/platform-specific ZIP, candidate.json and SHA256SUMS.txt attached to the GitHub Release; Actions artifacts expire after 14 days
+- [ ] SHA-256 of the downloaded release ZIP matches the candidate checksum; do not rebuild between validation and publication
+- [ ] Release notes distinguish versions actually tested from unverified engine/platform combinations
 - [ ] Uploaded artifact excludes root review reports, `openspec/`, AGENTS/CLAUDE local rules, raw automation trees, cache folders, generated HostProject fallback artifacts, local paths, and transient debug output
 - [ ] Public export workspace boundary check passed: `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -Mode ExportWorkspace`
 - [ ] Release entry links to public tooling docs and states the actual validation scope without distributing private cases or raw reports

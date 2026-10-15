@@ -15,8 +15,8 @@ English canonical: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 要求：
 
-- Unreal Engine 5.4+。
-- Visual Studio 2022，建议 17.8 或更新。
+- 当前维护者验证环境为 Windows / UE 5.7；其他版本和平台请记录实际编译、运行结果，不按“5.4+”推定支持。
+- 使用所选 UE 版本支持的 Visual Studio 和 Windows SDK 版本。
 
 通过 UnrealBuildTool 构建：
 

@@ -8,7 +8,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
-#include "RHIGlobals.h"
+#include "RHI.h"
 #include "WidgetBlueprint.h"
 
 #if WITH_DEV_AUTOMATION_TESTS

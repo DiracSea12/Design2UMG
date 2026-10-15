@@ -35,7 +35,7 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 | `public smoke/public validate` | 本地构建和聚焦验证，用于贡献者复现 | 贡献者和维护者 |
 | `maintainer formal admissible gate` | 维护者拥有的完整 admissible case set 正式无回退发布门禁 | 维护者 |
 
-当前公开 badge 只代表仓库 hygiene job。插件打包与 UE 自动化属于维护者本地验证，不在公开 CI 中运行，不是公开托管的 UE formal gate。
+徽章显示整个 Plugin CI 工作流的状态，不是单个检查。公共运行机执行仓库和工具测试；维护者推送、同仓库 PR 和手动运行还会请求自托管 UE 构建任务，没有运行机时该任务会排队。外部 fork PR 只执行公共检查。徽章不代表完整视觉回归或打包游戏验证。
 
 如果想看“各层测试到底覆盖什么、普通贡献者和维护者分别能跑什么”，请直接看 [Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md](Docs/ValidationGovernance/TestCoverageBoundary.zh-CN.md)。
 
@@ -59,7 +59,14 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 <Project>/Plugins/Design2UMG/
 ```
 
-然后在 `Edit > Plugins` 启用 `Design2UMG`。
+两种位置二选一，避免 UE 扫描到两份同名插件。替换文件前先关闭编辑器。
+
+- **源码下载**：按所选 UE 版本安装 C++ 编译环境，构建项目编辑器目标，见 [贡献指南](CONTRIBUTING.zh-CN.md)。GitHub 的源码压缩包不是预编译插件。
+- **预编译包**：选择标明对应 UE 版本和平台的 Release ZIP，将其中 `Design2UMG` 目录放入上述一个位置。蓝图项目优先使用匹配的预编译包；使用源码则也需要 C++ 构建环境。
+- 在 `Edit > Plugins` 启用插件并重启，先导入 `Examples/SimpleCard.pen`。
+- 字体二进制不随包分发；在插件设置中映射你有权使用的项目字体，按缺失字体诊断处理差异。
+
+当前维护者验证环境为 Windows / UE 5.7，其他版本和平台仍需单独提供编译和运行证据。候选包不等于正式发布；Actions 下载有保留期限，正式包从 GitHub Release 下载。发布包附带许可证、说明、Figma 导出器和公开示例；运行贡献者验证脚本需另取源码仓库，预编译包不是完整开发工作区。
 
 ## 快速开始
 
@@ -69,7 +76,9 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 Design2UMG.Import <absolute_or_relative_path_to.pen>
 ```
 
-导入 Figma：
+导入 Figma 时优先使用菜单 **Design2UMG > Import from Figma...** 的密码式 Token 输入框。不要把 Token 贴进控制台历史、截图或共享日志。
+
+下面的命令仅供明确需要的本地脚本使用，第二个参数是 Token 值，不是环境变量名；从环境变量展开后仍可能进入命令记录：
 
 ```text
 Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>

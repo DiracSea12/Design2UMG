@@ -9,6 +9,7 @@
 #include "HAL/FileManager.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
@@ -530,7 +531,11 @@ int32 DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 	TArray<TSharedPtr<FDesignNode>> PendingNodes = Nodes;
 	while (PendingNodes.Num() > 0)
 	{
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+		TSharedPtr<FDesignNode> Node = PendingNodes.Pop(false);
+#else
 		TSharedPtr<FDesignNode> Node = PendingNodes.Pop(EAllowShrinking::No);
+#endif
 		if (!Node.IsValid())
 		{
 			continue;

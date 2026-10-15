@@ -25,15 +25,21 @@
 #include "Components/Widget.h"
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
+#include "DynamicRHI.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontCache.h"
 #include "Misc/AutomationTest.h"
 #include "HAL/FileManager.h"
 #include "Misc/App.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ObjectTools.h"
 #include "RenderingThread.h"
+#include "RHI.h"
+#if !UE_VERSION_OLDER_THAN(5, 2, 0)
+#include "RHIStrings.h"
+#endif
 #include "Rendering/SlateRenderer.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/Package.h"
@@ -197,6 +203,11 @@ namespace
 		Root->SetStringField(TEXT("source_path"), Result.SourcePath);
 		Root->SetStringField(TEXT("generated_asset_path"), Result.GeneratedAssetPath);
 		Root->SetStringField(TEXT("render_png_path"), Result.RenderPngPath);
+		if (Result.bSuccess)
+		{
+			Root->SetStringField(TEXT("rhi_backend"), GDynamicRHI->GetName());
+			Root->SetStringField(TEXT("rhi_feature_level"), LexToString(GMaxRHIFeatureLevel));
+		}
 		Root->SetStringField(TEXT("error_message"), Result.ErrorMessage);
 		Root->SetNumberField(TEXT("render_width"), Result.RenderSize.X);
 		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);

@@ -517,23 +517,26 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		}
 	}
 
-	// If family mapping is missing but we found a usable path, persist mapping once.
-	const bool bNeedsPersistMapping = (bUsedDefaultIconPath || bUsedResolverPath)
+	// Persist only a family-specific resolver result. A default icon path is a
+	// rendering fallback and does not establish that the asset owns this glyph table.
+	const bool bNeedsPersistMapping = bUsedResolverPath
 		&& !Node->Text.IconFontFamily.IsEmpty();
 	if (bNeedsPersistMapping)
 	{
 		Result.PendingIconFontMappings.Add(Node->Text.IconFontFamily, AssetPath);
 		UE_LOG(LogDesign2UMG, Display,
-			TEXT("Queued icon font family mapping '%s' -> '%s'%s"),
+			TEXT("Queued icon font family mapping '%s' -> '%s' via FontResolver"),
 			*Node->Text.IconFontFamily,
-			*AssetPath,
-			bUsedResolverPath ? TEXT(" via FontResolver") : TEXT(""));
+			*AssetPath);
 	}
 
 	if (!AssetPath.IsEmpty())
 	{
 		Widget.Text.FontFamily = AssetPath;
-		ResolvedIconGlyph = FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
+		if (!bUsedDefaultIconPath)
+		{
+			ResolvedIconGlyph = FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
+		}
 		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
 		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
 		FString Typeface = FFontResolver::FindBestTypefaceForAssetPath(
@@ -566,9 +569,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 
 	// The icon name itself is the ligature text for fonts such as Material Symbols.
 	Widget.Text.IconName = Node->Text.IconFontName;
-	FString IconText = !ResolvedIconGlyph.IsEmpty()
-		? ResolvedIconGlyph
-		: FFontResolver::FindKnownIconGlyph(Node->Text.IconFontFamily, Node->Text.IconFontName);
+	FString IconText = ResolvedIconGlyph;
 	if (IconText.IsEmpty())
 	{
 		IconText = Node->Text.IconFontName;

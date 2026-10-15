@@ -72,8 +72,8 @@ namespace
 	void AppendNodeJson(TArray<FString>& Nodes, const UWidget* Widget, const FString& Path)
 	{
 		const FGeometry& Geometry = Widget->GetCachedGeometry();
-		const FVector2f LocalSize = Geometry.GetLocalSize();
-		const FVector2f AbsolutePosition = Geometry.GetAbsolutePosition();
+		const FVector2f LocalSize(Geometry.GetLocalSize());
+		const FVector2f AbsolutePosition(Geometry.GetAbsolutePosition());
 
 		// An un-laid-out SWidget (NullWidget / collapsed) reports an all-zero
 		// geometry that must not masquerade as a real (0,0,0,0) layout result.

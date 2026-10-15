@@ -7,7 +7,7 @@
 #include "Design2UMGGenerationManifest.h"
 #include "DesignImportPipeline.h"
 #include "FigmaParser.h"
-#include "Tests/Design2UMGComponentInputTestWidget.h"
+#include "Tests/ComponentPropertyFixtures.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
@@ -47,14 +47,14 @@ bool FSafeReimportMappedClassChangeTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UDesign2UMGComponentInputTestWidget* MappedBefore = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("mapped instance generated"), MappedBefore))
 	{
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = MappedBefore;
-	MappedBefore->TextValue = FText::FromString(TEXT("Hacked"));
+	TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
+	ComponentFixtures::Write<FTextProperty>(MappedBefore, TEXT("TextValue"), FText::FromString(TEXT("Hacked")));
 
 	// v2: the same Key's mapping points at another WBP class.
 	const FString V2 = MakeFixtureDoc(FString::Printf(
@@ -67,12 +67,12 @@ bool FSafeReimportMappedClassChangeTest::RunTest(const FString&)
 	TestEqual(TEXT("mapped class conflict is not plain success"), Result.Commit.Status,
 		EDesign2UMGCommitStatus::SucceededWithDegradation);
 
-	UDesign2UMGComponentInputTestWidget* MappedAfter = MappedWeak.Get();
+	UUserWidget* MappedAfter = MappedWeak.Get();
 	if (TestNotNull(TEXT("mapped instance kept (not destroyed, not replaced)"), MappedAfter))
 	{
 		TestTrue(TEXT("instance object identity preserved"), MappedAfter == MappedBefore);
 		TestEqual(TEXT("instance class not replaced"), MappedAfter->GetClass()->GetPathName(), FString(FixtureMappedClassPath));
-		TestEqual(TEXT("inputs not overwritten on mapped-class conflict"), MappedAfter->TextValue.ToString(), FString(TEXT("Hacked")));
+		TestEqual(TEXT("inputs not overwritten on mapped-class conflict"), ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("TextValue")).ToString(), FString(TEXT("Hacked")));
 	}
 
 	TestEqual(TEXT("mapped class conflict diagnosed once"), FixtureCountKind(Result, TEXT("reimport_mapped_class_conflict")), 1);
@@ -164,7 +164,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	UDesign2UMGComponentInputTestWidget* MappedBefore = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("v1 mapped instance generated"), MappedBefore)
 		|| !TestEqual(TEXT("v1 mapped instance keeps its design name"), MappedBefore->GetFName(), FName(TEXT("PrimaryButton")))
 		|| !TestTrue(TEXT("v1 mapped instance sits under the page inner layer"),
@@ -173,17 +173,17 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	const TWeakObjectPtr<UDesign2UMGComponentInputTestWidget> MappedWeak = MappedBefore;
+	const TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 
 	const FDesignReimportResult Result = FixtureReimport(MakeSwitcherDoc(true), FixtureMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
 	// The only instance + identity preserved + name unchanged (no node-id-named copy appears).
 	int32 MappedInstanceCount = 0;
-	UDesign2UMGComponentInputTestWidget* MappedAfter = nullptr;
+	UUserWidget* MappedAfter = nullptr;
 	WBP->WidgetTree->ForEachWidget([&MappedInstanceCount, &MappedAfter](UWidget* Widget)
 	{
-		if (UDesign2UMGComponentInputTestWidget* Candidate = Cast<UDesign2UMGComponentInputTestWidget>(Widget))
+		if (UUserWidget* Candidate = ComponentFixtures::CastInput(Widget))
 		{
 			++MappedInstanceCount;
 			MappedAfter = Candidate;
@@ -198,7 +198,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 		TestEqual(TEXT("mapped instance name unchanged"), MappedAfter->GetFName(), FName(TEXT("PrimaryButton")));
 		// The Matched path's inputs are overwritten directly.
 		TestEqual(TEXT("declared input overwritten with the v2 design value"),
-			MappedAfter->TextValue.ToString(), FString(TEXT("proto-v2")));
+			ComponentFixtures::Read<FTextProperty>(MappedAfter, TEXT("TextValue")).ToString(), FString(TEXT("proto-v2")));
 	}
 
 	// Diagnostics: the refresh is named; no reimport_added (no duplicate creation); no false move conflict.
@@ -287,7 +287,7 @@ bool FSafeReimportMappingDiagnosticsSurfacedTest::RunTest(const FString&)
 		Request.SettingsSnapshot->GenerationSettings.ComponentMapping.ValidationDiagnostics.Add(
 			MoveTemp(ValidationDiagnostic));
 	}
-	UDesign2UMGComponentInputTestWidget* OriginalInstance = FixtureFindMappedInstance(WBP);
+	UUserWidget* OriginalInstance = FixtureFindMappedInstance(WBP);
 	FString OriginalManifest;
 	FixtureReadFileString(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), OriginalManifest);
 	const FDesignReimportResult Result = DesignImportPipeline::Reimport(Document, Request);
@@ -415,7 +415,7 @@ bool FSafeReimportMappedOwnAttrDivergenceTest::RunTest(const FString&)
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	UDesign2UMGComponentInputTestWidget* MappedInstance = FixtureFindMappedInstance(WBP);
+	UUserWidget* MappedInstance = FixtureFindMappedInstance(WBP);
 	if (!TestNotNull(TEXT("mapped instance generated"), MappedInstance))
 	{
 		FixtureWipeOutput(OutputDir);

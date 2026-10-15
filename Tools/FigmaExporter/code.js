@@ -249,6 +249,23 @@ function buildTextStyle(node, first) {
     return style;
 }
 // ── Node Serialization ──
+function copyGeometryPaths(node, out) {
+    if ('fillGeometry' in node) {
+        out.fillGeometry = node.fillGeometry.map(p => ({ path: p.data, windingRule: p.windingRule }));
+    }
+    if ('strokeGeometry' in node) {
+        out.strokeGeometry = node.strokeGeometry.map(p => ({ path: p.data, windingRule: p.windingRule }));
+    }
+}
+function retainRestGeometryPaths(node, restNodesById) {
+    const out = restNodesById.get(node.id);
+    if (out)
+        copyGeometryPaths(node, out);
+    if ('children' in node) {
+        for (const child of node.children)
+            retainRestGeometryPaths(child, restNodesById);
+    }
+}
 function serializeNode(node) {
     var _a, _b, _c, _d;
     if (!node.visible && node.type !== 'COMPONENT' && node.type !== 'INSTANCE')
@@ -295,19 +312,7 @@ function serializeNode(node) {
     if ('strokes' in node) {
         out.strokes = node.strokes.map(serializePaint);
     }
-    // Geometry paths (fillGeometry / strokeGeometry)
-    if ('fillGeometry' in node) {
-        const fg = node.fillGeometry;
-        if (fg && fg.length > 0) {
-            out.fillGeometry = fg.map((p) => ({ path: p.data, windingRule: p.windingRule }));
-        }
-    }
-    if ('strokeGeometry' in node) {
-        const sg = node.strokeGeometry;
-        if (sg && sg.length > 0) {
-            out.strokeGeometry = sg.map((p) => ({ path: p.data, windingRule: p.windingRule }));
-        }
-    }
+    copyGeometryPaths(node, out);
     // Stroke weight
     if ('strokeWeight' in node) {
         out.strokeWeight = node.strokeWeight !== figma.mixed ? node.strokeWeight : 1;
@@ -531,7 +536,10 @@ async function exportOfficialRestNode(node) {
         return null;
     try {
         const response = await node.exportAsync({ format: 'JSON_REST_V1' });
-        return unwrapRestExportResponse(response, node.id);
+        const document = unwrapRestExportResponse(response, node.id);
+        if (document)
+            retainRestGeometryPaths(node, indexRestNodes(document));
+        return document;
     }
     catch (error) {
         console.warn(`JSON_REST_V1 export failed for ${node.name}:`, error);
@@ -761,6 +769,7 @@ async function collectComponentDependencies(root) {
             if (!document || document.id !== component.id || document.type !== 'COMPONENT') {
                 throw new Error('Component export did not contain its complete definition');
             }
+            retainRestGeometryPaths(component, indexRestNodes(document));
             applyComponentIdentities(document, instances);
             result.definitions.push(Object.assign(Object.assign({}, source), { document }));
         }
@@ -907,6 +916,7 @@ if (typeof module !== 'undefined' && module.exports) {
         serializeEffect,
         buildTextStyle,
         serializeNode,
+        exportOfficialRestNode,
         unwrapRestExportResponse,
         collectReferencedComponents,
         collectComponentDependencies,

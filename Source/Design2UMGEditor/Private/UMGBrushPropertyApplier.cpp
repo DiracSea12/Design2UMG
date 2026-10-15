@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "UMGBrushPropertyApplier.h"
+#include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignImageResourceLimits.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
@@ -15,7 +16,6 @@
 #include "Components/Image.h"
 #include "Components/RetainerBox.h"
 #include "Engine/Texture2D.h"
-#include "Materials/MaterialInstanceDynamic.h"
 
 namespace
 {
@@ -91,7 +91,7 @@ namespace UMGBrushPropertyApplier
 			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
 		}
 
-		FSlateBrush Brush = Image->GetBrush();
+		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
 		bool bBrushModified = false;
 		if (Node.WidgetStyle.WidthOverride.IsSet())
 		{
@@ -257,7 +257,7 @@ namespace UMGBrushPropertyApplier
 
 		if (Node.WidgetStyle.StrokePadding.IsSet())
 		{
-			const FMargin Current = Border->GetPadding();
+			const FMargin Current = Design2UMGWidgetPropertyAccess::GetPadding(*Border);
 			const FMargin StrokePadding = Node.WidgetStyle.StrokePadding.GetValue();
 			Border->SetPadding(FMargin(
 				Current.Left + StrokePadding.Left,
@@ -265,34 +265,6 @@ namespace UMGBrushPropertyApplier
 				Current.Right + StrokePadding.Right,
 				Current.Bottom + StrokePadding.Bottom));
 		}
-	}
-
-	static UMaterialInterface* ResolveRetainerEffectMaterial(
-		const FString& EffectMaterialRef,
-		const FUMGEffectData* Effect = nullptr)
-	{
-		if (EffectMaterialRef.IsEmpty()) return nullptr;
-		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerForegroundBlurEffectRef, ESearchCase::CaseSensitive))
-			return Design2UMGEffectMaterialBuilder::GetOrCreateForegroundBlurRetainerMaterial();
-		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerGeometryMaskEffectRef, ESearchCase::CaseSensitive))
-		{
-			if (Effect
-				&& Effect->GeometryMaskShape.IsSet()
-				&& Effect->GeometryMaskSize.IsSet()
-				&& Effect->GeometryMaskCornerRadii.IsSet())
-			{
-				return Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial(
-					Effect->GeometryMaskShape.GetValue(),
-					Effect->GeometryMaskSize.GetValue(),
-					Effect->GeometryMaskCornerRadii.GetValue());
-			}
-			return Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial();
-		}
-		if (EffectMaterialRef.Equals(UMGPropertyKeys::RetainerInnerShadowEffectRef, ESearchCase::CaseSensitive))
-			return Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial();
-		if (UMaterialInterface* Loaded = LoadObject<UMaterialInterface>(nullptr, *EffectMaterialRef))
-			return Loaded;
-		return FindObject<UMaterialInterface>(nullptr, *EffectMaterialRef);
 	}
 
 	void ApplyRetainerBoxProps(UWidget* Widget, const FUMGWidgetNode& Node)
@@ -307,48 +279,17 @@ namespace UMGBrushPropertyApplier
 		if (Effect.TextureParameter.IsSet())
 			RB->SetTextureParameter(FName(*Effect.TextureParameter.GetValue()));
 		if (Effect.EffectMaterial.IsSet())
-			RB->SetEffectMaterial(ResolveRetainerEffectMaterial(Effect.EffectMaterial.GetValue(), &Effect));
+			RB->SetEffectMaterial(Design2UMGEffectMaterialBuilder::GetOrCreateRetainerEffectMaterial(Effect));
 		if (Effect.RenderingPhase.IsSet())
 		{
 			const FUMGEffectData::FRenderingPhaseData& RenderingPhase = Effect.RenderingPhase.GetValue();
 			RB->SetRenderingPhase(RenderingPhase.Phase, FMath::Max(1, RenderingPhase.PhaseCount));
 		}
-		RB->TakeWidget();
-		if (UMaterialInstanceDynamic* DynamicEffect = RB->GetEffectMaterial())
+		if (!Effect.EffectMaterial.IsSet())
 		{
-			if (Effect.EffectBlurUVStep.IsSet())
-			{
-				const FVector2D& BlurUVStep = Effect.EffectBlurUVStep.GetValue();
-				DynamicEffect->SetVectorParameterValue(TEXT("BlurUVStep"), FLinearColor(BlurUVStep.X, BlurUVStep.Y, 0.0f, 0.0f));
-			}
-			if (Effect.EffectColor.IsSet())
-			{
-				const FLinearColor EffectColor = NormalizeTypedDescriptorColor(Effect.EffectColor.GetValue());
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowColor"), EffectColor);
-				DynamicEffect->SetScalarParameterValue(TEXT("InnerShadowStrength"), EffectColor.A);
-			}
-			if (Effect.EffectOffset.IsSet())
-			{
-				const FVector2D& EffectOffset = Effect.EffectOffset.GetValue();
-				DynamicEffect->SetVectorParameterValue(TEXT("InnerShadowOffset"), FLinearColor(EffectOffset.X, EffectOffset.Y, 0.0f, 0.0f));
-			}
-			if (Effect.GeometryMaskShape.IsSet())
-			{
-				DynamicEffect->SetScalarParameterValue(
-					TEXT("MaskShape"),
-					Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse ? 0.0f : 1.0f);
-			}
-			if (Effect.GeometryMaskSize.IsSet())
-			{
-				const FVector2D& MaskSize = Effect.GeometryMaskSize.GetValue();
-				DynamicEffect->SetVectorParameterValue(TEXT("MaskSize"), FLinearColor(MaskSize.X, MaskSize.Y, 0.0f, 0.0f));
-			}
-			if (Effect.GeometryMaskCornerRadii.IsSet())
-			{
-				const FVector4& Radii = Effect.GeometryMaskCornerRadii.GetValue();
-				DynamicEffect->SetVectorParameterValue(TEXT("MaskCornerRadiiTop"), FLinearColor(Radii.X, Radii.Y, 0.0f, 0.0f));
-				DynamicEffect->SetVectorParameterValue(TEXT("MaskCornerRadiiBottom"), FLinearColor(Radii.Z, Radii.W, 0.0f, 0.0f));
-			}
+			UMaterialInterface* Parent = const_cast<UMaterialInterface*>(Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*RB));
+			if (Parent)
+				RB->SetEffectMaterial(Design2UMGEffectMaterialBuilder::GetOrCreateRetainerEffectMaterial(Effect, Parent));
 		}
 	}
 

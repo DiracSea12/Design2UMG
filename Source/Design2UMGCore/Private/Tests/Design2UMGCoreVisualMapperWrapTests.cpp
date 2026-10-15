@@ -653,4 +653,44 @@ bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& P
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperAuthoredFlowPaddingTest,
+	"Design2UMG.VisualMapper.AuthoredFlowPaddingWithInsideStroke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperAuthoredFlowPaddingTest::RunTest(const FString& Parameters)
+{
+	for (const EDesignLayout Layout : { EDesignLayout::Horizontal, EDesignLayout::Vertical })
+	{
+		for (const float Padding : { 0.0f, 24.0f })
+		{
+			TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 160.0f, 80.0f);
+			Node->LayoutData.Layout = Layout;
+			Node->LayoutData.ExplicitPadding = FDesignPadding{ Padding, Padding, Padding, Padding };
+			Node->Visual.CornerRadius.Uniform = 8.0f;
+			Node->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+			Node->Visual.Stroke.Thickness.Uniform = 1.0f;
+			Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#334455FF"));
+			Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 20.0f, 16.0f));
+			Node->Children.Add(MakeFixedNode(EDesignNodeType::Text, 20.0f, 16.0f));
+
+			FUMGWidgetNode Widget;
+			Widget.Type = Layout == EDesignLayout::Horizontal ? TEXT("HorizontalBox") : TEXT("VerticalBox");
+			Widget.Name = TEXT("PaddedFlow");
+			Widget.Bounds.W = 160.0f;
+			Widget.Bounds.H = 80.0f;
+			Widget.Children.AddDefaulted_GetRef().Type = TEXT("TextBlock");
+			Widget.Children.AddDefaulted_GetRef().Type = TEXT("TextBlock");
+			VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+			const FUMGWidgetNode Border = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+			TestEqual(TEXT("Authored flow retains its border"), Border.Type, FString(TEXT("Border")));
+			const FMargin EffectivePadding = Border.WidgetStyle.Padding.Get(FMargin(0.0f))
+				+ Border.WidgetStyle.StrokePadding.Get(FMargin(0.0f));
+			TestEqual(TEXT("Inside outline does not move authored left padding"), EffectivePadding.Left, Padding);
+			TestEqual(TEXT("Inside outline does not move authored top padding"), EffectivePadding.Top, Padding);
+			TestEqual(TEXT("Inside outline does not move authored right padding"), EffectivePadding.Right, Padding);
+			TestEqual(TEXT("Inside outline does not move authored bottom padding"), EffectivePadding.Bottom, Padding);
+		}
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

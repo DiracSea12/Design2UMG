@@ -63,6 +63,19 @@ def assert_reason(result: dict, reason: str):
     assert reason in result["reasons"], f"missing {reason}: {result}"
 
 
+def make_tree_snapshot(nodes: list[dict], visible_texts: list[str]) -> dict:
+    return make_snapshot(
+        total=len(nodes),
+        leaf=sum(1 for node in nodes if node["kind"] != "container"),
+        container=sum(1 for node in nodes if node["kind"] == "container"),
+        text=sum(1 for node in nodes if node["kind"] == "text"),
+        visual=sum(1 for node in nodes if node["kind"] == "visual"),
+        visible_texts=visible_texts,
+        node_names=[node["name"] for node in nodes],
+        structure_nodes=nodes,
+    )
+
+
 def main():
     source_tree = [
         {"path": "0", "name": "Root", "kind": "container", "type": "FRAME"},
@@ -246,6 +259,142 @@ def main():
     asset_mode = validate(None, None, None, mode="asset")
     assert asset_mode["required"] is False
     assert asset_mode["passed"] is True
+
+    source_role_nodes = [
+        {"path": "0", "name": "Root", "kind": "container", "type": "FRAME"},
+        {"path": "0/0", "name": "dashboard", "kind": "text", "type": "IconFont"},
+        {"path": "0/1", "name": "dashboard", "kind": "text", "type": "Text"},
+    ]
+    asset_role_nodes = [
+        {"path": "0", "name": "Root", "kind": "container", "class": "CanvasPanel"},
+        {"path": "0/0", "name": "dashboard", "kind": "text", "class": "TextBlock", "text": "dashboard"},
+        {"path": "0/1", "name": "dashboard_1", "kind": "text", "class": "TextBlock", "text": "dashboard"},
+    ]
+    role_result = validate(
+        make_tree_snapshot(source_role_nodes, ["dashboard"]),
+        make_tree_snapshot(asset_role_nodes, ["dashboard", "dashboard"]),
+        make_tree_snapshot(asset_role_nodes, ["dashboard", "dashboard"]),
+    )
+    assert role_result["passed"] is True, role_result
+    assert role_result["metrics"]["icon_role_texts_excluded"] == ["dashboard"], role_result
+
+    icon_values = ["settings", "Icon", "\ue123"]
+    icon_source_nodes = [source_role_nodes[0]] + [
+        {"path": f"0/{index}", "name": f"Icon{index}", "kind": "text", "type": "IconFont"}
+        for index in range(3)
+    ]
+    icon_asset_nodes = [asset_role_nodes[0]] + [
+        {"path": f"0/{index}", "name": f"Icon{index}", "kind": "text", "class": "TextBlock", "text": value}
+        for index, value in enumerate(icon_values)
+    ]
+    icon_values_result = validate(
+        make_tree_snapshot(icon_source_nodes, []),
+        make_tree_snapshot(icon_asset_nodes, icon_values),
+        make_tree_snapshot(icon_asset_nodes, icon_values),
+    )
+    assert icon_values_result["passed"] is True, icon_values_result
+    assert sorted(icon_values_result["metrics"]["icon_role_texts_excluded"]) == sorted(icon_values), icon_values_result
+
+    missing_icon_source_nodes = [
+        source_role_nodes[0],
+        {"path": "0/0", "name": "expected_icon", "kind": "text", "type": "IconFont"},
+        {"path": "0/1", "name": "dashboard", "kind": "text", "type": "Text"},
+    ]
+    missing_icon_asset_nodes = [
+        asset_role_nodes[0],
+        {"path": "0/0", "name": "dashboard", "kind": "text", "class": "TextBlock", "text": "dashboard"},
+    ]
+    missing_icon_result = validate(
+        make_tree_snapshot(missing_icon_source_nodes, ["dashboard"]),
+        make_tree_snapshot(missing_icon_asset_nodes, ["dashboard"]),
+        make_tree_snapshot(missing_icon_asset_nodes, ["dashboard"]),
+    )
+    assert missing_icon_result["passed"] is False, missing_icon_result
+    assert_reason(missing_icon_result, "text_node_count_mismatch")
+    assert missing_icon_result["metrics"]["icon_role_texts_excluded"] == [], missing_icon_result
+
+    missing_body_result = validate(
+        make_tree_snapshot(source_role_nodes, ["dashboard"]),
+        make_tree_snapshot(asset_role_nodes[:2], ["dashboard"]),
+        make_tree_snapshot(asset_role_nodes[:2], ["dashboard"]),
+    )
+    assert missing_body_result["passed"] is False, missing_body_result
+    assert_reason(missing_body_result, "visible_text_mismatch")
+    assert missing_body_result["metrics"]["missing_texts"] == ["dashboard"], missing_body_result
+    assert missing_body_result["metrics"]["icon_role_texts_excluded"] == ["dashboard"], missing_body_result
+
+    repeated_source_nodes = [
+        {"path": "0", "name": "Root", "kind": "container", "type": "FRAME", "id": "root"},
+        {"path": "0/0", "name": "Item", "kind": "container", "type": "FRAME", "id": "instance"},
+        {"path": "0/0/0", "name": "IconFont_Widget", "kind": "text", "type": "IconFont", "id": "icon"},
+        {"path": "0/1", "name": "Item", "kind": "container", "type": "FRAME", "id": "instance"},
+        {"path": "0/1/0", "name": "IconFont_Widget", "kind": "text", "type": "IconFont", "id": "icon"},
+    ]
+    repeated_asset_nodes = [
+        {"path": "0", "name": "Root", "kind": "container", "class": "CanvasPanel"},
+        {"path": "0/0", "name": "Item", "kind": "container", "class": "Border"},
+        {"path": "0/0/0", "name": "IconFont_Widget_1", "kind": "text", "class": "TextBlock", "text": "one"},
+        {"path": "0/1", "name": "Item_1", "kind": "container", "class": "Border"},
+        {"path": "0/1/0", "name": "IconFont_Widget_2", "kind": "text", "class": "TextBlock", "text": "two"},
+    ]
+    repeated_result = validate(
+        make_tree_snapshot(repeated_source_nodes, []),
+        make_tree_snapshot(repeated_asset_nodes, ["one", "two"]),
+        make_tree_snapshot(repeated_asset_nodes, ["one", "two"]),
+    )
+    assert repeated_result["passed"] is True, repeated_result
+    assert repeated_result["metrics"]["icon_role_texts_excluded"] == ["one", "two"], repeated_result
+
+    missing_node_text = [dict(node) for node in asset_role_nodes]
+    missing_node_text[1].pop("text")
+    missing_text_result = validate(
+        make_tree_snapshot(source_role_nodes[:2], []),
+        make_tree_snapshot(missing_node_text[:2], ["dashboard"]),
+        make_tree_snapshot(missing_node_text[:2], ["dashboard"]),
+    )
+    assert missing_text_result["passed"] is False, missing_text_result
+    assert_reason(missing_text_result, "visible_text_mismatch")
+    assert missing_text_result["metrics"]["icon_role_texts_excluded"] == [], missing_text_result
+
+    missing_pair_result = validate(
+        make_tree_snapshot(source_role_nodes[:2], []),
+        make_tree_snapshot([], ["dashboard"]),
+        make_tree_snapshot([], ["dashboard"]),
+    )
+    assert missing_pair_result["passed"] is False, missing_pair_result
+    assert_reason(missing_pair_result, "visible_text_mismatch")
+    assert missing_pair_result["metrics"]["icon_role_texts_excluded"] == [], missing_pair_result
+
+    low_confidence_source_nodes = [
+        {"path": "0", "name": "root", "kind": "container", "type": "FRAME"},
+        {"path": "0/0", "name": "expected_icon", "kind": "text", "type": "IconFont"},
+    ]
+    low_confidence_asset_nodes = [
+        {"path": "0", "name": "root", "kind": "container", "class": "CanvasPanel"},
+        {"path": "0/0", "name": "UnexpectedBody", "kind": "text", "class": "TextBlock", "text": "unexpected body text"},
+    ]
+    low_confidence_result = validate(
+        make_tree_snapshot(low_confidence_source_nodes, []),
+        make_tree_snapshot(low_confidence_asset_nodes, ["unexpected body text"]),
+        make_tree_snapshot(low_confidence_asset_nodes, ["unexpected body text"]),
+    )
+    assert low_confidence_result["passed"] is False, low_confidence_result
+    assert_reason(low_confidence_result, "visible_text_mismatch")
+    assert low_confidence_result["metrics"]["icon_role_texts_excluded"] == [], low_confidence_result
+
+    fallback_source_nodes = [low_confidence_source_nodes[0], {**low_confidence_source_nodes[1], "name": "None"}]
+    fallback_asset_nodes = [
+        low_confidence_asset_nodes[0],
+        {"path": "0/0", "name": "TextBlock_0", "kind": "text", "class": "TextBlock", "text": "ordinary text"},
+    ]
+    fallback_result = validate(
+        make_tree_snapshot(fallback_source_nodes, []),
+        make_tree_snapshot(fallback_asset_nodes, ["ordinary text"]),
+        make_tree_snapshot(fallback_asset_nodes, ["ordinary text"]),
+    )
+    assert fallback_result["passed"] is False, fallback_result
+    assert_reason(fallback_result, "visible_text_mismatch")
+    assert fallback_result["metrics"]["icon_role_texts_excluded"] == [], fallback_result
 
     print("structure guard selftest passed")
 
