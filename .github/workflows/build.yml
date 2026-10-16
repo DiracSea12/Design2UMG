@@ -156,6 +156,8 @@ jobs:
           }
 
           $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
+          # BuildPlugin launches UBT separately from the AutomationTool mutex.
+          $env:UBT_EXTRA_ARGS = "$env:UBT_EXTRA_ARGS -WaitMutex".Trim()
           & $uat BuildPlugin `
             -Plugin="$pwd\Design2UMG.uplugin" `
             -Package="$packageRoot" `

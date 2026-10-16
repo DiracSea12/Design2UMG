@@ -113,6 +113,22 @@ class ReleaseContracts(unittest.TestCase):
                 self.assertEqual(marker.exists(), code == 0, result.stdout + result.stderr)
                 self.assertEqual(result.returncode == 0, code == 0)
 
+    def test_ci_package_build_forwards_engine_mutex_wait(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        package = workflow.split("- name: Build plugin package with RunUAT", 1)[1].split("\n      - name:", 1)[0]
+        assignment = next((line.strip() for line in package.splitlines()
+                           if line.strip().startswith("$env:UBT_EXTRA_ARGS =")), None)
+        self.assertIsNotNone(assignment)
+        self.assertLess(package.index(assignment), package.index("& $uat BuildPlugin"))
+        self.assertIn("-WaitForUATMutex", package)
+        driver = self.root / "package-mutex.ps1"
+        driver.write_text(assignment + "\n& pwsh -NoProfile -Command '$env:UBT_EXTRA_ARGS'\n", encoding="utf-8")
+        result = subprocess.run(["pwsh", "-NoProfile", "-File", str(driver)],
+                                env=dict(os.environ, UBT_EXTRA_ARGS="-NoHotReloadFromIDE"),
+                                capture_output=True, encoding="utf-8", errors="replace")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.split(), ["-NoHotReloadFromIDE", "-WaitMutex"])
+
     def test_ci_runs_font_rollback_tests(self):
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         self.assertIn("Design2UMG.Fonts.LocalSource", re.findall(r'Filter\s*=\s*"([^"]+)"', workflow))
