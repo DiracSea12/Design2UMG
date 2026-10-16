@@ -210,6 +210,7 @@ void FDesignDocument::BuildReusableNodeIndex(TMap<FString, TSharedPtr<FDesignNod
 	OutNodesById.Reset();
 	TSet<FString> RepeatedIds;
 	IndexReusableNodes(Children, OutNodesById, RepeatedIds);
+	IndexReusableNodes(SourceDocument().ImportedReusableNodes, OutNodesById, RepeatedIds);
 	if (!RepeatedIds.IsEmpty())
 	{
 		// A selected subtree can also contain definitions supplied separately by the import source.

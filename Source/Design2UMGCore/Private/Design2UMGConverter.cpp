@@ -20,6 +20,7 @@
 #include "LayoutMapper.h"
 #include "UMGWidgetTypes.h"
 #include "SizeEstimator.h"
+#include "DesignSourceExportBounds.h"
 #include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
 #include "RefExpander.h"
@@ -729,6 +730,19 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Convert: single root '%s' type=%s"), *RenderWidgets[0].Name, *RenderWidgets[0].Type);
 		Result.RootWidget = MoveTemp(RenderWidgets[0]);
+		if (State.ConversionError.IsEmpty() && Document.Metadata.FindRef(TEXT("source.provider")) == DesignComponentMapping::ProviderPencil)
+		{
+			for (const auto& Child : VisibleChildren)
+			{
+				if (!Child->bReusable)
+				{
+					Result.ExportBounds = DesignSourceExportBounds::Calculate(Child,
+						[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& Ref)
+						{ return RootPreResolutionResolver.ResolveExpandedChild(Ref, true); });
+					break;
+				}
+			}
+		}
 		FinalizeResult();
 		return Result;
 	}

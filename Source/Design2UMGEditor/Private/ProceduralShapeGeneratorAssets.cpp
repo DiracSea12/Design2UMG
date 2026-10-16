@@ -2,6 +2,7 @@
 
 #include "ProceduralShapeGeneratorAssets.h"
 #include "DesignImageResourceLimits.h"
+#include "Math/VectorRegister.h"
 
 #include "Design2UMGLog.h"
 #include "Engine/Texture2D.h"
@@ -10,6 +11,8 @@
 
 namespace
 {
+	constexpr int64 MaxShadowFilterOperations = 1ll << 30;
+
 	// Editor-main-thread-only state: generated gradient/shape textures are rooted
 	// (AddToRoot) here until their owning assets are saved, then released in one
 	// flush. Weak pointers keep the ledger from resurrecting GC'd textures.
@@ -181,12 +184,23 @@ namespace
 			Value /= Sum;
 		}
 
+		// Keep the scalar accumulation order; four lanes only process independent pixels.
+		const bool bVectorized = static_cast<int64>(Width) * Height * (2ll * KernelRadius + 1) * 2 > MaxShadowFilterOperations;
 		TArray<float> Temp;
 		Temp.SetNumUninitialized(Width * Height);
 		for (int32 Y = 0; Y < Height; ++Y)
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
+				if (bVectorized && X >= KernelRadius && X + 3 < Width - KernelRadius)
+				{
+					VectorRegister4Float Accumulator = VectorZeroFloat();
+					for (int32 K = -KernelRadius; K <= KernelRadius; ++K)
+						Accumulator = VectorAdd(Accumulator, VectorMultiply(VectorLoad(&Alpha[Y * Width + X + K]), VectorLoadFloat1(&Kernel[K + KernelRadius])));
+					VectorStore(Accumulator, &Temp[Y * Width + X]);
+					X += 3;
+					continue;
+				}
 				float Accumulator = 0.0f;
 				for (int32 KernelIndex = -KernelRadius; KernelIndex <= KernelRadius; ++KernelIndex)
 				{
@@ -201,6 +215,18 @@ namespace
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
+				if (bVectorized && X + 3 < Width)
+				{
+					VectorRegister4Float Accumulator = VectorZeroFloat();
+					for (int32 K = -KernelRadius; K <= KernelRadius; ++K)
+					{
+						const int32 SampleY = FMath::Clamp(Y + K, 0, Height - 1);
+						Accumulator = VectorAdd(Accumulator, VectorMultiply(VectorLoad(&Temp[SampleY * Width + X]), VectorLoadFloat1(&Kernel[K + KernelRadius])));
+					}
+					VectorStore(Accumulator, &Alpha[Y * Width + X]);
+					X += 3;
+					continue;
+				}
 				float Accumulator = 0.0f;
 				for (int32 KernelIndex = -KernelRadius; KernelIndex <= KernelRadius; ++KernelIndex)
 				{
@@ -653,7 +679,6 @@ namespace ProceduralShapeGeneratorAssets
 	{
 		OutRadius = 0;
 		constexpr int32 MaxKernelRadius = 4095; // 8191 float coefficients, under 32 KiB.
-		constexpr int64 MaxFilterSamples = 1ll << 30;
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height)
 			|| !FMath::IsFinite(BlurRadius) || BlurRadius < 0.0f) return false;
 		const float Sigma = BlurRadius * 0.5f;
@@ -662,7 +687,17 @@ namespace ProceduralShapeGeneratorAssets
 		if (Sigma > MaxKernelRadius / 3.0f) return false;
 		const int32 Radius = FMath::CeilToInt(Sigma * 3.0f);
 		const int64 SamplesPerPixel = 2ll * (2ll * Radius + 1);
-		if (static_cast<int64>(Width) * Height > MaxFilterSamples / SamplesPerPixel) return false;
+		if (static_cast<int64>(Width) * Height > MaxShadowFilterOperations / SamplesPerPixel)
+		{
+			// Two float masks and the texture coexist during filtering.
+			constexpr uint64 WorkingBytesPerPixel = 2 * sizeof(float) + sizeof(FColor);
+			if (static_cast<uint64>(Width) * Height > DesignImageResources::FImageResourceLimits::DefaultMaxTotalDecodedBytes / WorkingBytesPerPixel) return false;
+			const int64 VectorBlocks = FMath::Max(0, Width - 2 * Radius) / 4;
+			const int64 HorizontalGroups = Width - VectorBlocks * 3;
+			const int64 VerticalGroups = Width / 4 + Width % 4;
+			const int64 FilterOperations = (HorizontalGroups + VerticalGroups) * Height * (2ll * Radius + 1);
+			if (FilterOperations > MaxShadowFilterOperations) return false;
+		}
 		OutRadius = Radius;
 		return true;
 	}

@@ -75,6 +75,7 @@ namespace
 		FString ErrorMessage;
 		FIntPoint RenderSize = FIntPoint::ZeroValue;
 		FIntPoint DesignTimeSize = FIntPoint::ZeroValue;
+		FIntPoint SourceExportSize = FIntPoint::ZeroValue;
 		bool bRenderSizeOverridden = false;
 		TSharedPtr<FJsonObject> SourceStructure;
 		TSharedPtr<FJsonObject> AssetStructure;
@@ -214,6 +215,8 @@ namespace
 		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
 		Root->SetNumberField(TEXT("design_time_width"), Result.DesignTimeSize.X);
 		Root->SetNumberField(TEXT("design_time_height"), Result.DesignTimeSize.Y);
+		Root->SetNumberField(TEXT("source_export_width"), Result.SourceExportSize.X);
+		Root->SetNumberField(TEXT("source_export_height"), Result.SourceExportSize.Y);
 		Root->SetStringField(
 			TEXT("render_size_authority"),
 			Result.bRenderSizeOverridden
@@ -564,6 +567,8 @@ namespace
 				{
 					OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
 					OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(GeneratedBlueprint);
+					const FVector2D ExportSize = FUMGWidgetRenderer::GetBlueprintExportBounds(GeneratedBlueprint).GetSize();
+					OutResult.SourceExportSize = FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y));
 				}
 			}
 		};
@@ -604,11 +609,13 @@ namespace
 
 		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
 		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
+		const FVector2D ExportSize = FUMGWidgetRenderer::GetBlueprintExportBounds(WidgetBlueprint).GetSize();
+		OutResult.SourceExportSize = FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y));
 		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
 		// Keep the design canvas when its aspect matches and calibration adds no union padding.
 		// Apply a larger calibrated canvas to contain outer shadows or overflowing children.
 		TOptional<FVector2D> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
-		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
+		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 0 && OutResult.DesignTimeSize.Y > 0)
 		{
 			const FVector2D OverrideSize = EffectiveRenderSizeOverride.GetValue();
 			const int32 OverrideWidth = FMath::RoundToInt(OverrideSize.X);

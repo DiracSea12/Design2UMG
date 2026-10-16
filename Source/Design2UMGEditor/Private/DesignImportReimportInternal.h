@@ -278,7 +278,7 @@ namespace DesignImportPipeline
 		TSet<FString>& UpdatedD2UOwned,
 		const TArray<FString>& KeepAsIsWidgetNames);
 	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP);
-	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize);
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize, const TOptional<FBox2D>& ExportBounds);
 	/** Apply the existing ownership merge without saving; caller owns transaction completion. */
 	FDesignReimportResult ApplyPreparedReimport(
 		const FReimportSession& Session, UWidgetBlueprint* WBP,

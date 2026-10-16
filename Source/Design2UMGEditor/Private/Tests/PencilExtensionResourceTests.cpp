@@ -432,6 +432,8 @@ bool FPencilExtensionLibrariesDirectoryScanTest::RunTest(const FString&)
 	TestEqual(TEXT("Fixture directory registers one library"),
 		PencilExtensionResources::RegisterLibrariesFromDirectory(FixtureDir), 1);
 
+	FString DocumentJson;
+	TestTrue(TEXT("Scan retains the full component library"), PenBundledLibraries::TryGetDocumentJson(TEXT("sample"), DocumentJson));
 	FString VariablesJson;
 	TestTrue(TEXT("Scan registers under the PenParser query key"),
 		PenBundledLibraries::TryGetVariablesJson(TEXT("sample"), VariablesJson));

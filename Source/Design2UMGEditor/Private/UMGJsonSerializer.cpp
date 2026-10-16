@@ -556,6 +556,12 @@ FString FUMGJsonSerializer::Serialize(const FUMGWidgetData& Data)
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("WidgetName"), Data.WidgetName);
 	Root->SetObjectField(TEXT("RootWidget"), SerializeWidgetNode(Data.RootWidget));
+	if (Data.ExportBounds.IsSet())
+	{
+		const FBox2D& Bounds = Data.ExportBounds.GetValue();
+		Root->SetArrayField(TEXT("ExportBounds"), {MakeShared<FJsonValueNumber>(Bounds.Min.X),
+			MakeShared<FJsonValueNumber>(Bounds.Min.Y), MakeShared<FJsonValueNumber>(Bounds.Max.X), MakeShared<FJsonValueNumber>(Bounds.Max.Y)});
+	}
 
 	FString Output;
 	TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =

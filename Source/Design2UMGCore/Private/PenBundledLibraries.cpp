@@ -8,11 +8,32 @@ namespace PenBundledLibraries
 	{
 		// Library name -> serialized "variables" JSON. Registration and lookup both run on
 		// the game thread (import pipeline entry points), so no locking is needed.
-		TMap<FString, FString>& GetRegistry()
+		TMap<FString, FString>& GetVariableTables()
 		{
 			static TMap<FString, FString> Registry;
 			return Registry;
 		}
+
+		TMap<FString, FString>& GetDocuments()
+		{
+			static TMap<FString, FString> Documents;
+			return Documents;
+		}
+	}
+
+	void RegisterLibraryDocument(const FString& LibraryName, const FString& DocumentJson)
+	{
+		GetDocuments().Add(LibraryName, DocumentJson);
+	}
+
+	bool TryGetDocumentJson(const FString& LibraryName, FString& OutJson)
+	{
+		if (const FString* Json = GetDocuments().Find(LibraryName))
+		{
+			OutJson = *Json;
+			return true;
+		}
+		return false;
 	}
 
 	void RegisterLibraryVariables(const FString& LibraryName, const FString& VariablesJson)
@@ -21,12 +42,12 @@ namespace PenBundledLibraries
 		{
 			return;
 		}
-		GetRegistry().Add(LibraryName, VariablesJson);
+		GetVariableTables().Add(LibraryName, VariablesJson);
 	}
 
 	bool TryGetVariablesJson(const FString& LibraryName, FString& OutJson)
 	{
-		if (const FString* Json = GetRegistry().Find(LibraryName))
+		if (const FString* Json = GetVariableTables().Find(LibraryName))
 		{
 			OutJson = *Json;
 			return true;

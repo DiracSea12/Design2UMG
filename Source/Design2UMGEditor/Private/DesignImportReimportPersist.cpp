@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportReimportInternal.h"
+#include "UMGWidgetRenderer.h"
 #include "Misc/EngineVersionComparison.h"
 #include "GeneratedAssetLifecycle.h"
 
@@ -552,7 +553,7 @@ namespace DesignImportPipeline
 #endif
 	}
 
-	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize)
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize, const TOptional<FBox2D>& ExportBounds)
 	{
 		if (UUserWidget* CDO = Cast<UUserWidget>(
 			WBP->GeneratedClass ? WBP->GeneratedClass->GetDefaultObject() : nullptr))
@@ -565,6 +566,7 @@ namespace DesignImportPipeline
 			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
 		}
 
+		FUMGWidgetRenderer::SetBlueprintExportBounds(WBP, ExportBounds);
 		EnsureReimportWidgetGuids(WBP);
 
 #if !UE_VERSION_OLDER_THAN(5, 6, 0)

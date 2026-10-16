@@ -300,7 +300,7 @@ namespace DesignImportPipeline
 		GenerationOutput = BuildReimportManifestPayload(
 			Manifest, bPrototypeHostContinued, Data, Shared, UpdatedD2UOwned, KeepAsIsWidgetNames);
 		GenerationOutput.bHasDegradation = Result.bHasDegradation;
-		FinalizeReimportedAssetState(WBP, DesignSize);
+		FinalizeReimportedAssetState(WBP, DesignSize, Data.ExportBounds);
 
 		Result.bSucceeded = true;
 		return Result;

@@ -5,6 +5,7 @@
 #include "Misc/AutomationTest.h"
 #include "PenBundledLibraries.h"
 #include "PenParser.h"
+#include "DesignImportTypes.h"
 #include "RefExpander.h"
 #include "DesignSchema.h"
 #include "SizeEstimator.h"
@@ -1298,6 +1299,38 @@ bool FPenParserReusedOutputTest::RunTest(const FString&)
 	AddExpectedError(TEXT("Invalid design file format"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Malformed source fails"), FPenParser::ParseDocument(TEXT("not json"), Document));
 	TestEqual(TEXT("Failure clears the output"), Document.Children.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserImportedComponentsTest,
+	"Design2UMG.Unit.PenParser.ImportedComponents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FPenParserImportedComponentsTest::RunTest(const FString&)
+{
+	PenBundledLibraries::RegisterLibraryVariables(TEXT("component-fixture"),
+		TEXT(R"({"--surface":{"type":"color","value":"#123456"}})"));
+	PenBundledLibraries::RegisterLibraryDocument(TEXT("component-fixture"), TEXT(R"({
+		"version":"2.8","variables":{"--surface":{"type":"color","value":"#123456"}},"children":[{"id":"catalog","type":"frame","children":[
+			{"id":"card","type":"frame","reusable":true,"width":80,"height":24,"fill":"$--surface",
+				"children":[{"id":"label","type":"text","content":"Library label"}]}]}]})"));
+	FDesignDocument Doc;
+	const FString Json = TEXT(R"({"version":"2.8","imports":{"a":"pencil:component-fixture.lib.pen"},
+		"children":[{"id":"instance","type":"ref","ref":"a:card",
+			"descendants":{"a:label":{"content":"Instance label"}}},
+			{"id":"authored-component","type":"frame","reusable":true,"width":80,"height":24}]})");
+	if (!TestTrue(TEXT("Document with a bundled component parses"), FPenParser::ParseDocument(Json, Doc))) return false;
+	const FDesignReferenceExpansionResult Result = RefExpander::ExpandRef(Doc.Children[0], Doc);
+	if (!TestTrue(TEXT("Imported reusable component resolves"), Result.IsSuccess())) return false;
+	TestEqual(TEXT("Library fill uses the import's qualified variable"),
+		Result.ExpandedNode->Visual.TopmostFill().SolidColor, FString(TEXT("#123456")));
+	TestEqual(TEXT("Library dimensions reach the instance"), Result.ExpandedNode->Transform.Height.Value, 24.0f);
+	if (!TestEqual(TEXT("Library children are expanded"), Result.ExpandedNode->Children.Num(), 1)) return false;
+	TestEqual(TEXT("Qualified descendant overrides apply"), Result.ExpandedNode->Children[0]->Text.Content, FString(TEXT("Instance label")));
+	TestFalse(TEXT("The non-reusable catalog is not a component definition"), Doc.FindReusableNode(TEXT("a:catalog")).IsValid());
+	const TArray<FDesignFrameInfo> Frames = ExtractTopFrames(Doc);
+	if (!TestEqual(TEXT("Frame selection contains only source frames"), Frames.Num(), 1)) return false;
+	TestEqual(TEXT("Authored reusable roots remain selectable"), Frames[0].Id, FString(TEXT("authored-component")));
 	return true;
 }
 

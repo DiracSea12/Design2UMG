@@ -112,6 +112,7 @@ FUMGWidgetData& FUMGWidgetData::operator=(FUMGWidgetData&& Other) noexcept = def
 FUMGWidgetData::FUMGWidgetData(const FUMGWidgetData& Other)
 	: WidgetName(Other.WidgetName)
 	, RootWidget(Other.RootWidget)
+	, ExportBounds(Other.ExportBounds)
 	, Warnings(Other.Warnings)
 	, ConversionError(Other.ConversionError)
 	, IconFontMappingChanges(Other.IconFontMappingChanges)
@@ -136,6 +137,7 @@ FUMGWidgetData& FUMGWidgetData::operator=(const FUMGWidgetData& Other)
 
 	WidgetName = Other.WidgetName;
 	RootWidget = Other.RootWidget;
+	ExportBounds = Other.ExportBounds;
 	Warnings = Other.Warnings;
 	ConversionError = Other.ConversionError;
 	IconFontMappingChanges = Other.IconFontMappingChanges;

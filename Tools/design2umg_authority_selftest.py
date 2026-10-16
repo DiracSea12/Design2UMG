@@ -668,7 +668,7 @@ def test_render_size_authority_revalidates_live_pen_evidence_after_ue_generation
         result = verify.apply_render_size_authority(
             reference_context,
             export_path,
-            {"design_time_width": 100, "design_time_height": 50},
+            {"design_time_width": 100, "design_time_height": 50, "source_export_width": 100, "source_export_height": 50},
             candidate_path,
             pixel_tolerance=6,
         )

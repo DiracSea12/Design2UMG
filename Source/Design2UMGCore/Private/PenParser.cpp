@@ -30,6 +30,7 @@ struct FPenParserParseContext
 bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocument& OutDocument);
 void ParseVariables(const TSharedPtr<FJsonObject>& JsonObj, TMap<FString, FDesignVariable>& OutVariables);
 void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, TMap<FString, FDesignVariable>& InOutVariables);
+void AppendImportedLibraryNodes(const TSharedPtr<FJsonObject>& ImportsObj, const FDesignVariableResolver& Resolver, FDesignDocument& Document, FPenParserParseContext& ParseContext);
 bool ValidateNodeDepth(const TSharedPtr<FJsonObject>& JsonObj, FPenParserParseContext& ParseContext, int32 Depth);
 bool ValidateChildrenDepth(const TSharedPtr<FJsonValue>& ChildrenField, FPenParserParseContext& ParseContext, int32 Depth);
 TSharedPtr<FDesignNode> ParseNodeAtDepth(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver, FPenParserParseContext& ParseContext, int32 Depth);
@@ -143,6 +144,10 @@ bool ParseDocumentInternal(const TSharedPtr<FJsonObject>& JsonObj, FDesignDocume
 	}
 
 	AppendParsedChildrenAtDepth(JsonObj->TryGetField(TEXT("children")), Resolver, OutDocument.Children, ParseContext, 0);
+	if (ImportsField.IsValid() && ImportsField->Type == EJson::Object)
+	{
+		AppendImportedLibraryNodes(ImportsField->AsObject(), Resolver, OutDocument, ParseContext);
+	}
 
 	if (ParseContext.bDepthExceeded || ParseContext.Budget.WasExceeded())
 	{
@@ -299,6 +304,78 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 				InOutVariables.Add(QualifiedName, MoveTemp(VarPair.Value));
 			}
 		}
+	}
+}
+
+// Library node identities and variable references use the document's import alias.
+void QualifyLibraryValue(const TSharedPtr<FJsonValue>& Value, const FString& Prefix, const TSharedPtr<FJsonObject>& Variables)
+{
+	if (!Value.IsValid()) return;
+	if (Value->Type == EJson::Array)
+	{
+		for (const auto& Child : Value->AsArray()) QualifyLibraryValue(Child, Prefix, Variables);
+	}
+	else if (Value->Type == EJson::Object)
+	{
+		const TSharedPtr<FJsonObject> Object = Value->AsObject();
+		for (auto& Pair : Object->Values)
+		{
+			if (Pair.Key == TEXT("descendants") && Pair.Value->Type == EJson::Object)
+			{
+				TMap<FString, TSharedPtr<FJsonValue>> Qualified;
+				for (const auto& Override : Pair.Value->AsObject()->Values)
+				{
+					TArray<FString> Segments;
+					Override.Key.ParseIntoArray(Segments, TEXT("/"));
+					for (FString& Segment : Segments) Segment = Prefix + Segment;
+					Qualified.Add(FString::Join(Segments, TEXT("/")), Override.Value);
+				}
+				Pair.Value->AsObject()->Values = MoveTemp(Qualified);
+			}
+			if (Pair.Value->Type == EJson::String)
+			{
+				FString Text = Pair.Value->AsString();
+				if (Pair.Key == TEXT("id") || Pair.Key == TEXT("ref")) Text = Prefix + Text;
+				else if (Text.StartsWith(TEXT("$")) && Variables.IsValid() && Variables->HasField(Text.RightChop(1)))
+					Text = TEXT("$") + Prefix + Text.RightChop(1);
+				Pair.Value = MakeShared<FJsonValueString>(Text);
+			}
+			else QualifyLibraryValue(Pair.Value, Prefix, Variables);
+		}
+	}
+}
+
+void AppendReusableLibraryNodes(const TArray<TSharedPtr<FDesignNode>>& Nodes, TArray<TSharedPtr<FDesignNode>>& OutNodes)
+{
+	for (const auto& Node : Nodes)
+	{
+		if (Node->bReusable) OutNodes.Add(Node);
+		else AppendReusableLibraryNodes(Node->Children, OutNodes);
+	}
+}
+
+void AppendImportedLibraryNodes(const TSharedPtr<FJsonObject>& ImportsObj, const FDesignVariableResolver& Resolver,
+	FDesignDocument& Document, FPenParserParseContext& ParseContext)
+{
+	for (const auto& Import : ImportsObj->Values)
+	{
+		if (Import.Value->Type != EJson::String) continue;
+		FString LibraryName;
+		FString Json;
+		if (!ParsePencilLibraryId(Import.Value->AsString(), LibraryName)
+			|| !PenBundledLibraries::TryGetDocumentJson(LibraryName, Json)) continue;
+		TSharedPtr<FJsonObject> Library;
+		if (!DesignJsonUtils::TryParseObject(Json, Library)) continue;
+		const TSharedPtr<FJsonValue> Children = Library->TryGetField(TEXT("children"));
+		if (!ValidateChildrenDepth(Children, ParseContext, 0)) return;
+		const TSharedPtr<FJsonObject>* Variables = nullptr;
+		Library->TryGetObjectField(TEXT("variables"), Variables);
+		QualifyLibraryValue(Children, Import.Key + TEXT(":"), Variables ? *Variables : nullptr);
+		TArray<TSharedPtr<FDesignNode>> LibraryNodes;
+		AppendParsedChildrenAtDepth(Children, Resolver, LibraryNodes, ParseContext, 0);
+		TArray<TSharedPtr<FDesignNode>> Definitions;
+		AppendReusableLibraryNodes(LibraryNodes, Definitions);
+		if (!Definitions.IsEmpty()) Document.MutableSourceDocument().ImportedReusableNodes.Append(MoveTemp(Definitions));
 	}
 }
 

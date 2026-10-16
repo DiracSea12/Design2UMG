@@ -29,6 +29,7 @@ Design2UMG 是一个**纯编辑器插件**：读取设计工具导出的结构�
 
 - **布局还原**：把设计侧的 flex / auto-layout 投影为 UMG slot、anchor 和 offset，以节点 bounds 为唯一事实来源。
 - **视觉映射**：fill、stroke、圆角、阴影、模糊近似、线性/径向渐变、SVG path 光栅化。
+- **设计尺寸导出**：布局保留设计尺寸，PNG 边界另计阴影及未裁剪内容；支持单轴 1 像素和既有总像素预算内的分块导出，参考图尺寸不参与生成。
 - **变量与组件**：解析设计变量和主题，展开 ref / 组件实例。
 - **预览后生成**：导入前可查看预览图和可编辑的中间 JSON。
 - **安全重导入**：设计更新后原地刷新插件生成的部分，保留你手工添加的控件、绑定和蓝图逻辑（目前支持 Figma 来源）。
@@ -89,7 +90,7 @@ Design2UMG.LocalFigmaImport <Project>/Plugins/Design2UMG/Examples/AiHud/design.j
 | --- | --- |
 | 平台 | Windows (Win64)。其他系统尚未验证 |
 | Unreal Engine | 已完成 5.0–5.8 适配。2026-10-10 在 5.0.3 / 5.1.1 / 5.2.1 / 5.3.2 / 5.4.4 / 5.5.4 / 5.6.1 / 5.7.1 / 5.8.2 上完整回归，每个版本都完成了 81 个设计用例的生成和保存后重读 |
-| 日常开发与 CI | UE 5.7.1 |
+| 本地验证 / GitHub CI 环境 | UE 5.7.1 / UE 5.8.3 |
 | Pencil（可选） | VS Code 扩展 0.6.77，用于实时读取 |
 | Figma（可选） | Personal Access Token，用于在线导入 |
 
@@ -120,6 +121,8 @@ Release ZIP 包含许可证、文档、Figma 导出器和公开示例，但不�
 ```text
 Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--no-png]
 ```
+
+引用 Pencil 内置 `pencil:<library>.lib.pen` 时，会从已安装扩展读取组件定义和变量，保留导入别名，不改写原始设计稿。
 
 ### Figma 在线文件
 

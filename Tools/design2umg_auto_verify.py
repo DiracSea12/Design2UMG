@@ -17,6 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_render_rule as render_rule
 import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib.json_io import content_file_signature as helper_content_file_signature
 from design2umg_verify_lib.diagnostics import EvidenceReadError
@@ -160,22 +161,22 @@ def parse_padding_box(value) -> tuple[float, float, float, float]:
 
 def resolve_node_width(node: dict, available_width: float | None = None) -> float | None:
     width = parse_numeric_dimension(node.get("width"))
-    if width and width > 1:
+    if width and width > 0:
         return width
 
-    if isinstance(node.get("width"), str) and node.get("width") == "fill_container" and available_width and available_width > 1:
+    if isinstance(node.get("width"), str) and node.get("width") == "fill_container" and available_width and available_width > 0:
         return available_width
 
     size = node.get("size")
     if isinstance(size, dict):
         width = parse_numeric_dimension(size.get("x"))
-        if width and width > 1:
+        if width and width > 0:
             return width
 
     bbox = node.get("absoluteBoundingBox")
     if isinstance(bbox, dict):
         width = parse_numeric_dimension(bbox.get("width"))
-        if width and width > 1:
+        if width and width > 0:
             return width
 
     return None
@@ -183,19 +184,19 @@ def resolve_node_width(node: dict, available_width: float | None = None) -> floa
 
 def resolve_node_height(node: dict) -> float | None:
     height = parse_numeric_dimension(node.get("height"))
-    if height and height > 1:
+    if height and height > 0:
         return height
 
     size = node.get("size")
     if isinstance(size, dict):
         height = parse_numeric_dimension(size.get("y"))
-        if height and height > 1:
+        if height and height > 0:
             return height
 
     bbox = node.get("absoluteBoundingBox")
     if isinstance(bbox, dict):
         height = parse_numeric_dimension(bbox.get("height"))
-        if height and height > 1:
+        if height and height > 0:
             return height
 
     return None
@@ -241,7 +242,7 @@ def extract_node_numeric_size(node: dict, available_width: float | None = None) 
 
     width = resolve_node_width(node, available_width)
     height = resolve_node_height(node)
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return width, height
 
     return width, height
@@ -257,7 +258,7 @@ def infer_node_size_from_children(node: dict, available_width: float | None = No
 
     width, _ = extract_node_numeric_size(node, available_width)
     top, right, bottom, left = parse_padding_box(node.get("padding"))
-    inner_width = max(0.0, width - left - right) if width and width > 1 else available_width
+    inner_width = max(0.0, width - left - right) if width and width > 0 else available_width
     gap = parse_numeric_dimension(node.get("gap")) or 0.0
     layout = str(node.get("layout") or "").lower()
 
@@ -293,7 +294,7 @@ def infer_node_size_from_children(node: dict, available_width: float | None = No
         inferred_width = left + max_right + right
         inferred_height = top + max_bottom + bottom
 
-    if inferred_width <= 1 or inferred_height <= 1:
+    if inferred_width <= 0 or inferred_height <= 0:
         return None
     return math.ceil(inferred_width), math.ceil(inferred_height)
 
@@ -306,12 +307,12 @@ def extract_node_size(node: dict, available_width: float | None = None) -> tuple
     inferred = infer_node_size_from_children(node, available_width)
     if inferred:
         inferred_width, inferred_height = inferred
-        if not width or width <= 1:
+        if not width or width <= 0:
             width = inferred_width
-        if not height or height <= 1:
+        if not height or height <= 0:
             height = inferred_height
 
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
 
     return None
@@ -319,7 +320,7 @@ def extract_node_size(node: dict, available_width: float | None = None) -> tuple
 
 def extract_declared_node_size(node: dict) -> tuple[int, int] | None:
     width, height = extract_node_numeric_size(node)
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
     return None
 
@@ -412,11 +413,11 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
     }
 
 
-def resolve_authoritative_design_size(ue_result: dict | None) -> tuple[int, int] | None:
+def resolve_source_export_size(ue_result: dict | None) -> tuple[int, int] | None:
     ue_result = ue_result or {}
-    width = parse_numeric_dimension(ue_result.get("design_time_width"))
-    height = parse_numeric_dimension(ue_result.get("design_time_height"))
-    if width and height and width > 1 and height > 1:
+    width = parse_numeric_dimension(ue_result.get("source_export_width"))
+    height = parse_numeric_dimension(ue_result.get("source_export_height"))
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
 
     return None
@@ -429,7 +430,7 @@ def apply_render_size_authority(
     candidate_path: Path | None,
     pixel_tolerance: int,
 ) -> dict:
-    design_size = resolve_authoritative_design_size(ue_result)
+    design_size = resolve_source_export_size(ue_result)
     reference_authority = reference_context.get("reference_authority") or {}
     if reference_authority.get("canonical_source") in {"pencil_export_nodes", "pencil_get_screenshot"}:
         finalize_pen_reference_authority(reference_authority, design_size, pixel_tolerance)
@@ -438,16 +439,17 @@ def apply_render_size_authority(
     candidate_size_valid = bool(design_size and candidate_size and tuple(candidate_size) == tuple(design_size))
     if not candidate_size_valid:
         reference_validation["valid"] = False
-        reference_validation["reason"] = "candidate_size_mismatch_design_time_size" if design_size else "design_time_size_unavailable"
+        reference_validation["reason"] = "candidate_size_mismatch_source_export_size" if design_size else "source_export_size_unavailable"
     reference_validation["candidate_size"] = list(candidate_size) if candidate_size else None
-    reference_validation["candidate_size_matches_design_time"] = candidate_size_valid
+    reference_validation["candidate_size_matches_source_export"] = candidate_size_valid
     reference_context["reference_validation"] = reference_validation
     reference_context["render_size_authority"] = {
-        "source": "ue_blueprint_design_time_size",
-        "reason": "source design size defines render output; reference PNG size is compare-only",
+        "source": render_rule.SOURCE_EXPORT_AUTHORITY_SOURCE,
+        "reason": "source layout and effects define the export canvas; reference PNG size is compare-only",
         "design_size": list(design_size) if design_size else None,
+        "layout_size": [ue_result.get("design_time_width"), ue_result.get("design_time_height")],
         "candidate_size": list(candidate_size) if candidate_size else None,
-        "candidate_size_matches_design_time": candidate_size_valid,
+        "candidate_size_matches_source_export": candidate_size_valid,
         "requested_render_size": None,
     }
     return reference_validation

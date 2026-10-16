@@ -129,6 +129,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetData
 	UPROPERTY()
 	FUMGWidgetNode RootWidget;
 
+	/** Source paint bounds relative to the root layout origin, including unclipped effects. */
+	TOptional<FBox2D> ExportBounds;
+
 	/** Degradation warnings produced during conversion, e.g. Ellipse -> Border. */
 	TArray<FString> Warnings;
 

@@ -677,6 +677,8 @@ bool FShadowKernelBudgetTest::RunTest(const FString&)
 	TestEqual(TEXT("No kernel for zero blur"), Radius, 0);
 	TestTrue(TEXT("A normal large UI shadow remains admissible without allocating"), TryGetShadowKernelRadius(2048, 2048, 40, Radius));
 	TestEqual(TEXT("Ordinary discrete support is unchanged"), Radius, 60);
+	TestTrue(TEXT("Vectorized large shadow stays within the filter-operation budget"), TryGetShadowKernelRadius(1760, 1300, 160, Radius));
+	TestEqual(TEXT("Large shadow keeps the full discrete support"), Radius, 240);
 	TestTrue(TEXT("Coefficient boundary accepted without allocating"), TryGetShadowKernelRadius(8, 8, 2730, Radius));
 	TestEqual(TEXT("Coefficient radius boundary"), Radius, 4095);
 	TestFalse(TEXT("Coefficient limit is independent of texture dimensions"), TryGetShadowKernelRadius(8, 8, 2731, Radius));

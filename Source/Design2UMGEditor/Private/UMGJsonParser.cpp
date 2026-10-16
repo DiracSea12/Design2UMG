@@ -249,6 +249,30 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 	// never leaks a partial tree into the output (all-or-nothing).
 	FUMGWidgetData Candidate;
 	FDesignParserBudget Budget;
+	const TArray<TSharedPtr<FJsonValue>>* ExportBounds = nullptr;
+	if (Root->TryGetArrayField(TEXT("ExportBounds"), ExportBounds))
+	{
+		if (ExportBounds->Num() != 4)
+		{
+			if (OutError) *OutError = TEXT("ExportBounds requires four coordinates");
+			return false;
+		}
+		double Values[4];
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			if (!(*ExportBounds)[Index]->TryGetNumber(Values[Index]))
+			{
+				if (OutError) *OutError = TEXT("ExportBounds requires numeric coordinates");
+				return false;
+			}
+		}
+		if (Values[2] <= Values[0] || Values[3] <= Values[1])
+		{
+			if (OutError) *OutError = TEXT("ExportBounds requires a positive extent");
+			return false;
+		}
+		Candidate.ExportBounds = FBox2D(FVector2D(Values[0], Values[1]), FVector2D(Values[2], Values[3]));
+	}
 
 	const TSharedPtr<FJsonObject>* RootWidget;
 	if (!DesignJsonUtils::TryGetObject(Root, TEXT("RootWidget"), RootWidget))

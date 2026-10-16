@@ -436,6 +436,7 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 		ClearGeneratedWidgetNavigationState(&Blueprint);
 		DumpTemplateTextBlockFontState(TEXT("template-precompile"), &Blueprint);
 		ApplyDesignPreviewSize(&Blueprint, DesignSize, TEXT("pre-compile"));
+		FUMGWidgetRenderer::SetBlueprintExportBounds(&Blueprint, WidgetData.ExportBounds);
 		Package.MarkPackageDirty();
 
 		if (Settings.ComponentBlueprints)

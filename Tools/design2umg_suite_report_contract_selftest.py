@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import design2umg_auto_verify_suite as suite_verify
+import design2umg_render_rule as render_rule
 
 
 def assert_equal(actual, expected) -> None:
@@ -25,13 +26,34 @@ def assert_raises_runtime_error(func, expected_text: str) -> None:
 
 
 def main() -> None:
-    assert_equal(suite_verify.verify.resolve_authoritative_design_size({
+    assert_equal(suite_verify.verify.resolve_source_export_size({
         "render_size_authority": "reference_canvas_calibration",
         "render_width": 400, "render_height": 539,
         "design_time_width": 360, "design_time_height": 474,
-    }), (360, 474))
+        "source_export_width": 400, "source_export_height": 539,
+    }), (400, 539))
+    assert_equal(suite_verify.verify.resolve_source_export_size({"source_export_width": 320, "source_export_height": 1}), (320, 1))
+    assert_equal(suite_verify.verify.extract_declared_node_size({"width": 320, "height": 1}), (320, 1))
+    assert_equal(suite_verify.verify.extract_node_size({"type": "frame", "children": [
+        {"type": "rectangle", "width": 1, "height": 8, "x": 0, "y": 0}]}), (1, 8))
     with TemporaryDirectory() as directory:
         root = Path(directory)
+        pen = root / "design.pen"
+        pen.write_text(json.dumps({"children": [{"type": "frame", "id": "divider", "width": 1, "height": 8}]}), encoding="utf-8")
+        assert_equal([case["node"] for case in suite_verify.suite_discovery.discover_pen_cases(root, "", "")], ["divider"])
+        assert_equal(render_rule.as_size_pair(1, 8), [1, 8])
+        report_path = root / "compare_report.json"
+        report = {"comparison_mode": "native_size", "candidate_size": [81, 81],
+                  "ue_result": {"design_time_width": 45, "design_time_height": 45,
+                                "source_export_width": 81, "source_export_height": 81,
+                                "render_width": 81, "render_height": 81},
+                  "reference_context": {"render_size_authority": {
+                      "source": render_rule.SOURCE_EXPORT_AUTHORITY_SOURCE, "design_size": [81, 81]}}}
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        assert_equal(render_rule.evaluate_report_render_size_rule(report_path)["compatible"], True)
+        report["candidate_size"] = [80, 81]
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        assert_equal(render_rule.evaluate_report_render_size_rule(report_path)["reason"], "candidate_size_mismatch_source_export_size")
         state = {
             "args": SimpleNamespace(mode="pen", source="design.pen", node="frame",
                                     ir_golden_root=None, geometry_golden_root=None,

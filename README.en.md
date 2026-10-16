@@ -29,6 +29,7 @@ Design2UMG is an **editor-only plugin**. It reads structured data exported by de
 
 - **Layout conversion**: projects design-side flex / auto-layout onto UMG slots, anchors and offsets, with node bounds as the single source of truth.
 - **Visual mapping**: fill, stroke, corner radius, shadows, blur approximation, linear/radial gradients, SVG path rasterization.
+- **Source-sized exports**: keep the design layout size and calculate PNG bounds separately for shadows and unclipped content. One-pixel axes and tiled exports within the existing total-pixel budget are supported; reference dimensions never resize generation.
 - **Variables and components**: resolves design variables and themes, expands refs and component instances.
 - **Preview before generating**: inspect a preview image and editable intermediate JSON before import.
 - **Safe Reimport**: refreshes plugin-owned parts in place after a design update, keeping the widgets, bindings and Blueprint logic you added (Figma sources for now).
@@ -89,7 +90,7 @@ It is a "Chinese cyberpunk HUD" export sample. `Examples/` also contains `Dashbo
 | --- | --- |
 | Platform | Windows (Win64). Other operating systems are not yet verified |
 | Unreal Engine | 5.0–5.8 adapted. On 2026-10-10 a full regression ran on 5.0.3 / 5.1.1 / 5.2.1 / 5.3.2 / 5.4.4 / 5.5.4 / 5.6.1 / 5.7.1 / 5.8.2, each completing generation and saved-asset reload for all 81 design cases |
-| Daily development and CI | UE 5.7.1 |
+| Local validation / GitHub CI environment | UE 5.7.1 / UE 5.8.3 |
 | Pencil (optional) | VS Code extension 0.6.77, for live reads |
 | Figma (optional) | Personal Access Token, for online import |
 
@@ -120,6 +121,8 @@ Drag the file into Content Browser, or:
 ```text
 Design2UMG.Import <file.pen> [--node=<id>] [--out=/Game/Path] [--no-preview] [--no-png]
 ```
+
+Bundled `pencil:<library>.lib.pen` imports read component definitions and variables from the installed extension, preserve import aliases, and leave the source design unchanged.
 
 ### Figma files
 

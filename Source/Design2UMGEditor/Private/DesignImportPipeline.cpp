@@ -410,7 +410,7 @@ namespace DesignImportPipeline
 		}
 
 		// Extension resources feed the parse that follows: the icon index provides icon
-		// codepoints, and the bundled library documents provide the variables tables that
+		// codepoints, and the bundled library documents provide component definitions and variable tables that
 		// document imports ("pencil:shadcn.lib.pen") expand against. Register both before
 		// any parse/conversion consumes them.
 		PencilExtensionResources::EnsureIconGlyphsRegistered();

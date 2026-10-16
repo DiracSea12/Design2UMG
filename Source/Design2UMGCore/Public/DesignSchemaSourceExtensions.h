@@ -5,6 +5,8 @@
 #include "DesignSchemaFoundation.h"
 #include "DesignSchemaSourceExtensions.generated.h"
 
+struct FDesignNode;
+
 USTRUCT()
 struct FDesignComponentInstanceData
 {
@@ -141,6 +143,9 @@ USTRUCT()
 struct FDesignSourceDocumentData
 {
 	GENERATED_BODY()
+
+	/** External component definitions participate in lookup, not source frame selection or layout. */
+	TArray<TSharedPtr<FDesignNode>> ImportedReusableNodes;
 
 	UPROPERTY() FString SourceFilePath;
 	UPROPERTY() FString ComponentsJson;

@@ -13,6 +13,7 @@
 #include "DesignImportPipeline.h"
 #include "DesignPathRasterizer.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "ExternalServices/PencilExtensionResources.h"
 #include "FigmaParser.h"
 #include "FontResolver.h"
 #include "Misc/DateTime.h"
@@ -36,6 +37,8 @@ namespace
 		FDesignDocument Document;
 		if (SourceId == TEXT("Pen"))
 		{
+			PencilExtensionResources::EnsureIconGlyphsRegistered();
+			PencilExtensionResources::EnsureBundledLibrariesRegistered();
 			if (!FPenParser::ParseDocument(JsonContents, Document))
 			{
 				return false;

@@ -7,7 +7,7 @@
 struct FDesignDocument;
 
 /**
- * Load icon codepoints and bundled design-library variables from the Pencil extension.
+ * Load icon codepoints and bundled design-library components and variables from the Pencil extension.
  * Register these resources before converting icons or resolving library imports.
  */
 namespace PencilExtensionResources
@@ -18,7 +18,7 @@ namespace PencilExtensionResources
 	/** Relative paths of the icon index inside an extension root, in priority order. */
 	void GetIconIndexRelativeCandidates(TArray<FString>& OutRelativePaths);
 
-	/** Locate the extension's bundled library documents (*.lib.pen), extract their variables, and register them into PenBundledLibraries. Idempotent per process. */
+	/** Locate the extension's bundled library documents (*.lib.pen), register their component definitions and variables into PenBundledLibraries. Idempotent per process. */
 	void EnsureBundledLibrariesRegistered();
 
 	/** Relative directories of the bundled library documents inside an extension root, in priority order. */

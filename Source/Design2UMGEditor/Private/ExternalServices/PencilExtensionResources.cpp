@@ -431,6 +431,7 @@ namespace PencilExtensionResources
 			}
 
 			PenBundledLibraries::RegisterLibraryVariables(LibraryName, VariablesJson);
+			PenBundledLibraries::RegisterLibraryDocument(LibraryName, LibPenJson);
 			++RegisteredCount;
 		}
 		return RegisteredCount;

@@ -7,6 +7,7 @@
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
 #include "Engine/Font.h"
@@ -850,6 +851,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 
 	// Collect from node tree
 	CollectFontFamilies(Document.Children, UsedFamilies);
+	CollectFontFamilies(Document.SourceDocument().ImportedReusableNodes, UsedFamilies);
 
 	if (UsedFamilies.Num() == 0)
 		return {};
