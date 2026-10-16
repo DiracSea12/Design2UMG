@@ -308,7 +308,7 @@ class ReleaseContracts(unittest.TestCase):
     def test_ci_rebuild_removes_stale_plugin_outputs(self):
         source, installed, project = self.candidate_fixture()
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        start = workflow.index("./Tools/CI/Assert-CandidatePlugin.ps1")
+        start = workflow.index("$projectRoot = Split-Path -Parent $env:DESIGN2UMG_RUNTIME_PROJECT")
         start = workflow.rfind("\n", 0, start) + 1
         end = workflow.index("      - name: Build plugin package", start)
         block = "\n".join(line[10:] for line in workflow[start:end].splitlines())
@@ -316,6 +316,12 @@ class ReleaseContracts(unittest.TestCase):
         script = source / "Tools/CI/Assert-CandidatePlugin.ps1"
         script.parent.mkdir(parents=True)
         shutil.copy2(ROOT / "Tools/CI/Assert-CandidatePlugin.ps1", script)
+        target_template = ROOT / "Tools/CI/Design2UMGVerificationEditor.Target.cs"
+        shutil.copy2(target_template, script.parent / target_template.name)
+        target = project.parent / "Source/FixtureEditor.Target.cs"
+        target.parent.mkdir(parents=True)
+        target.write_text(target_template.read_text(encoding="utf-8").replace(
+            "Design2UMGVerificationEditorTarget", "FixtureEditorTarget"), encoding="utf-8")
         engine = installed.parents[3]
         build = engine / "Engine/Build/BatchFiles/Build.ps1"
         build.parent.mkdir(parents=True)
@@ -324,6 +330,9 @@ class ReleaseContracts(unittest.TestCase):
         metadata = project.parent / "Intermediate/Build/Win64/x64/FixtureEditor/Development/TargetMetadata.json"
         metadata.parent.mkdir(parents=True)
         metadata.write_bytes(b"fixture plan")
+        stale_metadata = metadata.parents[2] / "FixtureEditorNU/Development/TargetMetadata.json"
+        stale_metadata.parent.mkdir(parents=True)
+        stale_metadata.write_bytes(b"stale global non-unity plan")
         writer = engine / "Engine/Source/Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs"
         writer.parent.mkdir(parents=True)
         writer.write_text("const int CurrentVersionNumber = 2;\n", encoding="utf-8")
@@ -358,7 +367,13 @@ class ReleaseContracts(unittest.TestCase):
                     f"  [IO.File]::WriteAllText('{(binaries / 'UnrealEditor.modules').as_posix()}', '{{\"BuildId\":\"{build_id}\"}}')\n"
                     "  $global:LASTEXITCODE=0; return\n}\n"
                 )
-                build.write_text(write_metadata + output + "$global:LASTEXITCODE=0\n", encoding="utf-8")
+                strict_flags = (
+                    "foreach ($flag in @('-UsePrecompiled', '-NoEngineChanges', '-NoPCH', '-NoSharedPCH')) {\n"
+                    "  if ($args -notcontains $flag) { throw \"Missing strict plugin build flag: $flag\" }\n"
+                    "}\n"
+                    "if ($args -contains '-DisableUnity') { throw 'Global non-unity must not rebuild the engine' }\n"
+                )
+                build.write_text(write_metadata + strict_flags + output + "$global:LASTEXITCODE=0\n", encoding="utf-8")
                 result = subprocess.run(["pwsh", "-NoProfile", "-File", str(driver)],
                                         cwd=source, capture_output=True, encoding="utf-8", errors="replace")
                 self.assertFalse((binaries / "stale.dll").exists(), result.stdout + result.stderr)
@@ -366,6 +381,21 @@ class ReleaseContracts(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, complete and matching_manifest, result.stdout + result.stderr)
                 if complete and not matching_manifest:
                     self.assertIn("does not match the engine build", result.stdout + result.stderr)
+
+        target.write_text(target.read_text(encoding="utf-8").replace(
+            "DisableUnityBuildForModules", "EnableOptimizeCodeForModules"), encoding="utf-8")
+        result = subprocess.run(["pwsh", "-NoProfile", "-File", str(driver)],
+                                cwd=source, capture_output=True, encoding="utf-8", errors="replace")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Configure the isolated CI target", result.stdout + result.stderr)
+
+    def test_ci_packaging_keeps_default_engine_build_settings(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        start = workflow.index("      - name: Build plugin package")
+        end = workflow.index("      - name: Strip maintainer-only files", start)
+        block = workflow[start:end]
+        self.assertNotIn("-StrictIncludes", block)
+        self.assertIn("-WaitForUATMutex", block)
 
     def test_additional_plugin_directory(self):
         source, installed, project = self.candidate_fixture()

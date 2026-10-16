@@ -90,7 +90,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify candidate identity and rebuild installed editor plugin
+      - name: Verify candidate identity and strictly rebuild installed editor plugin
         run: |
           foreach ($name in @('UE_ROOT', 'DESIGN2UMG_RUNTIME_PROJECT', 'DESIGN2UMG_EDITOR_TARGET')) {
             if (-not [Environment]::GetEnvironmentVariable($name)) {
@@ -99,6 +99,13 @@ jobs:
           }
           ./Tools/Release/Assert-CleanWorkspace.ps1
           if ($LASTEXITCODE -ne 0) { throw "Candidate workspace is not clean: $LASTEXITCODE" }
+          $projectRoot = Split-Path -Parent $env:DESIGN2UMG_RUNTIME_PROJECT
+          $targetFile = Join-Path $projectRoot "Source/$($env:DESIGN2UMG_EDITOR_TARGET).Target.cs"
+          $targetTemplate = [IO.File]::ReadAllText((Join-Path $pwd 'Tools/CI/Design2UMGVerificationEditor.Target.cs'))
+          $expectedTarget = $targetTemplate.Replace('Design2UMGVerificationEditorTarget', "$($env:DESIGN2UMG_EDITOR_TARGET)Target")
+          if ([IO.File]::ReadAllText($targetFile).Replace("`r`n", "`n").Trim() -ne $expectedTarget.Replace("`r`n", "`n").Trim()) {
+            throw 'Configure the isolated CI target from Tools/CI/Design2UMGVerificationEditor.Target.cs before building.'
+          }
           $installed = ./Tools/CI/Assert-CandidatePlugin.ps1 -SourceRoot $pwd `
             -EngineRoot $env:UE_ROOT -ProjectFile $env:DESIGN2UMG_RUNTIME_PROJECT -PassThru
           foreach ($directory in @('Binaries', 'Intermediate')) {
@@ -113,7 +120,8 @@ jobs:
           & $build $env:DESIGN2UMG_EDITOR_TARGET Win64 Development `
             "-Project=$env:DESIGN2UMG_RUNTIME_PROJECT" `
             -Module=Design2UMGCore -Module=Design2UMGEditor `
-            -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
+            -UsePrecompiled -NoEngineChanges -NoPCH -NoSharedPCH `
+            -WaitMutex -NoHotReloadFromIDE
           if ($LASTEXITCODE -ne 0) { throw "Editor build failed: $LASTEXITCODE" }
           foreach ($module in @('Core', 'Editor')) {
             $binary = Join-Path $installed "Binaries/Win64/UnrealEditor-Design2UMG$module.dll"
@@ -153,7 +161,7 @@ jobs:
             -Package="$packageRoot" `
             -Rocket `
             -TargetPlatforms=Win64 `
-            -StrictIncludes
+            -WaitForUATMutex
           if ($LASTEXITCODE -ne 0) { throw "BuildPlugin failed: $LASTEXITCODE" }
 
       - name: Strip maintainer-only files from packaged plugin
@@ -196,8 +204,8 @@ jobs:
       - name: Run focused Design2UMG automation tests
         # The self-hosted runner validates the installed plugin copy at
         # the unique installed location, after source comparison and editor rebuild.
-        # The packaged plugin is exercised by the UAT BuildPlugin -StrictIncludes
-        # compile above plus the package boundary assertion.
+        # Strict header checks run in the plugin-only rebuild with precompiled
+        # engine modules. UAT then packages with the engine's normal build settings.
         run: |
           ./Tools/CI/Assert-CandidatePlugin.ps1 -SourceRoot $pwd `
             -EngineRoot $env:UE_ROOT -ProjectFile $env:DESIGN2UMG_RUNTIME_PROJECT
