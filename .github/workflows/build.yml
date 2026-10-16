@@ -228,6 +228,7 @@ jobs:
           $testRuns = @(
             [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Unit.PenParser.Imported"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Http.Figma"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.MCP.Stdio"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.LocalSource"; Mode = "RenderOffscreen" },

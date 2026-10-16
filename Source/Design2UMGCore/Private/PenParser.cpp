@@ -324,15 +324,15 @@ void QualifyLibraryValue(TSharedPtr<FJsonValue>& Value, const FString& Prefix, c
 		{
 			if (Pair.Key == TEXT("descendants") && Pair.Value->Type == EJson::Object)
 			{
-				TMap<FString, TSharedPtr<FJsonValue>> Qualified;
+				FJsonObject Qualified;
 				for (const auto& Override : Pair.Value->AsObject()->Values)
 				{
 					TArray<FString> Segments;
-					Override.Key.ParseIntoArray(Segments, TEXT("/"));
+					FString(*Override.Key).ParseIntoArray(Segments, TEXT("/"));
 					for (FString& Segment : Segments) Segment = Prefix + Segment;
-					Qualified.Add(FString::Join(Segments, TEXT("/")), Override.Value);
+					Qualified.SetField(FString::Join(Segments, TEXT("/")), Override.Value);
 				}
-				Pair.Value->AsObject()->Values = MoveTemp(Qualified);
+				Pair.Value->AsObject()->Values = MoveTemp(Qualified.Values);
 			}
 			if (Pair.Value->Type == EJson::String && (Pair.Key == TEXT("id") || Pair.Key == TEXT("ref")))
 			{
@@ -374,7 +374,7 @@ void AppendImportedLibraryNodes(const TSharedPtr<FJsonObject>& ImportsObj, const
 		if (!ValidateChildrenDepth(Children, ParseContext, 0)) return;
 		const TSharedPtr<FJsonObject>* Variables = nullptr;
 		Library->TryGetObjectField(TEXT("variables"), Variables);
-		QualifyLibraryValue(Children, Import.Key + TEXT(":"), Variables ? *Variables : nullptr);
+		QualifyLibraryValue(Children, FString(*Import.Key) + TEXT(":"), Variables ? *Variables : nullptr);
 		TArray<TSharedPtr<FDesignNode>> LibraryNodes;
 		AppendParsedChildrenAtDepth(Children, Resolver, LibraryNodes, ParseContext, 0);
 		TArray<TSharedPtr<FDesignNode>> Definitions;
