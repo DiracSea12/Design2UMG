@@ -122,7 +122,7 @@ jobs:
             }
           }
           $projectRoot = Split-Path -Parent $env:DESIGN2UMG_RUNTIME_PROJECT
-          $metadata = @(Get-ChildItem (Join-Path $projectRoot 'Intermediate/Build/Win64') -Filter TargetMetadata.dat -Recurse |
+          $metadata = @(Get-ChildItem (Join-Path $projectRoot 'Intermediate/Build/Win64') -Filter TargetMetadata.json -Recurse |
             Where-Object { $_.Directory.Name -eq 'Development' -and $_.Directory.Parent.Name -eq $env:DESIGN2UMG_EDITOR_TARGET })
           if ($metadata.Count -ne 1) { throw 'Expected one target metadata plan from the editor build.' }
           $writerSource = Join-Path $env:UE_ROOT 'Engine/Source/Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs'

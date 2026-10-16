@@ -321,7 +321,7 @@ class ReleaseContracts(unittest.TestCase):
         build.parent.mkdir(parents=True)
         binaries = installed / "Binaries/Win64"
         intermediate = installed / "Intermediate"
-        metadata = project.parent / "Intermediate/Build/Win64/x64/FixtureEditor/Development/TargetMetadata.dat"
+        metadata = project.parent / "Intermediate/Build/Win64/x64/FixtureEditor/Development/TargetMetadata.json"
         metadata.parent.mkdir(parents=True)
         metadata.write_bytes(b"fixture plan")
         writer = engine / "Engine/Source/Programs/UnrealBuildTool/Modes/WriteMetadataMode.cs"
