@@ -73,12 +73,6 @@ namespace DesignImportPipeline
 			return OutFallback.GenerationSettings;
 		}
 
-		FDesignPreviewMaterializationSettingsSnapshot BuildPreviewMaterializationSettingsSnapshot(
-			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
-		{
-			return FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSettings);
-		}
-
 		void MaybeWriteImportDiagnosticReport(
 			const FArtifactGenerationRequest& Request,
 			const FUMGWidgetData& Data,
@@ -233,7 +227,7 @@ namespace DesignImportPipeline
 				return Result;
 			}
 			FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot;
-			const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = &ResolveEffectiveGenerationSettings(
+			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings = ResolveEffectiveGenerationSettings(
 				Request, AnalysisResult.SettingsSnapshot, FallbackSettingsSnapshot);
 
 			if (Request.bUsePreview
@@ -241,16 +235,14 @@ namespace DesignImportPipeline
 					Data,
 					Request.OutputPath,
 					Request.PreviewWindowTitle,
-					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, *GenerationSettings),
+					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, GenerationSettings),
 					FOnPreviewCancelled::CreateLambda(
 						[]()
 						{
 							UE_LOG(LogDesign2UMG, Log, TEXT("DesignImportPipeline: Preview cancelled"));
 						}),
-					GenerationSettings
-						? TOptional<FDesignPreviewMaterializationSettingsSnapshot>(
-							BuildPreviewMaterializationSettingsSnapshot(*GenerationSettings))
-						: TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
+					TOptional<FDesignPreviewMaterializationSettingsSnapshot>(
+						FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSettings)),
 					AnalysisResult.ImageResult))
 			{
 				Result.bSucceeded = true;
@@ -274,7 +266,7 @@ namespace DesignImportPipeline
 
 			FArtifactGenerationRuntimeResult RuntimeResult;
 			FArtifactGenerationResult GenerationResult =
-				GenerateArtifactsInternal(Data, GenerationRequest, GenerationSettings, &RuntimeResult);
+				GenerateArtifactsInternal(Data, GenerationRequest, &GenerationSettings, &RuntimeResult);
 			Result.Commit = GenerationResult.Commit;
 			Result.bSucceeded = GenerationResult.bSucceeded;
 			Result.ErrorMessage = GenerationResult.ErrorMessage;

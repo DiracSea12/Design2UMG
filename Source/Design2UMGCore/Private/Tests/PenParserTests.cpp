@@ -1309,13 +1309,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserImportedComponentsTest,
 bool FPenParserImportedComponentsTest::RunTest(const FString&)
 {
 	PenBundledLibraries::RegisterLibraryVariables(TEXT("component-fixture"),
-		TEXT(R"({"--surface":{"type":"color","value":"#123456"}})"));
+		TEXT(R"({"--surface":{"type":"color","value":"#123456"},"space":{"type":"number","value":6},"radius":{"type":"number","value":4}})"));
 	PenBundledLibraries::RegisterLibraryDocument(TEXT("component-fixture"), TEXT(R"({
-		"version":"2.8","variables":{"--surface":{"type":"color","value":"#123456"}},"children":[{"id":"catalog","type":"frame","children":[
-			{"id":"card","type":"frame","reusable":true,"width":80,"height":24,"fill":"$--surface",
+		"version":"2.8","variables":{"--surface":{"type":"color","value":"#123456"},"space":{"type":"number","value":6},"radius":{"type":"number","value":4}},"children":[{"id":"catalog","type":"frame","children":[
+			{"id":"card","type":"frame","reusable":true,"width":80,"height":24,"fill":"$--surface","padding":["$space","$space"],"cornerRadius":["$radius","$radius"],
 				"children":[{"id":"label","type":"text","content":"Library label"}]}]}]})"));
 	FDesignDocument Doc;
-	const FString Json = TEXT(R"({"version":"2.8","imports":{"a":"pencil:component-fixture.lib.pen"},
+	const FString Json = TEXT(R"({"version":"2.8","imports":{"a":"pencil:component-fixture.lib.pen"},"variables":{"space":{"type":"number","value":99},"radius":{"type":"number","value":99}},
 		"children":[{"id":"instance","type":"ref","ref":"a:card",
 			"descendants":{"a:label":{"content":"Instance label"}}},
 			{"id":"authored-component","type":"frame","reusable":true,"width":80,"height":24}]})");
@@ -1325,6 +1325,9 @@ bool FPenParserImportedComponentsTest::RunTest(const FString&)
 	TestEqual(TEXT("Library fill uses the import's qualified variable"),
 		Result.ExpandedNode->Visual.TopmostFill().SolidColor, FString(TEXT("#123456")));
 	TestEqual(TEXT("Library dimensions reach the instance"), Result.ExpandedNode->Transform.Height.Value, 24.0f);
+	if (!TestTrue(TEXT("Library array padding parses"), Result.ExpandedNode->LayoutData.ExplicitPadding.IsSet())) return false;
+	TestEqual(TEXT("Array padding uses the library variable, not the document variable"), Result.ExpandedNode->LayoutData.ExplicitPadding->Left, 6.0f);
+	TestEqual(TEXT("Array corner radius uses the library variable"), Result.ExpandedNode->Visual.CornerRadius.TopLeft, 4.0f);
 	if (!TestEqual(TEXT("Library children are expanded"), Result.ExpandedNode->Children.Num(), 1)) return false;
 	TestEqual(TEXT("Qualified descendant overrides apply"), Result.ExpandedNode->Children[0]->Text.Content, FString(TEXT("Instance label")));
 	TestFalse(TEXT("The non-reusable catalog is not a component definition"), Doc.FindReusableNode(TEXT("a:catalog")).IsValid());

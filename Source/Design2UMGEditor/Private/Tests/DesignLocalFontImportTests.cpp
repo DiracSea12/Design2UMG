@@ -4,6 +4,7 @@
 #include "DesignLocalFontImport.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGSettings.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -620,6 +621,23 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	const int32 Count = Font->GetCompositeFont()->DefaultTypeface.Fonts.Num();
 	DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Repeat analysis does not append faces"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), Count);
+	FDesignDocument ExternalDocument;
+	auto Definition = MakeShared<FDesignNode>();
+	Definition->Id = TEXT("external-font");
+	Definition->Type = EDesignNodeType::Text;
+	Definition->bReusable = true;
+	Definition->Text = Node->Text;
+	ExternalDocument.MutableSourceDocument().ImportedReusableNodes.Add(Definition);
+	auto Instance = MakeShared<FDesignNode>();
+	Instance->Type = EDesignNodeType::Ref;
+	Instance->Ref = Definition->Id;
+	ExternalDocument.Children.Add(Instance);
+	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
+	FFontResolver::ClearCache();
+	FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
+	TArray<FString> ExternalWarnings;
+	TestTrue(TEXT("External component fonts prepare through the existing importer"), DesignLocalFontImport::Prepare(ExternalDocument, ExternalWarnings, Error));
+	TestEqual(TEXT("External-only font requests import the missing weight"), FFontResolver::FindExactTypefaceForAssetPath(Font->GetPathName(), TEXT("700")), FString(TEXT("Bold")));
 	auto* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	const auto SavedMappings = Settings->ExplicitFontMappings;
 	ON_SCOPE_EXIT { Settings->ExplicitFontMappings = SavedMappings; FFontResolver::ClearCache(); };

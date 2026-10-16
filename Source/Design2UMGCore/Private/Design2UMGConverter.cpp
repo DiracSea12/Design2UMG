@@ -698,6 +698,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
+	TSharedPtr<FDesignNode> ConvertedRootSource;
 	for (const auto& Child : VisibleChildren)
 	{
 		if (!State.ConversionError.IsEmpty())
@@ -712,7 +713,10 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 
 		FUMGWidgetNode ChildWidget = NodeOrchestrator.Convert(Child);
 		if (!ChildWidget.Type.IsEmpty())
+		{
 			RenderWidgets.Add(MoveTemp(ChildWidget));
+			ConvertedRootSource = Child;
+		}
 	}
 
 	if (State.PrototypeNavigation.IsValid())
@@ -732,16 +736,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Result.RootWidget = MoveTemp(RenderWidgets[0]);
 		if (State.ConversionError.IsEmpty() && Document.Metadata.FindRef(TEXT("source.provider")) == DesignComponentMapping::ProviderPencil)
 		{
-			for (const auto& Child : VisibleChildren)
-			{
-				if (!Child->bReusable)
-				{
-					Result.ExportBounds = DesignSourceExportBounds::Calculate(Child,
-						[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& Ref)
-						{ return RootPreResolutionResolver.ResolveExpandedChild(Ref, true); });
-					break;
-				}
-			}
+			Result.ExportBounds = DesignSourceExportBounds::Calculate(ConvertedRootSource,
+				[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& Ref)
+				{ return RootPreResolutionResolver.ResolveExpandedChild(Ref, true); });
 		}
 		FinalizeResult();
 		return Result;

@@ -308,12 +308,14 @@ void ExpandImportedLibraryVariables(const TSharedPtr<FJsonObject>& ImportsObj, T
 }
 
 // Library node identities and variable references use the document's import alias.
-void QualifyLibraryValue(const TSharedPtr<FJsonValue>& Value, const FString& Prefix, const TSharedPtr<FJsonObject>& Variables)
+void QualifyLibraryValue(TSharedPtr<FJsonValue>& Value, const FString& Prefix, const TSharedPtr<FJsonObject>& Variables)
 {
 	if (!Value.IsValid()) return;
 	if (Value->Type == EJson::Array)
 	{
-		for (const auto& Child : Value->AsArray()) QualifyLibraryValue(Child, Prefix, Variables);
+		TArray<TSharedPtr<FJsonValue>> Children = Value->AsArray();
+		for (auto& Child : Children) QualifyLibraryValue(Child, Prefix, Variables);
+		Value = MakeShared<FJsonValueArray>(MoveTemp(Children));
 	}
 	else if (Value->Type == EJson::Object)
 	{
@@ -332,16 +334,18 @@ void QualifyLibraryValue(const TSharedPtr<FJsonValue>& Value, const FString& Pre
 				}
 				Pair.Value->AsObject()->Values = MoveTemp(Qualified);
 			}
-			if (Pair.Value->Type == EJson::String)
+			if (Pair.Value->Type == EJson::String && (Pair.Key == TEXT("id") || Pair.Key == TEXT("ref")))
 			{
-				FString Text = Pair.Value->AsString();
-				if (Pair.Key == TEXT("id") || Pair.Key == TEXT("ref")) Text = Prefix + Text;
-				else if (Text.StartsWith(TEXT("$")) && Variables.IsValid() && Variables->HasField(Text.RightChop(1)))
-					Text = TEXT("$") + Prefix + Text.RightChop(1);
-				Pair.Value = MakeShared<FJsonValueString>(Text);
+				Pair.Value = MakeShared<FJsonValueString>(Prefix + Pair.Value->AsString());
 			}
 			else QualifyLibraryValue(Pair.Value, Prefix, Variables);
 		}
+	}
+	else if (Value->Type == EJson::String)
+	{
+		const FString Text = Value->AsString();
+		if (Text.StartsWith(TEXT("$")) && Variables.IsValid() && Variables->HasField(Text.RightChop(1)))
+			Value = MakeShared<FJsonValueString>(TEXT("$") + Prefix + Text.RightChop(1));
 	}
 }
 
@@ -366,7 +370,7 @@ void AppendImportedLibraryNodes(const TSharedPtr<FJsonObject>& ImportsObj, const
 			|| !PenBundledLibraries::TryGetDocumentJson(LibraryName, Json)) continue;
 		TSharedPtr<FJsonObject> Library;
 		if (!DesignJsonUtils::TryParseObject(Json, Library)) continue;
-		const TSharedPtr<FJsonValue> Children = Library->TryGetField(TEXT("children"));
+		TSharedPtr<FJsonValue> Children = Library->TryGetField(TEXT("children"));
 		if (!ValidateChildrenDepth(Children, ParseContext, 0)) return;
 		const TSharedPtr<FJsonObject>* Variables = nullptr;
 		Library->TryGetObjectField(TEXT("variables"), Variables);

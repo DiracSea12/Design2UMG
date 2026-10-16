@@ -3,6 +3,7 @@
 #include "Design2UMGFontAccess.h"
 #include "Design2UMGSettings.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGLog.h"
 #include "FontResolver.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -363,6 +364,7 @@ bool Prepare(const FDesignDocument& Document, TArray<FString>& OutWarnings, FStr
 	check(IsInGameThread());
 	TArray<FRequest> Requests;
 	Collect(Document.Children, Requests);
+	Collect(Document.SourceDocument().ImportedReusableNodes, Requests);
 	for (int32 Index = 0; Index < Requests.Num();)
 	{
 		const FRequest& Request = Requests[Index];

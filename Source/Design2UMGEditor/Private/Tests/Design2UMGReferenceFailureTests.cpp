@@ -8,6 +8,8 @@
 
 #include "DesignImportPipeline.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
+#include "PenParser.h"
+#include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 
 namespace
@@ -35,21 +37,6 @@ namespace
 		return Document;
 	}
 
-	FDesignDocument BuildDegradedReferenceDocument()
-	{
-		FDesignDocument Document;
-		Document.Children.Add(MakeReferenceNode(TEXT("pipeline-missing-entry"), TEXT("pipeline-missing-target"), false));
-
-		TSharedPtr<FDesignNode> ValidSibling = MakeShared<FDesignNode>();
-		ValidSibling->Id = TEXT("pipeline-valid-sibling");
-		ValidSibling->Name = TEXT("PipelineValidSibling");
-		ValidSibling->Type = EDesignNodeType::Rectangle;
-		ValidSibling->Transform.SetWidthValue(FDesignSize::Fixed(80.0f));
-		ValidSibling->Transform.SetHeightValue(FDesignSize::Fixed(40.0f));
-		ValidSibling->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#336699")));
-		Document.Children.Add(MoveTemp(ValidSibling));
-		return Document;
-	}
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -69,7 +56,10 @@ bool FReferenceExpansionDegradationReachesCommitTest::RunTest(const FString&)
 		Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(RepeatedOutputFolder);
 	};
 
-	FDesignDocument Document = BuildDegradedReferenceDocument();
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Pencil source with a missing reference parses"), FPenParser::ParseDocument(TEXT(R"({"version":"2.8","children":[
+		{"id":"pipeline-missing-entry","type":"ref","ref":"pipeline-missing-target"},
+		{"id":"pipeline-valid-sibling","name":"PipelineValidSibling","type":"rectangle","width":80,"height":40,"fill":"#336699"}]})"), Document))) return false;
 	const FImportAnalysisResult Analysis =
 		DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("Missing reference remains non-fatal when a valid sibling converts"), Analysis.ErrorMessage.IsEmpty());
@@ -78,6 +68,10 @@ bool FReferenceExpansionDegradationReachesCommitTest::RunTest(const FString&)
 		Analysis.Data.GetConversionStatus(),
 		EDesign2UMGConversionStatus::SucceededWithDegradation);
 	const FString AnalysisDataBeforeExecution = FUMGJsonSerializer::Serialize(Analysis.Data);
+	if (!TestTrue(TEXT("Successful root retains source export bounds"), Analysis.Data.ExportBounds.IsSet())) return false;
+	TestEqual(TEXT("Failed references do not supply the export extent"), Analysis.Data.ExportBounds->GetSize(), FVector2D(80, 40));
+	FUMGWidgetData PreviewData;
+	TestTrue(TEXT("Degraded source remains valid preview JSON"), FUMGJsonParser::ParseJson(AnalysisDataBeforeExecution, PreviewData));
 
 	FDesignImportRequest Request;
 	Request.OutputPath = OutputFolder;
