@@ -70,7 +70,7 @@ namespace
 
 		FDesignImportRequest ImportRequest =
 			Design2UMGEditorImportRequestSetup::MakePenImportRequest(OutputPath, true, true, SettingsSnapshot);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
+		DesignImportPipeline::Execute(Data, ImportRequest);
 	}
 }
 

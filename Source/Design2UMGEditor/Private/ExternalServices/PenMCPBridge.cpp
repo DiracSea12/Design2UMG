@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
+#include "DesignImportPlanning.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
@@ -240,7 +241,7 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = false;
 	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+	const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 	if (!Analysis.ErrorMessage.IsEmpty()) return false;
 	OutData = Analysis.Data;
 	return true;

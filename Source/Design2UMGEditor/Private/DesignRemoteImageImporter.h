@@ -13,6 +13,8 @@ class UTexture2D;
  * - /Game/... and /Engine/... paths are preserved
  * - http/https URLs are downloaded and imported as Texture2D assets
  */
+struct FDesignImageImportSettingsSnapshot;
+
 class DESIGN2UMGEDITOR_API FDesignRemoteImageImporter
 {
 public:
@@ -25,9 +27,10 @@ public:
 
 	/**
 	 * Resolve remote images and rewrite TexturePath to UE asset object paths.
-	 * Returns false when one or more URL images failed to import.
+	 * Returns structured outcomes for all attempted image resolutions.
 	 */
-	static FDesignImageImportResult ResolveRemoteImages(FUMGWidgetData& InOutData);
+	static FDesignImageImportResult ResolveRemoteImages(FUMGWidgetData& InOutData,
+		const FDesignImageImportSettingsSnapshot& Settings);
 
 	/**
 	 * Collect all remote TexturePath URLs in the widget tree and download them

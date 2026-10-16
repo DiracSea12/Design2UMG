@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGTestUtils.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
@@ -207,7 +208,7 @@ bool FPreviewContextPrototypeGenerationTest::RunTest(const FString& Parameters)
             Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
             Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
             Input.bResolveImages = false;
-            auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+            auto Refreshed = DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
             if (!TestTrue(*Refreshed.ParseError, Refreshed.bSucceeded)) continue;
             Data = MoveTemp(Refreshed.Data);
         }

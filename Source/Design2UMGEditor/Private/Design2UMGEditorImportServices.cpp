@@ -61,6 +61,7 @@ namespace Design2UMGEditorImportServices
 
 					if (!bLaunchOk)
 					{
+						UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: %s"), *GetOrCreateConnector().GetClient().GetLastError());
 						Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("LaunchFailed", "Design2UMG: Failed to launch MCP Server"), SNotificationItem::CS_Fail);
 						ReleaseFetchSlot();
 						return;
@@ -98,7 +99,7 @@ namespace Design2UMGEditorImportServices
 				FString NodesJson, VarsJson;
 				if (!bReadOk || !Design2UMGEditorMcpImportPayload::ParseReadDocumentResponse(Response, NodesJson, VarsJson))
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to read the active document via execute"));
+					UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to read the active document via execute: %s"), *Response);
 					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("PencilReadFailed", "Design2UMG: Failed to read the active Pencil document"), SNotificationItem::CS_Fail);
 					ReleaseFetchSlot();
 					return;
@@ -306,7 +307,7 @@ namespace Design2UMGEditorImportServices
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
 			AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-			FImportAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(*Document, AnalysisInput);
+			FImportAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(*Document, AnalysisInput);
 			if (!AnalysisResult.ErrorMessage.IsEmpty())
 			{
 				Design2UMGEditorImportSupport::ShowNotification(FText::FromString(AnalysisResult.ErrorMessage), SNotificationItem::CS_Fail);
@@ -357,7 +358,7 @@ namespace Design2UMGEditorImportServices
 					: SNotificationItem::CS_None);
 
 			const FDesignImportExecutionResult ExecutionResult =
-				Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(*Document, ImportRequest, &AnalysisResult);
+				DesignImportPipeline::Execute(*Document, ImportRequest, &AnalysisResult);
 
 			Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(
 				ExecutionResult.bSucceeded,

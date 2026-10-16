@@ -10,18 +10,19 @@ namespace DesignImportPlanning
 {
 	FDesignImageImportResult ResolveImages(
 		FUMGWidgetData& Data,
-		const FDesignImageImportResult* PreviousResult = nullptr);
+		const FDesignImageImportResult* PreviousResult = nullptr,
+		const FDesignImageImportSettingsSnapshot* Settings = nullptr);
 
 	/** Preserve unresolved Figma refs until the source is resolved and converted again. */
 	void RecordImageResolutionFailure(FDesignImageImportResult& InOutResult);
 
-	FImportInPlaceAnalysisResult AnalyzeWidgetData(
+	FImportInPlaceAnalysisResult AnalyzeImport(
 		FUMGWidgetData& Data,
-		const FImportAnalysisInput& Input);
+		const FImportAnalysisInput& Input = FImportAnalysisInput());
 
-	FImportAnalysisResult AnalyzeDocument(
+	FImportAnalysisResult AnalyzeImport(
 		FDesignDocument& Document,
-		const FImportAnalysisInput& Input);
+		const FImportAnalysisInput& Input = FImportAnalysisInput());
 
 	FPreviewRefreshResult AnalyzePreviewRefreshInput(
 		const FPreviewRefreshInput& Input,

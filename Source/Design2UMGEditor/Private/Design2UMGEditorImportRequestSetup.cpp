@@ -49,29 +49,6 @@ namespace Design2UMGEditorImportRequestSetup
 			SettingsSnapshot);
 	}
 
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FUMGWidgetData& Data,
-		const FDesignImportRequest& Request)
-	{
-		return DesignImportPipeline::Execute(Data, Request);
-	}
-
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FDesignDocument& Document,
-		const FDesignImportRequest& Request,
-		const FImportAnalysisResult* PrecomputedAnalysis)
-	{
-		return DesignImportPipeline::Execute(Document, Request, PrecomputedAnalysis);
-	}
-
-	FDesignImportExecutionResult ExecutePenFileImportWithSettings(
-		const FString& FilePath,
-		const FString& TargetNodeId,
-		const FDesignImportRequest& Request)
-	{
-		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
-	}
-
 	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs()
 	{
 		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();

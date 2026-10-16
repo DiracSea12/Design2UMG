@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 #include "DesignSchema.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
@@ -128,7 +129,7 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("Mapped image ref should become local png path"),
 		ImageRefs.Contains(FPaths::ConvertRelativePathToFull(FPaths::Combine(TempImagesDir, TEXT("img_card_bg_002.png")))));
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+	FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestFalse(TEXT("Filtered figma target yields widget name"), Data.WidgetName.IsEmpty());
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
@@ -477,7 +478,7 @@ bool FPenLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+	FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestTrue(TEXT("Pen blend conversion keeps all top-level nodes"), Document.Children.Num() == 3 && Data.RootWidget.Children.Num() == 3);
 	if (Document.Children.Num() < 3)
 	{

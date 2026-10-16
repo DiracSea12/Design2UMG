@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGLocalFigmaImport.h"
+#include "DesignImportPlanning.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
@@ -574,7 +575,7 @@ namespace Design2UMGLocalFigmaImport
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(ParsedDoc, AnalysisInput);
+		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(ParsedDoc, AnalysisInput);
 		if (!Analysis.ErrorMessage.IsEmpty())
 		{
 			OutError = Analysis.ErrorMessage;

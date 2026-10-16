@@ -41,6 +41,7 @@ bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDo
 	TSharedPtr<FJsonObject> JsonObj;
 	if (!DesignJsonUtils::TryParseObject(JsonString, JsonObj))
 	{
+		OutDocument = FDesignDocument();
 		UE_LOG(LogDesign2UMG, Error, TEXT("Invalid design file format. Please verify this is a valid .pen file."));
 		return false;
 	}
@@ -49,7 +50,11 @@ bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDo
 
 bool FPenParser::ParseDocumentObject(const TSharedPtr<FJsonObject>& JsonObject, FDesignDocument& OutDocument)
 {
-	return ParseDocumentInternal(JsonObject, OutDocument);
+	OutDocument = FDesignDocument();
+	FDesignDocument ParsedDocument;
+	if (!ParseDocumentInternal(JsonObject, ParsedDocument)) return false;
+	OutDocument = MoveTemp(ParsedDocument);
+	return true;
 }
 
 namespace

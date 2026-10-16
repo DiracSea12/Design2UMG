@@ -314,6 +314,55 @@ assert.ok(componentSets.set1.variantGroupProperties, 'variant group properties m
 
   const reference = await api.exportReferencePng(riskyLeafNode, 2);
   assert.deepEqual(Array.from(reference), [9, 8, 7, 6], 'reference PNG should come from the selected root');
+
+  const messages = [];
+  const reactions = [{ trigger: { type: 'ON_CLICK' }, actions: [{ type: 'NODE', navigation: 'NAVIGATE', destinationId: 'target' }] }];
+  const selected = {
+    id: 'export-root', name: 'Export root', type: 'FRAME', visible: true, children: [], fills: [], reactions,
+    async exportAsync(options) {
+      if (options.format === 'JSON_REST_V1') throw new Error('official export fixture failure');
+      return new Uint8Array([1, 2, 3]);
+    },
+  };
+  figma.root = { name: 'Test document' };
+  figma.currentPage = { id: 'page', name: 'Page', selection: [selected] };
+  figma.ui.postMessage = message => messages.push(message);
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await figma.ui.onmessage({ type: 'export', scale: 1 });
+    const exported = messages.find(message => message.type === 'done');
+    assert.ok(exported, 'manual export remains available');
+    const exportedRoot = JSON.parse(exported.json).document.children[0].children[0];
+    assert.deepEqual(exportedRoot.interactions, reactions, 'manual export keeps prototype interactions');
+    assert.ok(exported.warning, 'manual export is explicitly reported to the user');
+
+    messages.length = 0;
+    selected.reactions = [{ trigger: reactions[0].trigger, action: reactions[0].actions[0] }];
+    await figma.ui.onmessage({ type: 'export', scale: 1 });
+    assert.ok(messages.some(message => message.type === 'error'), 'unsupported interaction representation reports failure');
+    assert.equal(messages.some(message => message.type === 'done'), false, 'unsupported interactions are never silently discarded');
+    selected.reactions = reactions;
+
+    selected.exportAsync = async options => options.format === 'JSON_REST_V1'
+      ? { document: { id: selected.id, name: selected.name, type: selected.type, fills: [{ type: 'IMAGE', imageRef: 'missing' }] } }
+      : new Uint8Array([1, 2, 3]);
+    selected.fills = [{ type: 'IMAGE', imageHash: 'missing' }];
+    const originalGetImage = figma.getImageByHash;
+    try {
+      for (const image of [null, { async getBytesAsync() { throw new Error('image fixture failure'); } }]) {
+        messages.length = 0;
+        figma.getImageByHash = () => image;
+        await figma.ui.onmessage({ type: 'export', scale: 1 });
+        assert.ok(messages.some(message => message.type === 'error'), 'missing required image reports failure');
+        assert.equal(messages.some(message => message.type === 'done'), false, 'incomplete images never report completion');
+      }
+    } finally {
+      figma.getImageByHash = originalGetImage;
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
   console.log('FigmaExporter smoke test passed');
 })().catch((err) => {
   console.error(err);

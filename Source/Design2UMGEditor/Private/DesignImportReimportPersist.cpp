@@ -133,7 +133,7 @@ namespace DesignImportPipeline
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		const FImportAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 		Result.ImageResult = AnalysisResult.ImageResult;
 		Result.bHasDegradation = Result.ImageResult.HasFailures();
 		if (!AnalysisResult.ErrorMessage.IsEmpty())

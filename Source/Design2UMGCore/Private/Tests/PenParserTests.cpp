@@ -1283,4 +1283,22 @@ bool FPenPlaceholderRequiresSemanticFieldTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserReusedOutputTest,
+	"Design2UMG.Unit.PenParser.ReusedOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserReusedOutputTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("First document parses"), FPenParser::ParseDocument(TEXT(R"({"version":"1","fonts":[{"name":"First"}],"variables":{"old":{"type":"string","value":"old"}},"children":[{"id":"first","type":"frame"}]})"), Document))) return false;
+	if (!TestTrue(TEXT("Second document parses"), FPenParser::ParseDocument(TEXT(R"({"version":"1","children":[{"id":"second","type":"frame"}]})"), Document))) return false;
+	TestEqual(TEXT("Second parse replaces children"), Document.Children.Num(), 1);
+	TestEqual(TEXT("Second parse removes old fonts"), Document.Fonts.Num(), 0);
+	TestEqual(TEXT("Second parse removes old variables"), Document.Variables.Num(), 0);
+	if (Document.Children.Num() == 1) TestEqual(TEXT("Only the second node remains"), Document.Children[0]->Id, FString(TEXT("second")));
+	AddExpectedError(TEXT("Invalid design file format"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Malformed source fails"), FPenParser::ParseDocument(TEXT("not json"), Document));
+	TestEqual(TEXT("Failure clears the output"), Document.Children.Num(), 0);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

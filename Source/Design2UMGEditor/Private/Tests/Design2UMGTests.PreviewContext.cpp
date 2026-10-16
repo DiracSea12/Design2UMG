@@ -72,7 +72,7 @@ namespace
 		Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
 		Input.EditedJson = FUMGJsonSerializer::Serialize(Edited);
 		Input.bResolveImages = false;
-		return DesignImportPipeline::AnalyzePreviewRefresh(Input);
+		return DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
 	}
 }
 

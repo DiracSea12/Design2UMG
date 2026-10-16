@@ -67,6 +67,7 @@ namespace
 		Reusable->bReusable = true;
 		Reusable->Children.Add(
 			MakeNode(TEXT("rc-child-1"), TEXT("RCChild"), EDesignNodeType::Rectangle, 0.0f, 0.0f, 100.0f, 100.0f));
+		Reusable->Children[0]->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#ff0000")));
 
 		const TSharedPtr<FDesignNode> Host =
 			MakeNode(TEXT("host-1"), TEXT("HostFrame"), EDesignNodeType::Frame, 200.0f, 0.0f, 400.0f, 300.0f);
@@ -317,8 +318,9 @@ bool FConverterRefExpandTest::RunTest(const FString&)
 		BuildRefExpandDocument(),
 		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
-	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
+	if (!TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1)) return false;
 	TestEqual(TEXT("Expanded child is wrapped in a SizeBox"), Data.RootWidget.Children[0].Type, FString(TEXT("SizeBox")));
+	if (!TestEqual(TEXT("Expanded wrapper child count"), Data.RootWidget.Children[0].Children.Num(), 1)) return false;
 	TestEqual(TEXT("Expanded child keeps instance name"), Data.RootWidget.Children[0].Children[0].Name, FString(TEXT("RefNode")));
 	TestEqual(TEXT("Expanded child keeps instance id"), Data.RootWidget.Children[0].Children[0].Id, FString(TEXT("ref-1")));
 	TestFalse(TEXT("Expanded child has concrete runtime type"), Data.RootWidget.Children[0].Children[0].Type.IsEmpty());

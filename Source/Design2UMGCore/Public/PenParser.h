@@ -15,6 +15,7 @@ class DESIGN2UMGCORE_API FPenParser
 public:
 	/**
 	 * Parse a raw Pencil JSON string into a design document.
+	 * Replaces OutDocument on success and leaves it empty on failure.
 	 * @param JsonString Source Pencil JSON text.
 	 * @param OutDocument Parsed document on success.
 	 * @return `true` when parsing succeeds.
@@ -23,6 +24,7 @@ public:
 
 	/**
 	 * Parse an already-loaded Pencil JSON object into a design document.
+	 * Replaces OutDocument on success and leaves it empty on failure.
 	 * @param JsonObject Source Pencil document object.
 	 * @param OutDocument Parsed document on success.
 	 * @return `true` when parsing succeeds.

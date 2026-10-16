@@ -15,6 +15,27 @@ class UWidgetBlueprint;
 class FFeedbackContext;
 class SWidget;
 
+struct FArtifactGenerationResult
+{
+	FDesign2UMGCommitResult Commit;
+	/** Warnings from the actual generation attempt, including resource resolution. */
+	TArray<FString> Warnings;
+	/** True only when commit and requested artifacts succeeded; render can fail after commit. */
+	bool bSucceeded = false;
+	/** Structured failure reason (e.g. render target size above the RHI texture limit); empty on success or unspecified failures. */
+	FString ErrorMessage;
+	FString GeneratedAssetPath;
+	FString RenderPngPath;
+	FIntPoint RenderedSize = FIntPoint::ZeroValue;
+	/** Actual compiled widget instance used for the render, retained for immediate caller-side inspection. */
+	TStrongObjectPtr<UUserWidget> RenderedWidget;
+	/** Keeps that render's Slate tree alive so its cached geometry remains inspectable. */
+	TSharedPtr<SWidget> RenderedSlateWidget;
+
+	/** Component Mapping diagnostics (ini validation + hit/fallback/inputs/Prototype boundaries), going into the import diagnostic report. */
+	TArray<FDesign2UMGMappingDiagnostic> ComponentMappingDiagnostics;
+};
+
 namespace DesignImportGeneration
 {
 	void ApplyPendingIconFontMappingChanges(const FUMGWidgetData& Data, bool bPersistChanges = true);
@@ -41,27 +62,14 @@ namespace DesignImportGeneration
 		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
 		FFeedbackContext* ProgressFeedback = nullptr,
 		bool bPersistIconFontMappingChanges = true);
-	bool GenerateBlueprintAndPng(
+	FArtifactGenerationResult GenerateBlueprintAndPng(
 		const FUMGWidgetData& Data,
-		const FString& OutputPath,
-		FString* OutGeneratedAssetPath = nullptr,
-		FString* OutRenderPngPath = nullptr,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
-		bool bPersistIconFontMappingChanges = true);
-	bool GenerateBlueprintAndCompiledPng(
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
+	FArtifactGenerationResult GenerateBlueprintAndCompiledPng(
 		const FUMGWidgetData& Data,
-		const FString& OutputPath,
-		const FString& OutputPngFilePath,
-		FString* OutGeneratedAssetPath = nullptr,
-		FIntPoint* OutRenderedSize = nullptr,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr,
-		FDesign2UMGGenerationOutput* OutGenerationOutput = nullptr,
-		FString* OutError = nullptr,
-		const FBlueprintRenderPreparationOptions* RenderPreparation = nullptr,
-		bool bPersistIconFontMappingChanges = true,
-		TStrongObjectPtr<UUserWidget>* OutRenderedWidget = nullptr,
-		TSharedPtr<SWidget>* OutRenderedSlateWidget = nullptr);
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings = nullptr);
 	bool RenderCompiledBlueprintToPngFile(
 		UWidgetBlueprint* WidgetBlueprint,
 		const FString& OutputPngFilePath,

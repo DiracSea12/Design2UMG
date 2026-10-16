@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 #include "Misc/ScopeExit.h"
 
 #include "DesignImportPipeline.h"
@@ -70,7 +71,7 @@ bool FReferenceExpansionDegradationReachesCommitTest::RunTest(const FString&)
 
 	FDesignDocument Document = BuildDegradedReferenceDocument();
 	const FImportAnalysisResult Analysis =
-		DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+		DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("Missing reference remains non-fatal when a valid sibling converts"), Analysis.ErrorMessage.IsEmpty());
 	TestEqual(
 		TEXT("Analysis preserves explicit degradation"),
@@ -127,7 +128,7 @@ bool FReferenceExpansionFailureStopsGenerationTest::RunTest(const FString&)
 	FDesignDocument Document = BuildFatalReferenceDocument();
 	AddExpectedError(TEXT("circular ref detected"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FImportAnalysisResult Analysis =
-		DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+		DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("Analysis exposes conversion failure"), Analysis.ErrorMessage.Contains(TEXT("pipeline-cycle-a")));
 	TestEqual(
 		TEXT("Analysis data retains failed conversion status"),
@@ -203,7 +204,7 @@ bool FReferenceExpansionBranchingImportTest::RunTest(const FString&)
 		Document.Children.Add(Component);
 	}
 	Document.Children.Add(MakeReferenceNode(TEXT("branching-entry"), TEXT("branching-component-0"), false));
-	const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	if (!TestTrue(TEXT("Finite branching analysis succeeds"), Analysis.Data.GetConversionStatus() != EDesign2UMGConversionStatus::Failed)) return false;
 	int32 LeafCount = 0;
 	TFunction<void(const FUMGWidgetNode&)> CountLeaves = [&](const FUMGWidgetNode& Widget)

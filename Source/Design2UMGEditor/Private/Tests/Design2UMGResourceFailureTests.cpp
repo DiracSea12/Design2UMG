@@ -318,7 +318,7 @@ bool FResourceFailureApprovedPreviewGenerationPreservesSourceFailureTest::RunTes
 	RefreshInput.EditedJson = FUMGJsonSerializer::Serialize(Data);
 	RefreshInput.InitialImageResult = InitialImageResult;
 	RefreshInput.bResolveImages = false;
-	const FPreviewRefreshResult RefreshResult = DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
+	const FPreviewRefreshResult RefreshResult = DesignImportPlanning::AnalyzePreviewRefreshInput(RefreshInput);
 	if (!TestTrue(TEXT("Preview refresh succeeds"), RefreshResult.bSucceeded))
 	{
 		return false;

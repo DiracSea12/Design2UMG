@@ -29,6 +29,7 @@
 #include "TextureResource.h"
 #include "UMGWidgetTreeBuilder.h"
 #include "UObject/Package.h"
+#include "UObject/GarbageCollection.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SVirtualWindow.h"
 #include "WidgetBlueprint.h"
@@ -445,6 +446,7 @@ bool FRetainerNestedChildBlueprintRenderingTest::RunTest(const FString&)
 			return true;
 		}();
 
+		CollectGarbage(RF_NoFlags);
 		Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder);
 		if (!bBranchSucceeded) return false;
 	}

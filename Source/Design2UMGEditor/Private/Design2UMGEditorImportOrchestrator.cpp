@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportPlanning.h"
 
 #include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
@@ -55,7 +56,7 @@ namespace
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = false;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 		if (!Analysis.ErrorMessage.IsEmpty()) return false;
 		OutData = Analysis.Data;
 		return true;
@@ -83,7 +84,7 @@ namespace
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 			[CapturedRequest = Request, CapturedSettingsSnapshot = SettingsSnapshot](const FString& FrameId)
 			{
-				Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
+				DesignImportPipeline::ExecutePenFile(
 					CapturedRequest.FilePath,
 					FrameId,
 					Design2UMGEditorImportRequestSetup::MakePenImportRequest(
@@ -125,7 +126,7 @@ namespace Design2UMGEditorImportOrchestrator
 		}
 
 		const FDesignImportExecutionResult ExecutionResult = bOk
-			? Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(
+			? DesignImportPipeline::Execute(
 				Data,
 				Design2UMGEditorImportRequestSetup::MakePenImportRequest(
 					Request.OutputPath, Design2UMGEditorUnattendedExit::ShouldUsePreviewInCurrentMode(Request.bUsePreview), true, SettingsSnapshot))
@@ -163,7 +164,7 @@ namespace Design2UMGEditorImportOrchestrator
 			}
 			else
 			{
-				ExecutionResult = Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
+				ExecutionResult = DesignImportPipeline::ExecutePenFile(
 					Request.FilePath,
 					Request.TargetNodeId,
 					Design2UMGEditorImportRequestSetup::MakePenImportRequest(
@@ -212,7 +213,7 @@ namespace Design2UMGEditorImportOrchestrator
 					EDesignBlueprintGenerationMode::BlueprintAndPng,
 					SettingsSnapshot);
 				const FDesignImportExecutionResult ExecutionResult =
-					Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
+					DesignImportPipeline::Execute(Data, ImportRequest);
 				bOk = ExecutionResult.bSucceeded;
 			}
 		}
@@ -273,7 +274,7 @@ namespace Design2UMGEditorImportOrchestrator
 				EDesignBlueprintGenerationMode::BlueprintAndPng,
 				SettingsSnapshot,
 				false);
-			bOk = Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Document, ImportRequest).bSucceeded;
+			bOk = DesignImportPipeline::Execute(Document, ImportRequest).bSucceeded;
 		}
 
 		Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(

@@ -42,7 +42,8 @@ namespace DesignImportPipeline
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument);
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings);
 		FDesignImportExecutionResult ExecuteWithAnalysis(
 			FUMGWidgetData& Data,
 			const FImportInPlaceAnalysisResult& AnalysisResult,
@@ -149,40 +150,18 @@ namespace DesignImportPipeline
 			}
 
 			case EDesignBlueprintGenerationMode::BlueprintAndPng:
-				Result.bSucceeded = DesignImportGeneration::GenerateBlueprintAndPng(
-					Data,
-					Request.OutputPath,
-					&Result.GeneratedAssetPath,
-					&Result.RenderPngPath,
-					GenerationSettings,
-					&GenerationOutput,
-					Request.Generation.bPersistIconFontMappingChanges);
+				Result = DesignImportGeneration::GenerateBlueprintAndPng(Data, Request, GenerationSettings);
 				break;
-
 			case EDesignBlueprintGenerationMode::BlueprintAndCompiledPng:
-				Result.bSucceeded = DesignImportGeneration::GenerateBlueprintAndCompiledPng(
-					Data,
-					Request.OutputPath,
-					Request.Generation.CompiledPngFilePath,
-					&Result.GeneratedAssetPath,
-					&Result.RenderedSize,
-					GenerationSettings,
-					&GenerationOutput,
-					&Result.ErrorMessage,
-					Request.Generation.RenderPreparation.IsSet()
-						? &Request.Generation.RenderPreparation.GetValue()
-						: nullptr,
-					Request.Generation.bPersistIconFontMappingChanges,
-					&Result.RenderedWidget,
-					&Result.RenderedSlateWidget);
-				if (Result.bSucceeded)
-				{
-					Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
-				}
+				Result = DesignImportGeneration::GenerateBlueprintAndCompiledPng(Data, Request, GenerationSettings);
 				break;
 			}
+			if (Request.Generation.Mode == EDesignBlueprintGenerationMode::BlueprintOnly)
+			{
+				Result.Commit = GenerationOutput.Commit;
+				Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
+			}
 
-			Result.Commit = GenerationOutput.Commit;
 			Result.Warnings = Data.Warnings;
 			const bool bHasImageFailures = Request.RuntimeImageResult.IsSet()
 				&& Request.RuntimeImageResult->HasFailures();
@@ -204,7 +183,6 @@ namespace DesignImportPipeline
 				Result.ErrorMessage = TEXT("Save failed and recovery is incomplete: ") + Result.Commit.AssetPath;
 			if (Result.Commit.Asset == EDesign2UMGFileState::Saved)
 				Result.GeneratedAssetPath = Result.Commit.AssetPath;
-			Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
 			if (!Result.bSucceeded
 				&& Result.ComponentMappingDiagnostics.Num() == 0
 				&& GenerationSettings)
@@ -219,13 +197,14 @@ namespace DesignImportPipeline
 
 		FOnPreviewConfirmed CreatePreviewConfirmedHandler(
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument)
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			const FDesign2UMGGenerationSettingsSnapshot& GenerationSettings)
 		{
 			return FOnPreviewConfirmed::CreateLambda(
 				[CapturedGeneration = Request.Generation,
 				 bCapturedResolveImages = Request.bResolveImages,
 				 CapturedDiagnosticDocument = DiagnosticDocument,
-				 CapturedSettingsSnapshot = Request.SettingsSnapshot](const FPreviewGenerationRequest& PreviewGenerationRequest)
+				 CapturedSettings = GenerationSettings](const FPreviewGenerationRequest& PreviewGenerationRequest)
 				{
 					const FPreviewApprovedSnapshot& ApprovedSnapshot = PreviewGenerationRequest.ApprovedSnapshot;
 
@@ -237,14 +216,7 @@ namespace DesignImportPipeline
 						GenerationRequest.DiagnosticDocument = CapturedDiagnosticDocument;
 					}
 
-					if (CapturedSettingsSnapshot.IsSet())
-					{
-						return GenerateArtifacts(ApprovedSnapshot, GenerationRequest, CapturedSettingsSnapshot->GenerationSettings);
-					}
-					else
-					{
-						return GenerateArtifacts(ApprovedSnapshot, GenerationRequest);
-					}
+					return GenerateArtifacts(ApprovedSnapshot, GenerationRequest, CapturedSettings);
 				});
 		}
 
@@ -269,7 +241,7 @@ namespace DesignImportPipeline
 					Data,
 					Request.OutputPath,
 					Request.PreviewWindowTitle,
-					CreatePreviewConfirmedHandler(Request, DiagnosticDocument),
+					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, *GenerationSettings),
 					FOnPreviewCancelled::CreateLambda(
 						[]()
 						{
@@ -316,23 +288,6 @@ namespace DesignImportPipeline
 		}
 	}
 
-	FImportInPlaceAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
-	{
-		return DesignImportPlanning::AnalyzeWidgetData(Data, Input);
-	}
-
-	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input)
-	{
-		return DesignImportPlanning::AnalyzeDocument(Document, Input);
-	}
-
-	FPreviewRefreshResult AnalyzePreviewRefresh(
-		const FPreviewRefreshInput& Input,
-		const FUMGIconFontMappingChanges* MappingChanges)
-	{
-		return DesignImportPlanning::AnalyzePreviewRefreshInput(Input, MappingChanges);
-	}
-
 	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request)
 	{
 		const FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot = BuildFallbackImportSettingsSnapshot();
@@ -375,7 +330,7 @@ namespace DesignImportPipeline
 				? &GenerationRequest.RuntimeImageResult.GetValue()
 				: nullptr;
 			GenerationRequest.RuntimeImageResult =
-				DesignImportPlanning::ResolveImages(GenerationData, PreviousImageResult);
+				DesignImportPlanning::ResolveImages(GenerationData, PreviousImageResult, &GenerationSettings.ImageSettings);
 		}
 		return GenerateArtifactsInternal(GenerationData, GenerationRequest, &GenerationSettings);
 	}
@@ -385,7 +340,7 @@ namespace DesignImportPipeline
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = Request.bResolveImages;
 		AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
-		const FImportInPlaceAnalysisResult AnalysisResult = AnalyzeImport(Data, AnalysisInput);
+		const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(Data, AnalysisInput);
 		return ExecuteWithAnalysis(Data, AnalysisResult, Request, Request.DiagnosticDocument);
 	}
 
@@ -398,7 +353,7 @@ namespace DesignImportPipeline
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = Request.bResolveImages;
 			AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
-			OwnedAnalysisResult = AnalyzeImport(Document, AnalysisInput);
+			OwnedAnalysisResult = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 			AnalysisResult = &OwnedAnalysisResult;
 		}
 		FUMGWidgetData Data = PrecomputedAnalysis

@@ -154,31 +154,19 @@ bool FDesign2UMGInvalidGenerationClearsArtifactOutputsTest::RunTest(const FStrin
 	FUMGWidgetData InvalidData;
 	InvalidData.WidgetName = TEXT("WBP_InvalidSaveSemantics");
 
-	FString GeneratedAssetPath = TEXT("stale-asset-path");
-	FString RenderPngPath = TEXT("stale-render-path");
-	TestFalse(
-		TEXT("Invalid source data fails Blueprint and PNG generation"),
-		DesignImportGeneration::GenerateBlueprintAndPng(
-			InvalidData,
-			TEXT("/Game/Design2UMG/Automation/SaveSemantics"),
-			&GeneratedAssetPath,
-			&RenderPngPath));
-	TestTrue(TEXT("Failed generation clears generated asset path"), GeneratedAssetPath.IsEmpty());
-	TestTrue(TEXT("Failed generation clears render path"), RenderPngPath.IsEmpty());
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = TEXT("/Game/Design2UMG/Automation/SaveSemantics");
+	FArtifactGenerationResult Result = DesignImportGeneration::GenerateBlueprintAndPng(InvalidData, Request);
+	TestFalse(TEXT("Invalid source data fails Blueprint and PNG generation"), Result.bSucceeded);
+	TestTrue(TEXT("Failed generation has no generated asset path"), Result.GeneratedAssetPath.IsEmpty());
+	TestTrue(TEXT("Failed generation has no render path"), Result.RenderPngPath.IsEmpty());
 
 	InvalidData.WidgetName = TEXT("WBP_InvalidCompiledSaveSemantics");
-	GeneratedAssetPath = TEXT("stale-asset-path");
-	FIntPoint RenderedSize(321, 654);
-	TestFalse(
-		TEXT("Invalid source data fails compiled PNG generation"),
-		DesignImportGeneration::GenerateBlueprintAndCompiledPng(
-			InvalidData,
-			TEXT("/Game/Design2UMG/Automation/SaveSemantics"),
-			TEXT("G:/invalid/not-written.png"),
-			&GeneratedAssetPath,
-			&RenderedSize));
-	TestTrue(TEXT("Failed compiled generation clears generated asset path"), GeneratedAssetPath.IsEmpty());
-	TestEqual(TEXT("Failed compiled generation clears rendered size"), RenderedSize, FIntPoint::ZeroValue);
+	Request.Generation.CompiledPngFilePath = TEXT("G:/invalid/not-written.png");
+	Result = DesignImportGeneration::GenerateBlueprintAndCompiledPng(InvalidData, Request);
+	TestFalse(TEXT("Invalid source data fails compiled PNG generation"), Result.bSucceeded);
+	TestTrue(TEXT("Failed compiled generation has no generated asset path"), Result.GeneratedAssetPath.IsEmpty());
+	TestEqual(TEXT("Failed compiled generation has no rendered size"), Result.RenderedSize, FIntPoint::ZeroValue);
 	return true;
 }
 

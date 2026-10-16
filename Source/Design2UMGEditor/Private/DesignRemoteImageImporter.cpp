@@ -5,6 +5,7 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSettings.h"
+#include "DesignPreviewContracts.h"
 #include "GeneratedAssetLifecycle.h"
 
 #include "Engine/Texture.h"
@@ -27,9 +28,7 @@ namespace
 	using DesignRemoteImageImporterInternal::FResolveContext;
 	using DesignRemoteImageImporterInternal::FUrlDownloadResult;
 
-	// Per-widget textures use source identity; shared textures deduplicate image content.
-	// Each naming tag versions its own asset family. Changing a tag creates new asset names.
-	constexpr TCHAR PerWidgetTextureImportVersion[] = TEXT("ui4");
+	// Shared textures deduplicate image content; the tag versions the asset family.
 	constexpr TCHAR SharedTextureImportVersion[] = TEXT("ui5");
 
 	bool IsAssetPath(const FString& Value)
@@ -75,47 +74,13 @@ namespace
 		return BytesToHex(Hash, UE_ARRAY_COUNT(Hash));
 	}
 
-	FString SanitizeAssetName(const FString& Name)
-	{
-		FString Safe = Name;
-		Safe.ReplaceInline(TEXT(" "), TEXT("_"));
-		Safe.ReplaceInline(TEXT("."), TEXT("_"));
-		Safe.ReplaceInline(TEXT("/"), TEXT("_"));
-		Safe.ReplaceInline(TEXT("\\"), TEXT("_"));
-		Safe.ReplaceInline(TEXT(":"), TEXT("_"));
-		Safe.ReplaceInline(TEXT(";"), TEXT("_"));
-		Safe.ReplaceInline(TEXT(","), TEXT("_"));
-		Safe.ReplaceInline(TEXT("-"), TEXT("_"));
-		return Safe.IsEmpty() ? TEXT("Image") : Safe;
-	}
-
-	// Limit frame/node parts and source hashes to keep texture asset names bounded.
-	constexpr int32 MaxPerWidgetAssetNamePartChars = 24;
-	constexpr int32 MaxPerWidgetSourceHashChars = 10;
+	// Keep content-addressed texture asset names bounded.
 	constexpr int32 MaxSharedContentHashChars = 16;
-
-	FString BuildPerWidgetTextureAssetName(const FString& FrameName, const FString& WidgetName, const FString& WidgetId, const FString& SourceKey)
-	{
-		const FString SafeFrame = SanitizeAssetName(FrameName).Left(MaxPerWidgetAssetNamePartChars);
-		FString NodeBase = WidgetName;
-		if (NodeBase.IsEmpty())
-		{
-			NodeBase = WidgetId;
-		}
-		const FString SafeNode = SanitizeAssetName(NodeBase).Left(MaxPerWidgetAssetNamePartChars);
-		const FString SourceHash = MakeUrlHash(SourceKey).Left(MaxPerWidgetSourceHashChars);
-		return FString::Printf(TEXT("T_%s_%s_%s_%s"), *SafeFrame, *SafeNode, *SourceHash, PerWidgetTextureImportVersion);
-	}
 
 	FString BuildSharedTextureAssetName(const FString& ContentHash)
 	{
 		const FString SafeHash = ContentHash.Left(MaxSharedContentHashChars);
 		return FString::Printf(TEXT("T_D2U_%s_%s"), *SafeHash, SharedTextureImportVersion);
-	}
-
-	FString BuildSubImportPath(const FString& ImportPath, const FString& FrameName)
-	{
-		return ImportPath / SanitizeAssetName(FrameName);
 	}
 
 	FString BuildSharedImportPath(const FString& ImportPath)
@@ -145,11 +110,6 @@ namespace
 	FString BuildSourceScopedContentKey(const FString& SourceKey, const FString& ContentHash)
 	{
 		return FString::Printf(TEXT("%s#content:%s"), *SourceKey, *ContentHash);
-	}
-
-	FString BuildVersionedSourceKey(const FString& SourceKey, const FString& ContentHash)
-	{
-		return FString::Printf(TEXT("%s#version:%s"), *SourceKey, *ContentHash);
 	}
 
 	FString NormalizeImportPath(const FString& InPath)
@@ -273,10 +233,7 @@ namespace
 		FTextureCompilingManager::Get().FinishCompilation({ Texture });
 #endif
 
-		// Always force resource update + flush. After RewriteTextureAsset the
-		// old GPU resource still exists (GetResource() != null) but contains
-		// stale 32x32 data. Unconditional update ensures the GPU has the
-		// correct pixels before the widget tree is rendered.
+		// Refresh the GPU resource after applying UI texture settings before rendering.
 		Texture->UpdateResource();
 		bTextureResourceUpdatePending = true;
 	}
@@ -341,47 +298,6 @@ namespace
 		GeneratedAssetLifecycle::RegisterSavedAsset(Texture);
 
 		OutObjectPath = ObjectPath;
-		return true;
-	}
-
-	bool RewriteTextureAsset(
-		UTexture2D* Texture,
-		const TArray64<uint8>& RawData,
-		int32 Width,
-		int32 Height,
-		FString& OutError)
-	{
-		if (!Texture || Width <= 0 || Height <= 0 || RawData.Num() <= 0)
-		{
-			OutError = TEXT("Invalid arguments");
-			return false;
-		}
-
-		UPackage* Package = Texture->GetPackage();
-		if (!Package)
-		{
-			OutError = TEXT("Invalid texture package");
-			return false;
-		}
-
-		Texture->PreEditChange(nullptr);
-		Texture->Source.Init(Width, Height, 1, 1, TSF_BGRA8, RawData.GetData());
-		ApplyTextureUiSettings(Texture);
-		Texture->PostEditChange();
-		Texture->MarkPackageDirty();
-		Package->MarkPackageDirty();
-
-		const FString LongPackageName = Package->GetName();
-		const FString PackageFilename = FPackageName::LongPackageNameToFilename(LongPackageName, FPackageName::GetAssetPackageExtension());
-		FSavePackageArgs SaveArgs;
-		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-		SaveArgs.SaveFlags = SAVE_NoError;
-		if (!UPackage::SavePackage(Package, Texture, *PackageFilename, SaveArgs))
-		{
-			OutError = FString::Printf(TEXT("Failed to save texture package: %s"), *PackageFilename);
-			return false;
-		}
-
 		return true;
 	}
 
@@ -496,80 +412,6 @@ namespace
 		return true;
 	}
 
-	// Repair a per-widget local texture when source dimensions differ or it holds a placeholder.
-	void RefreshWidgetTextureFromSource(
-		UTexture2D* Existing,
-		const TArray<uint8>& FileData,
-		const FString& ObjectPath,
-		const FString& WidgetName,
-		const FString& WidgetId,
-		const FString& LocalPath,
-		FResolveContext& Context)
-	{
-		int32 SourceWidth = 0;
-		int32 SourceHeight = 0;
-		TArray64<uint8> SourceRawBGRA;
-		FString SourceDecodeError;
-		EDesignImageDiagnosticCategory DecodeCategory = EDesignImageDiagnosticCategory::Decode;
-		if (!FImagePayloadIO::DecodeToBGRA8(
-			FileData,
-			Context.ImageLimits,
-			SourceWidth,
-			SourceHeight,
-			SourceRawBGRA,
-			SourceDecodeError,
-			&Context.OperationBudget,
-			&DecodeCategory))
-		{
-			const FString Message = FString::Printf(TEXT("Texture refresh decode failed for '%s': %s"), *WidgetName, *SourceDecodeError);
-			Context.Report.AddDiagnostic(
-				EDesignImageDiagnosticOutcome::Failed,
-				DecodeCategory,
-				WidgetId,
-				WidgetName,
-				LocalPath,
-				SourceDecodeError,
-				Message);
-			return;
-		}
-
-		const int32 ExistingWidth = Existing->GetSizeX();
-		const int32 ExistingHeight = Existing->GetSizeY();
-		const bool bDimensionMismatch = ExistingWidth != SourceWidth || ExistingHeight != SourceHeight;
-		const bool bLooksBroken = (ExistingWidth <= 1 || ExistingHeight <= 1) && (SourceWidth > 1 || SourceHeight > 1);
-		if (!bDimensionMismatch && !bLooksBroken)
-		{
-			return;
-		}
-
-		FString RewriteError;
-		if (RewriteTextureAsset(Existing, SourceRawBGRA, SourceWidth, SourceHeight, RewriteError))
-		{
-			const FString Message = FString::Printf(TEXT("Refreshed local texture: %s (%dx%d -> %dx%d)"),
-				*ObjectPath, ExistingWidth, ExistingHeight, SourceWidth, SourceHeight);
-			Context.Report.AddDiagnostic(
-				EDesignImageDiagnosticOutcome::Refreshed,
-				EDesignImageDiagnosticCategory::TextureRefresh,
-				WidgetId,
-				WidgetName,
-				LocalPath,
-				FString(),
-				Message);
-		}
-		else
-		{
-			const FString Message = FString::Printf(TEXT("Texture refresh failed for '%s': %s"), *WidgetName, *RewriteError);
-			Context.Report.AddDiagnostic(
-				EDesignImageDiagnosticOutcome::Failed,
-				EDesignImageDiagnosticCategory::TextureRefresh,
-				WidgetId,
-				WidgetName,
-				LocalPath,
-				RewriteError,
-				Message);
-		}
-	}
-
 	// Adopt a freshly created shared texture: refresh it, point the widget at it and record
 	// it in both run caches.
 	void RegisterImportedTexture(
@@ -663,16 +505,6 @@ namespace
 			}
 
 			const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-			const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
-			const FString PerWidgetAssetName = BuildPerWidgetTextureAssetName(
-				Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(LocalKey, ContentHash));
-			const FString PerWidgetObjectPath = BuildObjectPathFromImport(SubDir, PerWidgetAssetName);
-			if (UTexture2D* Existing = LoadObject<UTexture2D>(nullptr, *PerWidgetObjectPath))
-			{
-				RefreshWidgetTextureFromSource(Existing, FileData, PerWidgetObjectPath, WidgetName, WidgetId, LocalPath, Context);
-				RegisterReusedTexture(LocalKey, ContentKey, PerWidgetObjectPath, Existing, nullptr, InOutTexturePath, Context);
-				return true;
-			}
 
 			int32 Width = 0, Height = 0;
 			TArray64<uint8> RawBGRA;
@@ -809,15 +641,6 @@ namespace
 		}
 
 		const FString SharedAssetName = BuildSharedTextureAssetName(ContentHash);
-		const FString SubDir = BuildSubImportPath(Context.ImportPath, Context.FrameName);
-		const FString PerWidgetAssetName = BuildPerWidgetTextureAssetName(
-			Context.FrameName, WidgetName, WidgetId, BuildVersionedSourceKey(SourceKey, ContentHash));
-		const FString PerWidgetObjectPath = BuildObjectPathFromImport(SubDir, PerWidgetAssetName);
-		if (UTexture2D* ExistingTexture = LoadObject<UTexture2D>(nullptr, *PerWidgetObjectPath))
-		{
-			RegisterReusedTexture(SourceKey, ContentKey, PerWidgetObjectPath, ExistingTexture, TEXT("Reused existing texture: "), InOutTexturePath, Context);
-			return true;
-		}
 
 		int32 Width = 0;
 		int32 Height = 0;
@@ -928,25 +751,11 @@ bool FDesignRemoteImageImporter::IsHttpUrl(const FString& Value)
 		|| Value.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
 }
 
-FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData)
+FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWidgetData& InOutData,
+	const FDesignImageImportSettingsSnapshot& Settings)
 {
-	const UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
-	if (!Settings)
-	{
-		FDesignImageImportResult Result;
-		Result.bWasExecuted = true;
-		FDesignImageDiagnostic Diagnostic;
-		Diagnostic.Outcome = EDesignImageDiagnosticOutcome::Failed;
-		Diagnostic.Category = EDesignImageDiagnosticCategory::Configuration;
-		Diagnostic.Reason = TEXT("Design2UMG settings are unavailable");
-		Diagnostic.Message = TEXT("Remote image import: settings unavailable");
-		Result.AddDiagnostic(MoveTemp(Diagnostic));
-		Result.RefreshDisplaySummary();
-		return Result;
-	}
-
 	TSet<FString> RemoteUrls;
-	if (Settings->bEnableRemoteImageImport)
+	if (Settings.bEnableRemoteImageImport)
 	{
 		CollectRemoteUrls(InOutData.RootWidget, RemoteUrls);
 	}
@@ -967,11 +776,10 @@ FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWid
 		return Context.Report.BuildResult(FString());
 	}
 
-	Context.ImportPath = NormalizeImportPath(Settings->RemoteImageImportPath);
-	Context.TimeoutSeconds = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
-	Context.bResolveRemoteImages = Settings->bEnableRemoteImageImport;
-	Context.bAllowUnsafeRemoteUrls = Settings->bAllowUnsafeRemoteImageUrls;
-	Context.FrameName = InOutData.WidgetName;
+	Context.ImportPath = NormalizeImportPath(Settings.RemoteImageImportPath);
+	Context.TimeoutSeconds = FMath::Max(1.0f, Settings.RemoteImageTimeoutSeconds);
+	Context.bResolveRemoteImages = Settings.bEnableRemoteImageImport;
+	Context.bAllowUnsafeRemoteUrls = Settings.bAllowUnsafeRemoteImageUrls;
 
 	if (RemoteUrls.Num() > 0)
 	{

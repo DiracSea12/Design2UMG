@@ -6,6 +6,7 @@
 #include "Design2UMGSettings.h"
 #include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGConverter.h"
+#include "DesignPreviewContracts.h"
 
 class UClass;
 class FDesign2UMGComponentBlueprintContext;
@@ -13,6 +14,7 @@ struct FDesignPreviewMaterializationSettingsSnapshot;
 
 struct FDesign2UMGGenerationSettingsSnapshot
 {
+	FDesignImageImportSettingsSnapshot ImageSettings;
 	TArray<FWidgetClassOverride> ClassOverrides;
 
 	/**

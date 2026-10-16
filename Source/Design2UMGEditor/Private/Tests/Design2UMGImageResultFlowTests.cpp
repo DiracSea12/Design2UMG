@@ -53,8 +53,8 @@ namespace
 		return BytesToHex(Hash, UE_ARRAY_COUNT(Hash));
 	}
 
-	// Seed the documented per-widget asset family so the real importer takes its refresh path.
-	UTexture2D* SeedRefreshTexture(const FString& Folder, const FString& Source, const TArray<uint8>& Bytes)
+	// An unrelated old texture must never substitute for the current source.
+	UTexture2D* SeedUnrelatedTexture(const FString& Folder, const FString& Source, const TArray<uint8>& Bytes)
 	{
 		FString FullSource = FPaths::ConvertRelativePathToFull(Source);
 		FPaths::NormalizeFilename(FullSource);
@@ -271,10 +271,10 @@ bool FImageResultAssetSourceIdentityTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageResultRefreshFailureIdentityTest,
-	"Design2UMG.Resources.ImageResultFlow.RefreshFailureIdentity",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageResultUnrelatedTextureFailureIdentityTest,
+	"Design2UMG.Resources.ImageResultFlow.UnrelatedTextureFailureIdentity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FImageResultRefreshFailureIdentityTest::RunTest(const FString&)
+bool FImageResultUnrelatedTextureFailureIdentityTest::RunTest(const FString&)
 {
 	using namespace Design2UMGReimportFixtures;
 	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/ImageRefresh_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
@@ -283,29 +283,28 @@ bool FImageResultRefreshFailureIdentityTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); IFileManager::Get().Delete(*File); };
 	const TArray<uint8> Broken = { 1, 2, 3, 4 };
 	TestTrue(TEXT("Write invalid refresh source"), FFileHelper::SaveArrayToFile(Broken, *File));
-	UTexture2D* Texture = SeedRefreshTexture(Folder, File, Broken);
+	UTexture2D* Texture = SeedUnrelatedTexture(Folder, File, Broken);
 	if (!TestNotNull(TEXT("Existing per-widget texture"), Texture)) return false;
 	FUMGWidgetData Data = MakeResultFlowImage(File);
 	FDesignImageImportResult Result = DesignImportPlanning::ResolveImages(Data);
-	TestEqual(TEXT("Refresh decode failure recorded"), Result.FailedCount, 1);
-	TestEqual(TEXT("Old texture was reused despite refresh failure"), Result.ReusedCount, 1);
+	TestEqual(TEXT("Source decode failure recorded"), Result.FailedCount, 1);
+	TestEqual(TEXT("Unrelated old texture is not reused"), Result.ReusedCount, 0);
 	const FDesignImageDiagnostic* Failure = Result.Diagnostics.FindByPredicate([](const FDesignImageDiagnostic& D)
 	{
 		return D.Outcome == EDesignImageDiagnosticOutcome::Failed;
 	});
-	if (TestNotNull(TEXT("Structured refresh failure"), Failure))
+	if (TestNotNull(TEXT("Structured source failure"), Failure))
 	{
 		TestEqual(TEXT("Failure identifies actual node"), Failure->NodeId, Data.RootWidget.Id);
 		TestEqual(TEXT("Failure identifies failed source file"), Failure->Resource, File);
-		TestEqual(TEXT("Partial failure binds to the asset actually retained"),
-			Failure->ResolvedAssetPath, Data.RootWidget.Brush.Image.TexturePath.Get(FString()));
+		TestTrue(TEXT("Failure does not claim an unrelated retained asset"), Failure->ResolvedAssetPath.IsEmpty());
 	}
 	for (int32 Retry = 0; Retry < 2; ++Retry)
 	{
 		Result = DesignImportPlanning::ResolveImages(Data, &Result);
-		TestEqual(TEXT("Unattempted refresh failure survives rewritten asset path"), Result.FailedCount, 1);
-		TestEqual(TEXT("Reuse fact survives without double counting"), Result.ReusedCount, 1);
-		TestEqual(TEXT("Both facts survive"), Result.Diagnostics.Num(), 2);
+		TestEqual(TEXT("Failed source remains reported across retries"), Result.FailedCount, 1);
+		TestEqual(TEXT("Retries never reuse unrelated textures"), Result.ReusedCount, 0);
+		TestEqual(TEXT("The source failure is not duplicated"), Result.Diagnostics.Num(), 1);
 	}
 	FPreviewApprovedSnapshot Approved;
 	Approved.Data = Data;
@@ -316,11 +315,11 @@ bool FImageResultRefreshFailureIdentityTest::RunTest(const FString&)
 	Generation.bResolveImages = true;
 	const FArtifactGenerationResult Generated = DesignImportPipeline::GenerateArtifacts(Approved, Generation);
 	TestTrue(TEXT("Preview-approved import remains usable"), Generated.bSucceeded);
-	TestEqual(TEXT("Preview retry retains refresh degradation"), Generated.Commit.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
+	TestEqual(TEXT("Preview retry retains source degradation"), Generated.Commit.Status, EDesign2UMGCommitStatus::SucceededWithDegradation);
 	TestTrue(TEXT("Repair source for an actual retry"), FFileHelper::SaveArrayToFile(MakeResultFlowPng(), *File));
 	Data.RootWidget.Brush.Image.TexturePath = File;
 	Result = DesignImportPlanning::ResolveImages(Data, &Result);
-	TestEqual(TEXT("Actual source retry clears refresh failure"), Result.FailedCount, 0);
+	TestEqual(TEXT("Actual source retry clears source failure"), Result.FailedCount, 0);
 	TestEqual(TEXT("Actual source retry replaces old reuse fact"), Result.ReusedCount, 0);
 	TestEqual(TEXT("Actual source retry records new import"), Result.ImportedCount, 1);
 	return true;
@@ -411,6 +410,29 @@ bool FImageResultSafeReimportReportTest::RunTest(const FString&)
 	FUMGWidgetData UnanalyzedData;
 	TestTrue(TEXT("Report without image analysis written"), DesignImportDiagnosticReport::WriteReimport(Document, UnanalyzedData, Request.TargetAssetPath, {}));
 	CheckImageReport(Before, TEXT("not_run"), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageImportSettingsSnapshotTest,
+	"Design2UMG.Resources.ImageResultFlow.SettingsSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImageImportSettingsSnapshotTest::RunTest(const FString&)
+{
+	using namespace Design2UMGReimportFixtures;
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/ImageSettings_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString File = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (FGuid::NewGuid().ToString() + TEXT(".png"));
+	TGuardValue<FString> RestorePath(Settings->RemoteImageImportPath, Folder);
+	ON_SCOPE_EXIT { FixtureWipeOutput(Folder); IFileManager::Get().Delete(*File); };
+	if (!TestTrue(TEXT("Write source image"), FFileHelper::SaveArrayToFile(MakeResultFlowPng(), *File))) return false;
+	const FDesign2UMGImportSettingsSnapshot Snapshot = FDesign2UMGImportSettingsSnapshot::FromSettings(Settings);
+	Settings->RemoteImageImportPath = Folder / TEXT("Changed");
+	FUMGWidgetData Data = MakeResultFlowImage(File);
+	FImportAnalysisInput Input;
+	Input.SettingsSnapshot = &Snapshot;
+	const FImportInPlaceAnalysisResult Result = DesignImportPlanning::AnalyzeImport(Data, Input);
+	TestEqual(TEXT("Image analysis uses the captured import path"), Result.ImageResult.ImportPath, Folder);
+	TestTrue(TEXT("Generated image stays under the captured path"), Data.RootWidget.Brush.Image.TexturePath.Get(FString()).StartsWith(Folder / TEXT("_Shared")));
 	return true;
 }
 

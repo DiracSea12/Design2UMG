@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
+#include "DesignImportPlanning.h"
 #include "Async/Async.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
@@ -78,7 +79,7 @@ namespace
 		{
 			FPreviewRefreshInput RefreshInput = Input;
 			RefreshInput.bResolveImages = false;
-			return DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
+			return DesignImportPlanning::AnalyzePreviewRefreshInput(RefreshInput);
 		}
 	};
 }

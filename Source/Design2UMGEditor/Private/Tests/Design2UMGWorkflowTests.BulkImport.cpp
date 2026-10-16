@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
 #include "FigmaComponentDependencies.h"
@@ -96,7 +97,7 @@ bool FPenWelcomeLigatureIconWeightWorkflowTest::RunTest(const FString& Parameter
 	FFontResolver::ClearCache();
 	FFontResolver::FindMissingFonts(Document);
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+	FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 
 	const FUMGWidgetNode* DashboardIcon = FindWidgetById(Data.RootWidget, TEXT("xGT5g"));
 	TestTrue(TEXT("Find dashboard icon widget"), DashboardIcon != nullptr);
@@ -158,7 +159,9 @@ bool FPenMcpImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PenMCP");
-	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = OutputPath;
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, Request).bSucceeded;
 	TestTrue(TEXT("Render Pen MCP import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -200,7 +203,9 @@ bool FFigmaLocalFileImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/LocalFigma");
-	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = OutputPath;
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, Request).bSucceeded;
 	TestTrue(TEXT("Render local Figma import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -232,7 +237,7 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Parse prepared Figma source"), FFigmaParser::ParseDocument(PreparedJson, Document));
 	TestTrue(TEXT("Parsed Figma source should contain children"), Document.Children.Num() > 0);
 
-	FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+	FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestFalse(TEXT("Figma source import should yield a widget name"), Data.WidgetName.IsEmpty());
 	TestTrue(TEXT("Figma source import should yield root widget children"), Data.RootWidget.Children.Num() > 0);
 
@@ -242,7 +247,9 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	}
 
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/FigmaSource");
-	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, OutputPath);
+	FArtifactGenerationRequest Request;
+	Request.OutputPath = OutputPath;
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, Request).bSucceeded;
 	TestTrue(TEXT("Render figma source import"), bPng);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return bPng;
@@ -291,13 +298,15 @@ bool FPenWelcomeBulkImportTest::RunTest(const FString& Parameters)
 			continue;
 		}
 
-		FUMGWidgetData Data = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
+		FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 		if (GUsingNullRHI)
 		{
 			continue;
 		}
 		const FString FrameOutputPath = OutputPath / ObjectTools::SanitizeObjectName(Data.WidgetName);
-		const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, FrameOutputPath);
+		FArtifactGenerationRequest Request;
+	Request.OutputPath = FrameOutputPath;
+	const bool bPng = DesignImportGeneration::GenerateBlueprintAndPng(Data, Request).bSucceeded;
 		TestTrue(*FString::Printf(TEXT("Render %s"), *Frame.Name), bPng);
 		GeneratedAssetPaths.Add(FrameOutputPath);
 	}

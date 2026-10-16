@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Design2UMGWidgetPropertyAccess.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGImageTestUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersionComparison.h"
@@ -1829,7 +1830,7 @@ bool FPreviewContextDependencyGenerationTest::RunTest(const FString& Parameters)
 			Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
 			Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
 			Input.bResolveImages = false;
-			auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+			auto Refreshed = DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
 			if (!TestTrue(TEXT("Preview refresh with dependencies succeeds"), Refreshed.bSucceeded)) continue;
 			Data = MoveTemp(Refreshed.Data);
 		}

@@ -45,6 +45,8 @@ struct FMCPStdioClient::FSession
 	void* StderrRead = nullptr;
 	FTSTicker::FDelegateHandle Ticker;
 	TArray<uint8> BufferedOutput;
+	FString LastError;
+	FString StderrTail;
 	int32 NextId = 1;
 	int32 PendingId = 0;
 	double Deadline = 0;
@@ -86,7 +88,7 @@ struct FMCPStdioClient::FSession
 	bool Poll()
 	{
 		TArray<uint8> Bytes;
-		FPlatformProcess::ReadPipeToArray(StderrRead, Bytes);
+		StderrTail = (StderrTail + FPlatformProcess::ReadPipe(StderrRead)).Right(4096);
 		if (FPlatformProcess::ReadPipeToArray(StdoutRead, Bytes)) BufferedOutput.Append(Bytes);
 		int32 Newline = INDEX_NONE;
 		while (!bStopped && BufferedOutput.Find(static_cast<uint8>('\n'), Newline))
@@ -97,6 +99,7 @@ struct FMCPStdioClient::FSession
 			TSharedPtr<FJsonObject> Message;
 			if (!DesignJsonUtils::TryParseObject(Line, Message))
 			{
+				LastError = TEXT("MCP server returned malformed JSON. ") + StderrTail;
 				auto Callback = MoveTemp(Pending);
 				Stop();
 				if (Callback) Callback(false, nullptr);
@@ -106,17 +109,31 @@ struct FMCPStdioClient::FSession
 			if (!Message->TryGetNumberField(TEXT("id"), Id) || !PendingId || Id != PendingId) continue;
 			const TSharedPtr<FJsonObject>* Result = nullptr;
 			const bool bSuccess = Message->TryGetObjectField(TEXT("result"), Result) && Result && Result->IsValid();
+			if (!bSuccess)
+			{
+				const TSharedPtr<FJsonObject>* Error = nullptr;
+				FString MessageText;
+				if (Message->TryGetObjectField(TEXT("error"), Error) && Error && Error->IsValid())
+					(*Error)->TryGetStringField(TEXT("message"), MessageText);
+				LastError = MessageText.IsEmpty() ? TEXT("MCP response has no result object") : MessageText;
+			}
 			Complete(bSuccess, bSuccess ? *Result : nullptr);
 		}
 		if (bStopped) return false;
 		if (!FPlatformProcess::IsProcRunning(Process))
 		{
+			StderrTail = (StderrTail + FPlatformProcess::ReadPipe(StderrRead)).Right(4096);
+			LastError = TEXT("MCP server exited. ") + StderrTail;
 			auto Callback = MoveTemp(Pending);
 			Stop();
 			if (Callback) Callback(false, nullptr);
 			return false;
 		}
-		if (PendingId && FPlatformTime::Seconds() >= Deadline) Complete(false);
+		if (PendingId && FPlatformTime::Seconds() >= Deadline)
+		{
+			LastError = TEXT("MCP request timed out. ") + StderrTail;
+			Complete(false);
+		}
 		return !bStopped;
 	}
 };
@@ -130,6 +147,7 @@ void FMCPStdioClient::Disconnect()
 }
 
 bool FMCPStdioClient::IsConnected() const { return Session && Session->bConnected; }
+FString FMCPStdioClient::GetLastError() const { return Session ? Session->LastError : TEXT("MCP client is disconnected"); }
 bool FMCPStdioClient::IsRunning() const
 {
 	return Session && !Session->bStopped && Session->Process.IsValid() && FPlatformProcess::IsProcRunning(Session->Process);
@@ -157,10 +175,14 @@ void FMCPStdioClient::SendRequest(TSharedPtr<FSession> Connection, const FString
 		return;
 	}
 	Connection->PendingId = Connection->NextId++;
+	Connection->LastError.Reset();
 	Connection->Deadline = FPlatformTime::Seconds() + RequestTimeoutSeconds;
 	Connection->Pending = MoveTemp(OnComplete);
 	if (!WriteRpcMessage(Connection->StdinWrite, RpcMessage(Method, Params, Connection->PendingId)))
+	{
+		Connection->LastError = TEXT("Failed to write MCP request. ") + Connection->StderrTail;
 		Connection->Complete(false);
+	}
 }
 
 void FMCPStdioClient::ConnectAsync(const FString& Executable, const FString& Arguments, TFunction<void(bool)> OnComplete)
@@ -181,6 +203,7 @@ void FMCPStdioClient::ConnectAsync(const FString& Executable, const FString& Arg
 	FPlatformProcess::ClosePipe(nullptr, StderrWrite);
 	if (!Connection->Process.IsValid())
 	{
+		Connection->LastError = TEXT("Failed to start MCP server: ") + Executable;
 		Connection->Stop();
 		if (OnComplete) OnComplete(false);
 		return;
@@ -208,7 +231,11 @@ void FMCPStdioClient::ConnectAsync(const FString& Executable, const FString& Arg
 			&& ProtocolVersion == TEXT("2024-11-05") && Result->TryGetObjectField(TEXT("capabilities"), Capabilities);
 		if (bSuccess) bSuccess = WriteRpcMessage(Pinned->StdinWrite, RpcMessage(TEXT("notifications/initialized"), nullptr));
 		Pinned->bConnected = bSuccess;
-		if (!bSuccess) Pinned->Stop();
+		if (!bSuccess)
+		{
+			if (Pinned->LastError.IsEmpty()) Pinned->LastError = TEXT("Invalid MCP initialization response");
+			Pinned->Stop();
+		}
 		if (OnComplete) OnComplete(bSuccess);
 	});
 }
@@ -218,13 +245,13 @@ void FMCPStdioClient::CallToolAsync(const FString& ToolName, const TSharedPtr<FJ
 {
 	if (!IsConnected())
 	{
-		if (OnComplete) OnComplete(false, FString());
+		if (OnComplete) OnComplete(false, GetLastError());
 		return;
 	}
 	const TSharedPtr<FJsonObject> Params = MakeShared<FJsonObject>();
 	Params->SetStringField(TEXT("name"), ToolName);
 	Params->SetObjectField(TEXT("arguments"), Arguments ? Arguments : MakeShared<FJsonObject>());
-	SendRequest(Session, TEXT("tools/call"), Params, [OnComplete = MoveTemp(OnComplete)](bool bSuccess, const TSharedPtr<FJsonObject>& Result)
+	SendRequest(Session, TEXT("tools/call"), Params, [Connection = Session, OnComplete = MoveTemp(OnComplete)](bool bSuccess, const TSharedPtr<FJsonObject>& Result)
 	{
 		FString Text;
 		const TArray<TSharedPtr<FJsonValue>>* Content = nullptr;
@@ -243,6 +270,8 @@ void FMCPStdioClient::CallToolAsync(const FString& ToolName, const TSharedPtr<FJ
 			bSuccess = !Parts.IsEmpty() && !bIsError;
 			Text = FString::Join(Parts, TEXT("\n"));
 		}
+		if (!bSuccess && Text.IsEmpty())
+			Text = Connection->LastError.IsEmpty() ? TEXT("MCP tool response has no text content") : Connection->LastError;
 		if (OnComplete) OnComplete(bSuccess, Text);
 	});
 }

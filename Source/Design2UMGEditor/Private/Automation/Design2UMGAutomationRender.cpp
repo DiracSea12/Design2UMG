@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Automation/Design2UMGAutomationRender.h"
+#include "DesignImportPlanning.h"
 
 #include "Automation/Design2UMGAutomationGeometryDump.h"
 #include "Automation/Design2UMGAutomationIrDump.h"
@@ -359,7 +360,7 @@ namespace
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = true;
 	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, AnalysisInput);
+	OutAnalysis = DesignImportPlanning::AnalyzeImport(OutDocument, AnalysisInput);
 		if (!OutAnalysis.ErrorMessage.IsEmpty())
 		{
 			OutError = OutAnalysis.ErrorMessage;
@@ -496,7 +497,7 @@ namespace
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
-		return DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+		return DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 	};
 
 		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
@@ -738,7 +739,7 @@ namespace
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = true;
 			AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
-			const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, AnalysisInput);
+			const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(Data, AnalysisInput);
 		DeferredAnalysisResult = AnalysisResult;
 		DiagnosticDocument = SourceDocument;
 		if (AnalysisResult.ErrorMessage.IsEmpty())

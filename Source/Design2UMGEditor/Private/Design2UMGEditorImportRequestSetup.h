@@ -26,19 +26,5 @@ namespace Design2UMGEditorImportRequestSetup
 		bool bRenderPng,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot);
 
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FUMGWidgetData& Data,
-		const FDesignImportRequest& Request);
-
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FDesignDocument& Document,
-		const FDesignImportRequest& Request,
-		const FImportAnalysisResult* PrecomputedAnalysis = nullptr);
-
-	FDesignImportExecutionResult ExecutePenFileImportWithSettings(
-		const FString& FilePath,
-		const FString& TargetNodeId,
-		const FDesignImportRequest& Request);
-
 	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs();
 }

@@ -1078,7 +1078,11 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 
 bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 {
-	return FigmaParserInternal::ParseDocument(FigmaJson, OutDocument);
+	OutDocument = FDesignDocument();
+	FDesignDocument ParsedDocument;
+	if (!FigmaParserInternal::ParseDocument(FigmaJson, ParsedDocument)) return false;
+	OutDocument = MoveTemp(ParsedDocument);
+	return true;
 }
 
 bool FFigmaParser::ExtractFileKey(const FString& UrlOrKey, FString& OutKey)

@@ -5,10 +5,21 @@
 #include "Components/Widget.h"
 #include "DesignPreviewContracts.h"
 
+FDesignImageImportSettingsSnapshot FDesignImageImportSettingsSnapshot::FromSettings(const UDesign2UMGSettings& Settings)
+{
+	FDesignImageImportSettingsSnapshot Snapshot;
+	Snapshot.bEnableRemoteImageImport = Settings.bEnableRemoteImageImport;
+	Snapshot.bAllowUnsafeRemoteImageUrls = Settings.bAllowUnsafeRemoteImageUrls;
+	Snapshot.RemoteImageImportPath = Settings.RemoteImageImportPath;
+	Snapshot.RemoteImageTimeoutSeconds = Settings.RemoteImageTimeoutSeconds;
+	return Snapshot;
+}
+
 FDesign2UMGGenerationSettingsSnapshot FDesign2UMGGenerationSettingsSnapshot::FromSettings(const UDesign2UMGSettings& Settings)
 {
 	FDesign2UMGGenerationSettingsSnapshot Snapshot;
 	Snapshot.ClassOverrides = Settings.ClassOverrides;
+	Snapshot.ImageSettings = FDesignImageImportSettingsSnapshot::FromSettings(Settings);
 	Snapshot.ComponentConversionSettings = FDesign2UMGConversionSettings::FromSettings(&Settings);
 	// Read the project-level Component Mapping ini once per import request when building the snapshot; it flows into the generation chain with the snapshot.
 	Snapshot.ComponentMapping = Design2UMGComponentMappingConfig::Load();

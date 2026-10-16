@@ -24,6 +24,7 @@ public:
 	void CancelRequests() { CancelActiveRequest(); }
 	bool IsConnected() const;
 	bool IsRunning() const;
+	FString GetLastError() const;
 
 private:
 	struct FSession;

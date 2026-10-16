@@ -692,4 +692,21 @@ bool FFigmaParserErrorInputTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaParserReusedOutputTest,
+	"Design2UMG.Unit.FigmaParser.ReusedOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaParserReusedOutputTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("First document parses"), FFigmaParser::ParseDocument(TEXT(R"({"fileKey":"first-file","document":{"id":"first","name":"First","type":"FRAME"}})"), Document))) return false;
+	if (!TestTrue(TEXT("Second document parses"), FFigmaParser::ParseDocument(TEXT(R"({"document":{"id":"second","name":"Second","type":"FRAME"}})"), Document))) return false;
+	TestEqual(TEXT("Second parse replaces children"), Document.Children.Num(), 1);
+	TestFalse(TEXT("Second parse removes old metadata"), Document.Metadata.Contains(TEXT("fileKey")));
+	if (Document.Children.Num() == 1) TestEqual(TEXT("Only the second node remains"), Document.Children[0]->Id, FString(TEXT("second")));
+	AddExpectedError(TEXT("Missing 'document' field"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Missing document fails"), FFigmaParser::ParseDocument(TEXT("{}"), Document));
+	TestEqual(TEXT("Failure clears the output"), Document.Children.Num(), 0);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Design2UMGCommitResult.h"
+#include "DesignImportGeneration.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
 #include "Design2UMGComponentMappingConfig.h"
@@ -49,27 +50,6 @@ struct FImportInPlaceAnalysisResult
 struct FImportAnalysisResult : FImportInPlaceAnalysisResult
 {
 	FUMGWidgetData Data;
-};
-
-struct FArtifactGenerationResult
-{
-	FDesign2UMGCommitResult Commit;
-	/** Warnings from the actual generation attempt, including resource resolution. */
-	TArray<FString> Warnings;
-	/** True only when commit and requested artifacts succeeded; render can fail after commit. */
-	bool bSucceeded = false;
-	/** Structured failure reason (e.g. render target size above the RHI texture limit); empty on success or unspecified failures. */
-	FString ErrorMessage;
-	FString GeneratedAssetPath;
-	FString RenderPngPath;
-	FIntPoint RenderedSize = FIntPoint::ZeroValue;
-	/** Actual compiled widget instance used for the render, retained for immediate caller-side inspection. */
-	TStrongObjectPtr<UUserWidget> RenderedWidget;
-	/** Keeps that render's Slate tree alive so its cached geometry remains inspectable. */
-	TSharedPtr<SWidget> RenderedSlateWidget;
-
-	/** Component Mapping diagnostics (ini validation + hit/fallback/inputs/Prototype boundaries), going into the import diagnostic report. */
-	TArray<FDesign2UMGMappingDiagnostic> ComponentMappingDiagnostics;
 };
 
 struct FDesignImportRequest
@@ -135,11 +115,6 @@ struct FDesignReimportResult
 
 namespace DesignImportPipeline
 {
-	FImportInPlaceAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input = FImportAnalysisInput());
-	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input = FImportAnalysisInput());
-	FPreviewRefreshResult AnalyzePreviewRefresh(
-		const FPreviewRefreshInput& Input,
-		const FUMGIconFontMappingChanges* MappingChanges = nullptr);
 	FArtifactGenerationResult GenerateArtifacts(FUMGWidgetData& Data, const FArtifactGenerationRequest& Request);
 	FArtifactGenerationResult GenerateArtifacts(
 		FUMGWidgetData& Data,

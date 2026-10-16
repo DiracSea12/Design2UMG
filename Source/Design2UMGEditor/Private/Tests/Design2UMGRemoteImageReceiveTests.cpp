@@ -6,6 +6,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignRemoteImageImporter.h"
+#include "DesignPreviewContracts.h"
 #include "DesignRemoteImageImporterInternal.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGSettings.h"
@@ -1162,7 +1163,7 @@ bool FRemoteImageReceiveSharedInvalidUrlCachesProcessingFailureTest::RunTest(con
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_A"), SharedUrl));
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_B"), SharedUrl));
 
-	const FDesignImageImportResult ImageResult = FDesignRemoteImageImporter::ResolveRemoteImages(Data);
+	const FDesignImageImportResult ImageResult = FDesignRemoteImageImporter::ResolveRemoteImages(Data, FDesignImageImportSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get()));
 	const FString& Report = ImageResult.DisplaySummary;
 	TestEqual(TEXT("Two nodes still cause one transport request"), Server.GetRequestCount(), 1);
 	TestTrue(TEXT("Both nodes report the shared processing failure"), Report.Contains(TEXT("failed=2")));

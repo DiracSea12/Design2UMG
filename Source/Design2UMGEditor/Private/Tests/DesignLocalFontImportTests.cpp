@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Design2UMGFontAccess.h"
+#include "DesignImportPlanning.h"
 #include "DesignLocalFontImport.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
@@ -601,7 +602,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	Node->Text.FontFamily = Face.Family;
 	Node->Text.FontWeight = TEXT("700");
 	Document.Children.Add(Node);
-	const FImportAnalysisResult Result = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	const FImportAnalysisResult Result = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("No preparation failure"), Result.ErrorMessage.IsEmpty());
 	const FString Path = FFontResolver::FindFontAssetPath(Face.Family);
 	TestFalse(TEXT("Default analysis prepares a project font"), Path.IsEmpty());
@@ -617,7 +618,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	TestFalse(TEXT("Fixture distinguishes old and new faces"), Before.Equals(Expected, 0.01));
 	TestTrue(TEXT("An already used Slate font immediately sees the imported weight"), After.Equals(Expected, 0.01));
 	const int32 Count = Font->GetCompositeFont()->DefaultTypeface.Fonts.Num();
-	DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Repeat analysis does not append faces"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), Count);
 	auto* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	const auto SavedMappings = Settings->ExplicitFontMappings;
@@ -625,10 +626,10 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	Settings->ExplicitFontMappings.Add(Face.Family, Font);
 	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
 	FFontResolver::ClearCache();
-	DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Explicit mapping prevents automatic modification"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), 1);
 	Node->Text.FontFamily = TEXT("D2U Missing Local Font Fixture");
-	const FImportAnalysisResult Missing = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	const FImportAnalysisResult Missing = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("Missing face is recorded in generated-data diagnostics"),
 		Missing.Data.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("D2U Missing Local Font Fixture")); }));
 	return true;

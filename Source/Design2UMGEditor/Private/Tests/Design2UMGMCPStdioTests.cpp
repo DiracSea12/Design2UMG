@@ -113,8 +113,15 @@ bool FMCPStdioResponseContractTest::RunTest(const FString&)
 	{
 		bool bCompleted = false;
 		int32 Callbacks = 0;
-		Client.CallToolAsync(Tool, MakeShared<FJsonObject>(), [&](bool bSuccess, const FString&)
-		{ ++Callbacks; bCompleted = true; TestFalse(TEXT("Invalid tool response reports failure"), bSuccess); });
+		Client.CallToolAsync(Tool, MakeShared<FJsonObject>(), [&](bool bSuccess, const FString& Error)
+		{
+			++Callbacks;
+			bCompleted = true;
+			TestFalse(TEXT("Invalid tool response reports failure"), bSuccess);
+			TestFalse(TEXT("Failure preserves its reason"), Error.IsEmpty());
+			if (Tool == TEXT("rpc_error")) TestTrue(TEXT("RPC error text reaches caller"), Error.Contains(TEXT("fixture failure")));
+			if (Tool == TEXT("exit")) TestTrue(TEXT("Process stderr reaches caller"), Error.Contains(TEXT("fixture exit detail")));
+		});
 		const bool bFinished = PumpStdioUntil([&]() { return bCompleted; });
 		TestTrue(TEXT("Failure completes instead of hanging"), bFinished);
 		if (!bFinished) { Client.Disconnect(); return false; }

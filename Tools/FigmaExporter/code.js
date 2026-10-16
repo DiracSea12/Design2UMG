@@ -276,6 +276,12 @@ function serializeNode(node) {
         type: node.type,
         visible: node.visible,
     };
+    if ('reactions' in node) {
+        if (node.reactions.some(reaction => !Array.isArray(reaction.actions))) {
+            throw new Error(`Manual export has no action list for an interaction on ${node.name}. Use the official JSON export.`);
+        }
+        out.interactions = cloneJsonSafe(node.reactions);
+    }
     // absoluteBoundingBox — Plugin API provides this directly
     if ('absoluteBoundingBox' in node && node.absoluteBoundingBox) {
         out.absoluteBoundingBox = rectToRest(node.absoluteBoundingBox);
@@ -616,7 +622,7 @@ async function collectImages(node, images, scale, onProgress, restNodesById) {
                 onProgress(`Render: ${node.name}`);
             }
             catch (e) {
-                console.warn(`Failed to export render fallback ${node.name}:`, e);
+                throw new Error(`Failed to export render image ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
         if (images.has(imageRef)) {
@@ -631,14 +637,16 @@ async function collectImages(node, images, scale, onProgress, restNodesById) {
                 if (hash && !images.has(hash)) {
                     try {
                         const img = figma.getImageByHash(hash);
-                        if (img) {
-                            const bytes = await img.getBytesAsync();
-                            images.set(hash, bytes);
-                            onProgress(`Image: ${hash.substring(0, 8)}...`);
-                        }
+                        if (!img)
+                            throw new Error('Image is unavailable');
+                        const bytes = await img.getBytesAsync();
+                        if (bytes.length === 0)
+                            throw new Error('Image is empty');
+                        images.set(hash, bytes);
+                        onProgress(`Image: ${hash.substring(0, 8)}...`);
                     }
                     catch (e) {
-                        console.warn(`Failed to get image ${hash}:`, e);
+                        throw new Error(`Failed to get image ${hash}: ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
             }
@@ -651,14 +659,16 @@ async function collectImages(node, images, scale, onProgress, restNodesById) {
                 if (hash && !images.has(hash)) {
                     try {
                         const img = figma.getImageByHash(hash);
-                        if (img) {
-                            const bytes = await img.getBytesAsync();
-                            images.set(hash, bytes);
-                            onProgress(`Stroke Image: ${hash.substring(0, 8)}...`);
-                        }
+                        if (!img)
+                            throw new Error('Image is unavailable');
+                        const bytes = await img.getBytesAsync();
+                        if (bytes.length === 0)
+                            throw new Error('Image is empty');
+                        images.set(hash, bytes);
+                        onProgress(`Stroke Image: ${hash.substring(0, 8)}...`);
                     }
                     catch (e) {
-                        console.warn(`Failed to get stroke image ${hash}:`, e);
+                        throw new Error(`Failed to get stroke image ${hash}: ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
             }
@@ -678,7 +688,7 @@ async function collectImages(node, images, scale, onProgress, restNodesById) {
                 onProgress(`Vector: ${node.name}`);
             }
             catch (e) {
-                console.warn(`Failed to export vector ${node.name}:`, e);
+                throw new Error(`Failed to export vector ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
             }
         }
     }
@@ -845,7 +855,9 @@ if (typeof figma !== 'undefined') {
         const scale = msg.scale || 2;
         try {
             figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
-            const serialized = await exportOfficialRestNode(root) || serializeNode(root);
+            const official = await exportOfficialRestNode(root);
+            const serialized = official || serializeNode(root);
+            const warning = official ? '' : 'Official JSON export failed. Manual export may omit unsupported fields; verify interactions and appearance.';
             if (!serialized) {
                 figma.ui.postMessage({ type: 'error', text: 'Failed to serialize selected node.' });
                 return;
@@ -895,6 +907,7 @@ if (typeof figma !== 'undefined') {
             }
             figma.ui.postMessage({
                 type: 'done',
+                warning,
                 text: `Exported ${images.size} image(s). Saving...`,
                 json: JSON.stringify(document, null, 2),
                 images: imageEntries,
