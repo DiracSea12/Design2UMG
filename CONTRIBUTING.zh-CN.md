@@ -15,20 +15,26 @@ English canonical: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 要求：
 
-- 当前维护者验证环境为 Windows / UE 5.7；其他版本和平台请记录实际编译、运行结果，不按“5.4+”推定支持。
+- 适配版本及验证范围见 [README](README.zh-CN.md#安装)。当前维护者 CI 使用 Windows / UE 5.7.1；提交验证结果时记录实际使用的引擎版本。
 - 使用所选 UE 版本支持的 Visual Studio 和 Windows SDK 版本。
 
 通过 UnrealBuildTool 构建：
 
 ```bat
-"<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" <ProjectName>Editor Win64 Development "-Project=<ContributorProject.uproject>" -WaitMutex
+"<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" <ProjectName>Editor Win64 Development "-Project=<ContributorProject.uproject>" -Module=Design2UMGCore -Module=Design2UMGEditor -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
 ```
 
 运行自动化测试：
 
-```bat
-"<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe" "<ContributorProject.uproject>" -ExecCmds="Automation RunTests Design2UMG" -unattended -nopause -nullrhi -log
+```powershell
+pwsh -NoProfile -File Tools/Run-Design2UMGAutomationTests.ps1 `
+  -ProjectPath "<ContributorProject.uproject>" `
+  -EditorPath "<UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe" `
+  -Tests Design2UMG `
+  -RealDesignExportRoot "<FigmaExportRoot>"
 ```
+
+导出根目录须包含真实设计组件测试所需的 `figma_game_party_home/design.json` 和 `figma_general_data_analytics/design.json`。
 
 这里必须用你自己控制的真实 UE 工程。HostProject fallback 不是贡献者侧，也不是维护者侧的支持验证路径。
 

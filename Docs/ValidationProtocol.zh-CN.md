@@ -67,15 +67,18 @@ automation 字体导入是“每个 case 自己的临时证据”，不是共享
 ### 1. 先构建
 
 ```text
-<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe SampleProjectEditor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe <RuntimeProjectName>Editor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -Module=Design2UMGCore -Module=Design2UMGEditor -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
 ```
 
 ### 2. 运行聚焦自动化测试
 
 先跑最小相关测试，再按风险扩大范围。
 
-```text
-<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.WidgetTree.BorderSpacerStrokePadding+Design2UMG.Rasterizer.PersistentPathTexture+Design2UMG.WidgetTree.DesignSizeExpansion; Quit" "-TestExit=Automation Test Queue Empty" -log
+```powershell
+pwsh -NoProfile -File Tools/Run-Design2UMGAutomationTests.ps1 `
+  -ProjectPath "<MaintainerRuntimeProject.uproject>" `
+  -EditorPath "<UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe" `
+  -Tests Design2UMG.Generation
 ```
 
 ### 3. 重新生成真实 asset

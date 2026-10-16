@@ -23,7 +23,7 @@ English canonical: [TestCoverageBoundary.md](TestCoverageBoundary.md)
 | `repository-hygiene` | `push`、`pull_request`、`workflow_dispatch` | 必需文件、公开边界/文本卫生、全部验证器自检、进程隔离及FigmaExporter构建/Node测试 | 会 |
 | `build-plugin` | 维护者 push、同仓库 PR、`workflow_dispatch` | Unreal `BuildPlugin` 编译、产物边界清理和复核、针对同 checkout 引擎安装副本的聚焦自动化、artifact 上传 | 仅同仓库 PR 会跑 |
 
-`build-plugin` 依赖维护者提供的 self-hosted Windows UE runner、`UE_ROOT` 和 `DESIGN2UMG_RUNTIME_PROJECT`。外部 PR 不会在这台 runner 上执行代码。
+`build-plugin` 依赖维护者提供的 self-hosted Windows UE runner、`UE_ROOT`、`DESIGN2UMG_RUNTIME_PROJECT` 和 `DESIGN2UMG_EDITOR_TARGET`。外部 PR 不会在这台 runner 上执行代码。
 
 完整 discovered admissible case set formal visual regression gate 目前不在 public GitHub-hosted PR 自动化里。
 
@@ -60,15 +60,16 @@ English canonical: [TestCoverageBoundary.md](TestCoverageBoundary.md)
 | Undo / finalize | `Design2UMG.CommitResult.ReimportUndoFailure`、`.ManifestFinalizeFailure`；测试事务缓冲区和平台文件移动失败。 | 恢复失败不能报告为成功，不能静默消费先前用户事务。 |
 | Replacement / 缺失 mapping | `Design2UMG.SafeReimport.PrepareCommit.KindFailurePreservesSubtree`、`.AutomaticOverrideFailurePreservesAllSlots` 和 `Design2UMG.SafeReimport.MappingDiagnosticsSurfaced`；无效 widget type 或不可加载 class。 | 保留原 subtree、slot、manifest，诊断指明实际失败边界。 |
 | Nested partial sync | `Design2UMG.SafeReimport.NestedAddAndRemovalBoundary`、`.NestedRemoveConflictNamesNode`、`.NestedMoveConflictCreatesNoCopy`；真实 nested owned/project 内容冲突。 | 不重复实例、不做不安全删除、不把部分更新伪装成完成，保留明确诊断。 |
-| HTTP | `Design2UMG.Http` 下的 Figma/MCP 响应、取消、重连和生命周期用例；通过引擎 HTTP 请求接口提供测试传输。 | 验证回调次数、状态与响应处理、迟到响应抑制、启动失败清理和会话释放。 |
+| HTTP | `Design2UMG.Http` 下的 Figma 响应与取消用例；通过引擎 HTTP 请求接口提供测试传输。 | 验证回调次数、状态与响应处理、迟到响应抑制和请求清理。 |
+| MCP / Pencil | `Design2UMG.MCP.Stdio`、`Design2UMG.Pencil.ConnectionLifecycle`、`Design2UMG.Pencil.ReadDocumentPayload`。 | 验证标准输入输出响应、请求身份、取消、重连、会话生命周期及当前 Pencil 文档读取。 |
 
 此表是可执行证据索引，不是覆盖率数字，也不代表任意一次运行都覆盖全部层级。每次改动应记录实际测试标识、日志与结果数量。
 
 ### 测试归属与筛选
 
-HTTP 测试集中在 `Design2UMGHttpTests.cpp`。组件 REST 依赖用例位于 `Design2UMGComponentBlueprintTests.cpp`，共用测试传输。文本测量边界测试使用 `Design2UMG.Architecture.TextMeasurementPrivateBoundary`。
+HTTP 测试集中在 `Design2UMGHttpTests.cpp`，标准输入输出 MCP 测试位于 `Design2UMGMCPStdioTests.cpp`；Pencil 生命周期和文档读取使用 `Design2UMG.Pencil` 筛选名。组件 REST 依赖用例位于 `Design2UMGComponentBlueprintTests.cpp`，共用测试传输。文本测量边界测试使用 `Design2UMG.Architecture.TextMeasurementPrivateBoundary`。
 
-完整套件：`Automation RunTests Design2UMG`；架构边界：`Automation RunTests Design2UMG.Architecture`；HTTP：`Automation RunTests Design2UMG.Http`。
+完整套件：`Automation RunTests Design2UMG`；架构边界：`Automation RunTests Design2UMG.Architecture`；HTTP：`Automation RunTests Design2UMG.Http`；标准输入输出 MCP：`Automation RunTests Design2UMG.MCP.Stdio`；Pencil：`Automation RunTests Design2UMG.Pencil`。
 
 完整套件和 `Design2UMG.ComponentBlueprints` 都包含 `RealDesignLayouts`。请使用 `Tools/Run-Design2UMGAutomationTests.ps1 -Tests Design2UMG -RealDesignExportRoot <FigmaExportRoot>` 启动；根目录必须包含 `figma_game_party_home/design.json` 和 `figma_general_data_analytics/design.json`。缺少参数或输入时测试明确失败，不会静默跳过。
 

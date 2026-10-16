@@ -23,7 +23,7 @@ Today it has two different jobs with different trust levels:
 | `repository-hygiene` | `push`, `pull_request`, `workflow_dispatch` | required files, public boundary/text hygiene, all verifier selftests, process isolation and FigmaExporter build/Node tests | Yes |
 | `build-plugin` | maintainer push, same-repository PR, `workflow_dispatch` | Unreal `BuildPlugin` compile, package boundary strip/verify, focused automation against the engine-installed plugin copy from the same checkout, artifact upload | Same-repository PRs only |
 
-`build-plugin` requires a maintainer-provided self-hosted Windows UE runner, `UE_ROOT`, and `DESIGN2UMG_RUNTIME_PROJECT`. External PRs do not run code on that runner.
+`build-plugin` requires a maintainer-provided self-hosted Windows UE runner, `UE_ROOT`, `DESIGN2UMG_RUNTIME_PROJECT`, and `DESIGN2UMG_EDITOR_TARGET`. External PRs do not run code on that runner.
 
 The full discovered admissible case set formal visual regression gate is not in public GitHub-hosted PR automation.
 
@@ -60,15 +60,16 @@ Shared helpers should remove demonstrated duplication, not model the application
 | Undo / finalization | `Design2UMG.CommitResult.ReimportUndoFailure` and `.ManifestFinalizeFailure`; a test transaction buffer and platform-file move failures. | Recovery failure is distinct from success; prior user transactions are not silently consumed. |
 | Replacement / missing mapping | `Design2UMG.SafeReimport.PrepareCommit.KindFailurePreservesSubtree`, `.AutomaticOverrideFailurePreservesAllSlots`, and `Design2UMG.SafeReimport.MappingDiagnosticsSurfaced`; invalid widget types or unloadable classes. | Original subtree/slots/manifest retained; diagnostics identify the actual failed boundary. |
 | Nested partial synchronization | `Design2UMG.SafeReimport.NestedAddAndRemovalBoundary`, `.NestedRemoveConflictNamesNode` and `.NestedMoveConflictCreatesNoCopy`; real nested owned/project content conflicts. | No duplicate instance, unsafe removal or success-shaped partial update; unsupported work remains explicit. |
-| HTTP | Figma/MCP response, cancellation, reconnection and lifetime cases under `Design2UMG.Http`, using the engine HTTP request interface. | Verify callback counts, status/body processing, stale-response suppression, launch-failure cleanup and session release. |
+| HTTP | Figma response and cancellation cases under `Design2UMG.Http`, using the engine HTTP request interface. | Verify callback counts, status/body processing, stale-response suppression and request cleanup. |
+| MCP / Pencil | `Design2UMG.MCP.Stdio`, `Design2UMG.Pencil.ConnectionLifecycle`, and `Design2UMG.Pencil.ReadDocumentPayload`. | Verify stdio responses, request identity, cancellation, reconnection, session lifetime, and current Pencil document extraction. |
 
 This is a navigation map to executable evidence, not a coverage percentage or a claim that each run exercised all tiers. Record the actual test identifiers, logs and result counts for a change.
 
 ### Test ownership and selectors
 
-HTTP tests live in `Design2UMGHttpTests.cpp`. Component REST dependency cases in `Design2UMGComponentBlueprintTests.cpp` share the transport fixture. The text-measurement boundary selector is `Design2UMG.Architecture.TextMeasurementPrivateBoundary`.
+HTTP tests live in `Design2UMGHttpTests.cpp`; stdio MCP tests live in `Design2UMGMCPStdioTests.cpp`. Pencil lifecycle and document-read tests use the `Design2UMG.Pencil` selectors. Component REST dependency cases in `Design2UMGComponentBlueprintTests.cpp` share the transport fixture. The text-measurement boundary selector is `Design2UMG.Architecture.TextMeasurementPrivateBoundary`.
 
-Run the full suite with `Automation RunTests Design2UMG`, architecture boundaries with `Automation RunTests Design2UMG.Architecture`, and HTTP cases with `Automation RunTests Design2UMG.Http`.
+Run the full suite with `Automation RunTests Design2UMG`, architecture boundaries with `Automation RunTests Design2UMG.Architecture`, HTTP cases with `Automation RunTests Design2UMG.Http`, stdio cases with `Automation RunTests Design2UMG.MCP.Stdio`, and Pencil cases with `Automation RunTests Design2UMG.Pencil`.
 
 The full suite and `Design2UMG.ComponentBlueprints` include `RealDesignLayouts`. Run them through `Tools/Run-Design2UMGAutomationTests.ps1 -Tests Design2UMG -RealDesignExportRoot <FigmaExportRoot>`. The root must contain `figma_game_party_home/design.json` and `figma_general_data_analytics/design.json`; a missing parameter or input is a test failure, not a skipped case.
 

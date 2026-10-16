@@ -51,16 +51,18 @@ The repository does not currently publish a public hosted UE matrix, public host
 | Layout conversion | Ahead of basic references: flex-like layout, anchors, offsets, and fixer rules |
 | Visual properties | Fill, stroke, radius, shadow, blur approximation, gradients, and SVG paths |
 | Component system | Ref expansion, variables, and themes |
-| Prototype flow | Minimal typed/runtime loop exists; broader semantics remain future work |
+| Prototype flow | Typed navigation data and native Blueprint wiring for supported single-step actions; broader semantics remain future work |
 | Multiple input sources | `.pen`, Figma REST, local Figma export JSON, plus bridge/debug utilities |
-| Blueprint logic generation | Runtime extension first; full UEdGraph authoring is not a current release promise |
+| Blueprint logic generation | Native Blueprint graph wiring for supported mouse/keyboard actions; not a general-purpose interaction graph compiler |
 
 ## v1.0 Public Contents
 
 - Core conversion pipeline from `.pen`, Figma, and local Figma export JSON to UMG Widget Blueprint.
 - Layout engine: flex-like layout to anchors/offsets, plus fixer rules.
-- Current visual-property path: fill, stroke, radius, shadow, blur approximation, gradients, SVG path rasterization, and cached path textures.
+- Current visual-property path: fill, stroke, radius, shadow, blur approximation, multi-stop gradients with endpoints/rotation, SVG path rasterization, and cached path textures.
 - Component reference expansion plus variable and theme parsing.
+- Native Blueprint wiring for supported single-step mouse/keyboard actions; detailed limits are in [Known Limitations](../KNOWN_LIMITATIONS.md#interaction-and-animation).
+- Incremental reimport of recorded instances, with explicit conflict and unsupported-update diagnostics; see [Known Limitations](../KNOWN_LIMITATIONS.md).
 - Content Browser drag-and-drop import and command-line import.
 - Public smoke / validation documentation.
 - Bridge and debug utilities remain available but are not the current support promise.
@@ -68,17 +70,14 @@ The repository does not currently publish a public hosted UE matrix, public host
 
 ## v1.1 Candidates
 
-- Prototype flow expansion: hover, drag, keyboard, conditional flows, and overlay semantics.
-- Evaluation of whether automatic Blueprint graph generation should be added.
-- Optional tag-based helper flow.
-- Multi-stop gradients and arbitrary gradient angles.
+- Prototype flow expansion beyond the supported single-step native graph bindings: drag, conditional/multi-step flows, additional keyboard actions, and complete overlay layer semantics.
 
 ## Later Community-Driven Areas
 
 - Advanced interaction semantics.
 - Responsive adaptation and safe-zone support.
 - Design token and design-system sync.
-- Incremental update / reimport behavior.
+- Broader reimport coverage beyond the current recorded-instance update boundary.
 
 ## Public API Boundary
 

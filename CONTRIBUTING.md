@@ -14,20 +14,26 @@ Put the plugin in one of the following:
 ```
 
 Requirements:
-- Unreal Engine: Windows / UE 5.7 is the current maintainer verification environment; report the exact version used for other combinations.
+- Unreal Engine: see the [adapted versions and verification scope](README.md#requirements). Current maintainer CI uses Windows / UE 5.7.1; record the exact engine version used for your changes.
 - Visual Studio and Windows SDK versions supported by your chosen Unreal Engine installation.
 
 Build the plugin via UnrealBuildTool:
 
 ```bat
-"<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" <ProjectName>Editor Win64 Development "-Project=<ContributorProject.uproject>" -WaitMutex
+"<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe" <ProjectName>Editor Win64 Development "-Project=<ContributorProject.uproject>" -Module=Design2UMGCore -Module=Design2UMGEditor -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
 ```
 
 Run automation tests:
 
-```bat
-"<UE5_Root>\Engine\Binaries\Win64\UnrealEditor.exe" "<ContributorProject.uproject>" -ExecCmds="Automation RunTests Design2UMG" -unattended -nopause -nullrhi -log
+```powershell
+pwsh -NoProfile -File Tools/Run-Design2UMGAutomationTests.ps1 `
+  -ProjectPath "<ContributorProject.uproject>" `
+  -EditorPath "<UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe" `
+  -Tests Design2UMG `
+  -RealDesignExportRoot "<FigmaExportRoot>"
 ```
+
+The export root must contain `figma_game_party_home/design.json` and `figma_general_data_analytics/design.json`, required by the real-design component tests.
 
 Use a real UE project you control. HostProject fallback is not a supported contributor or maintainer validation path.
 

@@ -71,7 +71,7 @@ These rules come from a reproduced failure in which cross-case automation font r
 ### 1. Build first
 
 ```text
-<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe <RuntimeProjectName>Editor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -WaitMutex -FromMsBuild
+<UE5_Root>\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe <RuntimeProjectName>Editor Win64 Development "-Project=<MaintainerRuntimeProject.uproject>" -Module=Design2UMGCore -Module=Design2UMGEditor -UsePrecompiled -NoEngineChanges -WaitMutex -NoHotReloadFromIDE
 ```
 
 ### 2. Run focused automation tests
@@ -80,8 +80,11 @@ Use the smallest relevant test set first, then broaden if needed.
 
 Example:
 
-```text
-<UE5_Root>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <MaintainerRuntimeProject.uproject> -unattended -nop4 -nosplash -NullRHI "-ExecCmds=Automation RunTests Design2UMG.WidgetTree.BorderSpacerStrokePadding+Design2UMG.Rasterizer.PersistentPathTexture+Design2UMG.WidgetTree.DesignSizeExpansion; Quit" "-TestExit=Automation Test Queue Empty" -log
+```powershell
+pwsh -NoProfile -File Tools/Run-Design2UMGAutomationTests.ps1 `
+  -ProjectPath "<MaintainerRuntimeProject.uproject>" `
+  -EditorPath "<UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe" `
+  -Tests Design2UMG.Generation
 ```
 
 ### 3. Regenerate the real asset

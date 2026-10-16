@@ -76,21 +76,9 @@ The retained public header surface is intentional, but it is still a plugin API 
 
 `Source/Design2UMGCore/Public/` owns the shared parser, converter, settings, schema, font, notification, text measurement, layout, value parsing, and typed widget-node access contracts used across Core, Editor, and tests.
 
-`Source/Design2UMGEditor/Public/` owns editor-only module, preview, remote image import, Figma/MCP/Pencil connector, preview widget/window, and JSON bridge contracts. These headers remain editor-facing and should not be treated as runtime module API.
+`Source/Design2UMGEditor/Public/` contains four editor-facing headers: `Design2UMGEditorModule.h`, `DesignImageDiagnostics.h`, `DesignPreviewContracts.h`, and `PreviewUserWidget.h`. These cover the module entry point, image diagnostics, and preview contracts; they are not runtime module APIs.
 
-Within that editor-facing surface there are two explicit buckets:
-
-- stable editor workflow contracts:
-  - preview service/window contracts
-  - remote image import service
-  - Figma / MCP / Pencil bridge entrypoints
-- compatibility-retained bridge utilities:
-  - `UMGJsonParser.h`
-  - `UMGJsonSerializer.h`
-
-The JSON bridge headers stay public for source compatibility and because preview/import/debug workflows still consume them, but they are not meant to imply a broad runtime support promise.
-
-Headers that are kept public for bridge/debug utilities are documented as such. If a future change narrows one of them, it needs current include evidence, source-compatibility review, and validation.
+Remote image import, Figma/MCP/Pencil connectors, preview windows, and JSON parsing/serialization live under `Source/Design2UMGEditor/Private/`. They are implementation details, not public extension contracts.
 
 ## IR Data Flow
 
@@ -119,31 +107,20 @@ Some fields such as `bPaddingRequiresRuntimeWrap` are set by the parser and cons
 
 ### Adding a new design source format
 
-Implement a parser that produces a `FDesignDocument`. The required root payload is `Children` (the root node list), plus any document-level metadata the downstream pipeline depends on such as `Fonts`. Register the parser in `DesignSourceRegistry` (`Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp`).
+Implement a parser that produces a `FDesignDocument`. The required root payload is `Children` (the root node list), plus document-level metadata the downstream pipeline uses, such as `Fonts`. The current `Pen`/`Figma` dispatch is `ConvertRegisteredSource` in `Source/Design2UMGEditor/Private/Design2UMGEditorImportOrchestrator.cpp`; there is no source registry API.
 
 Reference signatures:
 
 ```cpp
 static bool FPenParser::ParseDocument(const FString& JsonString, FDesignDocument& OutDocument);
 static bool FFigmaParser::ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument);
-bool Design2UMGEditorDesignSourceRegistry::TryConvertSource(
-    FName SourceId,
-    const FString& RawJson,
-    FUMGWidgetData& OutData);
 ```
 
-Current registration shape lives in `Design2UMGEditorDesignSourceRegistry::RegisterBuiltInSources()` and uses:
-
-```cpp
-using FDesignSourceConvertFunc = TFunction<bool(const FString& RawJson, FUMGWidgetData& OutData)>;
-void RegisterSource(FName SourceId, FDesignSourceConvertFunc&& Convert);
-```
-
-In practice, a new source format needs three edits:
+For a new source format:
 
 1. Add a parser entry point in `Source/Design2UMGCore/Public/*.h` and parser implementation in `Source/Design2UMGCore/Private/*.cpp`.
-2. Add a registry lambda in `Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp`.
-3. Make the lambda parse into `FDesignDocument`, then hand that document to `DesignImportPipeline::AnalyzeImport(...).Data` so the registry output still includes converter output plus import-analysis side data.
+2. Add explicit source dispatch in `Design2UMGEditorImportOrchestrator.cpp`, and update the import command entry points in `Design2UMGEditorCommandOwner.cpp` as needed.
+3. Pass the parsed document and current settings to `DesignImportPipeline::AnalyzeImport`, check its error, then return its converter output and import-analysis data through the existing workflow.
 
 ### Adding a new Widget type mapping
 
@@ -174,14 +151,14 @@ Contributor checklist by scenario:
 
 ### Extending the IR without breaking existing conversions
 
-New fields in `DesignSchema.h` and adjacent transient schema bridges should prefer `TOptional<T>` with a default unset state when the current UE baseline supports and tests the optional property shape. On UE 5.7, `UPROPERTY()` and `TOptional` are supported for the raw-schema optional presence patterns used here, so new code must not add a parallel `Value + bHasValue` pair just to express set-vs-unset semantics. The converter checks `IsSet()` before processing optional fields, so unset fields are safely ignored by existing conversion paths.
+New transient fields in `DesignSchema.h` and adjacent schema bridges should prefer ordinary `TOptional<T>` with a default unset state for set-vs-unset semantics. Follow the current unreflected optional fields rather than assuming `UPROPERTY()` support across all adapted UE versions. The converter checks `IsSet()` before processing optional fields.
 
 Reference pattern:
 
 ```cpp
 TOptional<float> Width;
 TOptional<FMargin> Padding;
-UPROPERTY() TOptional<bool> IsExposedInstance;
+TOptional<bool> IsExposedInstance;
 ```
 
 Do not introduce new `bHas*` + value shadow pairs into `DesignSchema.h`-style transient IR unless there is a documented serializer or typed-contract reason to keep that shape. Prefer `TOptional<T>` when you only need set-vs-unset presence. For existing typed payload structs in `UMGSchemaTypedPayloads.h`, follow the current local contract instead of forcing a blind `TOptional` rewrite.

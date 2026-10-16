@@ -68,17 +68,17 @@ Pencil .pen / Figma JSON
 
 `Source/Design2UMGCore/Public/` 中保留的 public headers 主要覆盖 parser entrypoints、converter entrypoints、settings payloads、schema aggregates、font resolver、notification hooks、text measurement facade、typed widget access 和 layout/value helpers。
 
-`Source/Design2UMGEditor/Public/` 中保留的 public headers 主要覆盖 editor module entrypoint、preview contracts、remote image importer、Figma/MCP/Pencil connector surfaces、preview widget/window，以及 JSON parser/serializer helper。
+`Source/Design2UMGEditor/Public/` 仅保留四个编辑器侧公共头：`Design2UMGEditorModule.h`、`DesignImageDiagnostics.h`、`DesignPreviewContracts.h`、`PreviewUserWidget.h`，分别承接模块入口、图片诊断与预览接口，不是运行时模块接口。
 
-当前没有足够证据支持移动或收窄这些 header。现有 public 边界保留上述职责说明；后续如果要收窄，必须以当前 include 证据和验证结果为准。
+远程图片导入、Figma/MCP/Pencil 连接器、预览窗口及 JSON 解析／序列化均位于 `Source/Design2UMGEditor/Private/`，属于内部实现。
 
 ## 扩展新设计来源
 
-新增设计来源时，先实现输出 `FDesignDocument` 的 parser，然后在 `DesignSourceRegistry` 注册。通常需要：
+新增设计来源时，先实现输出 `FDesignDocument` 的解析器。当前 `Pen`／`Figma` 由 `Design2UMGEditorImportOrchestrator.cpp` 中的 `ConvertRegisteredSource` 直接分派，没有来源注册表接口。通常需要：
 
 1. 在 `Source/Design2UMGCore/Public/*.h` 增加 parser entry point，并在 `Private/*.cpp` 实现。
-2. 在 `Source/Design2UMGEditor/Private/Design2UMGEditorDesignSourceRegistry.cpp` 添加 registry lambda。
-3. lambda 解析到 `FDesignDocument` 后交给 `DesignImportPipeline::AnalyzeImport(...).Data`，这样 registry 输出仍包含 converter 输出和 import-analysis side data。
+2. 在 `Design2UMGEditorImportOrchestrator.cpp` 增加明确的来源分派，按需同步 `Design2UMGEditorCommandOwner.cpp` 中的导入命令入口。
+3. 将解析后的文档和当前设置交给 `DesignImportPipeline::AnalyzeImport`，检查错误后，通过现有流程返回转换结果及导入分析数据。
 
 ## 扩展新 widget 映射
 

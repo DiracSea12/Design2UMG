@@ -56,7 +56,7 @@ For a plain-language coverage boundary and a contributor-versus-maintainer split
 
 ## Requirements
 
-- Unreal Engine: Windows / UE 5.7 is the current maintainer verification environment. Other versions and platforms need their own build and runtime evidence; older 5.4+ wording is not a verified support matrix.
+- Unreal Engine: Windows / UE 5.0–5.8 version adaptation is implemented. The 2026-10-10 regression runs covered 5.0.3, 5.1.1, 5.2.1, 5.3.2, 5.4.4, 5.5.4, 5.6.1, 5.7.1, and 5.8.2; each completed generation and saved-asset reload for all 81 design cases. Day-to-day builds and CI currently use UE 5.7.1. These historical runs do not mean every later commit has been retested on every version; other operating systems need separate validation.
 - Pencil extension in VS Code with a `.pen` document open in its design editor (optional, for live Pencil import; currently verified with 0.6.77)
 - Figma Personal Access Token (optional, for Figma import)
 
