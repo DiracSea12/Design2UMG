@@ -31,7 +31,7 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 | 层级 | 用途 | 谁来运行 |
 | --- | --- | --- |
 | `repository-hygiene` | 检查公开仓库边界和必需文件 | GitHub Actions push / PR |
-| `maintainer build` | 打包插件、运行聚焦 UE 自动化并上传产物 | 维护者本地验证，不进托管 CI |
+| `maintainer build` | 打包插件、运行聚焦 UE 自动化并上传产物 | GitHub Actions 自托管 Windows 运行机；没有运行机时排队 |
 | `public smoke/public validate` | 本地构建和聚焦验证，用于贡献者复现 | 贡献者和维护者 |
 | `maintainer formal admissible gate` | 维护者拥有的完整 admissible case set 正式无回退发布门禁 | 维护者 |
 
@@ -95,6 +95,14 @@ MCP JSON 导入只作为 bridge/debug utility：
 ```text
 Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-preview] [--out=/Game/Path]
 ```
+
+### 读取活动 Pencil 设计稿
+
+在 VS Code 的 Pencil 设计编辑器中打开 `.pen` 文件，再在 Unreal Editor 选择 **Design2UMG > Connect to Pencil...**。当前验证的 Pencil 0.6.77 使用标准输入输出通信，通过 `execute` 一次读取活动文档的画板和变量，不修改设计稿。选择画板、检查预览后生成 Widget Blueprint。
+
+更新扩展后，关闭并重新打开已有设计标签页，让新扩展注册文档。插件默认自动发现服务器，也可在插件设置中指定服务器路径和应用名称。
+
+远程图片导入默认开启，已有用户配置仍生效；不安全或本地图片 URL 默认关闭。
 
 ## 生成图片预算设置
 

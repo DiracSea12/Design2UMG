@@ -57,7 +57,7 @@ For a plain-language coverage boundary and a contributor-versus-maintainer split
 ## Requirements
 
 - Unreal Engine: Windows / UE 5.7 is the current maintainer verification environment. Other versions and platforms need their own build and runtime evidence; older 5.4+ wording is not a verified support matrix.
-- Pencil desktop app (optional, for MCP bridge/debug tooling)
+- Pencil extension in VS Code with a `.pen` document open in its design editor (optional, for live Pencil import; currently verified with 0.6.77)
 - Figma Personal Access Token (optional, for Figma import)
 
 ## Installation

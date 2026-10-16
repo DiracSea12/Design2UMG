@@ -51,7 +51,7 @@ figma_export.zip
 4. 插件会自动：
    - 解析 JSON 设计数据
    - 扫描同级 `images/` 目录匹配图片
-   - 将图片导入为 UE5 纹理资产（保存到 `/Game/Design2UMG/LocalFigma_Output/`）
+   - 将图片导入为 UE5 纹理资产，保存目录由 `Remote Image Import Path` 设置决定，默认 `/Game/Design2UMG/ImportedImages`
    - 打开预览窗口展示转换结果
 
 ## 注意事项

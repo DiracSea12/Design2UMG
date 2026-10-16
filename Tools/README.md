@@ -28,12 +28,14 @@ An empty normal suite writes `summary.json` with `status=empty`, `total=0`, `exe
 ## Run a suite
 
 ```powershell
-python Tools/design2umg_auto_verify_suite.py --design-root <YourCases> --output-root <NewRunRoot> --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --reference-root <YourFrozenReferenceRoot> --no-publish-history
+python Tools/design2umg_auto_verify_suite.py --design-root <YourCases> --output-root <NewRunRoot> --project <YourProject.uproject> --editor <UE5_Root>/Engine/Binaries/Win64/UnrealEditor.exe --reference-root <YourFrozenReferenceRoot> --editor-isolation case --parallel-editors 1 --no-publish-history
 ```
 
 Use an existing real project. Runtime execution requires `--project` or `DESIGN2UMG_RUNTIME_PROJECT`; no generated host project is substituted. Omit `--reference-root` when using each Figma export's PNG or the configured Pencil reference provider. Reference cache mode remains `read-write`; external frozen references are copied for comparison, not regenerated.
 
 Each external baseline case directory needs both `reference.png` and `compare_report.json` for available per-case `no_regression`. Keep input/reference identities and baseline pointers frozen during a code comparison. A filtered run is not a full-corpus result. Compare each metric per case, never just an average.
+
+For visual comparisons, use one editor per case with only one editor running at a time. Parallel shard results do not replace isolated screenshot evidence. Both generation and asset-reload screenshots use the source design canvas; reference image dimensions do not resize either render pass.
 
 `--no-publish-history` retains the ordinary history check and its run-local reports without replacing the global historical-best manifest. It does not waive regressions or publish anything to a remote service. Keep private cases, PNGs and run logs outside public exports.
 
