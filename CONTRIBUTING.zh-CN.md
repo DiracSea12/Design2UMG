@@ -15,7 +15,7 @@ English canonical: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 要求：
 
-- 适配版本及验证范围见 [README](README.zh-CN.md#安装)。当前维护者 CI 使用 Windows / UE 5.7.1；提交验证结果时记录实际使用的引擎版本。
+- 适配版本及验证范围见 [README](README.md#版本兼容)。当前维护者 CI 使用 Windows / UE 5.7.1；提交验证结果时记录实际使用的引擎版本。
 - 使用所选 UE 版本支持的 Visual Studio 和 Windows SDK 版本。
 
 通过 UnrealBuildTool 构建：

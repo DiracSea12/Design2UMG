@@ -118,6 +118,23 @@ $forbiddenRootReviewPatterns = @(
     'CODEX_*REVIEW*.md'
 )
 
+# Local-only files that must never be tracked (case-insensitive regex on repo-relative paths).
+$sourceForbiddenTrackedRegexes = @(
+    '^\.cowork-temp/',
+    '^\.claude/',
+    '^\.codex/',
+    '^\.vs/',
+    '^openspec/',
+    '^progress\.txt$',
+    '^ocr_result\.txt$',
+    '^CLAUDE\.md$',
+    '^AGENTS\.md$',
+    '^Design2UMG图片/',
+    '^(capture_editor_screenshot|capture_umg_screenshot|compare_coordinates|screenshot|show_expected_coords|test_import|verify_coords|verify_design_size)\.py$',
+    '^screenshot\.ps1$',
+    '^editor_screenshot\.png$'
+)
+
 $forbiddenInternalReviewPathPatterns = @(
     'Docs/ReviewActionPlan.md',
     'Docs/ReviewRemainingWork.md'
@@ -142,6 +159,7 @@ $exportForbiddenRecursivePathPatterns = @(
 
 $publicSurfaceGlobs = @(
     'README.md',
+    'README.en.md',
     'KNOWN_LIMITATIONS.md',
     'CONTRIBUTING.md',
     'SECURITY.md',
@@ -193,7 +211,7 @@ $failures = @()
 
 if ($Mode -in @('Package', 'ExportWorkspace')) {
     foreach ($required in @(
-        'LICENSE', 'README.md', 'README.zh-CN.md', 'CHANGELOG.md',
+        'LICENSE', 'README.md', 'README.en.md', 'CHANGELOG.md',
         'KNOWN_LIMITATIONS.md', 'Design2UMG.uplugin',
         'Tools/FigmaExporter/manifest.json', 'Tools/FigmaExporter/code.js',
         'Tools/FigmaExporter/ui.html', 'Tools/FigmaExporter/README.md',
@@ -206,10 +224,16 @@ if ($Mode -in @('Package', 'ExportWorkspace')) {
 }
 
 if ($Mode -eq 'SourceWorkspace') {
-    $trackedPaths = @(git -C $resolvedRoot ls-files 2>$null)
+    $trackedPaths = @(git -C $resolvedRoot -c core.quotepath=false ls-files 2>$null)
     if ($LASTEXITCODE -eq 0) {
         foreach ($trackedPath in $trackedPaths) {
             $relative = $trackedPath.Replace('\', '/')
+
+            foreach ($regex in $sourceForbiddenTrackedRegexes) {
+                if ($relative -match $regex) {
+                    $failures += "Forbidden local-only file tracked in SourceWorkspace: $relative"
+                }
+            }
 
             if ($relative -notlike '*/*') {
                 foreach ($pattern in $forbiddenRootReviewPatterns) {

@@ -41,7 +41,8 @@ Use this checklist before cutting a GitHub release branch or tag.
 
 - [ ] Public smoke validation command is documented separately from the release gate
 - [ ] Public smoke checks are described as contribution confidence checks, not as the formal admissible gate
-- [ ] Self-hosted BuildPlugin passed (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
+- [ ] Self-hosted plugin-only strict rebuild (`-UsePrecompiled -NoEngineChanges -NoPCH -NoSharedPCH`) and normal `RunUAT BuildPlugin` packaging both passed on a maintainer-provided UE runner
+- [ ] `Design2UMG.uplugin` integer `Version` was incremented for this release
 - [ ] Installed plugin source matches the candidate, no duplicate plugin is present, and the real project's editor target was rebuilt before automation
 - [ ] Actual packaged plugin installed as the only copy and tested in the existing real project; source-matched installed-copy automation alone does not satisfy this item
 - [ ] Generated assets saved and reloaded, then exercised in a cooked game with the plugin's editor modules absent; record the map, Widget asset, build configuration and results

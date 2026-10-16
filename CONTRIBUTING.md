@@ -14,7 +14,7 @@ Put the plugin in one of the following:
 ```
 
 Requirements:
-- Unreal Engine: see the [adapted versions and verification scope](README.md#requirements). Current maintainer CI uses Windows / UE 5.7.1; record the exact engine version used for your changes.
+- Unreal Engine: see the [adapted versions and verification scope](README.en.md#compatibility). Current maintainer CI uses Windows / UE 5.7.1; record the exact engine version used for your changes.
 - Visual Studio and Windows SDK versions supported by your chosen Unreal Engine installation.
 
 Build the plugin via UnrealBuildTool:

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = (
-    "LICENSE", "README.md", "README.zh-CN.md", "CHANGELOG.md",
+    "LICENSE", "README.md", "README.en.md", "CHANGELOG.md",
     "KNOWN_LIMITATIONS.md", "Design2UMG.uplugin",
     "Tools/FigmaExporter/manifest.json", "Tools/FigmaExporter/code.js",
     "Tools/FigmaExporter/ui.html", "Tools/FigmaExporter/README.md",
@@ -396,6 +396,29 @@ class ReleaseContracts(unittest.TestCase):
         block = workflow[start:end]
         self.assertNotIn("-StrictIncludes", block)
         self.assertIn("-WaitForUATMutex", block)
+
+    def test_plugin_version_matches_latest_changelog_entry(self):
+        plugin = (ROOT / "Design2UMG.uplugin").read_text(encoding="utf-8")
+        version = re.search(r'"VersionName"\s*:\s*"([^"]+)"', plugin).group(1)
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        latest = re.search(r"^## \[([^\]]+)\]", changelog, re.MULTILINE).group(1)
+        self.assertEqual(latest, version)
+
+    def test_source_workspace_rejects_tracked_local_only_files(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        for name in ("README.md", "Design2UMG图片/a.png", "screenshot.py"):
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixture\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", name], check=True)
+        result = self.run_script("Tools/Release/Assert-PublicRepoBoundary.ps1",
+                                 "-RepoRoot", repo, "-Mode", "SourceWorkspace")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("Forbidden local-only file tracked in SourceWorkspace: screenshot.py", output)
+        self.assertIn("Design2UMG图片/a.png", output)
 
     def test_additional_plugin_directory(self):
         source, installed, project = self.candidate_fixture()

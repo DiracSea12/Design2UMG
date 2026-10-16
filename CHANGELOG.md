@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/).
 ## [1.1.0] - Unreleased
 
 ### Changed
+- README rewritten around install and usage, with maintainer validation detail folded away. The Chinese README is now the default `README.md`; the English edition moved to `README.en.md` (replacing `README.zh-CN.md`). Outdated preview screenshots removed.
+- Plugin descriptor integer `Version` bumped to 2 for the 1.1.0 line; release contract tests check that `VersionName` matches the latest changelog entry.
 - Release packages include the MIT license, user documentation, Figma exporter and public examples, and explicitly exclude local font binaries. Package/export checks reject missing required files and local Fonts directories.
 - Self-hosted CI checks installed plugin source identity, rebuilds the real project editor, uses an isolated package directory, and emits a versioned ZIP with candidate metadata and SHA-256. Game-runtime and full visual checks remain separate release requirements.
 - Installation guidance distinguishes source and precompiled downloads, verified engine environments, and password-style Figma token input. Validation dependencies are versioned.

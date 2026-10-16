@@ -12,7 +12,7 @@ Use this workflow when freezing a validated plugin state into a standalone GitHu
 
 - candidate commit SHA in the maintainer workspace
 - current public workflow badge expectation: the complete `.github/workflows/build.yml` workflow, with self-hosted UE jobs conditional on event type and runner availability
-- successful self-hosted plugin build (`RunUAT BuildPlugin -StrictIncludes`) on a maintainer-provided UE runner
+- successful self-hosted plugin-only strict rebuild plus normal `RunUAT BuildPlugin` packaging on a maintainer-provided UE runner
 - successful `Automation RunTests Design2UMG`
 - successful full admissible summary:
   `Saved/Design2UMG/Automation/_final_admissible_full_<date>/summary.json`
@@ -32,6 +32,7 @@ Required public set:
 - `Tools/FigmaExporter/` (exclude node_modules and other local build dependencies)
 - `Examples/` (only public examples with confirmed publication rights)
 - `README.md`
+- `README.en.md`
 - `KNOWN_LIMITATIONS.md`
 - `CONTRIBUTING.md`
 - `SECURITY.md`
@@ -92,7 +93,7 @@ downloaded ZIP against `SHA256SUMS.txt`. Candidate metadata explicitly separates
 focused automation from game-runtime and full visual evidence.
 
 1. Record the candidate commit SHA and the successful validation artifact paths.
-2. Create the release package with `RunUAT BuildPlugin -StrictIncludes` from that candidate, using a maintainer-provided UE runner and an explicit plugin path.
+2. Create the release package with the normal `RunUAT BuildPlugin` from that candidate (strict header checks run in the separate plugin-only rebuild), using a maintainer-provided UE runner and an explicit plugin path.
 3. Run `pwsh -NoProfile -File Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot <PackageRoot> -Mode Package` before uploading the package.
 4. Copy the plugin subtree into a clean export workspace.
 5. Apply the public include/exclude rules above, removing maintainer-only files before publication.
@@ -106,7 +107,7 @@ focused automation from game-runtime and full visual evidence.
 
 Before publishing the exported repository:
 
-- `RunUAT BuildPlugin -StrictIncludes` succeeds in the export workspace
+- the plugin-only strict rebuild and `RunUAT BuildPlugin` succeed in the export workspace
 - public smoke validation commands use explicit `--project` / `--editor` values or documented environment variables
 - public docs are internally consistent
 - `Docs/ValidationGovernance/` points to the latest curated manifests

@@ -25,13 +25,6 @@ jobs:
           test -f Source/Design2UMGEditor/Private/Tests/Fixtures/FigmaComplex.json
           test -f Source/Design2UMGEditor/Private/Tests/Fixtures/FigmaRealDashboard.json
 
-      - name: Fail on tracked local-only files that should not ship in the repo
-        run: |
-          if git ls-files | grep -Ei '^\.cowork-temp/|^\.claude/|^\.codex/|^\.vs/|^openspec/|^progress\.txt$|^ocr_result\.txt$|^CLAUDE\.md$|^AGENTS\.md$|^[^/]*review[^/]*\.md$|^Design2UMG图片/|^capture_editor_screenshot\.py$|^capture_umg_screenshot\.py$|^compare_coordinates\.py$|^screenshot\.ps1$|^screenshot\.py$|^show_expected_coords\.py$|^test_import\.py$|^verify_coords\.py$|^verify_design_size\.py$|^editor_screenshot\.png$'; then
-            echo "Local-only files are tracked. Remove them before release."
-            exit 1
-          fi
-
       - name: Verify source public boundary
         shell: pwsh
         run: |
@@ -42,9 +35,14 @@ jobs:
         run: |
           ./Tools/Release/Test-TextFileHygiene.ps1
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: Tools/requirements-validation.txt
+
       - name: Run Python validation helper selftests
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r Tools/requirements-validation.txt
           python Tools/run_validation_selftests.py
 
@@ -67,6 +65,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: Tools/FigmaExporter/package-lock.json
 
       - name: Test Figma exporter
         working-directory: Tools/FigmaExporter
@@ -234,6 +234,7 @@ jobs:
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.RejectedReplacement"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.RetryReplacement"; Mode = "RenderOffscreen" },
+            # Intentional second Reload: proves the retried replacement survives a fresh process.
             [pscustomobject]@{ Filter = "Design2UMG.Fonts.Persistence.Reload"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Import.Planning"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Pencil.ConnectionLifecycle"; Mode = "RenderOffscreen" },
