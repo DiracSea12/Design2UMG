@@ -326,7 +326,8 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	Wrapper.Slot = Widget.Slot;
 	TransferWrapperRenderProperties(Wrapper, Widget, Node);
 
-	if (!Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty())
+	if (Node->Type == EDesignNodeType::IconFont
+		|| (!Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty()))
 	{
 		FMargin Gutter;
 		for (const FUMGBoxShadowLayerData& Shadow : ShadowLayers)

@@ -218,6 +218,12 @@ bool FVariableResolverLiteralDollarTextTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("$color/ink with slash is a variable ref"), Resolver.IsVariableRef(TEXT("$color/ink")));
 	TestTrue(TEXT("$spacing-0.5 with dot is a variable ref"), Resolver.IsVariableRef(TEXT("$spacing-0.5")));
 	TestTrue(TEXT("$N:--background import-qualified ref is a variable ref"), Resolver.IsVariableRef(TEXT("$N:--background")));
+	FDesignVariable Background;
+	Background.Name = TEXT("5:--background");
+	Background.Value = TEXT("#FAFAFA");
+	Variables.Add(Background.Name, Background);
+	TestTrue(TEXT("Numeric import aliases are variable references"), Resolver.IsVariableRef(TEXT("$5:--background")));
+	TestEqual(TEXT("Numeric import aliases resolve their value"), Resolver.ResolveColor(TEXT("$5:--background")), FString(TEXT("#FAFAFA")));
 	return true;
 }
 

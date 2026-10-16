@@ -11,31 +11,36 @@
 
 namespace
 {
-	bool TryFoldSingleFlowChildIntoSizeBox(FUMGWidgetNode& SizeBox, FUMGWidgetNode& Flow)
+	bool TryFoldFlowIntoSizeBox(FUMGWidgetNode& SizeBox, FUMGWidgetNode& Flow)
 	{
 		const bool bHorizontal = Flow.Type == UMGWidgetTypes::HorizontalBox;
 		if ((!bHorizontal && Flow.Type != UMGWidgetTypes::VerticalBox)
-			|| Flow.Children.Num() != 1 || Flow.WidgetStyle.HasAny()
+			|| Flow.Children.Num() > 1 || Flow.WidgetStyle.HasAny()
 			|| Flow.Effect.HasAny() || Flow.Shadow.HasAny() || Flow.WidgetState.HasAny()
 			|| (Flow.HasSourceData() && (Flow.Source().bMappedComponentCandidate || Flow.Source().IsFigmaInstance()))) return false;
 
-		// A positive-weight single fill slot uses all available space in either
+		// Empty panels add no content size. A positive-weight single fill slot
+		// uses all available space in either
 		// container, including undersized runtime allocations. Auto slots differ:
 		// a box panel permits main-axis overflow but a SizeBox alignment clamps it.
-		if (Flow.Children[0].Slot.SizeRule != EUMGSlotSizeRule::Fill
-			|| Flow.Children[0].Slot.FillWeight <= 0.f) return false;
+		if (!Flow.Children.IsEmpty())
+		{
+			if (Flow.Children[0].Slot.SizeRule != EUMGSlotSizeRule::Fill
+				|| Flow.Children[0].Slot.FillWeight <= 0.f) return false;
 
-		FUMGWidgetNode Content = MoveTemp(Flow.Children[0]);
-		if (bHorizontal)
-		{
-			Content.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			FUMGWidgetNode Content = MoveTemp(Flow.Children[0]);
+			if (bHorizontal)
+			{
+				Content.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			}
+			else
+			{
+				Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+			}
+			Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
+			Content.Slot.FillWeight = 1.f;
+			SizeBox.Children.Add(MoveTemp(Content));
 		}
-		else
-		{
-			Content.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
-		}
-		Content.Slot.SizeRule = EUMGSlotSizeRule::Auto;
-		Content.Slot.FillWeight = 1.f;
 		SizeBox.Id = Flow.Id;
 		SizeBox.Name = Flow.Name;
 		SizeBox.Render = MoveTemp(Flow.Render);
@@ -43,7 +48,6 @@ namespace
 		{
 			SizeBox.MutableSource() = Flow.Source();
 		}
-		SizeBox.Children.Add(MoveTemp(Content));
 		return true;
 	}
 
@@ -395,7 +399,7 @@ FUMGWidgetNode LayoutMapper::WrapWithSizeBox(FUMGWidgetNode&& ChildWidget, const
 	}
 	SizeBox.Slot = MoveTemp(ChildWidget.Slot);
 	ChildWidget.Slot = FUMGSlotData();
-	if (!TryFoldSingleFlowChildIntoSizeBox(SizeBox, ChildWidget))
+	if (!TryFoldFlowIntoSizeBox(SizeBox, ChildWidget))
 	{
 		SizeBox.Children.Add(MoveTemp(ChildWidget));
 	}

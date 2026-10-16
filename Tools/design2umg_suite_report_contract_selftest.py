@@ -25,6 +25,28 @@ def assert_raises_runtime_error(func, expected_text: str) -> None:
 
 
 def main() -> None:
+    assert_equal(suite_verify.verify.resolve_authoritative_design_size({
+        "render_size_authority": "reference_canvas_calibration",
+        "render_width": 400, "render_height": 539,
+        "design_time_width": 360, "design_time_height": 474,
+    }), (360, 474))
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        state = {
+            "args": SimpleNamespace(mode="pen", source="design.pen", node="frame",
+                                    ir_golden_root=None, geometry_golden_root=None,
+                                    native_self_check="off"),
+            "candidate_path": root / "candidate.png", "output_dir": root,
+            "game_output_root": "/Game/Automation/DesignSize", "spec_paths": [], "steps": {},
+            "ue_log_path": root / "unreal.log",
+            "render_size_override": [400, 539], "render_root_offset": [18, 14],
+        }
+        suite_verify.build_case_specs(state)
+        for path in state["spec_paths"]:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+            assert_true("render_size_override" not in spec and "render_root_offset" not in spec,
+                        "Reference canvas must not alter either render pass")
+
     args = SimpleNamespace(
         parallel_editors=3,
         idle_timeout_sec=180,

@@ -31,6 +31,35 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconShadowUsesGlyphAlphaTest,
+	"Design2UMG.Converter.IconShadowUsesGlyphAlpha",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIconShadowUsesGlyphAlphaTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	TestTrue(TEXT("Icon fixture parses"), FPenParser::ParseDocument(TEXT(R"({"children":[{
+		"type":"icon","id":"symbol","name":"Symbol","width":90,"height":90,
+		"icon":"waves","library":"lucide","fill":"#00D4AA",
+		"effect":[{"type":"shadow","blur":22,"color":"#00D4AAEE"},
+		{"type":"shadow","blur":50,"spread":8,"color":"#00D4AA44"}]
+	}]})"), Document));
+	if (Document.Children.IsEmpty()) return false;
+	const TSharedPtr<FDesignNode>& Icon = Document.Children[0];
+	if (!TestEqual(TEXT("Both source effects parse"), Icon->Visual.Effects.Num(), 2)) return false;
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* Capture = FindWidgetById(Data.RootWidget, TEXT("symbol_subtreeshadow"));
+	TestNotNull(TEXT("Icon shadows capture rendered glyph alpha"), Capture);
+	if (Capture)
+	{
+		TestEqual(TEXT("Shadow capture is a native RetainerBox"), Capture->Type, TEXT("RetainerBox"));
+		if (TestEqual(TEXT("Both authored shadows are retained"), Capture->Shadow.BoxShadows.Num(), 2))
+		{
+			TestEqual(TEXT("Glyph shadows have no box spread"), Capture->Shadow.BoxShadows[1].Spread, 0.0f);
+		}
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FForegroundBlurRetainerWrapperTest,
 	"Design2UMG.Converter.ForegroundBlurRetainerWrapper",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

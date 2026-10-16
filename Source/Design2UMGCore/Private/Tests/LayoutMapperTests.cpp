@@ -25,6 +25,24 @@ namespace
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutEmptyFlowCarrierTest,
+	"Design2UMG.Unit.LayoutMapper.EmptyFlowCarrier",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLayoutEmptyFlowCarrierTest::RunTest(const FString&)
+{
+	FUMGWidgetNode Flow;
+	Flow.Id = Flow.Name = TEXT("empty");
+	Flow.Type = TEXT("HorizontalBox");
+	Flow.MutableSource().SourceNodeId = TEXT("empty");
+	const auto Source = MakeNode(EDesignSizeMode::Fixed, 100, EDesignSizeMode::Fixed, 40);
+	const FUMGWidgetNode Carrier = LayoutMapper::WrapWithSizeBox(MoveTemp(Flow), Source, EDesignLayout::Horizontal);
+	TestEqual(TEXT("Empty flow keeps a native size constraint"), Carrier.Type, TEXT("SizeBox"));
+	TestTrue(TEXT("An empty flow needs no nested panel"), Carrier.Children.IsEmpty());
+	TestEqual(TEXT("The source identity stays on its size constraint"), Carrier.Id, FString(TEXT("empty")));
+	TestTrue(TEXT("Source metadata is preserved"), Carrier.HasSourceData());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLayoutCarrierComponentIdentityTest,
 	"Design2UMG.Unit.LayoutMapper.ComponentIdentityOwnership",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

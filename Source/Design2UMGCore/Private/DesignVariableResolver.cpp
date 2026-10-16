@@ -14,10 +14,16 @@ namespace
 			return false;
 		}
 
-		// Variable names may contain '/', '.', '-' and ':' (e.g. "color/ink",
-		// "spacing-0.5", "--background", "Y:--primary") but never start with a
-		// digit, so literal dollar text like "$45.00" stays plain text.
-		const TCHAR FirstChar = Value[1];
+		// Imported names may have numeric aliases, e.g. "$5:--background".
+		// A bare numeric dollar value such as "$45.00" remains literal text.
+		int32 NameStart = 1;
+		if (FChar::IsDigit(Value[1]))
+		{
+			const int32 Colon = Value.Find(TEXT(":"));
+			if (Colon == INDEX_NONE || Colon + 1 >= Value.Len()) return false;
+			NameStart = Colon + 1;
+		}
+		const TCHAR FirstChar = Value[NameStart];
 		if (!FChar::IsAlpha(FirstChar) && FirstChar != TEXT('_') && FirstChar != TEXT('-'))
 		{
 			return false;

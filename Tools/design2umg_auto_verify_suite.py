@@ -350,37 +350,6 @@ def prepare_case_state(
     candidate_path = output_dir / "candidate.png"
     game_output_root = verify.build_automation_asset_root(output_dir, case_args.game_output, case.get("name", ""))
 
-    # Canvas calibration (pen only): request the override whenever the reference
-    # size differs from the declared design size; the asset render's second-stage
-    # check (design-time vs reference aspect) decides whether it actually applies,
-    # so cases that would pass the final reference validation stay on the legacy
-    # path while validation-failing ones (auto-sized roots, overflow, shadow
-    # padding) render on the authoritative reference canvas.
-    state_render_size_override = None
-    if (
-        case_args.mode == "pen"
-        and reference_size
-        and reference_size[0] > 1
-        and reference_size[1] > 1
-        and tuple(reference_size) != tuple(expected_design_size or ())
-    ):
-        state_render_size_override = list(reference_size)
-
-    # Root export offset (pen only): Pencil's node-export canvas unions the node
-    # box with its outer shadows, so the node box sits at a source-derived
-    # offset inside the reference canvas. Forwarded to the asset render so the
-    # calibrated placement pins the root there instead of the centering
-    # heuristic; also proves the calibration carries union padding (shadow
-    # padding below the 1.25x scale heuristic must not skip the override).
-    # Gated on the size override being active: with no override the calibrated
-    # root would land in a clipping ConstraintCanvas (canvas stays at the
-    # design-time extent), so the narrow path keeps the legacy heuristic.
-    state_render_root_offset = None
-    if case_args.mode == "pen" and case_args.node and state_render_size_override:
-        state_render_root_offset = verify.compute_pen_root_export_offset(
-            case_args.source, case_args.node
-        )
-
     state = {
         "case": case,
         "args": case_args,
@@ -392,8 +361,6 @@ def prepare_case_state(
         "reference_validation": reference_validation,
         "expected_design_size": expected_design_size,
         "render_size": expected_design_size,
-        "render_size_override": state_render_size_override,
-        "render_root_offset": state_render_root_offset,
         "candidate_path": candidate_path,
         "game_output_root": game_output_root,
         "spec_paths": [],
@@ -474,10 +441,6 @@ def build_case_specs(state: dict):
             "result_json_path": str(output_dir / "ue_render_result.json"),
             "force_reload_package": True,
         }
-        if state.get("render_size_override"):
-            asset_render_spec["render_size_override"] = state["render_size_override"]
-        if state.get("render_root_offset") is not None:
-            asset_render_spec["render_root_offset"] = list(state["render_root_offset"])
         append_spec(
             state,
             "asset_render",
@@ -514,10 +477,6 @@ def build_case_specs(state: dict):
             "result_json_path": str(output_dir / "ue_render_result.json"),
             "force_reload_package": True,
         }
-        if state.get("render_size_override"):
-            asset_render_spec["render_size_override"] = state["render_size_override"]
-        if state.get("render_root_offset") is not None:
-            asset_render_spec["render_root_offset"] = list(state["render_root_offset"])
         append_spec(
             state,
             "asset_render",
