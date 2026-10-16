@@ -202,6 +202,7 @@ jobs:
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot $packageRoot -Mode Package
 
       - name: Run focused Design2UMG automation tests
+        id: automation
         # The self-hosted runner validates the installed plugin copy at
         # the unique installed location, after source comparison and editor rebuild.
         # Strict header checks run in the plugin-only rebuild with precompiled
@@ -325,7 +326,8 @@ jobs:
           }
 
       - name: Upload focused automation evidence
-        if: always()
+        # Upload whenever automation ran, pass or fail; skip when an earlier step stopped the job.
+        if: ${{ !cancelled() && steps.automation.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
           name: Design2UMG-Automation-${{ github.sha }}-${{ github.run_attempt }}
