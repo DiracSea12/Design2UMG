@@ -53,12 +53,6 @@ namespace
 		return Key;
 	}
 
-	bool IsAutomationImportedFontPath(const FString& ObjectPath)
-	{
-		return ObjectPath.Contains(TEXT("/Design2UMG/Automation/"), ESearchCase::IgnoreCase)
-			&& ObjectPath.Contains(TEXT("/ImportedFonts/"), ESearchCase::IgnoreCase);
-	}
-
 	bool FontHasUsableDefaultTypefaceEntry(const UFont* Font)
 	{
 		const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
@@ -426,8 +420,7 @@ FString NormalizeFontLookupKey(const FString& InValue)
 
 bool IsProjectFontAssetPath(const FString& ObjectPath)
 {
-	return ObjectPath.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase)
-		&& !IsAutomationImportedFontPath(ObjectPath);
+	return ObjectPath.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase);
 }
 
 bool IsEngineFontAssetPath(const FString& ObjectPath)

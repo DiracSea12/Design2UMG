@@ -229,6 +229,7 @@ jobs:
           New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
           $testRuns = @(
             [pscustomobject]@{ Filter = "Design2UMG.Generation"; Mode = "RenderOffscreen" },
+            [pscustomobject]@{ Filter = "Design2UMG.Text.FontResolverProjectDirectoryLookup"; Mode = "NullRHI" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.FigmaParser"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Unit.PenParser.Imported"; Mode = "RenderOffscreen" },
             [pscustomobject]@{ Filter = "Design2UMG.Http.Figma"; Mode = "RenderOffscreen" },

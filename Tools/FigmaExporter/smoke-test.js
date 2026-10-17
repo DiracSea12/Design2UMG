@@ -129,6 +129,12 @@ assert.equal(textOut.style.textCase, 'UPPER');
 assert.equal(textOut.style.textDecoration, 'UNDERLINE');
 assert.equal(textOut.style.paragraphSpacing, 8);
 assert.equal(textOut.style.paragraphIndent, 4);
+const italicTextOut = api.serializeNode({
+  ...textNode,
+  fontName: { ...textNode.fontName, style: 'Italic' },
+});
+assert.equal(italicTextOut.style.fontStyle, 'Italic');
+assert.equal(italicTextOut.characterStyleOverrides, undefined);
 
 const maskNode = {
   id: '1:2',

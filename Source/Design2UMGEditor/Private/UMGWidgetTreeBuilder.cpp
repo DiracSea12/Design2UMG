@@ -202,8 +202,7 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
 	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
 	{
-		const FName OriginalWidgetName = WidgetName;
-		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		for (int32 Suffix = 1; ; ++Suffix)
 		{
 			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
 			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
@@ -211,14 +210,6 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 				WidgetName = Candidate;
 				break;
 			}
-		}
-		if (WidgetName == OriginalWidgetName)
-		{
-			// All 999 suffixed candidates are taken; the widget keeps the colliding name and the
-			// engine auto-renames on ConstructWidget, which can break reimport same-name matching.
-			UE_LOG(LogDesign2UMG, Error,
-				TEXT("Widget name '%s' has more than 999 duplicates in the widget tree; leaving the collision to engine auto-naming, reimport same-name matching may be affected."),
-				*WidgetName.ToString());
 		}
 	}
 
@@ -286,7 +277,7 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 	};
 	if (WidgetClass && UWidget::StaticClass()->FindPropertyByName(WidgetName))
 	{
-		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		for (int32 Suffix = 1; ; ++Suffix)
 		{
 			const FName Candidate = FName(*FString::Printf(TEXT("%s_w%d"), *CollidingName.ToString(), Suffix));
 			if (IsNameFree(Candidate))

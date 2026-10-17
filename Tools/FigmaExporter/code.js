@@ -233,7 +233,7 @@ function buildTextStyle(node, first) {
     const spacing = node.letterSpacing !== figma.mixed ? node.letterSpacing : first.letterSpacing;
     const height = node.lineHeight !== figma.mixed ? node.lineHeight : first.lineHeight;
     const style = {
-        fontFamily: fontName.family, fontPostScriptName: '',
+        fontFamily: fontName.family, fontStyle: fontName.style, fontPostScriptName: '',
         fontWeight: node.fontWeight !== figma.mixed ? node.fontWeight : first.fontWeight,
         fontSize, textAlignHorizontal: node.textAlignHorizontal || 'LEFT',
         textAlignVertical: node.textAlignVertical || 'TOP',

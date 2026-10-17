@@ -3,6 +3,7 @@
 #include "Design2UMGFontAccess.h"
 #include "Design2UMGTextLayoutAccess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGSettings.h"
@@ -336,16 +337,55 @@ bool FFontResolverProjectFontOnlyLookupTest::RunTest(const FString& Parameters)
 		EngineFixture->MarkAsGarbage();
 	}
 
-	const FString AutomationOnlyFamily = TEXT("D2UAutomationOnlyFont");
-	FFontResolver::RegisterFontAssetPath(
-		AutomationOnlyFamily,
-		TEXT("/Game/Design2UMG/Automation/figma-figma-export-source/ImportedFonts/Oxygen.Oxygen"));
-	TestTrue(TEXT("Automation imported font registration must not become a project match"),
-		FFontResolver::FindFontAssetPath(AutomationOnlyFamily).IsEmpty());
-
 	Settings->ExplicitFontMappings = SavedMappings;
 	Settings->DefaultFontAsset = SavedDefaultFont;
 	FFontResolver::ClearCache();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFontResolverProjectDirectoryLookupTest,
+	"Design2UMG.Text.FontResolverProjectDirectoryLookup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFontResolverProjectDirectoryLookupTest::RunTest(const FString& Parameters)
+{
+	UDesign2UMGSettings* Settings = UDesign2UMGSettings::Get();
+	UFont* EngineFont = LoadObject<UFont>(nullptr, TEXT("/Engine/EngineFonts/Roboto.Roboto"));
+	if (!TestNotNull(TEXT("Settings available"), Settings)
+		|| !TestNotNull(TEXT("Font fixture source available"), EngineFont))
+	{
+		return false;
+	}
+
+	const FString Family = TEXT("D2UDirectoryFont") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	UPackage* Package = CreatePackage(*(TEXT("/Game/Design2UMG/Automation/FontResolver/ImportedFonts/") + Family));
+	UFont* Font = DuplicateObject<UFont>(EngineFont, Package, FName(*Family));
+	FAssetRegistryModule::AssetCreated(Font);
+	const FString FontPath = Font->GetPathName();
+	const TMap<FString, TSoftObjectPtr<UFont>> SavedMappings = Settings->ExplicitFontMappings;
+	const TSoftObjectPtr<UFont> SavedDefaultFont = Settings->DefaultFontAsset;
+	ON_SCOPE_EXIT
+	{
+		Settings->ExplicitFontMappings = SavedMappings;
+		Settings->DefaultFontAsset = SavedDefaultFont;
+		FAssetRegistryModule::AssetDeleted(Font);
+		Font->ClearFlags(RF_Public | RF_Standalone);
+		Font->MarkAsGarbage();
+		FFontResolver::ClearCache();
+	};
+	Settings->ExplicitFontMappings.Empty();
+	Settings->DefaultFontAsset.Reset();
+	FFontResolver::ClearCache();
+
+	TestEqual(TEXT("Project font lookup does not depend on the asset directory"),
+		FFontResolver::FindFontAssetPath(Family), FontPath);
+	const FString MappedFamily = TEXT("Mapped") + Family;
+	Settings->ExplicitFontMappings.Add(MappedFamily, TSoftObjectPtr<UFont>(FSoftObjectPath(Font)));
+	TestEqual(TEXT("Explicit project font mapping accepts the same asset"),
+		FFontResolver::FindFontAssetPath(MappedFamily), FontPath);
+	const FString RegisteredFamily = TEXT("Registered") + Family;
+	FFontResolver::RegisterFontAssetPath(RegisteredFamily, FontPath);
+	TestEqual(TEXT("Project font registration accepts the same asset"),
+		FFontResolver::FindFontAssetPath(RegisteredFamily), FontPath);
 	return true;
 }
 
