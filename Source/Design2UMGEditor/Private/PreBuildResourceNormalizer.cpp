@@ -62,7 +62,7 @@ namespace
 		auto Width = Node.WidgetStyle.WidthOverride;
 		auto Height = Node.WidgetStyle.HeightOverride;
 		Writer << Path.Geometry << Path.FillRule << Path.FillColor << Path.StrokeColor
-			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Path.StrokeGeometry << Width << Height;
+			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Path.StrokeGeometry << Path.CanvasSize << Width << Height;
 		auto Image = Node.Brush.Image;
 		Writer << Image.TexturePath << Image.Mode;
 		bool bHasTransform = Image.Transform.IsSet();
@@ -308,42 +308,9 @@ namespace
 	UTexture2D* CreatePathTexture(const FUMGWidgetNode& Node, const FTextureMaterializationPlan&, FString& OutError,
 		DesignImageResources::FImageOperationBudget* Budget)
 	{
-		const FString Geometry = Node.Path.Geometry.Get(FString());
-		const FString FillRule = Node.Path.FillRule.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::FillRule : Node.Path.FillRule.GetValue();
-		const FString StrokeCap = Node.Path.StrokeCap.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeCap : Node.Path.StrokeCap.GetValue();
-		const FString StrokeJoin = Node.Path.StrokeJoin.Get(FString()).IsEmpty() ? DesignPathRasterDefaults::StrokeJoin : Node.Path.StrokeJoin.GetValue();
-		const float StrokeThickness = Node.Path.StrokeThickness.Get(0.0f);
-		const float Width = Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize));
-		const float Height = Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize));
-		FIntPoint RasterSize;
-		if (!FDesignPathRasterizer::TryGetRasterSize(Width, Height, RasterSize)) return nullptr;
-
-		// Preserve the rasterizer's existing byte-color precision without a string round trip.
-		FUMGProceduralResourceRequest Paint;
-		const bool bHasGradient = !Node.Brush.Gradient.Stops.IsEmpty()
-			&& Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Paint);
-		TOptional<FLinearColor> Fill = Node.Path.FillColor;
-		if (bHasGradient && Fill.IsSet() && !Node.Path.StrokeGradient.HasAny()) Fill = FLinearColor::White;
-		if (Fill.IsSet()) Fill = FLinearColor::FromSRGBColor(Fill->ToFColor(true));
-		TOptional<FLinearColor> Stroke = Node.Path.StrokeColor;
-		if (Stroke.IsSet()) Stroke = FLinearColor::FromSRGBColor(Stroke->ToFColor(true));
-		FUMGProceduralResourceRequest StrokePaint;
-		const bool bHasStrokeGradient = Node.Path.StrokeGradient.HasAny();
-		if (bHasStrokeGradient)
-		{
-			StrokePaint.Gradient = Node.Path.StrokeGradient;
-			StrokePaint.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(StrokePaint.Gradient);
-			StrokePaint.WidthOverride = Width;
-			StrokePaint.HeightOverride = Height;
-		}
-		// The rasterizer bills this raster against the materialization budget on a cache
-		// miss, i.e. exactly when it allocates; a cache hit allocates nothing and is free.
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-			*Geometry, RasterSize.X, RasterSize.Y,
-			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError, Budget,
-			bHasGradient ? &Paint : nullptr, Node.Path.StrokeGeometry.Get(FString()),
-			bHasStrokeGradient ? &StrokePaint : nullptr,
-			bHasGradient || Node.Brush.Image.TexturePath.Get(FString()).IsEmpty() ? nullptr : &Node.Brush.Image);
+		FDesignPathRasterRequest Request;
+		if (!FDesignPathRasterizer::TryBuildRequest(Node, Request)) return nullptr;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request, &OutError, Budget);
 		if (!Texture && !OutError.IsEmpty())
 		{
 			// Name the node here: the refusal happens inside the rasterizer, which has no idea
@@ -588,11 +555,8 @@ bool FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 			&& !Node.Path.Geometry.Get(FString()).IsEmpty()
 			&& HasVisiblePathPaint(Node))
 		{
-			FIntPoint RasterSize;
-			if (!FDesignPathRasterizer::TryGetRasterSize(
-				Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-				Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-				RasterSize))
+			FDesignPathRasterRequest Request;
+			if (!FDesignPathRasterizer::TryBuildRequest(Node, Request))
 			{
 				OutError = FString::Printf(
 					TEXT("Failed to create generated texture for '%s': invalid or excessive path texture dimensions"),

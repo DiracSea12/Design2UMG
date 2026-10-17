@@ -260,6 +260,8 @@ struct FUMGEffectData
 
 struct FUMGPathData
 {
+	// Drawing canvas can include ink outside the native widget's layout box.
+	TOptional<FVector2D> CanvasSize;
 	TOptional<FString> Geometry;
 	TOptional<FString> StrokeGeometry;
 	FUMGVisualBrushData::FGradientData StrokeGradient;
@@ -272,7 +274,8 @@ struct FUMGPathData
 
 	bool HasAny() const
 	{
-		return Geometry.IsSet()
+		return CanvasSize.IsSet()
+			|| Geometry.IsSet()
 			|| StrokeGeometry.IsSet()
 			|| StrokeGradient.HasAny()
 			|| FillRule.IsSet()

@@ -3,12 +3,29 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UMGSchemaTypedPayloads.h"
+#include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "DesignPathRasterDefaults.h"
 #include "DesignImageResourceLimits.h"
 
 class UTexture2D;
-struct FUMGProceduralResourceRequest;
+// Owns all paint descriptions; the optional source texture is borrowed for the synchronous call.
+struct FDesignPathRasterRequest
+{
+	FUMGPathData Path;
+	FIntPoint Size = FIntPoint::ZeroValue;
+	TOptional<FUMGProceduralResourceRequest> FillPaint;
+	TOptional<FUMGProceduralResourceRequest> StrokePaint;
+	TOptional<FUMGVisualBrushData::FImageData> FillImage;
+	UTexture2D* FillTexture = nullptr;
+
+	FDesignPathRasterRequest() = default;
+	FDesignPathRasterRequest(FString Geometry, FIntPoint RasterSize, TOptional<FLinearColor> FillColor)
+		: Size(RasterSize)
+	{
+		Path.Geometry = MoveTemp(Geometry);
+		Path.FillColor = FillColor;
+	}
+};
 
 class FDesignPathRasterizer
 {
@@ -18,24 +35,10 @@ public:
 	static constexpr int64 MaxRasterPixels = DesignImageResources::FImageResourceLimits::DefaultMaxPixels;
 	static bool IsRasterSizeAllowed(int64 Width, int64 Height);
 	static bool TryGetRasterSize(float Width, float Height, FIntPoint& OutSize);
-	static UTexture2D* Rasterize(
-		const FString& Geometry,
-		int32 Width,
-		int32 Height,
-		const TOptional<FLinearColor>& FillColor,
-		const FString& FillRule = DesignPathRasterDefaults::FillRule,
-		const TOptional<FLinearColor>& StrokeColor = TOptional<FLinearColor>(),
-		float StrokeWidth = 0.0f,
-		const FString& StrokeCap = DesignPathRasterDefaults::StrokeCap,
-		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin,
-		FString* OutError = nullptr,
-		// Share a budget across allocations; null starts a standalone operation.
-		DesignImageResources::FImageOperationBudget* Budget = nullptr,
-		const FUMGProceduralResourceRequest* FillPaint = nullptr,
-		const FString& StrokeGeometry = FString(),
-		const FUMGProceduralResourceRequest* StrokePaint = nullptr,
-		const FUMGVisualBrushData::FImageData* FillImage = nullptr,
-		UTexture2D* FillTexture = nullptr);
+	static bool TryBuildRequest(const FUMGWidgetNode& Node, FDesignPathRasterRequest& OutRequest,
+		const TMap<FString, UTexture2D*>* TextureMap = nullptr);
+	static UTexture2D* Rasterize(const FDesignPathRasterRequest& Request, FString* OutError = nullptr,
+		DesignImageResources::FImageOperationBudget* Budget = nullptr);
 	static void FlushPendingTextureUpdates();
 	static void ClearCache();
 	static int64 GetCachedPixelCount();

@@ -892,6 +892,8 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutPath.StrokeJoin = Str;
 		}
+		if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(*PathDataObject, TEXT("CanvasSize")); Value.IsValid())
+			OutPath.CanvasSize = ParseVector2DValue(Value, TEXT("CanvasSize"));
 		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeGeometry"), Str)) OutPath.StrokeGeometry = Str;
 		const TSharedPtr<FJsonObject>* StrokeGradient = nullptr;
 		if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("StrokeGradient"), StrokeGradient)) ParseGradientPayload(*StrokeGradient, OutPath.StrokeGradient);

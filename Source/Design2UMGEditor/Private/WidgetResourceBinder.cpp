@@ -18,35 +18,10 @@ namespace
 {
 	UTexture2D* ResolvePathTexture(const FUMGWidgetNode& Node, FIntPoint& Size, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
-		if (!Node.Path.Geometry.IsSet()) return nullptr;
-		if (!FDesignPathRasterizer::TryGetRasterSize(
-			Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-			Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), Size)) return nullptr;
-		FUMGProceduralResourceRequest Paint;
-		const bool bHasGradient = !Node.Brush.Gradient.Stops.IsEmpty()
-			&& Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Paint);
-		FUMGProceduralResourceRequest StrokePaint;
-		const bool bHasStrokeGradient = Node.Path.StrokeGradient.HasAny();
-		if (bHasStrokeGradient)
-		{
-			StrokePaint.Gradient = Node.Path.StrokeGradient;
-			StrokePaint.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(StrokePaint.Gradient);
-			StrokePaint.WidthOverride = Node.WidgetStyle.WidthOverride;
-			StrokePaint.HeightOverride = Node.WidgetStyle.HeightOverride;
-		}
-		TOptional<FLinearColor> Fill = Node.Path.FillColor;
-		if (bHasGradient && Fill.IsSet() && !bHasStrokeGradient) Fill = FLinearColor::White;
-		const bool bHasImage = !bHasGradient && !Node.Brush.Image.TexturePath.Get(FString()).IsEmpty();
-		UTexture2D* FillTexture = bHasImage && TextureMap
-			? TextureMap->FindRef(Node.Brush.Image.TexturePath.GetValue()) : nullptr;
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-			Node.Path.Geometry.GetValue(), Size.X, Size.Y, Fill,
-			Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule), Node.Path.StrokeColor,
-			Node.Path.StrokeThickness.Get(0.0f), Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap),
-			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin), nullptr, Budget,
-			bHasGradient ? &Paint : nullptr, Node.Path.StrokeGeometry.Get(FString()),
-			bHasStrokeGradient ? &StrokePaint : nullptr, bHasImage ? &Node.Brush.Image : nullptr, FillTexture);
-		return Texture;
+		FDesignPathRasterRequest Request;
+		if (!FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)) return nullptr;
+		Size = Request.Size;
+		return FDesignPathRasterizer::Rasterize(Request, nullptr, Budget);
 	}
 
 	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
@@ -57,6 +32,8 @@ namespace
 		Image->SetBrushFromTexture(Texture);
 		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
 		Brush.ImageSize = FVector2D(Size.X / DesignPathRasterDefaults::Supersample, Size.Y / DesignPathRasterDefaults::Supersample);
+		if (Node.Path.CanvasSize.IsSet())
+			Brush.ImageSize = FVector2D(Node.WidgetStyle.WidthOverride.Get(Brush.ImageSize.X), Node.WidgetStyle.HeightOverride.Get(Brush.ImageSize.Y));
 		Brush.Tiling = ESlateBrushTileType::NoTile;
 		Image->SetBrush(Brush);
 		Image->SetDesiredSizeOverride(Brush.ImageSize);

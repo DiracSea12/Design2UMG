@@ -80,7 +80,7 @@ bool FDesignPathMalformedInputTest::RunTest(const FString&)
 	AddExpectedError(TEXT("failed to parse path data"), EAutomationExpectedErrorFlags::Contains, Invalid.Num());
 	for (const FString& Geometry : Invalid)
 	{
-		TestNull(*Geometry, FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor::White));
+		TestNull(*Geometry, FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor::White)));
 	}
 	for (const FString& Geometry : {
 		FString(TEXT("M0 0 10 0 10 10 0 10Z")),
@@ -90,7 +90,7 @@ bool FDesignPathMalformedInputTest::RunTest(const FString&)
 		FString(TEXT("M0 0 Q10 0 10 10 T0 0Z")),
 		FString(TEXT("M0 0 A10 10 0 01 10 10 L0 10Z"))})
 	{
-		TestNotNull(*Geometry, FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor::White));
+		TestNotNull(*Geometry, FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor::White)));
 	}
 	FDesignPathRasterizer::FlushPendingTextureUpdates();
 	return true;
@@ -105,7 +105,11 @@ bool FDesignPathDegenerateBoundsTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { FDesignPathRasterizer::ClearCache(); };
 	for (const FString& Geometry : { FString(TEXT("M0 0L16 0")), FString(TEXT("M0 0L0 16")) })
 	{
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Geometry, 32, 32, {}, TEXT("nonzero"), FLinearColor::White, 1.0f);
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(32, 32), {});
+		Request.Path.FillRule = TEXT("nonzero");
+		Request.Path.StrokeColor = FLinearColor::White;
+		Request.Path.StrokeThickness = 1.0f;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request);
 		if (!TestNotNull(TEXT("A visible axis-aligned stroke produces a texture"), Texture)) continue;
 		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
 		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
@@ -115,7 +119,30 @@ bool FDesignPathDegenerateBoundsTest::RunTest(const FString&)
 		TestTrue(TEXT("The line has actual visible pixels"), PaintedPixels > 0);
 		TestTrue(TEXT("A thin line does not fill the whole image"), PaintedPixels < 32 * 32);
 	}
-	UTexture2D* EmptyFill = FDesignPathRasterizer::Rasterize(TEXT("M0 0L16 0"), 32, 2, FLinearColor::White);
+	FDesignPathRasterRequest Square(TEXT("M10 10L30 10"), FIntPoint(40, 20), {});
+	Square.Path.CanvasSize = FVector2D(40, 20);
+	Square.Path.StrokeColor = FLinearColor::White;
+	Square.Path.StrokeThickness = 10.0f;
+	Square.Path.StrokeCap = TEXT("square");
+	UTexture2D* SquareTexture = FDesignPathRasterizer::Rasterize(Square);
+	if (TestNotNull(TEXT("A square-capped segment rasterizes"), SquareTexture))
+	{
+		const FColor* Pixels = static_cast<const FColor*>(SquareTexture->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		TestTrue(TEXT("Square caps include their rectangular corner"), Pixels[5 * 40 + 5].A > 0);
+		TestEqual(TEXT("Square caps stop at half the stroke width, without an extra circular tip"), Pixels[10 * 40 + 4].A, uint8(0));
+		SquareTexture->GetPlatformData()->Mips[0].BulkData.Unlock();
+	}
+	Square.Path.Geometry = TEXT("M10 10L30 30");
+	Square.Path.CanvasSize = FVector2D(40, 40);
+	Square.Size = FIntPoint(40, 40);
+	UTexture2D* Diagonal = FDesignPathRasterizer::Rasterize(Square);
+	if (TestNotNull(TEXT("A diagonal square-capped segment rasterizes"), Diagonal))
+	{
+		const FColor* Pixels = static_cast<const FColor*>(Diagonal->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		TestTrue(TEXT("The pixel loop includes rotated square corners"), Pixels[10 * 40 + 3].A > 0);
+		Diagonal->GetPlatformData()->Mips[0].BulkData.Unlock();
+	}
+	UTexture2D* EmptyFill = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(TEXT("M0 0L16 0"), FIntPoint(32, 2), FLinearColor::White));
 	TestNotNull(TEXT("A zero-area fill is an empty raster, not a resource failure"), EmptyFill);
 	return true;
 }
@@ -145,7 +172,7 @@ bool FDesignPathAllocationLimitTest::RunTest(const FString&)
 	TestFalse(TEXT("Supersampled total pixel limit enforced"), FDesignPathRasterizer::TryGetRasterSize(5000.0f, 5000.0f, Size));
 	AddExpectedError(TEXT("invalid or excessive raster size"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestNull(TEXT("Direct rasterization cannot bypass limits"),
-		FDesignPathRasterizer::Rasterize(TEXT("M0 0L10 0L10 10Z"), MAX_int32, MAX_int32, FLinearColor::White));
+		FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(TEXT("M0 0L10 0L10 10Z"), FIntPoint(MAX_int32, MAX_int32), FLinearColor::White)));
 	return true;
 }
 
@@ -210,8 +237,9 @@ bool FPathCacheBudgetTest::RunTest(const FString&)
 	for (int32 Index = 0; Index < 17; ++Index)
 	{
 		const FLinearColor Color(Index / 16.0f, 0.5f, 0.5f, 1.0f);
-		if (!TestNotNull(TEXT("Ordinary large path generates"),
-			FDesignPathRasterizer::Rasterize(Geometry, 2048, 2048, Color, TEXT("evenodd")))) return false;
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(2048, 2048), Color);
+		Request.Path.FillRule = TEXT("evenodd");
+		if (!TestNotNull(TEXT("Ordinary large path generates"), FDesignPathRasterizer::Rasterize(Request))) return false;
 		TestTrue(TEXT("Retained cache pixels never exceed one raster budget"),
 			FDesignPathRasterizer::GetCachedPixelCount() <= FDesignPathRasterizer::MaxRasterPixels);
 		FDesignPathRasterizer::FlushPendingTextureUpdates();
@@ -222,7 +250,9 @@ bool FPathCacheBudgetTest::RunTest(const FString&)
 	CollectGarbage(RF_NoFlags);
 	for (int32 Index = 0; Index < 257; ++Index)
 	{
-		if (!FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(Index / 256.0f, 0, 0, 1), TEXT("evenodd"))) return false;
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(8, 8), FLinearColor(Index / 256.0f, 0, 0, 1));
+		Request.Path.FillRule = TEXT("evenodd");
+		if (!FDesignPathRasterizer::Rasterize(Request)) return false;
 	}
 	TestEqual(TEXT("Entry budget is enforced on insertion, not one request later"),
 		FDesignPathRasterizer::GetCachedPixelCount(), 256ll * 8 * 8);
@@ -607,8 +637,8 @@ bool FPathCacheRequestIdentityTest::RunTest(const FString&)
 	TestTrue(TEXT("The refusal names the cumulative operation limit"), Error.Contains(TEXT("operation limit")));
 	// The lower-level raster cache must not round distinct alpha values into one key.
 	const FString Geometry = Absolute.Path.Geometry.GetValue();
-	UTexture2D* HalfAlpha = FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(1, 1, 1, 0.5f));
-	UTexture2D* BelowHalf = FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(1, 1, 1, 0.49999f));
+	UTexture2D* HalfAlpha = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor(1, 1, 1, 0.5f)));
+	UTexture2D* BelowHalf = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor(1, 1, 1, 0.49999f)));
 	if (!TestNotNull(TEXT("Half alpha raster"), HalfAlpha) || !TestNotNull(TEXT("Below-half alpha raster"), BelowHalf)) return false;
 	const auto PixelAlpha = [](UTexture2D* Texture)
 	{
@@ -803,7 +833,9 @@ bool FExplicitPathFillRuleTest::RunTest(const FString&)
 	const FString Geometry = TEXT("M0 0L100 0L100 100L0 100Z M20 20L80 20L80 80L20 80Z");
 	for (const TCHAR* Rule : {TEXT("nonzero"), TEXT("evenodd")})
 	{
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Geometry, 100, 100, FLinearColor::White, Rule);
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(100, 100), FLinearColor::White);
+		Request.Path.FillRule = Rule;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request);
 		if (!TestNotNull(TEXT("Compound path rasterized"), Texture)) return false;
 		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
 		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
@@ -827,6 +859,7 @@ bool FNativeBorderGradientStrokeTest::RunTest(const FString&)
 	Node.Type = TEXT("Border");
 	Node.Name = TEXT("PaintedBorder");
 	Node.WidgetStyle.WidthOverride = Node.WidgetStyle.HeightOverride = 16.0f;
+	Node.Path.CanvasSize = FVector2D(16, 16);
 	Node.Path.Geometry = TEXT("M0 0 L16 0 L16 16 L0 16 Z");
 	Node.Path.StrokeGeometry = TEXT("M1 1 L15 1 L15 15 L1 15 Z");
 	Node.Path.FillColor = FLinearColor::Red;
@@ -845,6 +878,7 @@ bool FNativeBorderGradientStrokeTest::RunTest(const FString&)
 	FString Error;
 	if (!TestTrue(TEXT("Compound paint round-trips through the existing JSON bridge"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), Parsed, &Error))) return false;
 	TestEqual(TEXT("Stroke geometry remains independent of fill geometry"), Parsed.RootWidget.Path.StrokeGeometry.Get(FString()), Node.Path.StrokeGeometry.GetValue());
+	TestTrue(TEXT("The independent drawing canvas round-trips"), Parsed.RootWidget.Path.CanvasSize.IsSet() && Parsed.RootWidget.Path.CanvasSize.GetValue().Equals(FVector2D(16, 16)));
 	TestEqual(TEXT("Both stroke stops survive"), Parsed.RootWidget.Path.StrokeGradient.Stops.Num(), 2);
 	FUMGWidgetNode PreviewNode = Parsed.RootWidget;
 	PreviewNode.Brush.Image.TexturePath = TEXT("preview-source");
@@ -880,6 +914,12 @@ bool FNativeBorderGradientStrokeTest::RunTest(const FString&)
 	Variants.Children[1].Path.StrokeGradient.Stops[0].Color = FLinearColor::White;
 	if (!TestTrue(TEXT("Distinct stroke paints materialize together"), FPreBuildResourceNormalizer::NormalizePathTextures(Variants, Folder / TEXT("Variants"), TEXT("Paint"), &Error))) return false;
 	TestNotEqual(TEXT("Stroke paint participates in resource identity"), Variants.Children[0].Brush.Image.TexturePath.Get(FString()), Variants.Children[1].Brush.Image.TexturePath.Get(FString()));
+	FUMGWidgetNode MissingImage = Node;
+	MissingImage.Brush.Image.TexturePath = Folder / TEXT("MissingCompoundSource.MissingCompoundSource");
+	TestFalse(TEXT("A compound background still requires its actual source image"),
+		FPreBuildResourceNormalizer::NormalizePathTextures(MissingImage, Folder / TEXT("Missing"), TEXT("Paint"), &Error));
+	TestTrue(TEXT("The required image failure comes from actual raster preparation"), Error.Contains(TEXT("Path fill image is not available")));
+
 	return true;
 }
 

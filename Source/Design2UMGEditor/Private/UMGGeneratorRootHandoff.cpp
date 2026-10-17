@@ -43,13 +43,8 @@ namespace UMGGeneratorRootHandoff
 		Prepared.DesignSize = FIntPoint(RootWidth, RootHeight);
 		FUMGWidgetData ImageData;
 		ImageData.RootWidget = MoveTemp(Prepared.Root);
-		const FDesignImageImportResult Images = DesignImportPlanning::ResolveImages(ImageData, nullptr, ImageSettings);
+		DesignImportPlanning::ResolveImages(ImageData, nullptr, ImageSettings);
 		Prepared.Root = MoveTemp(ImageData.RootWidget);
-		if (Images.HasFailures())
-		{
-			Prepared.ErrorMessage = Images.DisplaySummary;
-			return Prepared;
-		}
 		if (!FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 			Prepared.Root, PackagePath, AssetName, Prepared.ErrorMessage, Budget)) return Prepared;
 

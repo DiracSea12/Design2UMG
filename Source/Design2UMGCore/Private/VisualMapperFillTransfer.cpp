@@ -370,9 +370,13 @@ namespace VisualMapperFillTransfer
 			const float Half = Thickness / 2.0f;
 			if (Node->Type == EDesignNodeType::Line)
 			{
-				PaintSize.Y = Thickness;
-				PaintOffset.Y = -Half;
-				Geometry = FString::Printf(TEXT("M0 %f L%f %f"), Half, PaintSize.X, Half);
+				const float CapExtent = Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular
+					|| Node->Visual.Stroke.Cap == EDesignStrokeCap::Square ? Half : 0.0f;
+				const float LineWidth = PaintSize.X;
+				// An integral canvas keeps both raster axes at the same supersample scale.
+				PaintSize = FVector2D(FMath::CeilToFloat(LineWidth + 2.0f * CapExtent), FMath::CeilToFloat(Thickness));
+				PaintOffset = FVector2D((LineWidth - PaintSize.X) * 0.5f, -PaintSize.Y * 0.5f);
+				Geometry = FString::Printf(TEXT("M%f %f L%f %f"), -PaintOffset.X, PaintSize.Y * 0.5f, LineWidth - PaintOffset.X, PaintSize.Y * 0.5f);
 			}
 			else
 			{
@@ -416,6 +420,25 @@ namespace VisualMapperFillTransfer
 			Widget.WidgetStyle.HeightOverride = PaintSize.Y;
 			return MoveTemp(Widget);
 		}
+		const bool bLine = bCanonicalOutline && Node->Type == EDesignNodeType::Line;
+		const FVector2D LayoutSize = bLine ? FVector2D(PaintSize.X + 2.0f * PaintOffset.X, Thickness) : PaintSize;
+		const auto ApplyLineCanvas = [&](FUMGWidgetNode& Layer)
+		{
+			if (!bLine) return;
+			Layer.Path.CanvasSize = PaintSize;
+			Layer.WidgetStyle.WidthOverride = LayoutSize.X;
+			Layer.WidgetStyle.HeightOverride = LayoutSize.Y;
+			// Expand ink around the layout center without changing the slot's desired width.
+			const FVector2D Expansion = PaintSize / LayoutSize;
+			const FVector2D SourceScale = Layer.Render.RenderTransformScale.Get(FVector2D(1.0f, 1.0f));
+			const FVector2D Pivot = Layer.Render.RenderTransformPivot.Get(FVector2D(0.5f, 0.5f));
+			const FVector2D PivotCorrection = (Expansion - FVector2D(1.0f, 1.0f)) * (Pivot - FVector2D(0.5f, 0.5f)) * LayoutSize * SourceScale;
+			const float Angle = FMath::DegreesToRadians(Layer.Render.RenderAngle.Get(0.0f));
+			const FVector2D RotatedCorrection(PivotCorrection.X * FMath::Cos(Angle) - PivotCorrection.Y * FMath::Sin(Angle),
+				PivotCorrection.X * FMath::Sin(Angle) + PivotCorrection.Y * FMath::Cos(Angle));
+			Layer.Render.RenderTransformScale = SourceScale * Expansion;
+			Layer.Render.RenderTranslation = Layer.Render.RenderTranslation.Get(FVector2D::ZeroVector) + RotatedCorrection;
+		};
 		FUMGWidgetNode Overlay = MakeMultiFillOverlayShell(Widget);
 		Overlay.Render = MoveTemp(Widget.Render);
 		Overlay.Shadow = MoveTemp(Widget.Shadow);
@@ -446,14 +469,42 @@ namespace VisualMapperFillTransfer
 					: (Node->Visual.Stroke.Cap == EDesignStrokeCap::Square ? TEXT("square") : TEXT("butt"));
 			}
 			else Layer.Path.FillColor = FLinearColor::White;
-			Layer.Render.RenderTranslation = PaintOffset;
+			Layer.Render.RenderTranslation = bLine ? FVector2D(0.0f, -LayoutSize.Y * 0.5f) : PaintOffset;
 			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Node->Visual.Stroke.Fill->Gradient);
 			Layer.WidgetStyle.WidthOverride = PaintSize.X;
 			Layer.WidgetStyle.HeightOverride = PaintSize.Y;
-			if (Layer.Brush.Gradient.StartPoint.IsSet())
-				Layer.Brush.Gradient.StartPoint = (Layer.Brush.Gradient.StartPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
-			if (Layer.Brush.Gradient.EndPoint.IsSet())
-				Layer.Brush.Gradient.EndPoint = (Layer.Brush.Gradient.EndPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
+			if (bLine && PaintOffset.X != 0.0f
+				&& Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Linear"), ESearchCase::IgnoreCase)
+				&& (!Layer.Brush.Gradient.StartPoint.IsSet() || !Layer.Brush.Gradient.EndPoint.IsSet()))
+			{
+				// Convert an angle gradient to the same projection in the unpadded paint box.
+				const float Angle = FMath::DegreesToRadians(Layer.Brush.Gradient.Rotation.Get(0.0f));
+				const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
+				const float Minimum = FMath::Min(0.0f, static_cast<float>(Direction.X)) + FMath::Min(0.0f, static_cast<float>(Direction.Y));
+				const float Range = FMath::Abs(Direction.X) + FMath::Abs(Direction.Y);
+				const FVector2D Projection = Direction / LayoutSize / Range;
+				const FVector2D Span = Projection / Projection.SizeSquared();
+				const FVector2D Start = Span * (Minimum / Range);
+				Layer.Brush.Gradient.StartPoint = (Start + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+				Layer.Brush.Gradient.EndPoint = (Start + Span + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+			}
+			else
+			{
+				if (Layer.Brush.Gradient.StartPoint.IsSet())
+					Layer.Brush.Gradient.StartPoint = (Layer.Brush.Gradient.StartPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
+				if (Layer.Brush.Gradient.EndPoint.IsSet())
+					Layer.Brush.Gradient.EndPoint = (Layer.Brush.Gradient.EndPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
+			}
+			if (bLine && Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+			{
+				FVector2D Center = Layer.Brush.Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+				FVector2D Size = Layer.Brush.Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+				Center = (Center * LayoutSize + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+				Size *= LayoutSize / PaintSize;
+				Layer.Brush.Gradient.Center = Center;
+				Layer.Brush.Gradient.Size = Size;
+			}
+			ApplyLineCanvas(Layer);
 			Overlay.Children.Add(MoveTemp(Layer));
 		}
 		if (bStrokeOnly && Overlay.Children.Num() == 1)
@@ -464,7 +515,8 @@ namespace VisualMapperFillTransfer
 			Layer.Bounds = Overlay.Bounds;
 			Layer.Slot = Overlay.Slot;
 			Layer.Render = MoveTemp(Overlay.Render);
-			Layer.Render.RenderTranslation = Layer.Render.RenderTranslation.Get(FVector2D::ZeroVector) + PaintOffset;
+			Layer.Render.RenderTranslation = Layer.Render.RenderTranslation.Get(FVector2D::ZeroVector) + (bLine ? FVector2D(0.0f, -LayoutSize.Y * 0.5f) : PaintOffset);
+			ApplyLineCanvas(Layer);
 			Layer.Shadow = MoveTemp(Overlay.Shadow);
 			return Layer;
 		}

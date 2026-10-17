@@ -757,6 +757,58 @@ bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
 	TestTrue(TEXT("Canonical shape stroke retains a path"), Painted.Path.Geometry.IsSet());
 	TestEqual(TEXT("Declared stroke thickness reaches the resource path"), Painted.Path.StrokeThickness.Get(0.0f), 2.0f);
 	TestEqual(TEXT("Original gradient stops reach the native resource"), Painted.Brush.Gradient.Stops.Num(), 2);
+	const TSharedPtr<FDesignNode> Line = MakeShared<FDesignNode>(*Doc.Children[0]);
+	Line->Type = EDesignNodeType::Line;
+	Line->Transform.SetWidthValue(FDesignSize::Fixed(100));
+	Line->Transform.SetHeightValue(FDesignSize::Fixed(0));
+	Line->Visual.Stroke.Thickness.Uniform = 10;
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Circular;
+	Line->Visual.Stroke.Fill->Gradient.StartPoint = FVector2D(0.1f, 0.0f);
+	Line->Visual.Stroke.Fill->Gradient.EndPoint = FVector2D(0.9f, 0.0f);
+	FUMGWidgetNode LineWidget;
+	LineWidget.Type = TEXT("Image");
+	LineWidget.Bounds.W = 100;
+	const FUMGWidgetNode PaintedLine = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(LineWidget), Line);
+	TestEqual(TEXT("Cap painting does not change the layout width"), PaintedLine.WidgetStyle.WidthOverride.Get(0), 100.0f);
+	TestEqual(TEXT("Cap padding shifts the centerline inside its canvas"), PaintedLine.Path.Geometry.Get(FString()), FString(TEXT("M5.000000 5.000000 L105.000000 5.000000")));
+	TestTrue(TEXT("Native render expansion retains the authored centerline length"), PaintedLine.Render.RenderTransformScale.Get(FVector2D(1, 1)).Equals(FVector2D(1.1, 1), 0.0001));
+	TestTrue(TEXT("A stroke-only line stays one native image"), PaintedLine.Type == TEXT("Image") && PaintedLine.Children.IsEmpty());
+	TestTrue(TEXT("Independent canvas includes both half-stroke caps"), PaintedLine.Path.CanvasSize.Get(FVector2D::ZeroVector).Equals(FVector2D(110, 10)));
+	TestTrue(TEXT("Gradient start keeps its authored line coordinate"), FMath::IsNearlyEqual(PaintedLine.Brush.Gradient.StartPoint.GetValue().X * 110.0f - 5.0f, 10.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Gradient end keeps its authored line coordinate"), FMath::IsNearlyEqual(PaintedLine.Brush.Gradient.EndPoint.GetValue().X * 110.0f - 5.0f, 90.0f, KINDA_SMALL_NUMBER));
+	FUMGWidgetNode TransformedLine;
+	TransformedLine.Type = TEXT("Image");
+	TransformedLine.Bounds.W = 100;
+	TransformedLine.Render.RenderTransformScale = FVector2D(2, 3);
+	TransformedLine.Render.RenderAngle = 30.0f;
+	TransformedLine.Render.RenderTransformPivot = FVector2D(0.25, 0.75);
+	TransformedLine.Render.RenderTranslation = FVector2D(7, 9);
+	const FUMGWidgetNode TransformedPaint = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(TransformedLine), Line);
+	TestTrue(TEXT("Ink expansion composes with authored scale"), TransformedPaint.Render.RenderTransformScale.GetValue().Equals(FVector2D(2.2, 3), 0.0001));
+	TestEqual(TEXT("Authored rotation survives"), TransformedPaint.Render.RenderAngle.GetValue(), 30.0f);
+	TestTrue(TEXT("Authored pivot survives"), TransformedPaint.Render.RenderTransformPivot.GetValue().Equals(FVector2D(0.25, 0.75)));
+	TestTrue(TEXT("Noncentral pivot correction follows the authored rotation and scale"), TransformedPaint.Render.RenderTranslation.GetValue().Equals(FVector2D(7.0 - 5.0 * FMath::Cos(PI / 6), 1.5), 0.0001));
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Square;
+	Line->Children.Add(MakeShared<FDesignNode>());
+	FUMGWidgetNode ContentLine;
+	ContentLine.Type = TEXT("Border");
+	ContentLine.Bounds.W = 100;
+	const FUMGWidgetNode ContentPaint = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(ContentLine), Line);
+	TestTrue(TEXT("Line content retains the existing native overlay and two layers"), ContentPaint.Type == TEXT("Overlay") && ContentPaint.Children.Num() == 2);
+	if (ContentPaint.Children.Num() == 2)
+	{
+		const FUMGWidgetNode& CapLayer = ContentPaint.Children[1];
+		TestEqual(TEXT("Square caps do not widen the overlay's layout"), ContentPaint.Bounds.W, 100.0f);
+		TestEqual(TEXT("Square cap image keeps the original desired width"), CapLayer.WidgetStyle.WidthOverride.GetValue(), 100.0f);
+		TestTrue(TEXT("Square caps reserve the same half-stroke canvas extent"), CapLayer.Path.CanvasSize.GetValue().Equals(FVector2D(110, 10)));
+	}
+	Line->Children.Empty();
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Butt;
+	FUMGWidgetNode ButtLine;
+	ButtLine.Type = TEXT("Image");
+	const FUMGWidgetNode ButtPaint = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(ButtLine), Line);
+	TestTrue(TEXT("Butt caps add no horizontal extent"), ButtPaint.Path.CanvasSize.GetValue().Equals(FVector2D(100, 10)));
+
 	Doc.Children[0]->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
 	Doc.Children[0]->Visual.Fills.Add(Doc.Children[0]->Visual.Stroke.Fill.GetValue());
 	FUMGWidgetNode Filled;

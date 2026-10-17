@@ -128,14 +128,15 @@ bool FGeneratedTextureBudgetPathCacheHitBudgetTest::RunTest(const FString&)
 	FString Error;
 	const FString A = TEXT("M0 0 L10 0 L10 10 L0 10 Z");
 	const FString B = TEXT("M0 0 L12 0 L12 10 L0 10 Z");
-	UTexture2D* First = FDesignPathRasterizer::Rasterize(A, 400, 400, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
-	UTexture2D* Hit = FDesignPathRasterizer::Rasterize(A, 400, 400, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+	FDesignPathRasterRequest Request(A, FIntPoint(400, 400), FLinearColor::White);
+	UTexture2D* First = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
+
+	UTexture2D* Hit = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	TestNotNull(TEXT("Initial path raster allocates"), First);
 	TestTrue(TEXT("A byte-identical path is a real cache hit"), Hit == First);
-	UTexture2D* Miss = FDesignPathRasterizer::Rasterize(B, 400, 400, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+
+	Request.Path.Geometry = B;
+	UTexture2D* Miss = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	TestNull(TEXT("A distinct cache miss is a second allocation and is refused"), Miss);
 	TestTrue(TEXT("The refused miss names the operation limit"), Error.Contains(TEXT("operation limit")));
 	return true;
@@ -153,19 +154,16 @@ bool FGeneratedTextureBudgetPathCacheEvictionRebillsTest::RunTest(const FString&
 	const FString& Refusal = Budget.GetRefusalError();
 	FString Error;
 	const FString Geometry = TEXT("M0 0 L10 0 L10 10 L0 10 Z");
-	UTexture2D* First = FDesignPathRasterizer::Rasterize(
-		Geometry, 400, 400, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+	FDesignPathRasterRequest Request(Geometry, FIntPoint(400, 400), FLinearColor::White);
+	UTexture2D* First = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	if (!TestNotNull(TEXT("The first cache miss allocates and is billed"), First)) return false;
 	TestTrue(TEXT("The identical request is a cache hit before eviction"),
-		FDesignPathRasterizer::Rasterize(
-			Geometry, 400, 400, FLinearColor::White,
-			TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget) == First);
+
+		FDesignPathRasterizer::Rasterize(Request, &Error, &Budget) == First);
 
 	FDesignPathRasterizer::ClearCache();
-	UTexture2D* AfterEviction = FDesignPathRasterizer::Rasterize(
-		Geometry, 400, 400, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+
+	UTexture2D* AfterEviction = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	TestNull(TEXT("The same request is billed again after its cached allocation is evicted"), AfterEviction);
 	TestTrue(TEXT("The re-billed allocation reaches the cumulative limit"),
 		Error.Contains(TEXT("operation limit")) && Refusal.Contains(TEXT("operation limit")));
@@ -187,9 +185,8 @@ bool FGeneratedTextureBudgetMixedKindsShareActualBudgetTest::RunTest(const FStri
 		MakeGradientRequest(400, 1.0f), nullptr, &Error, &Budget);
 	ON_SCOPE_EXIT { FProceduralShapeGenerator::ReleaseTransientTexture(Procedural); };
 	if (!TestNotNull(TEXT("Procedural allocation fits"), Procedural)) return false;
-	UTexture2D* Path = FDesignPathRasterizer::Rasterize(
-		TEXT("M0 0 L10 0 L10 10 L0 10 Z"), 318, 318, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+	FDesignPathRasterRequest Request(TEXT("M0 0 L10 0 L10 10 L0 10 Z"), FIntPoint(318, 318), FLinearColor::White);
+	UTexture2D* Path = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	if (!TestNotNull(TEXT("A path allocation can consume the remaining shared budget"), Path)) return false;
 	UTexture2D* Extra = FProceduralShapeGenerator::GenerateFromMaterialRef(
 		MakeGradientRequest(32, 0.25f), nullptr, &Error, &Budget);
@@ -269,9 +266,8 @@ bool FGeneratedTextureBudgetUvOnlyCropDoesNotConsumeBudgetTest::RunTest(const FS
 	TestEqual(TEXT("UV-only crop keeps the original texture path"),
 		Node.Brush.Image.TexturePath.Get(FString()), SourcePath);
 
-	UTexture2D* RemainingAllocation = FDesignPathRasterizer::Rasterize(
-		TEXT("M0 0 L10 0 L10 10 L0 10 Z"), 318, 318, FLinearColor::White,
-		TEXT("nonzero"), {}, 0.0f, TEXT("butt"), TEXT("miter"), &Error, &Budget);
+	FDesignPathRasterRequest Request(TEXT("M0 0 L10 0 L10 10 L0 10 Z"), FIntPoint(318, 318), FLinearColor::White);
+	UTexture2D* RemainingAllocation = FDesignPathRasterizer::Rasterize(Request, &Error, &Budget);
 	TestNotNull(TEXT("The remaining one-MiB headroom is still available after the UV-only crop"),
 		RemainingAllocation);
 	TestTrue(TEXT("No allocation refusal was recorded"), Refusal.IsEmpty());

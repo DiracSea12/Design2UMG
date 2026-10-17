@@ -266,20 +266,10 @@ bool FPathStrokeOnlyIconRasterizationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Stroke cap propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeCap), TEXT("round"));
 	TestEqual(TEXT("Stroke join propagated"), GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeJoin), TEXT("round"));
 
-	const FString Geometry = GetWidgetProperty(*Widget, UMGPropertyKeys::PathGeometry);
-	const FString FillRule = GetWidgetProperty(*Widget, UMGPropertyKeys::PathFillRule);
-	const FString StrokeColorValue = GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeColor);
-	const float StrokeThickness = FCString::Atof(*GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeThickness));
-	UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-		Geometry,
-		20,
-		20,
-		Widget->Path.FillColor,
-		FillRule,
-		TOptional<FLinearColor>(FUMGValueParser::ParseColor(StrokeColorValue)),
-		StrokeThickness,
-		GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeCap),
-		GetWidgetProperty(*Widget, UMGPropertyKeys::PathStrokeJoin));
+	FDesignPathRasterRequest Request;
+	Request.Path = Widget->Path;
+	Request.Size = FIntPoint(20, 20);
+	UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request);
 	TestTrue(TEXT("Stroke-only path rasterizes to texture"), Texture != nullptr);
 	if (!Texture)
 	{

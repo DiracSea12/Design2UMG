@@ -443,6 +443,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializePathPayload(const FUMGPathD
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeCap, Path.StrokeCap.GetValue());
 	if (Path.StrokeJoin.IsSet())
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeJoin, Path.StrokeJoin.GetValue());
+	if (Path.CanvasSize.IsSet()) PathObject->SetStringField(TEXT("CanvasSize"), Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Path.CanvasSize.GetValue()));
 	if (Path.StrokeGeometry.IsSet()) PathObject->SetStringField(TEXT("StrokeGeometry"), Path.StrokeGeometry.GetValue());
 	if (TSharedPtr<FJsonObject> Gradient = SerializeGradientPayload(Path.StrokeGradient)) PathObject->SetObjectField(TEXT("StrokeGradient"), Gradient);
 	return PathObject;

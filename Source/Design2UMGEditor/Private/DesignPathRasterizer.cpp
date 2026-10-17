@@ -5,6 +5,7 @@
 #include "ProceduralShapeGenerator.h"
 #include "Design2UMGLog.h"
 #include "DesignResourceResolver.h"
+#include "UMGWidgetNodeAccess.h"
 #include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
 #include "Hash/CityHash.h"
@@ -48,17 +49,25 @@ namespace
 		TArray<uint8> Signature;
 	};
 
-	TArray<uint8> MakeCacheSignature(
-		FString Geometry, int32 Width, int32 Height, TOptional<FLinearColor> FillColor,
-		FString Rule, TOptional<FLinearColor> StrokeColor, float StrokeWidth,
-		FString StrokeCap, FString StrokeJoin, const FUMGProceduralResourceRequest* FillPaint,
-		const FString& StrokeGeometry, const FUMGProceduralResourceRequest* StrokePaint,
-		const FUMGVisualBrushData::FImageData* FillImage, FGuid SourceImageId, FObjectKey SourceObject)
+	TArray<uint8> MakeCacheSignature(FDesignPathRasterRequest Request, FGuid SourceImageId, FObjectKey SourceObject)
 	{
+		auto& Path = Request.Path;
+		FString Geometry = Path.Geometry.Get(FString());
+		int32 Width = Request.Size.X, Height = Request.Size.Y;
+		auto FillColor = Path.FillColor, StrokeColor = Path.StrokeColor;
+		FString Rule = Path.FillRule.Get(DesignPathRasterDefaults::FillRule);
+		FString StrokeCap = Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
+		FString StrokeJoin = Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
+		float StrokeWidth = Path.StrokeThickness.Get(0.0f);
+		FString StrokeGeometry = Path.StrokeGeometry.Get(FString());
+		const auto* FillPaint = Request.FillPaint.IsSet() ? &Request.FillPaint.GetValue() : nullptr;
+		const auto* StrokePaint = Request.StrokePaint.IsSet() ? &Request.StrokePaint.GetValue() : nullptr;
+		const auto* FillImage = Request.FillImage.IsSet() ? &Request.FillImage.GetValue() : nullptr;
+
 		TArray<uint8> Signature;
 		FMemoryWriter Writer(Signature);
 		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
-			<< StrokeWidth << StrokeCap << StrokeJoin;
+			<< StrokeWidth << StrokeCap << StrokeJoin << Path.CanvasSize;
 		bool bHasImage = FillImage != nullptr;
 		Writer << bHasImage;
 		if (FillImage)
@@ -187,14 +196,12 @@ namespace
 
 		if (bSquareCap)
 		{
-			const FVector2D Direction = Segment.GetSafeNormal();
-			const FVector2D ExtendedStart = Start - Direction * Radius;
-			const FVector2D ExtendedEnd = End + Direction * Radius;
-			const FVector2D ExtendedSegment = ExtendedEnd - ExtendedStart;
-			const float ExtendedLengthSq = ExtendedSegment.SizeSquared();
-			const float T = FMath::Clamp(FVector2D::DotProduct(Point - ExtendedStart, ExtendedSegment) / ExtendedLengthSq, 0.0f, 1.0f);
-			const FVector2D ClosestPoint = ExtendedStart + ExtendedSegment * T;
-			return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
+			const float SegmentLength = FMath::Sqrt(SegmentLengthSq);
+			const FVector2D Direction = Segment / SegmentLength;
+			const FVector2D Relative = Point - Start;
+			const float Along = FVector2D::DotProduct(Relative, Direction);
+			const float Across = FVector2D::CrossProduct(Direction, Relative);
+			return Along >= -Radius && Along <= SegmentLength + Radius && FMath::Abs(Across) <= Radius;
 		}
 
 		const float RawT = FVector2D::DotProduct(Point - Start, Segment) / SegmentLengthSq;
@@ -246,10 +253,12 @@ namespace
 					continue;
 				}
 
-				const int32 MinX = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.X, End.X) - Radius - 1.0f));
-				const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(FMath::Max(Start.X, End.X) + Radius + 1.0f));
-				const int32 MinY = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.Y, End.Y) - Radius - 1.0f));
-				const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(FMath::Max(Start.Y, End.Y) + Radius + 1.0f));
+				const FVector2D Direction = (End - Start).GetSafeNormal();
+				const float BoundsRadius = bSquareCap ? Radius * (FMath::Abs(Direction.X) + FMath::Abs(Direction.Y)) : Radius;
+				const int32 MinX = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.X, End.X) - BoundsRadius - 1.0f));
+				const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(FMath::Max(Start.X, End.X) + BoundsRadius + 1.0f));
+				const int32 MinY = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.Y, End.Y) - BoundsRadius - 1.0f));
+				const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(FMath::Max(Start.Y, End.Y) + BoundsRadius + 1.0f));
 
 				for (int32 Y = MinY; Y <= MaxY; ++Y)
 				{
@@ -835,23 +844,73 @@ bool FDesignPathRasterizer::TryGetRasterSize(float Width, float Height, FIntPoin
 	return true;
 }
 
-UTexture2D* FDesignPathRasterizer::Rasterize(
-	const FString& Geometry,
-	int32 Width,
-	int32 Height,
-	const TOptional<FLinearColor>& FillColor,
-	const FString& FillRule,
-	const TOptional<FLinearColor>& StrokeColor,
-	float StrokeWidth,
-	const FString& StrokeCap,
-	const FString& StrokeJoin,
-	FString* OutError,
-	DesignImageResources::FImageOperationBudget* Budget,
-	const FUMGProceduralResourceRequest* FillPaint,
-	const FString& StrokeGeometry,
-	const FUMGProceduralResourceRequest* StrokePaint,
-	const FUMGVisualBrushData::FImageData* FillImage, UTexture2D* FillTexture)
+bool FDesignPathRasterizer::TryBuildRequest(const FUMGWidgetNode& Node, FDesignPathRasterRequest& OutRequest,
+	const TMap<FString, UTexture2D*>* TextureMap)
 {
+	OutRequest = FDesignPathRasterRequest();
+	if (Node.Path.Geometry.Get(FString()).IsEmpty()) return false;
+	const FVector2D CanvasSize = Node.Path.CanvasSize.Get(FVector2D(
+		Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
+		Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize))));
+	if (!TryGetRasterSize(CanvasSize.X, CanvasSize.Y, OutRequest.Size)) return false;
+	OutRequest.Path = Node.Path;
+	auto DefaultIfEmpty = [](TOptional<FString>& Value, const TCHAR* Default)
+	{
+		if (Value.Get(FString()).IsEmpty()) Value = FString(Default);
+	};
+	DefaultIfEmpty(OutRequest.Path.FillRule, DesignPathRasterDefaults::FillRule);
+	DefaultIfEmpty(OutRequest.Path.StrokeCap, DesignPathRasterDefaults::StrokeCap);
+	DefaultIfEmpty(OutRequest.Path.StrokeJoin, DesignPathRasterDefaults::StrokeJoin);
+	FUMGProceduralResourceRequest FillPaint;
+	if (!Node.Brush.Gradient.Stops.IsEmpty()
+		&& Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, FillPaint))
+	{
+		if (Node.Path.CanvasSize.IsSet())
+		{
+			FillPaint.WidthOverride = CanvasSize.X;
+			FillPaint.HeightOverride = CanvasSize.Y;
+		}
+		OutRequest.FillPaint = MoveTemp(FillPaint);
+		if (OutRequest.Path.FillColor.IsSet() && !Node.Path.StrokeGradient.HasAny()) OutRequest.Path.FillColor = FLinearColor::White;
+	}
+	if (Node.Path.StrokeGradient.HasAny())
+	{
+		FUMGProceduralResourceRequest StrokePaint;
+		StrokePaint.Gradient = Node.Path.StrokeGradient;
+		StrokePaint.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(StrokePaint.Gradient);
+		StrokePaint.WidthOverride = CanvasSize.X;
+		StrokePaint.HeightOverride = CanvasSize.Y;
+		OutRequest.StrokePaint = MoveTemp(StrokePaint);
+	}
+	// Persisted path colors are byte-precision; preview must prepare the same paint.
+	for (auto* Color : {&OutRequest.Path.FillColor, &OutRequest.Path.StrokeColor})
+		if (Color->IsSet()) *Color = FLinearColor::FromSRGBColor(Color->GetValue().ToFColor(true));
+	if (!OutRequest.FillPaint.IsSet() && !Node.Brush.Image.TexturePath.Get(FString()).IsEmpty())
+	{
+		OutRequest.FillImage = Node.Brush.Image;
+		if (TextureMap) OutRequest.FillTexture = TextureMap->FindRef(Node.Brush.Image.TexturePath.GetValue());
+	}
+	return true;
+}
+
+UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Request, FString* OutError,
+	DesignImageResources::FImageOperationBudget* Budget)
+{
+	const FUMGPathData& PathData = Request.Path;
+	const FString Geometry = PathData.Geometry.Get(FString());
+	const int32 Width = Request.Size.X, Height = Request.Size.Y;
+	const auto& FillColor = PathData.FillColor;
+	const auto& StrokeColor = PathData.StrokeColor;
+	const FString FillRule = PathData.FillRule.Get(DesignPathRasterDefaults::FillRule);
+	const FString StrokeCap = PathData.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
+	const FString StrokeJoin = PathData.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
+	const float StrokeWidth = PathData.StrokeThickness.Get(0.0f);
+	const FString StrokeGeometry = PathData.StrokeGeometry.Get(FString());
+	const auto* FillPaint = Request.FillPaint.IsSet() ? &Request.FillPaint.GetValue() : nullptr;
+	const auto* StrokePaint = Request.StrokePaint.IsSet() ? &Request.StrokePaint.GetValue() : nullptr;
+	const auto* FillImage = Request.FillImage.IsSet() ? &Request.FillImage.GetValue() : nullptr;
+	UTexture2D* FillTexture = Request.FillTexture;
+
 	check(IsInGameThread());
 	if (OutError) OutError->Reset();
 	if (Geometry.IsEmpty()) return nullptr;
@@ -881,9 +940,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		}
 	}
 	// --- Cache lookup ---
-	const TArray<uint8> CacheSignature = MakeCacheSignature(
-		Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin,
-		FillPaint, StrokeGeometry, StrokePaint, FillImage,
+	const TArray<uint8> CacheSignature = MakeCacheSignature(Request,
 		SourceImage ? SourceImage->Source.GetId() : FGuid(), FObjectKey(SourceImage));
 	const uint64 CacheKey = MakeCacheKey(CacheSignature);
 	if (FPathCacheEntry* Found = GPathCache.Find(CacheKey))
@@ -937,11 +994,11 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	float Scale = FMath::Min(ScaleX, ScaleY);
 	float OffsetX = (Width - BoundsSize.X * Scale) / 2.0f - Bounds.Min.X * Scale;
 	float OffsetY = (Height - BoundsSize.Y * Scale) / 2.0f - Bounds.Min.Y * Scale;
-	if (StrokePaint || (FillPaint && !bHasVisibleFill && bHasVisibleStroke))
+	if (PathData.CanvasSize.IsSet() || StrokePaint || (FillPaint && !bHasVisibleFill && bHasVisibleStroke))
 	{
 		// Typed paint coordinates belong to the authored shape box, not its ink bounds.
 		const FUMGProceduralResourceRequest* PaintBounds = StrokePaint ? StrokePaint : FillPaint;
-		Scale = Width / PaintBounds->WidthOverride.Get(static_cast<float>(Width));
+		Scale = Width / (PathData.CanvasSize.IsSet() ? PathData.CanvasSize->X : PaintBounds->WidthOverride.Get(static_cast<float>(Width)));
 		OffsetX = OffsetY = 0.0f;
 	}
 
