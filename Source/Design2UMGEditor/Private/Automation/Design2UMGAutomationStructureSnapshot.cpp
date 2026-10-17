@@ -6,6 +6,7 @@
 
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "DesignTreeBudget.h"
 #include "FontResolver.h"
 #include "DesignReferenceExpansion.h"
@@ -226,6 +227,10 @@ namespace Design2UMGAutomationStructureSnapshot
 			for (const TSharedPtr<FDesignNode>& Child : SourceDocument.Children)
 			{
 				SnapshotDocument.Children.Add(RefExpander::DeepCopyNode(Child));
+			}
+			for (const TSharedPtr<FDesignNode>& Imported : SourceDocument.SourceDocument().ImportedReusableNodes)
+			{
+				SnapshotDocument.MutableSourceDocument().ImportedReusableNodes.Add(RefExpander::DeepCopyNode(Imported));
 			}
 
 			return SnapshotDocument;
