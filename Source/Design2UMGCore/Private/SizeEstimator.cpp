@@ -355,7 +355,8 @@ void SizeEstimator::GatherVisibleChildren(const TSharedPtr<FDesignNode>& Node, T
 
 	for (const TSharedPtr<FDesignNode>& Child : Node->Children)
 	{
-		if (!ShouldSkipNodeForSizing(Child))
+		if (!ShouldSkipNodeForSizing(Child)
+			&& (Node->LayoutData.Layout == EDesignLayout::None || !Child->LayoutData.bAbsoluteLayoutPositioning))
 		{
 			OutVisibleChildren.Add(Child);
 		}

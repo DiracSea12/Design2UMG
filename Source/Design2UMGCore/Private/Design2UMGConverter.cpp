@@ -206,8 +206,9 @@ namespace Design2UMGConverterPrivate
 			if (!bUsingRenderFallback)
 			{
 				VisualSupport::ApplyBaseVisualProperties(Widget, Node);
-				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver);
-				ApplyLayoutAdjustments(Widget, Node, ActiveContext, ParentLayout);
+				TArray<FUMGWidgetNode> AbsoluteChildren;
+				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver, AbsoluteChildren);
+				ApplyLayoutAdjustments(Widget, Node, ActiveContext, ParentLayout, MoveTemp(AbsoluteChildren));
 				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
 			}
 			else
@@ -272,10 +273,31 @@ namespace Design2UMGConverterPrivate
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
-			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver,
+			TArray<FUMGWidgetNode>& OutAbsoluteChildren) const
 		{
 			TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 			GatherVisibleChildrenForConversion(Node, VisibleChildren);
+			if (Node->LayoutData.Layout != EDesignLayout::None)
+			{
+				TArray<TSharedPtr<FDesignNode>> FlowChildren;
+				for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+				{
+					if (!Child->LayoutData.bAbsoluteLayoutPositioning)
+					{
+						FlowChildren.Add(Child);
+						continue;
+					}
+					const TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
+					FUMGWidgetNode AbsoluteWidget = ConvertChild(EffectiveChild, Context, EDesignLayout::None);
+					if (!AbsoluteWidget.Type.IsEmpty())
+					{
+						LayoutMapper::ApplySlotProperties(AbsoluteWidget, EffectiveChild, EDesignLayout::None);
+						OutAbsoluteChildren.Add(MoveTemp(AbsoluteWidget));
+					}
+				}
+				VisibleChildren = MoveTemp(FlowChildren);
+			}
 			// Grid selection and flow prep must see the same filtered child list to avoid layout drift.
 			if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
 			{
@@ -405,7 +427,8 @@ namespace Design2UMGConverterPrivate
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
-			const EDesignLayout ParentLayout) const
+			const EDesignLayout ParentLayout,
+			TArray<FUMGWidgetNode> AbsoluteChildren) const
 		{
 			const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
 				&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
@@ -477,6 +500,28 @@ namespace Design2UMGConverterPrivate
 			else if (LayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
 			{
 				LayoutMapper::ApplyPadding(Widget, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
+			}
+
+			if (!AbsoluteChildren.IsEmpty())
+			{
+				// Padding remains inside the flow subtree; absolute coordinates use the parent origin.
+				FUMGWidgetNode Canvas;
+				Canvas.Type = UMGWidgetTypes::CanvasPanel;
+				Canvas.Id = Widget.Id;
+				Canvas.Name = Widget.Name;
+				Canvas.Bounds = Widget.Bounds;
+				Canvas.Slot = Widget.Slot;
+				Canvas.Render = MoveTemp(Widget.Render);
+				Widget.Render = FUMGRenderStyleData();
+				Widget.Id += TEXT("__flow");
+				Widget.Name += TEXT("_Flow");
+				Widget.Bounds.X = Widget.Bounds.Y = 0.0f;
+				Widget.Slot = FUMGSlotData();
+				Widget.Slot.Anchors.Max.X = Widget.Slot.Anchors.Max.Y = 1.0f;
+				Widget.Slot.Offsets.Right = Widget.Slot.Offsets.Bottom = 0.0f;
+				Canvas.Children.Add(MoveTemp(Widget));
+				Canvas.Children.Append(MoveTemp(AbsoluteChildren));
+				Widget = MoveTemp(Canvas);
 			}
 
 			Widget = VisualSupport::ApplyVisualEffectWrappers(MoveTemp(Widget), Node, VisualSettings.VisualMapperOptions);

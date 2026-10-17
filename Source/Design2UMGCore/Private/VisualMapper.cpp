@@ -236,6 +236,8 @@ void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorne
 
 void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
+	// Non-solid paints use the exported stroke outline, not Slate's solid outline color.
+	if (Stroke.Fill.IsSet() && Stroke.Fill->Type != EDesignFillType::Color) return;
 	const FMargin HalfInsets = VisualMapperStrokeSupport::GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),

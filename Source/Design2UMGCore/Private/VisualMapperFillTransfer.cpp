@@ -4,12 +4,25 @@
 
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "ImageFillUtils.h"
+#include "Design2UMGLog.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetTypes.h"
 
 namespace
 {
+	FString MakeRoundedRectanglePath(const FVector2D& Size, const FVector4& Radii, const float Inset)
+	{
+		const float TL = FMath::Max(0.0f, Radii.X - Inset), TR = FMath::Max(0.0f, Radii.Y - Inset);
+		const float BR = FMath::Max(0.0f, Radii.Z - Inset), BL = FMath::Max(0.0f, Radii.W - Inset);
+		const float Right = Size.X - Inset, Bottom = Size.Y - Inset;
+		return FString::Printf(TEXT("M%f %f L%f %f A%f %f 0 0 1 %f %f L%f %f A%f %f 0 0 1 %f %f L%f %f A%f %f 0 0 1 %f %f L%f %f A%f %f 0 0 1 %f %f Z"),
+			Inset + TL, Inset, Right - TR, Inset, TR, TR, Right, Inset + TR,
+			Right, Bottom - BR, BR, BR, Right - BR, Bottom,
+			Inset + BL, Bottom, BL, BL, Inset, Bottom - BL,
+			Inset, Inset + TL, TL, TL, Inset + TL, Inset);
+	}
+
 	namespace GradientHelpers
 	{
 
@@ -331,6 +344,131 @@ namespace VisualMapperFillTransfer
 			ImageFillUtils::ApplyImageFillProperties(Widget, PrimaryFill.Image);
 			AddTextureSizeHints(Widget, Node);
 		}
+	}
+
+	FUMGWidgetNode WrapWithGradientStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+	{
+		if (!Node->Visual.Stroke.HasStroke() || !Node->Visual.Stroke.Fill.IsSet()
+			|| Node->Visual.Stroke.Fill->Type != EDesignFillType::Gradient)
+		{
+			return MoveTemp(Widget);
+		}
+		TArray<FDesignGeometryPath> Paths;
+		const bool bCanonicalOutline = Node->Visual.Stroke.Thickness.bUniform
+			&& (Node->Type == EDesignNodeType::Rectangle || Node->Type == EDesignNodeType::Line);
+		const float Thickness = Node->Visual.Stroke.Thickness.Uniform;
+		FVector2D PaintSize(FMath::Max(1.0f, Node->Transform.Width.Value), FMath::Max(1.0f, Node->Transform.Height.Value));
+		FVector2D PaintOffset = FVector2D::ZeroVector;
+		const FVector4 RawRadii = Node->Visual.CornerRadius.ToVector4();
+		const float RadiusLimit = FMath::Min(Node->Transform.Width.Value, Node->Transform.Height.Value) / 2.0f;
+		const FVector4 Radii(FMath::Clamp(RawRadii.X, 0.0f, RadiusLimit), FMath::Clamp(RawRadii.Y, 0.0f, RadiusLimit),
+			FMath::Clamp(RawRadii.Z, 0.0f, RadiusLimit), FMath::Clamp(RawRadii.W, 0.0f, RadiusLimit));
+
+		if (bCanonicalOutline)
+		{
+			FString Geometry;
+			const float Half = Thickness / 2.0f;
+			if (Node->Type == EDesignNodeType::Line)
+			{
+				PaintSize.Y = Thickness;
+				PaintOffset.Y = -Half;
+				Geometry = FString::Printf(TEXT("M0 %f L%f %f"), Half, PaintSize.X, Half);
+			}
+			else
+			{
+				const float Expansion = Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside ? 0.0f
+					: (Node->Visual.Stroke.Align == EDesignStrokeAlign::Center ? Half : Thickness);
+				PaintOffset = FVector2D(-Expansion, -Expansion);
+				PaintSize += FVector2D(2.0f * Expansion, 2.0f * Expansion);
+				Geometry = MakeRoundedRectanglePath(PaintSize, Radii + FVector4(Expansion, Expansion, Expansion, Expansion), Half);
+			}
+			Paths = {{Geometry, TEXT("nonzero")}};
+		}
+		else Paths = Node->Shape.PaintGeometry.StrokePaths.Get(TArray<FDesignGeometryPath>());
+		if (Paths.IsEmpty())
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("Gradient stroke '%s' requires exported stroke geometry."), *Node->Name);
+			return MoveTemp(Widget);
+		}
+		const bool bStrokeOnly = Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty();
+		// An inside stroke fits the native brush bounds; outside paint needs a separate layer.
+		if (!bStrokeOnly && Widget.Type == UMGWidgetTypes::Border && bCanonicalOutline && Node->Type == EDesignNodeType::Rectangle
+			&& Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside)
+		{
+			Widget.Path.Geometry = MakeRoundedRectanglePath(PaintSize, Radii, 0.0f);
+			Widget.Path.StrokeGeometry = Paths[0].Path;
+			Widget.Path.FillRule = TEXT("nonzero");
+			if (!Node->Visual.Fills.IsEmpty() && Node->Visual.TopmostFill().bEnabled)
+				Widget.Path.FillColor = Widget.Brush.BrushColor.Get(FLinearColor::White);
+			Widget.Path.StrokeColor = FLinearColor::White;
+			Widget.Path.StrokeThickness = Thickness;
+			FUMGVisualBrushData StrokeBrush;
+			GradientHelpers::ApplyTypedGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient);
+			Widget.Path.StrokeGradient = MoveTemp(StrokeBrush.Gradient);
+			auto FillGradient = MoveTemp(Widget.Brush.Gradient);
+			auto FillImage = MoveTemp(Widget.Brush.Image);
+			Widget.Brush = FUMGVisualBrushData();
+			Widget.Brush.Gradient = MoveTemp(FillGradient);
+			Widget.Brush.Image = MoveTemp(FillImage);
+			Widget.Brush.DrawAs = ESlateBrushDrawType::Image;
+			Widget.Brush.BrushColor = FLinearColor::White;
+			Widget.WidgetStyle.WidthOverride = PaintSize.X;
+			Widget.WidgetStyle.HeightOverride = PaintSize.Y;
+			return MoveTemp(Widget);
+		}
+		FUMGWidgetNode Overlay = MakeMultiFillOverlayShell(Widget);
+		Overlay.Render = MoveTemp(Widget.Render);
+		Overlay.Shadow = MoveTemp(Widget.Shadow);
+		Widget.Shadow = FUMGShadowData();
+		Widget.Render = FUMGRenderStyleData();
+		if (!bStrokeOnly)
+		{
+			PrepareMultiFillContentWidget(Widget);
+			Overlay.Children.Add(MoveTemp(Widget));
+		}
+		for (int32 Index = 0; Index < Paths.Num(); ++Index)
+		{
+			const FDesignGeometryPath& Path = Paths[Index];
+			FUMGWidgetNode Layer;
+			Layer.Type = UMGWidgetTypes::Image;
+			const FString Suffix = FString::Printf(TEXT("_stroke%d"), Index);
+			Layer.Id = Overlay.Id + Suffix;
+			Layer.Name = Overlay.Name + Suffix;
+			Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+			Layer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+			Layer.Path.Geometry = Path.Path;
+			Layer.Path.FillRule = Path.FillRule;
+			if (bCanonicalOutline)
+			{
+				Layer.Path.StrokeColor = FLinearColor::White;
+				Layer.Path.StrokeThickness = Thickness;
+				Layer.Path.StrokeCap = Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular ? TEXT("round")
+					: (Node->Visual.Stroke.Cap == EDesignStrokeCap::Square ? TEXT("square") : TEXT("butt"));
+			}
+			else Layer.Path.FillColor = FLinearColor::White;
+			Layer.Render.RenderTranslation = PaintOffset;
+			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Node->Visual.Stroke.Fill->Gradient);
+			Layer.WidgetStyle.WidthOverride = PaintSize.X;
+			Layer.WidgetStyle.HeightOverride = PaintSize.Y;
+			if (Layer.Brush.Gradient.StartPoint.IsSet())
+				Layer.Brush.Gradient.StartPoint = (Layer.Brush.Gradient.StartPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
+			if (Layer.Brush.Gradient.EndPoint.IsSet())
+				Layer.Brush.Gradient.EndPoint = (Layer.Brush.Gradient.EndPoint.GetValue() * FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) - PaintOffset) / PaintSize;
+			Overlay.Children.Add(MoveTemp(Layer));
+		}
+		if (bStrokeOnly && Overlay.Children.Num() == 1)
+		{
+			FUMGWidgetNode Layer = MoveTemp(Overlay.Children[0]);
+			Layer.Id = Overlay.Id;
+			Layer.Name = Overlay.Name;
+			Layer.Bounds = Overlay.Bounds;
+			Layer.Slot = Overlay.Slot;
+			Layer.Render = MoveTemp(Overlay.Render);
+			Layer.Render.RenderTranslation = Layer.Render.RenderTranslation.Get(FVector2D::ZeroVector) + PaintOffset;
+			Layer.Shadow = MoveTemp(Overlay.Shadow);
+			return Layer;
+		}
+		return Overlay;
 	}
 
 	FUMGWidgetNode WrapWithMultiFill(

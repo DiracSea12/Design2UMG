@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "DesignColorUtils.h"
 #include "LayoutMapper.h"
+#include "VisualMapperFillTransfer.h"
 #include "UMGWidgetTypes.h"
 #include "UMGValueParser.h"
 
@@ -260,6 +261,8 @@ namespace Design2UMGConverterVisualSupport
 		{
 			Widget = VisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
 		}
+
+		Widget = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(Widget), Node);
 
 		if (Node->Visual.GeometryMask.HasMask())
 		{

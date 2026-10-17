@@ -20,7 +20,7 @@ using DesignJsonUtils::TryGetNumber;
 
 namespace
 {
-	// Preserve the existing wrap heuristic; this only gives the thresholds names.
+	// Geometry inference is only used when the source omits its wrap rule.
 	constexpr int32 WrappedHorizontalLayoutMinChildren = 6;
 	constexpr int32 WrappedHorizontalLayoutMinFillChildren = 4;
 	constexpr int32 WrappedHorizontalLayoutMinRows = 2;
@@ -34,7 +34,8 @@ namespace
 
 	bool IsLikelyWrappedHorizontalLayout(const TSharedPtr<FJsonObject>& NodeObj)
 	{
-		if (!NodeObj.IsValid() || GetString(NodeObj, TEXT("layoutMode")) != TEXT("HORIZONTAL"))
+		if (!NodeObj.IsValid() || NodeObj->HasField(TEXT("layoutWrap"))
+			|| GetString(NodeObj, TEXT("layoutMode")) != TEXT("HORIZONTAL"))
 		{
 			return false;
 		}
@@ -378,7 +379,8 @@ void ParsePosition(
 	FDesignNode& OutNode,
 	bool bParentHasAutoLayout)
 {
-	if (bParentHasAutoLayout)
+	if (bParentHasAutoLayout
+		&& !GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase))
 	{
 		OutNode.Transform.ClearPosition();
 		return;

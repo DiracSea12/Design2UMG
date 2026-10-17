@@ -14,6 +14,7 @@
 #include "Misc/Paths.h"
 #include "FigmaTestDocBuilder.h"
 #include "VisualMapper.h"
+#include "VisualMapperFillTransfer.h"
 
 using namespace Design2UMGCoreTests;
 
@@ -706,6 +707,102 @@ bool FFigmaParserReusedOutputTest::RunTest(const FString&)
 	AddExpectedError(TEXT("Missing 'document' field"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Missing document fails"), FFigmaParser::ParseDocument(TEXT("{}"), Document));
 	TestEqual(TEXT("Failure clears the output"), Document.Children.Num(), 0);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExplicitNoWrapTest,
+	"Design2UMG.Unit.FigmaParser.ExplicitNoWrap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExplicitNoWrapTest::RunTest(const FString&)
+{
+	TArray<FString> Children;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		const FString Id = FString::Printf(TEXT("item-%d"), Index);
+		Children.Add(MakeLeafNode(*Id, *Id, TEXT("RECTANGLE"), Index * 30, Index % 2 == 0 ? 0 : 10,
+			30, Index % 2 == 0 ? 40 : 20, TEXT(",\"layoutSizingHorizontal\":\"FILL\"")));
+	}
+	const FString Parent = MakeContainerNode(TEXT("row"), TEXT("Row"), TEXT("FRAME"), 0, 0, 180, 40,
+		FString::Join(Children, TEXT(",")), TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"NO_WRAP\",\"counterAxisAlignItems\":\"CENTER\""));
+	FDesignDocument Doc;
+	if (!TestTrue(TEXT("No-wrap document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Parent), Doc))) return false;
+	TestEqual(TEXT("Explicit NO_WRAP wins over child Y differences"), Doc.Children[0]->LayoutData.Layout, EDesignLayout::Horizontal);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaNonSolidStrokeTest,
+	"Design2UMG.Unit.FigmaParser.NonSolidStroke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
+{
+	const FString Gradient = TEXT("{\"type\":\"GRADIENT_LINEAR\",\"gradientStops\":[{\"position\":0,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}},{\"position\":1,\"color\":{\"r\":0,\"g\":1,\"b\":0,\"a\":1}}]}");
+	FDesignDocument Doc;
+	const FString Shape = MakeLeafNode(TEXT("shape"), TEXT("Shape"), TEXT("RECTANGLE"), 0, 0, 100, 100,
+		FString::Printf(TEXT(",\"strokeWeight\":2,\"strokes\":[%s],\"strokeGeometry\":[{\"path\":\"M0 0 L100 0 L100 100 L0 100 Z M2 2 L2 98 L98 98 L98 2 Z\",\"windingRule\":\"NONZERO\"}]"), *Gradient));
+	if (!TestTrue(TEXT("Gradient stroke document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Shape), Doc))) return false;
+	TestTrue(TEXT("Gradient stroke retains its thickness"), Doc.Children[0]->Visual.Stroke.HasStroke());
+	if (TestTrue(TEXT("Gradient stroke retains its paint"), Doc.Children[0]->Visual.Stroke.Fill.IsSet()))
+	{
+		TestTrue(TEXT("Stroke paint stays gradient, not black"), Doc.Children[0]->Visual.Stroke.Fill->Type == EDesignFillType::Gradient);
+		TestEqual(TEXT("Stroke retains both gradient stops"), Doc.Children[0]->Visual.Stroke.Fill->Gradient.Colors.Num(), 2);
+	}
+	FUMGWidgetNode Surface;
+	Surface.Type = TEXT("Border");
+	Surface.Id = TEXT("shape");
+	Surface.Name = TEXT("Shape");
+	const FUMGWidgetNode Painted = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(Surface), Doc.Children[0]);
+	TestEqual(TEXT("Stroke-only shape remains one native image"), Painted.Type, FString(TEXT("Image")));
+	TestTrue(TEXT("Stroke-only shape adds no wrappers"), Painted.Children.IsEmpty());
+	TestTrue(TEXT("Canonical shape stroke retains a path"), Painted.Path.Geometry.IsSet());
+	TestEqual(TEXT("Declared stroke thickness reaches the resource path"), Painted.Path.StrokeThickness.Get(0.0f), 2.0f);
+	TestEqual(TEXT("Original gradient stops reach the native resource"), Painted.Brush.Gradient.Stops.Num(), 2);
+	Doc.Children[0]->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+	Doc.Children[0]->Visual.Fills.Add(Doc.Children[0]->Visual.Stroke.Fill.GetValue());
+	FUMGWidgetNode Filled;
+	Filled.Type = TEXT("Border");
+	Filled.Id = TEXT("filled");
+	Filled.Name = TEXT("Filled");
+	Filled.Brush.Gradient = Painted.Brush.Gradient;
+	Filled.Brush.BrushColor = FLinearColor::White;
+	const FUMGWidgetNode PaintedBorder = VisualMapperFillTransfer::WrapWithGradientStroke(MoveTemp(Filled), Doc.Children[0]);
+	TestEqual(TEXT("Inside gradient stroke retains its native Border"), PaintedBorder.Type, FString(TEXT("Border")));
+	TestTrue(TEXT("A representable Border background adds no paint wrappers"), PaintedBorder.Children.IsEmpty());
+	TestTrue(TEXT("Native Border retains the declared stroke path"), PaintedBorder.Path.Geometry.IsSet());
+	AddExpectedError(TEXT("FigmaParser: Unsupported stroke paint"), EAutomationExpectedErrorFlags::Contains, 1);
+	const FString ImageShape = MakeLeafNode(TEXT("image-shape"), TEXT("ImageShape"), TEXT("RECTANGLE"), 0, 0, 100, 100,
+		TEXT(",\"strokeWeight\":2,\"strokes\":[{\"type\":\"IMAGE\",\"imageRef\":\"test-image\"}]"));
+	if (!TestTrue(TEXT("Image stroke document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(ImageShape), Doc))) return false;
+	TestFalse(TEXT("Unsupported image paint is not fabricated as black"), Doc.Children[0]->Visual.Stroke.HasStroke());
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaAbsoluteFlowFitSizeTest,
+	"Design2UMG.Unit.FigmaParser.AbsoluteFlowFitSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaAbsoluteFlowFitSizeTest::RunTest(const FString&)
+{
+	const TSharedPtr<FDesignNode> Parent = MakeShared<FDesignNode>();
+	Parent->Type = EDesignNodeType::Frame;
+	Parent->Transform.SetWidthValue(FDesignSize::Fit(68));
+	Parent->Transform.SetHeightValue(FDesignSize::Fixed(80));
+	Parent->LayoutData.Layout = EDesignLayout::Horizontal;
+	Parent->LayoutData.SetGap(8);
+	FDesignPadding Padding;
+	Padding.Left = Padding.Right = 10;
+	Parent->LayoutData.SetPadding(Padding);
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		const TSharedPtr<FDesignNode> Child = MakeShared<FDesignNode>();
+		Child->Type = EDesignNodeType::Rectangle;
+		Child->Transform.SetWidthValue(FDesignSize::Fixed(Index == 1 ? 1000 : 20));
+		Child->Transform.SetHeightValue(FDesignSize::Fixed(20));
+		Child->LayoutData.bAbsoluteLayoutPositioning = Index == 1;
+		Child->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FF0000")));
+		Parent->Children.Add(Child);
+	}
+	TestEqual(TEXT("Absolute child contributes no flow fit width"), SizeEstimator::EstimateNodeSize(Parent, 0.0f).X, 68.0);
 	return true;
 }
 

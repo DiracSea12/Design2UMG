@@ -34,6 +34,7 @@ private:
 	static TSharedPtr<FJsonObject> SerializeTextPayload(const FUMGTextData& Text);
 	static TSharedPtr<FJsonObject> SerializeBrushPayload(const FUMGVisualBrushData& Brush);
 	static TSharedPtr<FJsonObject> SerializeEffectPayload(const FUMGEffectData& Effect);
+	static TSharedPtr<FJsonObject> SerializeGradientPayload(const FUMGVisualBrushData::FGradientData& Gradient);
 	static TSharedPtr<FJsonObject> SerializePathPayload(const FUMGPathData& Path);
 	static TSharedPtr<FJsonObject> SerializeShadowPayload(const FUMGShadowData& Shadow);
 	static TSharedPtr<FJsonObject> SerializeRenderPayload(const FUMGRenderStyleData& Render);

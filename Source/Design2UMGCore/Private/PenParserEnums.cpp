@@ -13,7 +13,7 @@ EDesignNodeType ParseNodeType(const FString& Token)
 	if (Token == TEXT("line")) return EDesignNodeType::Line;
 	if (Token == TEXT("polygon")) return EDesignNodeType::Polygon;
 	if (Token == TEXT("text")) return EDesignNodeType::Text;
-	if (Token == TEXT("icon")) return EDesignNodeType::IconFont;
+	if (Token == TEXT("icon") || Token == TEXT("icon_font")) return EDesignNodeType::IconFont;
 	if (Token == TEXT("path")) return EDesignNodeType::Path;
 	if (Token == TEXT("ref")) return EDesignNodeType::Ref;
 	if (Token == TEXT("group")) return EDesignNodeType::Group;

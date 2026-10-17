@@ -32,6 +32,7 @@ private:
 	static void ParseTextPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGTextData& OutText);
 	static void ParseBrushPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGVisualBrushData& OutBrush);
 	static void ParseEffectPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGEffectData& OutEffect);
+	static void ParseGradientPayload(const TSharedPtr<class FJsonObject>& GradientObject, FUMGVisualBrushData::FGradientData& Gradient);
 	static void ParsePathPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGPathData& OutPath);
 	static void ParseShadowPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGShadowData& OutShadow);
 	static void ParseRenderPayload(const TSharedPtr<class FJsonObject>& NodeObject, FUMGRenderStyleData& OutRender);

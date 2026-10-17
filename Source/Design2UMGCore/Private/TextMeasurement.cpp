@@ -2,6 +2,9 @@
 
 #include "TextMeasurement.h"
 #include "TextMeasurementInternal.h"
+#include "TextMeasurementRuntimeProbe.h"
+#include "TextFontResolution.h"
+#include "TextStyleUtils.h"
 #include "DesignSchema.h"
 
 #include "DesignNodeSemantics.h"
@@ -128,7 +131,30 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 		return FVector2D::ZeroVector;
 	}
 	// FontMeasure omits tracking; measure the shaped widget for every line count.
-	const FVector2D MeasuredSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout, FontMappings);
+	FVector2D MeasuredSize = MeasureResolvedTextNodeDesiredSize(Node, ResolvedLayout, FontMappings);
+	const bool bHasSourceLayoutWidth = Node->Transform.LayoutBoundsSize.IsSet()
+		&& Node->Transform.LayoutBoundsSize->X > 0.0f && Node->Transform.Width.Value > 0.0f;
+	if (bHasSourceLayoutWidth && Node->Transform.Width.IsFit())
+	{
+		// Fit describes sizing behavior; an exported layout width is already computed.
+		MeasuredSize.X = Node->Transform.Width.Value;
+	}
+	else if (!bHasSourceLayoutWidth && !Node->Transform.Width.IsFill()
+		&& !TextMeasurement::IsWrappingTextMode(Node)
+		&& (Node->Transform.Width.IsFit() || !Node->Transform.bSourceHasWidth))
+	{
+		const auto Font = TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, FontMappings);
+		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+		Request.Text = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
+		Request.FontSize = AppliedFontSize;
+		Request.FontAssetPath = Font.FontAssetPath;
+		Request.TypefaceName = Font.TypefaceName;
+		Request.bRequiresResolvedFontAsset = Font.bRequiresResolvedFontAsset;
+		Request.LetterSpacing = Node->Text.LetterSpacing.IsSet()
+			? TextStyleUtils::ConvertLetterSpacingPxToTracking(Node->Text.LetterSpacing.GetValue(), AppliedFontSize) : 0;
+		float Width = 0.0f;
+		if (TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(Request, Width)) MeasuredSize.X = FMath::CeilToFloat(Width);
+	}
 	if (MeasuredSize.X > 0.0f && MeasuredSize.Y > 0.0f)
 	{
 		return MeasuredSize;

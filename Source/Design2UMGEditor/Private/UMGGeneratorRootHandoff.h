@@ -13,6 +13,7 @@ class UWidget;
 class UWidgetBlueprint;
 class FDesign2UMGComponentMappingBuildState;
 struct FDesign2UMGGenerationSettingsSnapshot;
+struct FDesignImageImportSettingsSnapshot;
 
 namespace UMGGeneratorRootHandoff
 {
@@ -28,7 +29,8 @@ namespace UMGGeneratorRootHandoff
 	FPreparedRoot PrepareRootForBuild(
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
-		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget = nullptr,
+		const FDesignImageImportSettingsSnapshot* ImageSettings = nullptr);
 
 	UWidget* CreateRootWidget(
 		UWidgetBlueprint* WidgetBlueprint,

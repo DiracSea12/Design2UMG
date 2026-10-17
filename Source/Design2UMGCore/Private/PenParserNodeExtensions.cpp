@@ -347,14 +347,16 @@ void PenParserNodeExtensions::ParseNodeExtended(
 
 	{
 		FString RawIconFontName;
-		if (JsonObj->TryGetStringField(TEXT("icon"), RawIconFontName))
+		const TCHAR* IconNameField = JsonObj->HasField(TEXT("icon")) ? TEXT("icon") : TEXT("iconFontName");
+		if (JsonObj->TryGetStringField(IconNameField, RawIconFontName))
 		{
-			Node->Text.IconFontName = RawIconFontName;
+			Node->Text.IconFontName = Resolver.ResolveString(RawIconFontName);
 		}
 	}
 	{
 		FString RawIconFontFamily;
-		if (JsonObj->TryGetStringField(TEXT("library"), RawIconFontFamily))
+		const TCHAR* IconFamilyField = JsonObj->HasField(TEXT("library")) ? TEXT("library") : TEXT("iconFontFamily");
+		if (JsonObj->TryGetStringField(IconFamilyField, RawIconFontFamily))
 		{
 			Node->Text.IconFontFamily = Resolver.ResolveString(RawIconFontFamily);
 		}

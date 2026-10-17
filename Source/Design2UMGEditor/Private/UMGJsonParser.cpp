@@ -624,6 +624,57 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 	}
 }
 
+void FUMGJsonParser::ParseGradientPayload(const TSharedPtr<FJsonObject>& GradientObject, FUMGVisualBrushData::FGradientData& Gradient)
+{
+	float FloatVal = 0.0f;
+	FString Str;
+	if (TryGetStrictStringField(GradientObject, UMGJsonKeys::Type, Str))
+	{
+		Gradient.Type = Str;
+	}
+	if (TryGetFiniteFloatFieldF(GradientObject, UMGJsonKeys::Rotation, FloatVal))
+	{
+		Gradient.Rotation = FloatVal;
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::StartPoint); JsonValue.IsValid())
+	{
+		Gradient.StartPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::StartPoint);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::EndPoint); JsonValue.IsValid())
+	{
+		Gradient.EndPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::EndPoint);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::Center); JsonValue.IsValid())
+	{
+		Gradient.Center = ParseVector2DValue(JsonValue, UMGJsonKeys::Center);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::Size); JsonValue.IsValid())
+	{
+		Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
+	}
+	if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(GradientObject, UMGJsonKeys::Stops))
+	{
+		for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
+		{
+			const TSharedPtr<FJsonObject>* StopObject = nullptr;
+			if (!StopValue->TryGetObject(StopObject) || !StopObject || !(*StopObject).IsValid())
+			{
+				continue;
+			}
+
+			FUMGVisualBrushData::FGradientStopData& Stop = Gradient.Stops.AddDefaulted_GetRef();
+			if (TryGetStrictStringField(*StopObject, UMGPropertyKeys::Color, Str))
+			{
+				Stop.Color = FUMGValueParser::ParseColor(Str);
+			}
+			if (TryGetFiniteFloatFieldF(*StopObject, UMGJsonKeys::Position, FloatVal))
+			{
+				Stop.Position = FloatVal;
+			}
+		}
+	}
+}
+
 void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject, FUMGVisualBrushData& OutBrush)
 {
 	// Parse Brush (v2.4).
@@ -712,51 +763,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
 		{
-			if (TryGetStrictStringField(*GradientObject, UMGJsonKeys::Type, Str))
-			{
-				OutBrush.Gradient.Type = Str;
-			}
-			if (TryGetFiniteFloatFieldF(*GradientObject, UMGJsonKeys::Rotation, FloatVal))
-			{
-				OutBrush.Gradient.Rotation = FloatVal;
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::StartPoint); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.StartPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::StartPoint);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::EndPoint); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.EndPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::EndPoint);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Center); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.Center = ParseVector2DValue(JsonValue, UMGJsonKeys::Center);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Size); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
-			}
-			if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(*GradientObject, UMGJsonKeys::Stops))
-			{
-				for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
-				{
-					const TSharedPtr<FJsonObject>* StopObject = nullptr;
-					if (!StopValue->TryGetObject(StopObject) || !StopObject || !(*StopObject).IsValid())
-					{
-						continue;
-					}
-
-					FUMGVisualBrushData::FGradientStopData& Stop = OutBrush.Gradient.Stops.AddDefaulted_GetRef();
-					if (TryGetStrictStringField(*StopObject, UMGPropertyKeys::Color, Str))
-					{
-						Stop.Color = FUMGValueParser::ParseColor(Str);
-					}
-					if (TryGetFiniteFloatFieldF(*StopObject, UMGJsonKeys::Position, FloatVal))
-					{
-						Stop.Position = FloatVal;
-					}
-				}
-			}
+			ParseGradientPayload(*GradientObject, OutBrush.Gradient);
 		}
 	}
 }
@@ -885,6 +892,10 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutPath.StrokeJoin = Str;
 		}
+		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeGeometry"), Str)) OutPath.StrokeGeometry = Str;
+		const TSharedPtr<FJsonObject>* StrokeGradient = nullptr;
+		if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("StrokeGradient"), StrokeGradient)) ParseGradientPayload(*StrokeGradient, OutPath.StrokeGradient);
+
 	}
 }
 

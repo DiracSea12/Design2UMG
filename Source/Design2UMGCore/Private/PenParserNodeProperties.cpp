@@ -109,8 +109,8 @@ FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const 
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontWeight"))) Patch.FontWeight = Node.Text.FontWeight;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontStyle"))) Patch.FontStyle = Node.Text.FontStyle;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("href"))) Patch.Href = Node.Text.Href;
-	if (JsonObj->HasTypedField<EJson::String>(TEXT("icon"))) Patch.IconFontName = Node.Text.IconFontName;
-	if (JsonObj->HasTypedField<EJson::String>(TEXT("library"))) Patch.IconFontFamily = Node.Text.IconFontFamily;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("icon")) || JsonObj->HasTypedField<EJson::String>(TEXT("iconFontName"))) Patch.IconFontName = Node.Text.IconFontName;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("library")) || JsonObj->HasTypedField<EJson::String>(TEXT("iconFontFamily"))) Patch.IconFontFamily = Node.Text.IconFontFamily;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("geometry"))) Patch.Geometry = Node.Shape.Geometry;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fillRule"))) Patch.FillRule = Node.Shape.FillRule;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("layout"))) Patch.Layout = Node.LayoutData.Layout;

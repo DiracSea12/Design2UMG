@@ -192,6 +192,10 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
 	const FString Json = TEXT(R"JSON(
 {
   "version": "2.13",
+  "variables": {
+    "icon-name": {"type": "string", "value": "search"},
+    "icon-family": {"type": "string", "value": "lucide"}
+  },
   "children": [
     {
       "id": "current-icon",
@@ -203,34 +207,50 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
       "height": 24
     },
     {
-      "id": "legacy-icon",
-      "name": "Legacy Icon",
+      "id": "library-icon",
+      "name": "Library Icon",
       "type": "icon_font",
-      "iconFontName": "search",
-      "iconFontFamily": "lucide"
+      "iconFontName": "$icon-name",
+      "iconFontFamily": "$icon-family",
+      "reusable": true,
+      "width": 16,
+      "height": 16
+    },
+    {
+      "id": "icon-instance",
+      "type": "ref",
+      "ref": "library-icon",
+      "iconFontName": "plus",
+      "iconFontFamily": "feather"
     }
   ]
 }
 )JSON");
 
 	FDesignDocument Doc;
-	TestTrue(TEXT("Pen icon formats parse"), FPenParser::ParseDocument(Json, Doc));
-	TestEqual(TEXT("Root count"), Doc.Children.Num(), 2);
-	if (Doc.Children.Num() != 2)
-	{
-		return false;
-	}
+	if (!TestTrue(TEXT("Pen icon formats parse"), FPenParser::ParseDocument(Json, Doc))) return false;
+	if (!TestEqual(TEXT("Root count"), Doc.Children.Num(), 3)) return false;
 
 	const TSharedPtr<FDesignNode>& CurrentIcon = Doc.Children[0];
-	TestTrue(TEXT("Current icon valid"), CurrentIcon.IsValid());
+	if (!TestTrue(TEXT("Current icon valid"), CurrentIcon.IsValid())) return false;
 	TestEqual(TEXT("Current icon type"), CurrentIcon->Type, EDesignNodeType::IconFont);
 	TestEqual(TEXT("Current icon name"), CurrentIcon->Text.IconFontName, FString(TEXT("search")));
 	TestEqual(TEXT("Current icon family"), CurrentIcon->Text.IconFontFamily, FString(TEXT("lucide")));
-	const TSharedPtr<FDesignNode>& UnsupportedIcon = Doc.Children[1];
-	TestTrue(TEXT("Unsupported icon node remains structurally present"), UnsupportedIcon.IsValid());
-	TestEqual(TEXT("Unsupported icon type is rejected"), UnsupportedIcon->Type, EDesignNodeType::Unknown);
-	TestTrue(TEXT("Unsupported icon name is not migrated"), UnsupportedIcon->Text.IconFontName.IsEmpty());
-	TestTrue(TEXT("Unsupported icon family is not migrated"), UnsupportedIcon->Text.IconFontFamily.IsEmpty());
+	const TSharedPtr<FDesignNode>& LibraryIcon = Doc.Children[1];
+	if (!TestTrue(TEXT("Library icon valid"), LibraryIcon.IsValid())) return false;
+	TestEqual(TEXT("Library icon type"), LibraryIcon->Type, EDesignNodeType::IconFont);
+	TestEqual(TEXT("Library icon name resolves variables"), LibraryIcon->Text.IconFontName, FString(TEXT("search")));
+	TestEqual(TEXT("Library icon family resolves variables"), LibraryIcon->Text.IconFontFamily, FString(TEXT("lucide")));
+	TestEqual(TEXT("Library icon width"), LibraryIcon->Transform.Width.Value, 16.0f);
+	TestEqual(TEXT("Library icon height"), LibraryIcon->Transform.Height.Value, 16.0f);
+
+	const FDesignReferenceExpansionResult Expansion = RefExpander::ExpandRef(Doc.Children[2], Doc);
+	if (!TestTrue(TEXT("Icon reference expansion succeeds"), Expansion.IsSuccess())) return false;
+	const TSharedPtr<FDesignNode>& Instance = Expansion.ExpandedNode;
+	if (!TestTrue(TEXT("Icon instance valid"), Instance.IsValid())) return false;
+	TestEqual(TEXT("Icon instance type"), Instance->Type, EDesignNodeType::IconFont);
+	TestEqual(TEXT("Icon instance name override"), Instance->Text.IconFontName, FString(TEXT("plus")));
+	TestEqual(TEXT("Icon instance family override"), Instance->Text.IconFontFamily, FString(TEXT("feather")));
 	return true;
 }
 

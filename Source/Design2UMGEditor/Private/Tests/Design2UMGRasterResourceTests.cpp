@@ -10,6 +10,9 @@
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetTypes.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "WidgetResourceBinder.h"
 #include "TextureResource.h"
 #include "UObject/Package.h"
 #include "Design2UMGEffectMaterialBuilder.h"
@@ -17,6 +20,8 @@
 #include "UMGPropertyKeys.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/Image.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Engine/Texture2D.h"
@@ -784,6 +789,97 @@ bool FExistingTextureFailureIsolationTest::RunTest(const FString&)
 	const FString NewPath = NewTexture->GetPathName();
 	if (!TestNotNull(TEXT("Unchanged retry reuses the saved content"), FUMGGenerator::BuildWidgetBlueprint(Data, Folder, nullptr, nullptr, nullptr, Existing))) return false;
 	TestEqual(TEXT("No new asset identity for unchanged output"), TextureIn(Existing)->GetPathName(), NewPath);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FExplicitPathFillRuleTest,
+	"Design2UMG.Resources.Rasterization.ExplicitPathFillRule",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FExplicitPathFillRuleTest::RunTest(const FString&)
+{
+	FDesignPathRasterizer::ClearCache();
+	ON_SCOPE_EXIT { FDesignPathRasterizer::FlushPendingTextureUpdates(); FDesignPathRasterizer::ClearCache(); };
+	const FString Geometry = TEXT("M0 0L100 0L100 100L0 100Z M20 20L80 20L80 80L20 80Z");
+	for (const TCHAR* Rule : {TEXT("nonzero"), TEXT("evenodd")})
+	{
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Geometry, 100, 100, FLinearColor::White, Rule);
+		if (!TestNotNull(TEXT("Compound path rasterized"), Texture)) return false;
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
+		const uint8 CenterAlpha = Pixels[50 * 100 + 50].A;
+		Mip.BulkData.Unlock();
+		TestEqual(TEXT("Explicit winding rule controls the nested contour"), CenterAlpha,
+			FString(Rule) == TEXT("nonzero") ? uint8(255) : uint8(0));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeBorderGradientStrokeTest,
+	"Design2UMG.Resources.Rasterization.NativeBorderGradientStroke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FNativeBorderGradientStrokeTest::RunTest(const FString&)
+{
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/BorderPaint_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
+	FUMGWidgetData Data;
+	FUMGWidgetNode& Node = Data.RootWidget;
+	Node.Type = TEXT("Border");
+	Node.Name = TEXT("PaintedBorder");
+	Node.WidgetStyle.WidthOverride = Node.WidgetStyle.HeightOverride = 16.0f;
+	Node.Path.Geometry = TEXT("M0 0 L16 0 L16 16 L0 16 Z");
+	Node.Path.StrokeGeometry = TEXT("M1 1 L15 1 L15 15 L1 15 Z");
+	Node.Path.FillColor = FLinearColor::Red;
+	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+	Node.Brush.Image.Mode = TEXT("Crop");
+	FUMGVisualBrushData::FImageTransformData ImageTransform;
+	ImageTransform.A = ImageTransform.D = 0.5f;
+	ImageTransform.TX = ImageTransform.TY = 0.25f;
+	Node.Brush.Image.Transform = ImageTransform;
+	Node.Path.FillRule = TEXT("nonzero");
+	Node.Path.StrokeColor = FLinearColor::White;
+	Node.Path.StrokeThickness = 2.0f;
+	Node.Path.StrokeGradient.Type = TEXT("Linear");
+	Node.Path.StrokeGradient.Stops = {{FLinearColor::Blue, 0.0f}, {FLinearColor::Green, 1.0f}};
+	FUMGWidgetData Parsed;
+	FString Error;
+	if (!TestTrue(TEXT("Compound paint round-trips through the existing JSON bridge"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), Parsed, &Error))) return false;
+	TestEqual(TEXT("Stroke geometry remains independent of fill geometry"), Parsed.RootWidget.Path.StrokeGeometry.Get(FString()), Node.Path.StrokeGeometry.GetValue());
+	TestEqual(TEXT("Both stroke stops survive"), Parsed.RootWidget.Path.StrokeGradient.Stops.Num(), 2);
+	FUMGWidgetNode PreviewNode = Parsed.RootWidget;
+	PreviewNode.Brush.Image.TexturePath = TEXT("preview-source");
+	TMap<FString, UTexture2D*> PreviewImages;
+	PreviewImages.Add(TEXT("preview-source"), LoadObject<UTexture2D>(nullptr, *Node.Brush.Image.TexturePath.GetValue()));
+	UTexture2D* Preview = nullptr;
+	TestTrue(TEXT("Native Border preview resolves the same compound resource"), FWidgetResourceBinder::TryResolveProceduralTexture(PreviewNode, GetTransientPackage(), Preview, nullptr, nullptr, &PreviewImages) == FWidgetResourceBinder::EProceduralTextureResult::Resolved);
+	UBorder* Border = NewObject<UBorder>();
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Border, PreviewNode, &PreviewImages);
+	TestTrue(TEXT("Native Border receives its bound preview image"), Border->Background.GetResourceObject() == Preview);
+	UTexture2D* PreviousPreview = nullptr;
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		UTexture2D* Source = UTexture2D::CreateTransient(2, 2, PF_B8G8R8A8);
+		if (!TestNotNull(TEXT("Transient preview source exists"), Source)) return false;
+		FColor* SourcePixels = static_cast<FColor*>(Source->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE));
+		for (int32 Pixel = 0; Pixel < 4; ++Pixel) SourcePixels[Pixel] = FColor::White;
+		Source->GetPlatformData()->Mips[0].BulkData.Unlock();
+		Source->UpdateResource();
+		PreviewImages[TEXT("preview-source")] = Source;
+		TestTrue(TEXT("Updated preview source resolves"), FWidgetResourceBinder::TryResolveProceduralTexture(
+			PreviewNode, GetTransientPackage(), Preview, nullptr, nullptr, &PreviewImages) == FWidgetResourceBinder::EProceduralTextureResult::Resolved);
+		TestTrue(TEXT("Source identity is not just its unchanged URL or empty source GUID"), Preview != PreviousPreview);
+		PreviousPreview = Preview;
+	}
+	if (!TestTrue(TEXT("Compound background persists"), FPreBuildResourceNormalizer::NormalizePathTextures(Parsed.RootWidget, Folder, TEXT("Border"), &Error))) return false;
+	TestEqual(TEXT("Persistence retains the native control"), Parsed.RootWidget.Type, FString(TEXT("Border")));
+	TestTrue(TEXT("Persistence does not reintroduce paint wrappers"), Parsed.RootWidget.Children.IsEmpty());
+	TestTrue(TEXT("Border receives a materialized background"), Parsed.RootWidget.Brush.Image.TexturePath.IsSet());
+	TestFalse(TEXT("Baked image transform is not applied twice"), Parsed.RootWidget.Brush.Image.Transform.IsSet());
+	FUMGWidgetNode Variants;
+	Variants.Children = {Node, Node};
+	Variants.Children[1].Path.StrokeGradient.Stops[0].Color = FLinearColor::White;
+	if (!TestTrue(TEXT("Distinct stroke paints materialize together"), FPreBuildResourceNormalizer::NormalizePathTextures(Variants, Folder / TEXT("Variants"), TEXT("Paint"), &Error))) return false;
+	TestNotEqual(TEXT("Stroke paint participates in resource identity"), Variants.Children[0].Brush.Image.TexturePath.Get(FString()), Variants.Children[1].Brush.Image.TexturePath.Get(FString()));
 	return true;
 }
 

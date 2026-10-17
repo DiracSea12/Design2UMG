@@ -269,6 +269,38 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeTextPayload(const FUMGTextD
 	return TextObject;
 }
 
+TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeGradientPayload(const FUMGVisualBrushData::FGradientData& Gradient)
+{
+	if (!Gradient.HasAny()) return nullptr;
+	TSharedRef<FJsonObject> GradientObject = MakeShared<FJsonObject>();
+	if (Gradient.Type.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::Type, Gradient.Type.GetValue());
+	if (Gradient.Rotation.IsSet())
+		GradientObject->SetNumberField(UMGJsonKeys::Rotation, Gradient.Rotation.GetValue());
+	if (Gradient.StartPoint.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::StartPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.StartPoint.GetValue()));
+	if (Gradient.EndPoint.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::EndPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.EndPoint.GetValue()));
+	if (Gradient.Center.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::Center, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Center.GetValue()));
+	if (Gradient.Size.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::Size, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Size.GetValue()));
+	if (Gradient.Stops.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> StopArray;
+		StopArray.Reserve(Gradient.Stops.Num());
+		for (const FUMGVisualBrushData::FGradientStopData& Stop : Gradient.Stops)
+		{
+			TSharedRef<FJsonObject> StopObject = MakeShared<FJsonObject>();
+			StopObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color));
+			StopObject->SetNumberField(UMGJsonKeys::Position, Stop.Position);
+			StopArray.Add(MakeShared<FJsonValueObject>(StopObject));
+		}
+		GradientObject->SetArrayField(UMGJsonKeys::Stops, StopArray);
+	}
+	return GradientObject;
+}
+
 TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisualBrushData& Brush)
 {
 	// Brush (v2.4)
@@ -317,35 +349,9 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 		BJ->SetObjectField(TEXT("Image"), ImageObject);
 		bHasAny = true;
 	}
-	if (B.Gradient.HasAny())
+	if (TSharedPtr<FJsonObject> Gradient = SerializeGradientPayload(B.Gradient))
 	{
-		TSharedRef<FJsonObject> GradientObject = MakeShared<FJsonObject>();
-		if (B.Gradient.Type.IsSet())
-			GradientObject->SetStringField(UMGJsonKeys::Type, B.Gradient.Type.GetValue());
-		if (B.Gradient.Rotation.IsSet())
-			GradientObject->SetNumberField(UMGJsonKeys::Rotation, B.Gradient.Rotation.GetValue());
-		if (B.Gradient.StartPoint.IsSet())
-			GradientObject->SetStringField(UMGJsonKeys::StartPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.StartPoint.GetValue()));
-		if (B.Gradient.EndPoint.IsSet())
-			GradientObject->SetStringField(UMGJsonKeys::EndPoint, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.EndPoint.GetValue()));
-		if (B.Gradient.Center.IsSet())
-			GradientObject->SetStringField(UMGJsonKeys::Center, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Center.GetValue()));
-		if (B.Gradient.Size.IsSet())
-			GradientObject->SetStringField(UMGJsonKeys::Size, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(B.Gradient.Size.GetValue()));
-		if (B.Gradient.Stops.Num() > 0)
-		{
-			TArray<TSharedPtr<FJsonValue>> StopArray;
-			StopArray.Reserve(B.Gradient.Stops.Num());
-			for (const FUMGVisualBrushData::FGradientStopData& Stop : B.Gradient.Stops)
-			{
-				TSharedRef<FJsonObject> StopObject = MakeShared<FJsonObject>();
-				StopObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Stop.Color));
-				StopObject->SetNumberField(UMGJsonKeys::Position, Stop.Position);
-				StopArray.Add(MakeShared<FJsonValueObject>(StopObject));
-			}
-			GradientObject->SetArrayField(UMGJsonKeys::Stops, StopArray);
-		}
-		BJ->SetObjectField(TEXT("Gradient"), GradientObject);
+		BJ->SetObjectField(TEXT("Gradient"), Gradient);
 		bHasAny = true;
 	}
 	if (!bHasAny)
@@ -437,6 +443,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializePathPayload(const FUMGPathD
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeCap, Path.StrokeCap.GetValue());
 	if (Path.StrokeJoin.IsSet())
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeJoin, Path.StrokeJoin.GetValue());
+	if (Path.StrokeGeometry.IsSet()) PathObject->SetStringField(TEXT("StrokeGeometry"), Path.StrokeGeometry.GetValue());
+	if (TSharedPtr<FJsonObject> Gradient = SerializeGradientPayload(Path.StrokeGradient)) PathObject->SetObjectField(TEXT("StrokeGradient"), Gradient);
 	return PathObject;
 }
 

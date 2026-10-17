@@ -3,10 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UMGSchemaTypedPayloads.h"
 #include "DesignPathRasterDefaults.h"
 #include "DesignImageResourceLimits.h"
 
 class UTexture2D;
+struct FUMGProceduralResourceRequest;
 
 class FDesignPathRasterizer
 {
@@ -28,7 +30,12 @@ public:
 		const FString& StrokeJoin = DesignPathRasterDefaults::StrokeJoin,
 		FString* OutError = nullptr,
 		// Share a budget across allocations; null starts a standalone operation.
-		DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		DesignImageResources::FImageOperationBudget* Budget = nullptr,
+		const FUMGProceduralResourceRequest* FillPaint = nullptr,
+		const FString& StrokeGeometry = FString(),
+		const FUMGProceduralResourceRequest* StrokePaint = nullptr,
+		const FUMGVisualBrushData::FImageData* FillImage = nullptr,
+		UTexture2D* FillTexture = nullptr);
 	static void FlushPendingTextureUpdates();
 	static void ClearCache();
 	static int64 GetCachedPixelCount();

@@ -31,5 +31,6 @@ public:
 		const FUMGWidgetNode& Node,
 		UObject* Outer,
 		UTexture2D*& OutTexture,
-		FUMGProceduralResourceRequest* OutRequest = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		FUMGProceduralResourceRequest* OutRequest = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr,
+		const TMap<FString, UTexture2D*>* TextureMap = nullptr);
 };

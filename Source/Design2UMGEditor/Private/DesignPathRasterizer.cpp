@@ -1,8 +1,10 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignPathRasterizer.h"
+#include "UObject/ObjectKey.h"
 #include "ProceduralShapeGenerator.h"
 #include "Design2UMGLog.h"
+#include "DesignResourceResolver.h"
 #include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
 #include "Hash/CityHash.h"
@@ -49,12 +51,46 @@ namespace
 	TArray<uint8> MakeCacheSignature(
 		FString Geometry, int32 Width, int32 Height, TOptional<FLinearColor> FillColor,
 		FString Rule, TOptional<FLinearColor> StrokeColor, float StrokeWidth,
-		FString StrokeCap, FString StrokeJoin)
+		FString StrokeCap, FString StrokeJoin, const FUMGProceduralResourceRequest* FillPaint,
+		const FString& StrokeGeometry, const FUMGProceduralResourceRequest* StrokePaint,
+		const FUMGVisualBrushData::FImageData* FillImage, FGuid SourceImageId, FObjectKey SourceObject)
 	{
 		TArray<uint8> Signature;
 		FMemoryWriter Writer(Signature);
 		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
 			<< StrokeWidth << StrokeCap << StrokeJoin;
+		bool bHasImage = FillImage != nullptr;
+		Writer << bHasImage;
+		if (FillImage)
+		{
+			auto Image = *FillImage;
+			Writer << Image.TexturePath << Image.Mode << SourceImageId << SourceObject;
+			bool bHasTransform = Image.Transform.IsSet();
+			Writer << bHasTransform;
+			if (bHasTransform)
+			{
+				auto Transform = Image.Transform.GetValue();
+				Writer << Transform.A << Transform.B << Transform.TX << Transform.C << Transform.D << Transform.TY;
+			}
+		}
+		FString StrokePath = StrokeGeometry;
+		Writer << StrokePath;
+		for (const auto* Paint : {FillPaint, StrokePaint})
+		{
+			bool bHasPaint = Paint != nullptr;
+			Writer << bHasPaint;
+			if (Paint)
+			{
+				auto SourceWidth = Paint->WidthOverride;
+				auto SourceHeight = Paint->HeightOverride;
+				Writer << SourceWidth << SourceHeight;
+				auto Gradient = Paint->Gradient;
+				Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size;
+				int32 StopCount = Gradient.Stops.Num();
+				Writer << StopCount;
+				for (auto& Stop : Gradient.Stops) Writer << Stop.Position << Stop.Color;
+			}
+		}
 		return Signature;
 	}
 
@@ -810,7 +846,11 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	const FString& StrokeCap,
 	const FString& StrokeJoin,
 	FString* OutError,
-	DesignImageResources::FImageOperationBudget* Budget)
+	DesignImageResources::FImageOperationBudget* Budget,
+	const FUMGProceduralResourceRequest* FillPaint,
+	const FString& StrokeGeometry,
+	const FUMGProceduralResourceRequest* StrokePaint,
+	const FUMGVisualBrushData::FImageData* FillImage, UTexture2D* FillTexture)
 {
 	check(IsInGameThread());
 	if (OutError) OutError->Reset();
@@ -830,8 +870,21 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		return nullptr;
 	}
 
+	UTexture2D* SourceImage = nullptr;
+	if (FillImage)
+	{
+		SourceImage = FillTexture ? FillTexture : DesignResourceResolver::LoadTextureFromPath(FillImage->TexturePath.Get(FString()), DesignResourceResolver::ELoadMode::LoadThenFind);
+		if (!SourceImage)
+		{
+			if (OutError) *OutError = TEXT("Path fill image is not available");
+			return nullptr;
+		}
+	}
 	// --- Cache lookup ---
-	const TArray<uint8> CacheSignature = MakeCacheSignature(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
+	const TArray<uint8> CacheSignature = MakeCacheSignature(
+		Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin,
+		FillPaint, StrokeGeometry, StrokePaint, FillImage,
+		SourceImage ? SourceImage->Source.GetId() : FGuid(), FObjectKey(SourceImage));
 	const uint64 CacheKey = MakeCacheKey(CacheSignature);
 	if (FPathCacheEntry* Found = GPathCache.Find(CacheKey))
 	{
@@ -884,6 +937,13 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	float Scale = FMath::Min(ScaleX, ScaleY);
 	float OffsetX = (Width - BoundsSize.X * Scale) / 2.0f - Bounds.Min.X * Scale;
 	float OffsetY = (Height - BoundsSize.Y * Scale) / 2.0f - Bounds.Min.Y * Scale;
+	if (StrokePaint || (FillPaint && !bHasVisibleFill && bHasVisibleStroke))
+	{
+		// Typed paint coordinates belong to the authored shape box, not its ink bounds.
+		const FUMGProceduralResourceRequest* PaintBounds = StrokePaint ? StrokePaint : FillPaint;
+		Scale = Width / PaintBounds->WidthOverride.Get(static_cast<float>(Width));
+		OffsetX = OffsetY = 0.0f;
+	}
 
 	for (auto& Path : SubPaths)
 	{
@@ -893,6 +953,24 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 			Pt.Y = Pt.Y * Scale + OffsetY;
 		}
 	}
+
+	TArray<TArray<FPathPoint>> StrokePaths;
+	if (!StrokeGeometry.IsEmpty())
+	{
+		FBox2D StrokeBounds;
+		if (!ParsePathData(StrokeGeometry, StrokePaths, StrokeBounds))
+		{
+			if (OutError) *OutError = TEXT("Failed to parse stroke geometry");
+			return nullptr;
+		}
+		for (auto& Path : StrokePaths)
+			for (auto& Point : Path)
+			{
+				Point.X = Point.X * Scale + OffsetX;
+				Point.Y = Point.Y * Scale + OffsetY;
+			}
+	}
+	const auto& StrokeContours = StrokePaths.IsEmpty() ? SubPaths : StrokePaths;
 
 	// Cache hits allocate nothing. Charge misses before allocating the raster buffer.
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
@@ -917,7 +995,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	// For implicit nonzero fills with multiple contours, compare an evenodd raster.
 	// Select evenodd when nonzero coverage exceeds it by 20%, preserving glyph holes.
 	// Explicit fill rules bypass this extra rasterization.
-	if (bHasVisibleFill && !bEvenOdd)
+	if (bHasVisibleFill && FillRule.IsEmpty())
 	{
 		TArray<FColor> EvenOddPixels;
 		ScanlineFill(SubPaths, EvenOddPixels, Width, Height, FillColor->ToFColor(true), true);
@@ -933,11 +1011,11 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		}
 	}
 
-	if (bHasVisibleStroke)
+	if (bHasVisibleStroke && !StrokePaint)
 	{
 		const float ScaledStrokeWidth = FMath::Max(1.0f, StrokeWidth * Scale);
 		RasterizeStroke(
-			SubPaths,
+			StrokeContours,
 			Pixels,
 			Width,
 			Height,
@@ -947,7 +1025,77 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 			StrokeJoin);
 	}
 
-	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
+	const auto PaintMask = [&](TArray<FColor>& Mask, const FUMGProceduralResourceRequest& SourcePaint) -> UTexture2D*
+	{
+		FUMGProceduralResourceRequest Paint = SourcePaint;
+		Paint.WidthOverride = static_cast<float>(Width);
+		Paint.HeightOverride = static_cast<float>(Height);
+		UTexture2D* Painted = FProceduralShapeGenerator::GenerateFromMaterialRef(Paint, nullptr, OutError, Budget);
+		if (!Painted) return nullptr;
+		FProceduralShapeGenerator::FlushPendingTextureUpdates();
+		const FColor* Colors = static_cast<const FColor*>(Painted->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		for (int32 Index = 0; Index < Mask.Num(); ++Index)
+		{
+			const FColor Tint = Mask[Index];
+			const uint8 Coverage = Tint.A;
+			Mask[Index] = Colors[Index];
+			if (StrokePaint)
+			{
+				FLinearColor Tinted = FLinearColor::FromSRGBColor(Colors[Index]) * FLinearColor::FromSRGBColor(Tint);
+				Tinted.A = Colors[Index].A / 255.0f;
+				Mask[Index] = Tinted.ToFColor(true);
+			}
+			Mask[Index].A = static_cast<uint8>((static_cast<uint32>(Mask[Index].A) * Coverage + 127) / 255);
+		}
+		Painted->GetPlatformData()->Mips[0].BulkData.Unlock();
+		FProceduralShapeGenerator::ReleaseTransientTexture(Painted);
+		return Painted;
+	};
+	UTexture2D* Texture = FillPaint ? PaintMask(Pixels, *FillPaint) : nullptr;
+	if (FillPaint && !Texture) return nullptr;
+	if (SourceImage)
+	{
+		const auto Transform = FillImage->Mode.Get(FString()) == TEXT("Crop")
+			? FillImage->Transform.Get(FUMGVisualBrushData::FImageTransformData()) : FUMGVisualBrushData::FImageTransformData();
+		Texture = FProceduralShapeGenerator::ApplyAffineCrop(SourceImage, Transform.A, Transform.B, Transform.TX,
+			Transform.C, Transform.D, Transform.TY, Width, Height, OutError, Budget);
+		if (!Texture) return nullptr;
+		FProceduralShapeGenerator::FlushPendingTextureUpdates();
+		const FColor* ImagePixels = static_cast<const FColor*>(Texture->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+		{
+			Pixels[Index] = (FLinearColor::FromSRGBColor(ImagePixels[Index]) * FLinearColor::FromSRGBColor(Pixels[Index])).ToFColor(true);
+		}
+		Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+		FProceduralShapeGenerator::ReleaseTransientTexture(Texture);
+	}
+
+	if (StrokePaint && bHasVisibleStroke)
+	{
+		if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+		{
+			if (OutError) *OutError = BudgetError;
+			return nullptr;
+		}
+		TArray<FColor> StrokePixels;
+		StrokePixels.SetNumZeroed(Pixels.Num());
+		RasterizeStroke(StrokeContours, StrokePixels, Width, Height, StrokeColor->ToFColor(true),
+			FMath::Max(1.0f, StrokeWidth * Scale), StrokeCap, StrokeJoin);
+		UTexture2D* PaintedStroke = PaintMask(StrokePixels, *StrokePaint);
+		if (!PaintedStroke) return nullptr;
+		for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+		{
+			const FLinearColor Background = FLinearColor::FromSRGBColor(Pixels[Index]);
+			const FLinearColor Foreground = FLinearColor::FromSRGBColor(StrokePixels[Index]);
+			const float Alpha = Foreground.A + Background.A * (1.0f - Foreground.A);
+			FLinearColor Combined = Foreground * Foreground.A + Background * (Background.A * (1.0f - Foreground.A));
+			if (Alpha > 0.0f) Combined /= Alpha;
+			Combined.A = Alpha;
+			Pixels[Index] = Combined.ToFColor(true);
+		}
+		if (!Texture) Texture = PaintedStroke;
+	}
+	if (!Texture) Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 	if (!Texture)
 		return nullptr;
 

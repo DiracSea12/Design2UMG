@@ -261,6 +261,8 @@ struct FUMGEffectData
 struct FUMGPathData
 {
 	TOptional<FString> Geometry;
+	TOptional<FString> StrokeGeometry;
+	FUMGVisualBrushData::FGradientData StrokeGradient;
 	TOptional<FString> FillRule;
 	TOptional<FLinearColor> FillColor;
 	TOptional<FLinearColor> StrokeColor;
@@ -271,6 +273,8 @@ struct FUMGPathData
 	bool HasAny() const
 	{
 		return Geometry.IsSet()
+			|| StrokeGeometry.IsSet()
+			|| StrokeGradient.HasAny()
 			|| FillRule.IsSet()
 			|| FillColor.IsSet()
 			|| StrokeColor.IsSet()

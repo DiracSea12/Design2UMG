@@ -7,6 +7,7 @@
 #include "FontResolver.h"
 #include "TextMeasurement.h"
 #include "TextMeasurementInternal.h"
+#include "TextMeasurementRuntimeProbe.h"
 #include "TextFontResolution.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
@@ -588,6 +589,30 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	{
 		Widget.TextStyle.FontSize = ResolvedFontSize.GetValue();
 		Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
+		if (!AssetPath.IsEmpty())
+		{
+			TextMeasurementRuntimeProbe::FTextMeasureRequest MetricsRequest;
+			MetricsRequest.FontAssetPath = AssetPath;
+			MetricsRequest.TypefaceName = Widget.Text.TypefaceFontName.Get(FString());
+			MetricsRequest.FontSize = Widget.TextStyle.FontSize;
+			MetricsRequest.Text = IconText;
+			float ParagraphWidth = 0.0f;
+			const float BoxExtent = FMath::Min(Node->Transform.Width.Value, Node->Transform.Height.Value);
+			if (BoxExtent > 0.0f && TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(MetricsRequest, ParagraphWidth))
+			{
+				const float EmHeight = MetricsRequest.FontSize * Design2UMGFontAccess::RenderDPI / 72.0f;
+				const float Scale = BoxExtent / FMath::Min(ParagraphWidth, EmHeight);
+				MetricsRequest.FontSize *= Scale;
+				Widget.TextStyle.FontSize = MetricsRequest.FontSize;
+				Widget.TextStyle.SourceFontSize = EmHeight * Scale;
+				Widget.Text.Justification = TEXT("Center");
+			}
+			float BaselineShift = 0.0f;
+			if (TextMeasurementRuntimeProbe::TryResolveIconBaselineShift(MetricsRequest, Node->Transform.Height.Value, BaselineShift))
+			{
+				Widget.Text.LineHeightBaselineShift = BaselineShift;
+			}
+		}
 	}
 
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();

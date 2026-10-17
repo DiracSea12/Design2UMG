@@ -118,7 +118,7 @@ namespace UMGBrushPropertyApplier
 		}
 	}
 
-	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
+	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
 		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 		if (!Budget) Budget = &LocalBudget;
@@ -129,7 +129,7 @@ namespace UMGBrushPropertyApplier
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget)
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap)
 			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Brush.SetResourceObject(GeneratedTexture);
@@ -235,10 +235,13 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
+		if (!Node.Path.Geometry.IsSet())
 		{
-			Brush.SetResourceObject(Cropped);
-		}, Budget) || bBrushChanged;
+			bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
+			{
+				Brush.SetResourceObject(Cropped);
+			}, Budget) || bBrushChanged;
+		}
 
 		if (bBrushChanged)
 		{

@@ -31,6 +31,8 @@ namespace TextMeasurementRuntimeProbe
 	bool IsAvailable();
 	FSlateFontInfo BuildFontInfo(const FTextMeasureRequest& Request);
 	bool TryMeasureText(const FTextMeasureRequest& Request, FVector2D& OutSize);
+	bool TryMeasureIntrinsicWidth(const FTextMeasureRequest& Request, float& OutWidth);
+	bool TryResolveIconBaselineShift(const FTextMeasureRequest& Request, const float BoxHeight, float& OutShift);
 	bool TryMeasureTextBlockDesiredSize(const FTextBlockMeasureRequest& Request, FVector2D& OutSize);
 
 	/** Release the module-owned probe text block before shutdown / hot-reload. */

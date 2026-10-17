@@ -3,6 +3,7 @@
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetTypes.h"
+#include "UMGWidgetNodeAccess.h"
 #include "UMGImageCropUtils.h"
 #include "Design2UMGLog.h"
 #include "DesignPathRasterDefaults.h"
@@ -61,7 +62,24 @@ namespace
 		auto Width = Node.WidgetStyle.WidthOverride;
 		auto Height = Node.WidgetStyle.HeightOverride;
 		Writer << Path.Geometry << Path.FillRule << Path.FillColor << Path.StrokeColor
-			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Width << Height;
+			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Path.StrokeGeometry << Width << Height;
+		auto Image = Node.Brush.Image;
+		Writer << Image.TexturePath << Image.Mode;
+		bool bHasTransform = Image.Transform.IsSet();
+		Writer << bHasTransform;
+		if (bHasTransform)
+		{
+			auto Transform = Image.Transform.GetValue();
+			Writer << Transform.A << Transform.B << Transform.TX << Transform.C << Transform.D << Transform.TY;
+		}
+		for (const auto* Paint : {&Node.Brush.Gradient, &Node.Path.StrokeGradient})
+		{
+			auto Gradient = *Paint;
+			Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size;
+			int32 StopCount = Gradient.Stops.Num();
+			Writer << StopCount;
+			for (auto& Stop : Gradient.Stops) Writer << Stop.Position << Stop.Color;
+		}
 		return Key;
 	}
 
@@ -269,7 +287,7 @@ namespace
 		FTextureMaterializationPlan& OutPlan)
 	{
 		const FString Geometry = Node.Path.Geometry.Get(FString());
-		if (Node.Type != UMGWidgetTypes::Image || Geometry.IsEmpty())
+		if ((Node.Type != UMGWidgetTypes::Image && Node.Type != UMGWidgetTypes::Border) || Geometry.IsEmpty())
 		{
 			return false;
 		}
@@ -280,7 +298,7 @@ namespace
 		}
 
 		OutPlan.Key = MakePathTextureKey(Node);
-		OutPlan.Filter = TF_Nearest;
+		OutPlan.Filter = Node.Brush.Gradient.HasAny() || Node.Path.StrokeGradient.HasAny() ? TF_Bilinear : TF_Nearest;
 		OutPlan.Kind = FTextureMaterializationPlan::EKind::Path;
 		const FString SanitizedName = ObjectTools::SanitizeObjectName(Node.Name.IsEmpty() ? Node.Id : Node.Name);
 		OutPlan.AssetName = ObjectTools::SanitizeObjectName(FString::Printf(TEXT("%s_%s"), *AssetPrefix, *SanitizedName));
@@ -301,15 +319,31 @@ namespace
 		if (!FDesignPathRasterizer::TryGetRasterSize(Width, Height, RasterSize)) return nullptr;
 
 		// Preserve the rasterizer's existing byte-color precision without a string round trip.
+		FUMGProceduralResourceRequest Paint;
+		const bool bHasGradient = !Node.Brush.Gradient.Stops.IsEmpty()
+			&& Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, Paint);
 		TOptional<FLinearColor> Fill = Node.Path.FillColor;
+		if (bHasGradient && Fill.IsSet() && !Node.Path.StrokeGradient.HasAny()) Fill = FLinearColor::White;
 		if (Fill.IsSet()) Fill = FLinearColor::FromSRGBColor(Fill->ToFColor(true));
 		TOptional<FLinearColor> Stroke = Node.Path.StrokeColor;
 		if (Stroke.IsSet()) Stroke = FLinearColor::FromSRGBColor(Stroke->ToFColor(true));
+		FUMGProceduralResourceRequest StrokePaint;
+		const bool bHasStrokeGradient = Node.Path.StrokeGradient.HasAny();
+		if (bHasStrokeGradient)
+		{
+			StrokePaint.Gradient = Node.Path.StrokeGradient;
+			StrokePaint.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(StrokePaint.Gradient);
+			StrokePaint.WidthOverride = Width;
+			StrokePaint.HeightOverride = Height;
+		}
 		// The rasterizer bills this raster against the materialization budget on a cache
 		// miss, i.e. exactly when it allocates; a cache hit allocates nothing and is free.
 		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
 			*Geometry, RasterSize.X, RasterSize.Y,
-			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError, Budget);
+			Fill, FillRule, Stroke, StrokeThickness, StrokeCap, StrokeJoin, &OutError, Budget,
+			bHasGradient ? &Paint : nullptr, Node.Path.StrokeGeometry.Get(FString()),
+			bHasStrokeGradient ? &StrokePaint : nullptr,
+			bHasGradient || Node.Brush.Image.TexturePath.Get(FString()).IsEmpty() ? nullptr : &Node.Brush.Image);
 		if (!Texture && !OutError.IsEmpty())
 		{
 			// Name the node here: the refusal happens inside the rasterizer, which has no idea
@@ -423,7 +457,7 @@ namespace
 		const FTextureMaterializationPlan::EKind Kind)
 	{
 		ReplaceNodeFillWithTexturePath(Node, TexturePath);
-		if (Kind == FTextureMaterializationPlan::EKind::ImageTransform)
+		if (Kind == FTextureMaterializationPlan::EKind::ImageTransform || Kind == FTextureMaterializationPlan::EKind::Path)
 		{
 			Node.Brush.Image.Transform.Reset();
 			Node.Brush.Image.Mode.Reset();
@@ -550,7 +584,7 @@ bool FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 	const DesignImageResources::FImageResourceLimits Limits = DesignImageResources::GetGeneratedTextureLimits();
 	TFunction<bool(const FUMGWidgetNode&)> Visit = [&](const FUMGWidgetNode& Node)
 	{
-		if (Node.Type == UMGWidgetTypes::Image
+		if ((Node.Type == UMGWidgetTypes::Image || Node.Type == UMGWidgetTypes::Border)
 			&& !Node.Path.Geometry.Get(FString()).IsEmpty()
 			&& HasVisiblePathPaint(Node))
 		{

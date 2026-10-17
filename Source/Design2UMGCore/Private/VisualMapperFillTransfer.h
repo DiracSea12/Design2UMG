@@ -10,6 +10,7 @@ struct FUMGWidgetNode;
 
 namespace VisualMapperFillTransfer
 {
+	FUMGWidgetNode WrapWithGradientStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node);
 	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	FUMGWidgetNode WrapWithMultiFill(
 		FUMGWidgetNode&& Widget,
