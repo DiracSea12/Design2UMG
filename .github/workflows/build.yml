@@ -156,8 +156,8 @@ jobs:
           }
 
           $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
-          # BuildPlugin launches UBT separately from the AutomationTool mutex.
-          $env:UBT_EXTRA_ARGS = "$env:UBT_EXTRA_ARGS -WaitMutex".Trim()
+          # Keep native foreign-plugin outputs so UBT also generates the module manifest.
+          $env:UBT_EXTRA_ARGS = "$env:UBT_EXTRA_ARGS -WaitMutex -UsePrecompiled -NoEngineChanges -NoPCH -NoSharedPCH".Trim()
           & $uat BuildPlugin `
             -Plugin="$pwd\Design2UMG.uplugin" `
             -Package="$packageRoot" `
@@ -201,6 +201,9 @@ jobs:
       - name: Verify packaged plugin excludes maintainer-only files
         run: |
           $packageRoot = Join-Path $env:RUNNER_TEMP "Design2UMG-Package-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/Design2UMG"
+          if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'Binaries/Win64/UnrealEditor.modules') -PathType Leaf)) {
+            throw 'Packaged plugin module manifest is missing: Binaries/Win64/UnrealEditor.modules'
+          }
           ./Tools/Release/Assert-PublicRepoBoundary.ps1 -RepoRoot $packageRoot -Mode Package
 
       - name: Run focused Design2UMG automation tests
@@ -208,7 +211,7 @@ jobs:
         # The self-hosted runner validates the installed plugin copy at
         # the unique installed location, after source comparison and editor rebuild.
         # Strict header checks run in the plugin-only rebuild with precompiled
-        # engine modules. UAT then packages with the engine's normal build settings.
+        # engine modules. UAT packaging also uses precompiled engine modules with PCH disabled.
         run: |
           ./Tools/CI/Assert-CandidatePlugin.ps1 -SourceRoot $pwd `
             -EngineRoot $env:UE_ROOT -ProjectFile $env:DESIGN2UMG_RUNTIME_PROJECT
