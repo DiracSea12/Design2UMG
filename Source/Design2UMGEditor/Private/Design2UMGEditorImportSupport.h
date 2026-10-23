@@ -8,5 +8,7 @@
 namespace Design2UMGEditorImportSupport
 {
 	void ShowNotification(const FText& Text, const SNotificationItem::ECompletionState State);
+	bool LoadTextFile(
+		const FString& FilePath, FString& OutContents, const TCHAR* FailureDescription, FString& OutError);
 	bool LoadTextFileOrLog(const FString& FilePath, FString& OutContents);
 }

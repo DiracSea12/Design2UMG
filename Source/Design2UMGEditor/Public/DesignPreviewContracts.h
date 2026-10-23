@@ -10,6 +10,17 @@
 
 class UUserWidget;
 
+/** Image settings captured before an import or preview-confirmation operation. */
+struct FDesignImageImportSettingsSnapshot
+{
+	bool bEnableRemoteImageImport = true;
+	bool bAllowUnsafeRemoteImageUrls = false;
+	FString RemoteImageImportPath = TEXT("/Game/Design2UMG/ImportedImages");
+	float RemoteImageTimeoutSeconds = 20.0f;
+
+	static FDesignImageImportSettingsSnapshot FromSettings(const UDesign2UMGSettings& Settings);
+};
+
 /** Output mode requested when materializing a preview snapshot. */
 enum class EDesignBlueprintGenerationMode : uint8
 {
@@ -62,6 +73,7 @@ struct FPreviewRefreshInput
 	/** Source-resolution facts collected before the preview opened. */
 	FDesignImageImportResult InitialImageResult;
 	bool bResolveImages = true;
+	TOptional<FDesignImageImportSettingsSnapshot> ImageSettings;
 };
 
 struct FPreviewApprovedSnapshot

@@ -38,6 +38,7 @@ for line in sys.stdin.buffer:
     assert initialized, "tools/call arrived before notifications/initialized"
     name = request["params"]["name"]
     if name == "exit":
+        os.write(2, b"fixture exit detail\n")
         sys.exit(4)
     if name == "slow":
         time.sleep(0.08)

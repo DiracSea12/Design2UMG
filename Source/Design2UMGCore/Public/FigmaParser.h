@@ -14,6 +14,7 @@ class DESIGN2UMGCORE_API FFigmaParser
 public:
 	/**
 	 * Parse a Figma export JSON string into a design document.
+	 * Replaces OutDocument on success and leaves it empty on failure.
 	 * @param FigmaJson Source Figma export JSON text.
 	 * @param OutDocument Parsed document on success.
 	 * @return `true` when parsing succeeds.

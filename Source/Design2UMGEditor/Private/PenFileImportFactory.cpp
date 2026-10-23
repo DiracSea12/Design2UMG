@@ -63,10 +63,13 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	bOutOperationCanceled = false;
 
 	TArray<FDesignFrameInfo> Frames;
-	if (!DesignImportPipeline::LoadPenFrames(Filename, Frames))
+	FString LoadError;
+	FString LoadWarnings;
+	if (!DesignImportPipeline::LoadPenFrames(Filename, Frames, &LoadError, &LoadWarnings))
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: Failed to parse %s"), *Filename);
 		FDesign2UMGNotification::Error(LOCTEXT("ParseFailed", "Design2UMG: Failed to parse .pen file"));
+		DesignImportDialogs::ShowImportProblem(LoadError);
 		return nullptr;
 	}
 
@@ -74,8 +77,11 @@ UObject* UPenFileImportFactory::FactoryCreateFile(
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("PenFileImport: No frames found in %s"), *Filename);
 		FDesign2UMGNotification::Error(LOCTEXT("NoFrames", "Design2UMG: No frames found in file"));
+		DesignImportDialogs::ShowImportProblem(LoadError);
 		return nullptr;
 	}
+
+	if (!LoadWarnings.IsEmpty()) DesignImportDialogs::ShowImportProblem(LoadWarnings);
 
 	const FString OutputPath = InParent ? InParent->GetPathName() : FString(DesignImportDefaults::PenOutputPath);
 	const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =

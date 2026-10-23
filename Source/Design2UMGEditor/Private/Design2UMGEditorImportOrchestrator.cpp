@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDialogs.h"
+#include "DesignImportPlanning.h"
 
 #include "Design2UMGEditorImportFrameSelection.h"
 #include "Design2UMGEditorImportRequestSetup.h"
@@ -12,6 +14,7 @@
 #include "DesignImportPipeline.h"
 #include "DesignPathRasterizer.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "ExternalServices/PencilExtensionResources.h"
 #include "FigmaParser.h"
 #include "FontResolver.h"
 #include "Misc/DateTime.h"
@@ -29,13 +32,16 @@ namespace
 	bool ConvertRegisteredSource(
 		const FName SourceId,
 		const FString& JsonContents,
+		const FString& SourceFilePath,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
 		FUMGWidgetData& OutData)
 	{
 		FDesignDocument Document;
 		if (SourceId == TEXT("Pen"))
 		{
-			if (!FPenParser::ParseDocument(JsonContents, Document))
+			PencilExtensionResources::EnsureIconGlyphsRegistered();
+			PencilExtensionResources::EnsureBundledLibrariesRegistered();
+			if (!FPenParser::ParseDocument(JsonContents, Document, SourceFilePath))
 			{
 				return false;
 			}
@@ -52,10 +58,7 @@ namespace
 			return false;
 		}
 
-		FImportAnalysisInput AnalysisInput;
-		AnalysisInput.bResolveImages = false;
-		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeConversion(Document, SettingsSnapshot);
 		if (!Analysis.ErrorMessage.IsEmpty()) return false;
 		OutData = Analysis.Data;
 		return true;
@@ -66,16 +69,22 @@ namespace
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 	{
 		TArray<FDesignFrameInfo> Frames;
-		if (!DesignImportPipeline::LoadPenFrames(Request.FilePath, Frames))
+		FString LoadError;
+		FString LoadWarnings;
+		if (!DesignImportPipeline::LoadPenFrames(Request.FilePath, Frames, &LoadError, &LoadWarnings))
 		{
+			DesignImportDialogs::ShowImportProblem(LoadError);
 			return;
 		}
 
 		if (Frames.Num() == 0)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: No frames found in %s"), *Request.FilePath);
+			DesignImportDialogs::ShowImportProblem(LoadError);
 			return;
 		}
+
+		if (!LoadWarnings.IsEmpty()) DesignImportDialogs::ShowImportProblem(LoadWarnings);
 
 		Design2UMGEditorImportFrameSelection::ExecuteFrameImport(
 			Frames,
@@ -83,7 +92,7 @@ namespace
 			LOCTEXT("FrameSelectorHint", "This file contains multiple frames. Double-click to import:"),
 			[CapturedRequest = Request, CapturedSettingsSnapshot = SettingsSnapshot](const FString& FrameId)
 			{
-				Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
+				DesignImportPipeline::ExecutePenFile(
 					CapturedRequest.FilePath,
 					FrameId,
 					Design2UMGEditorImportRequestSetup::MakePenImportRequest(
@@ -125,7 +134,7 @@ namespace Design2UMGEditorImportOrchestrator
 		}
 
 		const FDesignImportExecutionResult ExecutionResult = bOk
-			? Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(
+			? DesignImportPipeline::Execute(
 				Data,
 				Design2UMGEditorImportRequestSetup::MakePenImportRequest(
 					Request.OutputPath, Design2UMGEditorUnattendedExit::ShouldUsePreviewInCurrentMode(Request.bUsePreview), true, SettingsSnapshot))
@@ -144,6 +153,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!FPaths::FileExists(Request.FilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.FilePath);
+			DesignImportDialogs::ShowImportProblem(TEXT("找不到设计稿文件：") + Request.FilePath);
 			bOk = false;
 		}
 		else if (FApp::IsUnattended() && Request.TargetNodeId.IsEmpty())
@@ -163,7 +173,7 @@ namespace Design2UMGEditorImportOrchestrator
 			}
 			else
 			{
-				ExecutionResult = Design2UMGEditorImportRequestSetup::ExecutePenFileImportWithSettings(
+				ExecutionResult = DesignImportPipeline::ExecutePenFile(
 					Request.FilePath,
 					Request.TargetNodeId,
 					Design2UMGEditorImportRequestSetup::MakePenImportRequest(
@@ -198,6 +208,7 @@ namespace Design2UMGEditorImportOrchestrator
 			if (!ConvertRegisteredSource(
 				Request.SourceId,
 				JsonContents,
+				Request.JsonPath,
 				SettingsSnapshot,
 				Data))
 			{
@@ -212,7 +223,7 @@ namespace Design2UMGEditorImportOrchestrator
 					EDesignBlueprintGenerationMode::BlueprintAndPng,
 					SettingsSnapshot);
 				const FDesignImportExecutionResult ExecutionResult =
-					Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
+					DesignImportPipeline::Execute(Data, ImportRequest);
 				bOk = ExecutionResult.bSucceeded;
 			}
 		}
@@ -246,6 +257,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!FPaths::FileExists(Request.JsonFilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.JsonFilePath);
+			DesignImportDialogs::ShowImportProblem(TEXT("找不到设计稿文件：") + Request.JsonFilePath);
 			bOk = false;
 		}
 
@@ -255,6 +267,7 @@ namespace Design2UMGEditorImportOrchestrator
 		{
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
+			DesignImportDialogs::ShowImportProblem(ErrorMessage);
 			bOk = false;
 		}
 
@@ -273,7 +286,7 @@ namespace Design2UMGEditorImportOrchestrator
 				EDesignBlueprintGenerationMode::BlueprintAndPng,
 				SettingsSnapshot,
 				false);
-			bOk = Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Document, ImportRequest).bSucceeded;
+			bOk = DesignImportPipeline::Execute(Document, ImportRequest).bSucceeded;
 		}
 
 		Design2UMGEditorUnattendedExit::ExitUnattendedWithStatus(
@@ -295,6 +308,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(JsonFilePath, Document, ErrorMessage))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
+			DesignImportDialogs::ShowImportProblem(ErrorMessage);
 		}
 		else
 		{

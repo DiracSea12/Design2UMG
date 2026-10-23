@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 
 #include "Design2UMGComponentMappingConfig.h"
 #include "Design2UMGComponentMappingGeneration.h"
@@ -548,7 +549,7 @@ bool FPreviewContextMappedGenerationTest::RunTest(const FString& Parameters)
 			Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
 			Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
 			Input.bResolveImages = false;
-			auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+			auto Refreshed = DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
 			if (!TestTrue(TEXT("Preview preserves mapped context"), Refreshed.bSucceeded)) continue;
 			Data = MoveTemp(Refreshed.Data);
 		}

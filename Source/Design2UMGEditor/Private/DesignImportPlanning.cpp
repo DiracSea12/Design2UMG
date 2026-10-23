@@ -16,11 +16,6 @@
 
 namespace
 {
-	FDesign2UMGConversionSettings BuildFallbackConversionSettings()
-	{
-		return FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get());
-	}
-
 	bool ParseWidgetJson(const FString& JsonString, FUMGWidgetData& OutData, FString* OutError)
 	{
 		FString ParseError;
@@ -120,11 +115,14 @@ namespace DesignImportPlanning
 {
 	FDesignImageImportResult ResolveImages(
 		FUMGWidgetData& Data,
-		const FDesignImageImportResult* PreviousResult)
+		const FDesignImageImportResult* PreviousResult,
+		const FDesignImageImportSettingsSnapshot* Settings)
 	{
 		FImageSourcesByNode ActiveSources;
 		CollectImageSources(Data.RootWidget, ActiveSources);
-		FDesignImageImportResult Result = FDesignRemoteImageImporter::ResolveRemoteImages(Data);
+		const FDesignImageImportSettingsSnapshot EffectiveSettings = Settings
+			? *Settings : FDesignImageImportSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get());
+		FDesignImageImportResult Result = FDesignRemoteImageImporter::ResolveRemoteImages(Data, EffectiveSettings);
 		if (PreviousResult)
 		{
 			Result = ReconcileImageResults(ActiveSources, MoveTemp(Result), *PreviousResult);
@@ -163,7 +161,16 @@ namespace DesignImportPlanning
 		InOutResult.AddDiagnostic(MoveTemp(Diagnostic));
 		InOutResult.RefreshDisplaySummary();
 	}
-	FImportInPlaceAnalysisResult AnalyzeWidgetData(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
+	FImportAnalysisResult AnalyzeConversion(
+		FDesignDocument& Document, const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
+	{
+		FImportAnalysisInput Input;
+		Input.bResolveImages = false;
+		Input.SettingsSnapshot = &SettingsSnapshot;
+		return AnalyzeImport(Document, Input);
+	}
+
+	FImportInPlaceAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
 	{
 		FImportInPlaceAnalysisResult Result;
 		if (!Data.ConversionError.IsEmpty())
@@ -171,24 +178,21 @@ namespace DesignImportPlanning
 			Result.ErrorMessage = Data.ConversionError;
 			return Result;
 		}
-		if (Input.SettingsSnapshot)
-		{
-			Result.SettingsSnapshot = *Input.SettingsSnapshot;
-		}
+		Result.SettingsSnapshot = Input.SettingsSnapshot ? *Input.SettingsSnapshot
+			: FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		if (Input.bResolveImages)
 		{
-			Result.ImageResult = ResolveImages(Data);
+			Result.ImageResult = ResolveImages(Data, nullptr,
+				&Result.SettingsSnapshot->GenerationSettings.ImageSettings);
 		}
 		return Result;
 	}
 
-	FImportAnalysisResult AnalyzeDocument(FDesignDocument& Document, const FImportAnalysisInput& Input)
+	FImportAnalysisResult AnalyzeImport(FDesignDocument& Document, const FImportAnalysisInput& Input)
 	{
 		FImportAnalysisResult Result;
-		if (Input.SettingsSnapshot)
-		{
-			Result.SettingsSnapshot = *Input.SettingsSnapshot;
-		}
+		Result.SettingsSnapshot = Input.SettingsSnapshot ? *Input.SettingsSnapshot
+			: FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 
 		// A document whose only top-level node is a reusable library entry (e.g. a selected
 		// Figma component definition exported as the design root) is being imported as the
@@ -198,10 +202,7 @@ namespace DesignImportPlanning
 			Document.Children[0]->bReusable = false;
 		}
 
-		const FDesign2UMGConversionSettings& ConversionSettings =
-			Result.SettingsSnapshot.IsSet()
-				? Result.SettingsSnapshot->ConversionSettings
-				: BuildFallbackConversionSettings();
+		const FDesign2UMGConversionSettings& ConversionSettings = Result.SettingsSnapshot->ConversionSettings;
 		TArray<FString> FontWarnings;
 		if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Result.ErrorMessage))
 		{
@@ -214,14 +215,12 @@ namespace DesignImportPlanning
 			Result.ErrorMessage = Result.Data.ConversionError;
 			return Result;
 		}
-		Result.Data.Warnings.Append(FontWarnings);
-		if (Result.SettingsSnapshot.IsSet())
-		{
-			Result.SettingsSnapshot->GenerationSettings.ComponentConversionSettings = ConversionSettings;
-		}
+		for (const FString& Warning : FontWarnings) Result.Data.Warnings.AddUnique(Warning);
+		Result.SettingsSnapshot->GenerationSettings.ComponentConversionSettings = ConversionSettings;
 		if (Input.bResolveImages)
 		{
-			Result.ImageResult = ResolveImages(Result.Data);
+			Result.ImageResult = ResolveImages(Result.Data, nullptr,
+				&Result.SettingsSnapshot->GenerationSettings.ImageSettings);
 		}
 		return Result;
 	}
@@ -258,7 +257,8 @@ namespace DesignImportPlanning
 		{
 			const FDesignImageImportResult RetainedFacts = ReconcileImageResults(
 				ActiveSources, FDesignImageImportResult(), Input.InitialImageResult);
-			Result.ImageResult = ResolveImages(Result.Data, &RetainedFacts);
+			Result.ImageResult = ResolveImages(Result.Data, &RetainedFacts,
+				Input.ImageSettings.IsSet() ? &Input.ImageSettings.GetValue() : nullptr);
 		}
 		else
 		{

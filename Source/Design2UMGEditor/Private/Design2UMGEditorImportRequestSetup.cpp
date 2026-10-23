@@ -3,7 +3,6 @@
 #include "Design2UMGEditorImportRequestSetup.h"
 
 #include "Design2UMGSettings.h"
-
 #include "Dom/JsonObject.h"
 
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
@@ -49,36 +48,12 @@ namespace Design2UMGEditorImportRequestSetup
 			SettingsSnapshot);
 	}
 
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FUMGWidgetData& Data,
-		const FDesignImportRequest& Request)
-	{
-		return DesignImportPipeline::Execute(Data, Request);
-	}
-
-	FDesignImportExecutionResult ExecuteImportWithSettings(
-		FDesignDocument& Document,
-		const FDesignImportRequest& Request,
-		const FImportAnalysisResult* PrecomputedAnalysis)
-	{
-		return DesignImportPipeline::Execute(Document, Request, PrecomputedAnalysis);
-	}
-
-	FDesignImportExecutionResult ExecutePenFileImportWithSettings(
-		const FString& FilePath,
-		const FString& TargetNodeId,
-		const FDesignImportRequest& Request)
-	{
-		return DesignImportPipeline::ExecutePenFile(FilePath, TargetNodeId, Request);
-	}
-
 	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs()
 	{
 		TSharedPtr<FJsonObject> Args = MakeShared<FJsonObject>();
 		Args->SetStringField(TEXT("filePath"), TEXT(""));
-		Args->SetStringField(TEXT("description"), TEXT("Read document for UMG import"));
-		// Print a single marked JSON line; execute also returns human-readable status text.
-		Args->SetStringField(TEXT("input"), TEXT("Print(\"Design2UMGDocument:\"+JSON.stringify({nodes:Get((n,ctx)=>{if(ctx.depth!==0||n.type!==\"frame\")return;ctx.skipChildren();return Get(n.id,{depth:99,includePathGeometry:true})},{depth:0}),variables:GetVariables()}))"));
+		// One execute reads every top-level subtree and the current variables/themes.
+		Args->SetStringField(TEXT("input"), TEXT("Print(\"Design2UMGDocument:\"+JSON.stringify({nodes:Get((n,c)=>{c.skipChildren();return Get(n.id,{depth:99,includePathGeometry:true})},{depth:0}),variables:GetVariables()}))"));
 		return Args;
 	}
 }

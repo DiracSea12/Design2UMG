@@ -127,9 +127,9 @@
       a.download = 'figma_export.zip';
       a.click();
       URL.revokeObjectURL(a.href);
-      statusEl.textContent = 'Done!';
-      hintEl.textContent = 'Downloaded figma_export.zip — extract and import in UE5.';
-      hintEl.style.color = '#1bc47d';
+      statusEl.textContent = msg.warning ? 'Done with warning' : 'Done!';
+      hintEl.textContent = msg.warning || 'Downloaded figma_export.zip — extract and import in UE5.';
+      hintEl.style.color = msg.warning ? '#e6a23c' : '#1bc47d';
       btn.disabled = false;
     }
 

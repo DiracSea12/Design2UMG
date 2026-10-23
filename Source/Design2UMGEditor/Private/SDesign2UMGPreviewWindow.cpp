@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "SDesign2UMGPreviewWindow.h"
+#include "DesignImportDialogs.h"
+#include "DesignImportPlanning.h"
 #include "Async/Async.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
@@ -78,7 +80,7 @@ namespace
 		{
 			FPreviewRefreshInput RefreshInput = Input;
 			RefreshInput.bResolveImages = false;
-			return DesignImportPipeline::AnalyzePreviewRefresh(RefreshInput);
+			return DesignImportPlanning::AnalyzePreviewRefreshInput(RefreshInput);
 		}
 	};
 }
@@ -91,6 +93,7 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 	InitialImageResult = InArgs._InitialImageResult;
 	CurrentImageResult = InitialImageResult;
 	CurrentOutputPath = InArgs._OutputPath;
+	SourceFilePath = InArgs._SourceFilePath;
 	ConversionWarnings = InArgs._Warnings;
 	CachedMaterializationSettingsSnapshot = InArgs._InitialMaterializationSettingsSnapshot;
 	OnConfirmed = InArgs._OnConfirmed;
@@ -433,6 +436,16 @@ SDesign2UMGPreviewWindow::ResolveMaterializationSettingsSnapshot()
 	return CachedMaterializationSettingsSnapshot;
 }
 
+FString SDesign2UMGPreviewWindow::FormatPreviewFailure(const FString& ErrorMessage) const
+{
+	if (OriginalData.IsValid())
+	{
+		return DesignImportDialogs::FormatImportResult(*OriginalData, ErrorMessage, false, SourceFilePath);
+	}
+	const FUMGWidgetData EmptyData;
+	return DesignImportDialogs::FormatImportResult(EmptyData, ErrorMessage, false, SourceFilePath);
+}
+
 FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 {
 	if (CurrentOutputPath.IsEmpty())
@@ -443,8 +456,9 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 
 	if (!CanConfirmLatestSnapshot())
 	{
-		FMessageDialog::Open(EAppMsgType::Ok,
-			LOCTEXT("RefreshRequiredBeforeGenerate", "Preview is stale or failed to refresh. Refresh must succeed before generating."));
+		DesignImportDialogs::ShowImportProblem(GenerationStatus.IsEmpty()
+			? LOCTEXT("RefreshRequiredBeforeGenerate", "预览正在刷新或已过期，请刷新成功后再生成。").ToString()
+			: GenerationStatus.ToString());
 		return FReply::Handled();
 	}
 
@@ -486,19 +500,30 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 		{
 			if (!Diagnostic.Message.IsEmpty()) Message += TEXT("\n") + Diagnostic.Message;
 		}
+		Message = DesignImportDialogs::FormatImportResult(GenerationRequest.ApprovedSnapshot.Data, Message, false, SourceFilePath);
 		GenerationStatus = FText::FromString(Message);
+		DesignImportDialogs::ShowImportProblem(Message);
 		return FReply::Handled();
 	}
 	GenerationStatus = FText::GetEmpty();
-	if (Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation)
+	if (Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation
+		|| !Result.Warnings.IsEmpty() || !GenerationRequest.ApprovedSnapshot.Data.Warnings.IsEmpty()
+		|| GenerationRequest.ApprovedSnapshot.ImageResult.HasFailures())
 	{
-		FString Summary = FString::Join(Result.Warnings, TEXT("\n"));
+		FString Issues = FString::Join(Result.Warnings, TEXT("\n"));
 		for (const auto& Diagnostic : Result.ComponentMappingDiagnostics)
 		{
-			if (!Diagnostic.Message.IsEmpty()) Summary += TEXT("\n") + Diagnostic.Message;
+			if (!Diagnostic.Message.IsEmpty()) Issues += TEXT("\n") + Diagnostic.Message;
 		}
-		if (Summary.IsEmpty()) Summary = TEXT("Generation completed with degradation. Review the import diagnostics.");
-		FDesign2UMGNotification::Warning(FText::FromString(Summary));
+		if (GenerationRequest.ApprovedSnapshot.ImageResult.HasFailures())
+			Issues += TEXT("\n") + DesignImportDialogs::FormatImageIssues(GenerationRequest.ApprovedSnapshot.ImageResult);
+		if (Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation)
+		{
+			if (Issues.IsEmpty()) Issues = TEXT("Generation completed with degradation. Review the import diagnostics.");
+			FDesign2UMGNotification::Warning(FText::FromString(Issues));
+		}
+		DesignImportDialogs::ShowImportProblem(DesignImportDialogs::FormatImportResult(
+			GenerationRequest.ApprovedSnapshot.Data, Issues, true, SourceFilePath));
 	}
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
@@ -665,6 +690,7 @@ void SDesign2UMGPreviewWindow::InvalidateApprovedSnapshot()
 {
 	LatestApprovedSnapshot.Reset();
 	bLatestApprovedSnapshotStale = true;
+	GenerationStatus = FText::GetEmpty();
 }
 
 void SDesign2UMGPreviewWindow::RefreshUMGPreview()
@@ -680,6 +706,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 		CurrentImageResult.Reset();
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
+		GenerationStatus = FText::FromString(FormatPreviewFailure(Error));
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(GetAppStyleBrush("WhiteBrush"))
@@ -687,7 +714,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 			.Padding(8)
 			[
 				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("PreviewError", "JSON Error:\n{0}"), FText::FromString(Error)))
+				.Text(GenerationStatus)
 				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.3f, 0.3f)))
 				.AutoWrapText(true)
 			]
@@ -759,6 +786,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		CurrentImageResult.Reset();
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
+		GenerationStatus = FText::FromString(FormatPreviewFailure(RefreshResult.ParseError));
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(GetAppStyleBrush("WhiteBrush"))
@@ -766,7 +794,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 			.Padding(8)
 			[
 				SNew(STextBlock)
-				.Text(FText::Format(LOCTEXT("PreviewParseError", "Preview parse failed:\n{0}"), FText::FromString(RefreshResult.ParseError)))
+				.Text(GenerationStatus)
 				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.3f, 0.3f)))
 				.AutoWrapText(true)
 			]
@@ -837,10 +865,10 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 	{
 		InvalidateApprovedSnapshot();
 		CleanupPreviewWidget();
-		const FText FailureMessage = MaterializationResult.ErrorMessage.IsEmpty()
-			? LOCTEXT("PreviewFailed", "Failed to create preview widget.\nCheck the Output Log for details.")
-			: FText::Format(LOCTEXT("PreviewResourceLimit", "Preview stopped because image resources exceed the limit.\n{0}\n\nReduce image sizes or preview fewer nodes, then try again."),
-				FText::FromString(MaterializationResult.ErrorMessage));
+		const FString FailureDetails = DesignImportDialogs::FormatImportResult(
+		ApprovedSnapshot.Data, MaterializationResult.ErrorMessage, false, SourceFilePath);
+		const FText FailureMessage = FText::FromString(FailureDetails);
+	GenerationStatus = FailureMessage;
 		UMGPreviewContainer->SetContent(
 			SNew(SBorder)
 			.BorderImage(GetAppStyleBrush("WhiteBrush"))
@@ -855,13 +883,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		);
 		if (!MaterializationResult.ErrorMessage.IsEmpty())
 		{
-			const FText FailureTitle = LOCTEXT("PreviewResourceLimitTitle", "Design2UMG - Preview resource limit");
-#if UE_VERSION_OLDER_THAN(5, 3, 0)
-			FMessageDialog::Open(EAppMsgType::Ok, FailureMessage, &FailureTitle);
-#else
-			FMessageDialog::Open(EAppMsgType::Ok, FailureMessage,
-				FailureTitle);
-#endif
+			DesignImportDialogs::ShowImportProblem(FailureDetails);
 		}
 	}
 }

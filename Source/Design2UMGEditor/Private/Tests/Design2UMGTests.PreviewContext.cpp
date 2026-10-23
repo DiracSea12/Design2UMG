@@ -3,6 +3,7 @@
 #include "Design2UMGEditorImportServices.h"
 #include "DesignImportPlanning.h"
 #include "DesignImportPipeline.h"
+#include "DesignPreviewMaterializationService.h"
 #include "UMGJsonSerializer.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGGenerator.h"
@@ -72,7 +73,7 @@ namespace
 		Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
 		Input.EditedJson = FUMGJsonSerializer::Serialize(Edited);
 		Input.bResolveImages = false;
-		return DesignImportPipeline::AnalyzePreviewRefresh(Input);
+		return DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
 	}
 }
 
@@ -97,6 +98,31 @@ bool FPreviewContextPreservationTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Stable source identity preserved"), Label.Source().SourceNodeId, FString(TEXT("label")));
 		TestEqual(TEXT("Visual edit is not overwritten"), Label.Text.Text.Get(FString()), bEdit ? FString(TEXT("Edited text")) : FString(TEXT("Original text")));
 		TestEqual(TEXT("Interaction retained"), Result.Data.PrototypeNavigation().ClickBindings.Num(), 1);
+	}
+
+	FDesignPreviewMaterializationRequest Request;
+	Request.ApprovedSnapshot.Data.WidgetName = TEXT("WBP_PreviewDimensions");
+	Request.ApprovedSnapshot.Data.RootWidget = PreviewNode(TEXT("root"), TEXT("CanvasPanel"));
+	FDesignPreviewMaterializationService Service;
+	for (const FVector2D Size : { FVector2D(1, 180), FVector2D(320, 1), FVector2D(1, 1) })
+	{
+		Request.ApprovedSnapshot.Data.RootWidget.Bounds = { 0, 0, static_cast<float>(Size.X), static_cast<float>(Size.Y) };
+		FDesignPreviewMaterializationResult Result;
+		if (TestTrue(TEXT("One-pixel axes materialize"), Service.MaterializePreview(Request, Result)))
+		{
+			TestEqual(TEXT("Preview preserves the source dimensions"), Result.PreviewDesignSize, Size);
+			UUserWidget* Widget = Service.GetMaterializedPreviewWidget();
+			TestTrue(TEXT("Accepted dimensions produce a root widget"), Widget && Widget->WidgetTree && Widget->WidgetTree->RootWidget);
+		}
+	}
+	for (const FVector2D Size : { FVector2D(0, 1), FVector2D(1, 0), FVector2D(-1, 1), FVector2D(1, -1) })
+	{
+		Request.ApprovedSnapshot.Data.RootWidget.Bounds = { 0, 0, static_cast<float>(Size.X), static_cast<float>(Size.Y) };
+		FDesignPreviewMaterializationResult Result;
+		AddExpectedError(TEXT("Preview design size is unavailable"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestFalse(TEXT("Nonpositive axes are rejected"), Service.MaterializePreview(Request, Result));
+		TestTrue(TEXT("Rejection explains the positive-size requirement"), Result.ErrorMessage.Contains(TEXT("宽高须大于 0")));
+		TestNull(TEXT("Rejected dimensions leave no preview widget"), Service.GetMaterializedPreviewWidget());
 	}
 	return true;
 }

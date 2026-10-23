@@ -18,10 +18,10 @@
 
 namespace
 {
-	bool TryResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot, FVector2D& OutPreviewDesignSize)
+	bool TryResolvePreviewDesignSize(const FPreviewApprovedSnapshot& ApprovedSnapshot, FVector2D& OutPreviewDesignSize, FString& OutError)
 	{
 		const FDesignPixelBounds& RootBounds = ApprovedSnapshot.Data.RootWidget.Bounds;
-		if (RootBounds.W > 1.0f && RootBounds.H > 1.0f)
+		if (RootBounds.W > 0.0f && RootBounds.H > 0.0f)
 		{
 			OutPreviewDesignSize = FVector2D(RootBounds.W, RootBounds.H);
 			return true;
@@ -29,6 +29,7 @@ namespace
 
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("Preview design size is unavailable; source data must define the layout size"));
+		OutError = FString::Printf(TEXT("根节点预览尺寸无效（%.3f × %.3f），宽高须大于 0。"), RootBounds.W, RootBounds.H);
 		OutPreviewDesignSize = FVector2D::ZeroVector;
 		return false;
 	}
@@ -44,7 +45,7 @@ bool FDesignPreviewMaterializationService::MaterializePreview(const FDesignPrevi
 	OutResult = FDesignPreviewMaterializationResult();
 	OutResult.RequestId = Request.RequestId;
 	FVector2D PreviewDesignSize = FVector2D::ZeroVector;
-	if (!TryResolvePreviewDesignSize(Request.ApprovedSnapshot, PreviewDesignSize))
+	if (!TryResolvePreviewDesignSize(Request.ApprovedSnapshot, PreviewDesignSize, OutResult.ErrorMessage))
 	{
 		CleanupMaterializedPreview();
 		return false;
@@ -140,6 +141,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 	if (!TempWidget.IsValid())
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create UUserWidget"));
+		OutError = TEXT("创建预览界面（UUserWidget）失败。");
 		return nullptr;
 	}
 
@@ -147,6 +149,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 	if (!TempWidget->WidgetTree)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create WidgetTree"));
+		OutError = TEXT("创建预览控件树（WidgetTree）失败。");
 		return nullptr;
 	}
 
@@ -207,6 +210,7 @@ TStrongObjectPtr<UUserWidget> FDesignPreviewMaterializationService::CreatePrevie
 	if (!RootWidget)
 	{
 		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to create root widget of type: %s"), *ApprovedSnapshot.Data.RootWidget.Type);
+		OutError = FString::Printf(TEXT("创建预览根控件失败，控件类型：%s。"), *ApprovedSnapshot.Data.RootWidget.Type);
 		return nullptr;
 	}
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "DesignImportPlanning.h"
 #include "DesignImportPipeline.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
@@ -318,7 +319,7 @@ bool FImportPlanningUsesExplicitSettingsSnapshotTest::RunTest(const FString& Par
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = false;
 	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	const FImportAnalysisResult Result = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+	const FImportAnalysisResult Result = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 
 	const FUMGWidgetNode& RootWidget = Result.Data.RootWidget;
 	if (!TestTrue(TEXT("Typed shape payload is present"), RootWidget.Brush.Shape.IsSet())) return false;
@@ -413,7 +414,7 @@ bool FPenBridgeImportUsesSingleExplicitSettingsSnapshotTest::RunTest(const FStri
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = false;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		Data = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput).Data;
+		Data = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput).Data;
 	}
 	TestTrue(TEXT("Pen source converts using explicit snapshot"), bParsed);
 

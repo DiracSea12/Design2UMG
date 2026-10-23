@@ -801,42 +801,25 @@ namespace DesignImportGeneration
 		return WBP;
 	}
 
-	bool GenerateBlueprintAndPng(
+	FArtifactGenerationResult GenerateBlueprintAndPng(
 		const FUMGWidgetData& Data,
-		const FString& OutputPath,
-		FString* OutGeneratedAssetPath,
-		FString* OutRenderPngPath,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-		FDesign2UMGGenerationOutput* OutGenerationOutput,
-		const bool bPersistIconFontMappingChanges)
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 	{
-		if (OutGeneratedAssetPath)
-		{
-			OutGeneratedAssetPath->Empty();
-		}
-		if (OutRenderPngPath)
-		{
-			OutRenderPngPath->Empty();
-		}
-
-		return RunBlueprintAndPngPipeline(
-			TEXT("Blueprint and PNG"),
-			Data,
-			OutputPath,
-			GenerationSettings,
-			true,
-			bPersistIconFontMappingChanges,
-			OutGenerationOutput,
+		FArtifactGenerationResult Result;
+		FDesign2UMGGenerationOutput GenerationOutput;
+		Result.bSucceeded = RunBlueprintAndPngPipeline(
+			TEXT("Blueprint and PNG"), Data, Request.OutputPath, GenerationSettings, true,
+			Request.Generation.bPersistIconFontMappingChanges, &GenerationOutput,
 			[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 			{
-				return BuildTransientPreviewThenSave(
-					Data,
-					MoveTemp(Built),
-					Progress,
-					OutGeneratedAssetPath,
-					OutRenderPngPath,
-					OutGenerationOutput);
+				return BuildTransientPreviewThenSave(Data, MoveTemp(Built), Progress,
+					&Result.GeneratedAssetPath, &Result.RenderPngPath, &GenerationOutput);
 			});
+		Result.Commit = GenerationOutput.Commit;
+		Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
+		Result.Warnings = Data.Warnings;
+		return Result;
 	}
 
 	bool RenderCompiledBlueprintToPngFile(
@@ -911,56 +894,30 @@ namespace DesignImportGeneration
 		return true;
 	}
 
-	bool GenerateBlueprintAndCompiledPng(
+	FArtifactGenerationResult GenerateBlueprintAndCompiledPng(
 		const FUMGWidgetData& Data,
-		const FString& OutputPath,
-		const FString& OutputPngFilePath,
-		FString* OutGeneratedAssetPath,
-		FIntPoint* OutRenderedSize,
-		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings,
-		FDesign2UMGGenerationOutput* OutGenerationOutput,
-		FString* OutError,
-		const FBlueprintRenderPreparationOptions* RenderPreparation,
-		const bool bPersistIconFontMappingChanges,
-		TStrongObjectPtr<UUserWidget>* OutRenderedWidget,
-		TSharedPtr<SWidget>* OutRenderedSlateWidget)
+		const FArtifactGenerationRequest& Request,
+		const FDesign2UMGGenerationSettingsSnapshot* GenerationSettings)
 	{
-		if (OutGeneratedAssetPath)
-		{
-			OutGeneratedAssetPath->Empty();
-		}
-		if (OutRenderedSize)
-		{
-			*OutRenderedSize = FIntPoint::ZeroValue;
-		}
-		if (OutError)
-		{
-			OutError->Reset();
-		}
-
-		return RunBlueprintAndPngPipeline(
-			TEXT("Compiled PNG"),
-			Data,
-			OutputPath,
-			GenerationSettings,
-			false,
-			bPersistIconFontMappingChanges,
-			OutGenerationOutput,
+		FArtifactGenerationResult Result;
+		FDesign2UMGGenerationOutput GenerationOutput;
+		Result.bSucceeded = RunBlueprintAndPngPipeline(
+			TEXT("Compiled PNG"), Data, Request.OutputPath, GenerationSettings, false,
+			Request.Generation.bPersistIconFontMappingChanges, &GenerationOutput,
 			[&](FBuiltBlueprint&& Built, FGenerationProgress& Progress) -> bool
 			{
-				return SaveThenRenderCompiled(
-					MoveTemp(Built),
-					Progress,
-					OutputPngFilePath,
-					OutGeneratedAssetPath,
-					OutRenderedSize,
-					OutGenerationOutput,
-					OutError,
-					RenderPreparation,
-					OutRenderedWidget,
-					OutRenderedSlateWidget);
+				return SaveThenRenderCompiled(MoveTemp(Built), Progress, Request.Generation.CompiledPngFilePath,
+					&Result.GeneratedAssetPath, &Result.RenderedSize, &GenerationOutput, &Result.ErrorMessage,
+					Request.Generation.RenderPreparation.IsSet() ? &Request.Generation.RenderPreparation.GetValue() : nullptr,
+					&Result.RenderedWidget, &Result.RenderedSlateWidget);
 			});
+		Result.Commit = GenerationOutput.Commit;
+		Result.ComponentMappingDiagnostics = MoveTemp(GenerationOutput.MappingDiagnostics);
+		Result.Warnings = Data.Warnings;
+		if (Result.bSucceeded) Result.RenderPngPath = Request.Generation.CompiledPngFilePath;
+		return Result;
 	}
+
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-#include "DesignImportPlanning.h"
 #include "DesignImportGeneration.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGNotifications.h"
 #include "PencilConnector.h"
 #include "Tests/Design2UMGMCPStdioTestProcess.h"
@@ -162,7 +162,7 @@ bool FImportPlanningTest::RunTest(const FString& Parameters)
 
 	FImportAnalysisInput Input;
 	Input.bResolveImages = false;
-	const FImportInPlaceAnalysisResult Result = DesignImportPlanning::AnalyzeWidgetData(WidgetData, Input);
+	const FImportInPlaceAnalysisResult Result = DesignImportPlanning::AnalyzeImport(WidgetData, Input);
 
 	TestEqual(TEXT("Import planning keeps widget name in place"), WidgetData.WidgetName, FString(TEXT("WBP_ImportPlanningSmoke")));
 	TestEqual(TEXT("Import planning keeps root type in place"), WidgetData.RootWidget.Type, FString(TEXT("CanvasPanel")));

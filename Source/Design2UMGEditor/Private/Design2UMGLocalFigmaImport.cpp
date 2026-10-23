@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGLocalFigmaImport.h"
+#include "DesignImportPlanning.h"
+#include "Design2UMGEditorImportSupport.h"
 #include "DesignSchemaSourceExtensions.h"
 
 #include "Design2UMGConverter.h"
@@ -484,9 +486,9 @@ namespace Design2UMGLocalFigmaImport
 	{
 		FDesignDocument ParsedDocument;
 		FString JsonStr;
-		if (!FFileHelper::LoadFileToString(JsonStr, *JsonFilePath))
+		if (!Design2UMGEditorImportSupport::LoadTextFile(
+			JsonFilePath, JsonStr, TEXT("Failed to read design.json"), OutError))
 		{
-			OutError = FString::Printf(TEXT("Failed to read design.json: %s"), *JsonFilePath);
 			return false;
 		}
 
@@ -500,7 +502,11 @@ namespace Design2UMGLocalFigmaImport
 			const FString FileKey = DesignJsonUtils::GetString(Root, TEXT("fileKey"));
 			const FString Scope = FileKey.IsEmpty() ? FPaths::ConvertRelativePathToFull(JsonFilePath) : FileKey;
 			FString Prepared;
-			if (!FigmaComponentDependencies::PrepareRestFile(JsonStr, Scope, Prepared, OutError)) return false;
+			if (!FigmaComponentDependencies::PrepareRestFile(JsonStr, Scope, Prepared, OutError))
+			{
+				OutError = FString::Printf(TEXT("Figma 文件：%s\n%s"), *JsonFilePath, *OutError);
+				return false;
+			}
 			JsonStr = MoveTemp(Prepared);
 		}
 		if (!FFigmaParser::ParseDocument(JsonStr, ParsedDocument))
@@ -520,9 +526,7 @@ namespace Design2UMGLocalFigmaImport
 
 	void ResolveDocumentImages(FDesignDocument& ParsedDocument, const FString& JsonFilePath)
 	{
-		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(JsonFilePath);
-		ParsedDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
-		ParsedDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+		const FString& ResolvedSourceFilePath = ParsedDocument.RecordSourceFilePath(JsonFilePath);
 		ParsedDocument.Metadata.Add(TEXT("source.filePath"), ResolvedSourceFilePath);
 
 		const FString ImagesDir = FPaths::GetPath(ResolvedSourceFilePath) / TEXT("images");
@@ -574,7 +578,7 @@ namespace Design2UMGLocalFigmaImport
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(ParsedDoc, AnalysisInput);
+		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(ParsedDoc, AnalysisInput);
 		if (!Analysis.ErrorMessage.IsEmpty())
 		{
 			OutError = Analysis.ErrorMessage;
