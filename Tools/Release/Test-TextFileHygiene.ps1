@@ -66,7 +66,7 @@ foreach ($line in (git ls-files --eol)) {
 	}
 }
 
-$sourceFiles = git ls-files Source | Where-Object { $_ -match '\.(h|cpp|cs)$' }
+$sourceFiles = git ls-files Source | Where-Object { $_ -match '\.(h|cpp|cs)$' -and $_ -notmatch '^Source/ThirdParty/' }
 foreach ($relativePath in $sourceFiles) {
 	$fullPath = Join-Path $repoRoot $relativePath
 	if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {

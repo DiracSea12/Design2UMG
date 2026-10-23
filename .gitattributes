@@ -31,3 +31,5 @@ openspec/** export-ignore
 /PenDesigns/ export-ignore
 /FigmaExports/ export-ignore
 /CODE_QUALITY_OPTIMIZATION_PLAN.md export-ignore
+/Resources/PencilFontWorker/Win64/** -text
+/Source/ThirdParty/** -text

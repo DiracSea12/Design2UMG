@@ -156,4 +156,3 @@ FBox2D DesignSourceExportBounds::Calculate(const TSharedPtr<FDesignNode>& Source
 	Result.Max.Y = FMath::CeilToDouble(Result.Max.Y);
 	return Result;
 }
-
