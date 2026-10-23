@@ -2,6 +2,7 @@
 
 #include "UMGWidgetTreeBuilder.h"
 #include "DesignBrowserWidget.h"
+#include "WebBrowser.h"
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -20,9 +21,11 @@
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/EngineVersionComparison.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -204,8 +207,7 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 	FName WidgetName = SanitizeWidgetName(Node.Name, Node.Type);
 	if (FindObject<UObject>(WidgetTree, *WidgetName.ToString()))
 	{
-		const FName OriginalWidgetName = WidgetName;
-		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
+		for (int32 Suffix = 1; ; ++Suffix)
 		{
 			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
 			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
@@ -214,13 +216,44 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 				break;
 			}
 		}
-		if (WidgetName == OriginalWidgetName)
+	}
+
+	// Keep inherited members and Blueprint graphs out of the widget-variable namespace.
+	// Parent lookup also covers generation before a skeleton class is available.
+	UWidgetBlueprint* Blueprint = WidgetTree->GetTypedOuter<UWidgetBlueprint>();
+	UClass* ParentClass = Blueprint && Blueprint->ParentClass ? Blueprint->ParentClass.Get() : UUserWidget::StaticClass();
+	TSet<FName> ClassVariables, ReservedMembers;
+	UWidgetTree* PreviousGeneratedTree = nullptr;
+	if (Blueprint)
+	{
+		FBlueprintEditorUtils::GetClassVariableList(Blueprint, ClassVariables, true);
+		FBlueprintEditorUtils::GetFunctionNameList(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetAllGraphNames(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetSCSVariableNameList(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetImplementingBlueprintsFunctionNameList(Blueprint, ReservedMembers);
+		for (const auto& Variable : Blueprint->NewVariables) ReservedMembers.Add(Variable.VarName);
+		if (const auto* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass))
+			PreviousGeneratedTree = GeneratedClass->GetWidgetTreeArchetype();
+	}
+	const auto HasMemberName = [&](const FName& Candidate)
+	{
+		// The previous compiled tree proves which variables belong to generated widgets.
+		// Declared variables, functions and graphs remain reserved even at the same name.
+		const bool bPreviousWidget = PreviousGeneratedTree && PreviousGeneratedTree->FindWidget(Candidate);
+		return ParentClass->FindPropertyByName(Candidate) || ParentClass->FindFunctionByName(Candidate)
+			|| ReservedMembers.Contains(Candidate) || (ClassVariables.Contains(Candidate) && !bPreviousWidget);
+	};
+	if (HasMemberName(WidgetName))
+	{
+		const FName CollidingName = WidgetName;
+		for (int32 Suffix = 1; ; ++Suffix)
 		{
-			// All 999 suffixed candidates are taken; the widget keeps the colliding name and the
-			// engine auto-renames on ConstructWidget, which can break reimport same-name matching.
-			UE_LOG(LogDesign2UMG, Error,
-				TEXT("Widget name '%s' has more than 999 duplicates in the widget tree; leaving the collision to engine auto-naming, reimport same-name matching may be affected."),
-				*WidgetName.ToString());
+			const FName Candidate(*FString::Printf(TEXT("%s_w%d"), *CollidingName.ToString(), Suffix));
+			if (!HasMemberName(Candidate) && !FindObject<UObject>(WidgetTree, *Candidate.ToString()))
+			{
+				WidgetName = Candidate;
+				break;
+			}
 		}
 	}
 
@@ -275,27 +308,6 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name, ClassOverrideCache))
 		{
 			WidgetClass = Override;
-		}
-	}
-
-	// Avoid case-insensitive UWidget property collisions before creating Blueprint variables.
-	// Use _wN for property collisions and _N for sibling duplicates so reimport can rank both.
-	const FName CollidingName = WidgetName;
-	const auto IsNameFree = [&WidgetTree](const FName& Candidate)
-	{
-		return !UWidget::StaticClass()->FindPropertyByName(Candidate)
-			&& !FindObject<UObject>(WidgetTree, *Candidate.ToString());
-	};
-	if (WidgetClass && UWidget::StaticClass()->FindPropertyByName(WidgetName))
-	{
-		for (int32 Suffix = 1; Suffix < 1000; ++Suffix)
-		{
-			const FName Candidate = FName(*FString::Printf(TEXT("%s_w%d"), *CollidingName.ToString(), Suffix));
-			if (IsNameFree(Candidate))
-			{
-				WidgetName = Candidate;
-				break;
-			}
 		}
 	}
 

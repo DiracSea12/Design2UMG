@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportReimportInternal.h"
+#include "DesignWidgetBlueprintUtils.h"
+#include "UMGWidgetRenderer.h"
 #include "Misc/EngineVersionComparison.h"
 #include "GeneratedAssetLifecycle.h"
 
@@ -133,7 +135,7 @@ namespace DesignImportPipeline
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult AnalysisResult = AnalyzeImport(Document, AnalysisInput);
+		const FImportAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 		Result.ImageResult = AnalysisResult.ImageResult;
 		Result.bHasDegradation = Result.ImageResult.HasFailures();
 		if (!AnalysisResult.ErrorMessage.IsEmpty())
@@ -256,7 +258,60 @@ namespace DesignImportPipeline
 		return {};
 	}
 
-	/** Build the update plan over the already mapped, immutable reimport scope. */
+	/** Validate the current scoped IR without retaining node borrows in an apply plan. */
+	bool ValidateReimportSource(
+		const FDesign2UMGGenerationManifestSidecar& Manifest,
+		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
+		FDesign2UMGComponentMappingBuildState& MappingBuildState,
+		FString& OutFailureReason)
+	{
+		BuildDesignTreeIndex(PreparedScopeRoot, TreeIndex);
+
+		TSet<FString> CheckedMappingKeys;
+		if (!ValidateReimportMappedNodes(PreparedScopeRoot, TreeIndex, MappingBuildState, CheckedMappingKeys, OutFailureReason))
+			return false;
+		TSet<FString> RecordedIds;
+		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
+		{
+			if (TreeIndex.AmbiguousDesignNodeIds.Contains(Record.DesignNodeId))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("Ambiguous stable design identity '%s' participates in reimport reconciliation; existing asset and manifest preserved"),
+					*Record.DesignNodeId);
+				return false;
+			}
+			if (RecordedIds.Contains(Record.DesignNodeId))
+			{
+				OutFailureReason = FString::Printf(
+					TEXT("Manifest contains duplicate design identity '%s'; existing asset and manifest preserved"),
+					*Record.DesignNodeId);
+				return false;
+			}
+			RecordedIds.Add(Record.DesignNodeId);
+		}
+
+		// Expanded component descendants may legitimately repeat definition ids across distinct instances. New
+		// top-level roots, however, become reconciliation identities for this operation and must be unique before mutation.
+		if (!RecordedIds.Contains(GetDesignNodeId(PreparedScopeRoot)))
+		{
+			for (const FUMGWidgetNode& Child : PreparedScopeRoot.Children)
+			{
+				const FString ChildId = GetDesignNodeId(Child);
+				if (!RecordedIds.Contains(ChildId) && TreeIndex.AmbiguousDesignNodeIds.Contains(ChildId))
+				{
+					OutFailureReason = FString::Printf(
+						TEXT("Ambiguous stable design identity '%s' would become a new top-level reimport instance; existing asset and manifest preserved"),
+						*ChildId);
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	/** Borrow nodes only after resource preparation has finished relocating the scoped IR. */
 	bool BuildReimportUpdatePlan(
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		const FUMGWidgetNode& PreparedScopeRoot,
@@ -267,28 +322,11 @@ namespace DesignImportPipeline
 		TSet<FString>& AliveInstanceWidgetNames,
 		FString& OutFailureReason)
 	{
-		// Build the update plan from one scoped identity index rather than repeated manifest-record tree searches.
-		BuildDesignTreeIndex(PreparedScopeRoot, TreeIndex);
-
-		TSet<FString> CheckedMappingKeys;
-		if (!ValidateReimportMappedNodes(PreparedScopeRoot, TreeIndex, MappingBuildState, CheckedMappingKeys, OutFailureReason))
+		if (!ValidateReimportSource(Manifest, PreparedScopeRoot, TreeIndex, MappingBuildState, OutFailureReason))
 			return false;
+
 		for (const FDesign2UMGGenerationManifestSidecar::FInstanceRecord& Record : Manifest.Instances)
 		{
-			if (TreeIndex.AmbiguousDesignNodeIds.Contains(Record.DesignNodeId))
-			{
-				OutFailureReason = FString::Printf(
-					TEXT("Ambiguous stable design identity '%s' participates in reimport reconciliation; existing asset and manifest preserved"),
-					*Record.DesignNodeId);
-				return false;
-			}
-			if (InstancesById.Contains(Record.DesignNodeId))
-			{
-				OutFailureReason = FString::Printf(
-					TEXT("Manifest contains duplicate design identity '%s'; existing asset and manifest preserved"),
-					*Record.DesignNodeId);
-				return false;
-			}
 			InstancesById.Add(Record.DesignNodeId, &Record);
 
 			FReimportPlanEntry Entry;
@@ -310,23 +348,6 @@ namespace DesignImportPipeline
 				Entry.Action = EReimportPlanAction::Matched;
 			}
 			Plan.Add(Entry);
-		}
-
-		// Expanded component descendants may legitimately repeat definition ids across distinct instances. New
-		// top-level roots, however, become reconciliation identities for this operation and must be unique before mutation.
-		if (!InstancesById.Contains(GetDesignNodeId(PreparedScopeRoot)))
-		{
-			for (const FUMGWidgetNode& Child : PreparedScopeRoot.Children)
-			{
-				const FString ChildId = GetDesignNodeId(Child);
-				if (!InstancesById.Contains(ChildId) && TreeIndex.AmbiguousDesignNodeIds.Contains(ChildId))
-				{
-					OutFailureReason = FString::Printf(
-						TEXT("Ambiguous stable design identity '%s' would become a new top-level reimport instance; existing asset and manifest preserved"),
-						*ChildId);
-					return false;
-				}
-			}
 		}
 
 		// Definition descendants can repeat across component instances. They are not global reconciliation keys;
@@ -523,36 +544,7 @@ namespace DesignImportPipeline
 		return GenerationOutput;
 	}
 
-	/**
-	 * Asset finalization covers side effects unrelated to manifest assembly:
-	 * refresh the CDO preview size when the design root size changed (written back by SaveWidgetBlueprint after compiling);
-	 * backfill missing variable GUIDs of generation-chain-created widgets with the compiler's own deterministic rule.
-	 */
-	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP)
-	{
-#if !UE_VERSION_OLDER_THAN(5, 6, 0)
-		// Widgets created by this generation run (plus test injections via ConstructWidget) have no
-		// variable GUID, and the compiler ensures on missing entries. Backfill with the compiler's own deterministic
-		// rule; existing GUIDs stay untouched. Modify first to capture the GUID map's pre-transaction state: on a
-		// save-failure rollback the map restores with the asset, or the post-rollback recompile would trip the compiler's ensure on a "deleted widget's leftover GUID".
-		if (WBP->WidgetTree)
-		{
-			WBP->Modify();
-			WBP->ForEachSourceWidget([WBP](UWidget* TreeWidget)
-			{
-				const FName WidgetName = TreeWidget->GetFName();
-				if (!WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
-				{
-					WBP->WidgetVariableNameToGuidMap.Add(
-						WidgetName, FGuid::NewDeterministicGuid(TreeWidget->GetPathName()));
-				}
-			});
-		}
-
-#endif
-	}
-
-	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize)
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize, const TOptional<FBox2D>& ExportBounds)
 	{
 		if (UUserWidget* CDO = Cast<UUserWidget>(
 			WBP->GeneratedClass ? WBP->GeneratedClass->GetDefaultObject() : nullptr))
@@ -565,7 +557,8 @@ namespace DesignImportPipeline
 			CDO->DesignSizeMode = EDesignPreviewSizeMode::Custom;
 		}
 
-		EnsureReimportWidgetGuids(WBP);
+		FUMGWidgetRenderer::SetBlueprintExportBounds(WBP, ExportBounds);
+		DesignWidgetBlueprintUtils::EnsureWidgetVariableGuids(WBP);
 
 #if !UE_VERSION_OLDER_THAN(5, 6, 0)
 		// Generated transition animations follow the same rule as widgets: a non-empty GUID map makes the

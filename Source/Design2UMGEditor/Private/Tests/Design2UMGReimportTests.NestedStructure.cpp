@@ -406,7 +406,8 @@ bool FSafeReimportNestedRemoveConflictTest::RunTest(const FString&)
 	TestEqual(TEXT("nested remove conflict diagnosed once"), FixtureCountKind(Result, TEXT("reimport_remove_conflict")), 1);
 	TestTrue(TEXT("conflict names the node and the project-content reason"),
 		FixtureHasMessageWithAll(Result, TEXT("reimport_remove_conflict"), { TEXT("'Tail'"), TEXT("DevChild") }));
-	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+	UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("kept sibling Head still present"), Head))
 	{
 		TestEqual(TEXT("kept sibling still refreshed"), Head->GetText().ToString(), FString(TEXT("Head v2")));
 	}
@@ -751,11 +752,17 @@ bool FSafeReimportTopLevelReparentSourceOwnedTest::RunTest(const FString&)
 	const FDesignReimportResult Result = FixtureReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("reimport itself succeeds (conflict is per-node)"), Result.bSucceeded);
 
-	UWidget* NAfter = NWeak.Get();
-	if (TestNotNull(TEXT("N still alive"), NAfter))
+	UTextBlock* NAfter = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("N")));
+	if (TestNotNull(TEXT("N still present in the widget tree"), NAfter))
 	{
-		TestEqual(TEXT("N kept under the project container DevPanel"),
-			NAfter->GetParent()->GetFName(), FName(TEXT("DevPanel")));
+		TestTrue(TEXT("N identity preserved"), NAfter == NWeak.Get());
+		if (TestNotNull(TEXT("N still has a parent"), NAfter->GetParent()))
+		{
+			TestEqual(TEXT("N kept under the project container DevPanel"),
+				NAfter->GetParent()->GetFName(), FName(TEXT("DevPanel")));
+		}
+		TestEqual(TEXT("Design text refreshed despite the top-level move conflict"),
+			NAfter->GetText().ToString(), FString(TEXT("mv-v2")));
 	}
 	TestEqual(TEXT("top-level move conflict diagnosed once"), FixtureCountKind(Result, TEXT("reimport_move_conflict")), 1);
 	TestTrue(TEXT("conflict names N and the project-container reason"),

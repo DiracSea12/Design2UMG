@@ -513,9 +513,9 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 	FDesignDocument Document;
 	Document.Version = TEXT("figma-fixture-v1");
-	Document.Metadata.Add(
-		TEXT("design.sourceFilePath"),
-		FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), FString::Printf(TEXT("fixture_%s.json"), *FGuid::NewGuid().ToString(EGuidFormats::Digits))));
+	const FString SourceFilePath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"),
+		FString::Printf(TEXT("fixture_%s.json"), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	Document.Metadata.Add(TEXT("design.sourceFilePath"), SourceFilePath);
 
 	FDesignSkippedNodeReport SkippedNode;
 	SkippedNode.NodeId = TEXT("slice1");
@@ -582,25 +582,7 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 		TEXT("G:/SampleProject/Saved/Design2UMG/WBP_ImportReportFixture.png"),
 		TEXT("/Game/Design2UMG/_TestOutput/ImportReport/WBP_ImportReportFixture"));
 
-	TArray<FString> ReportsAfter;
-	IFileManager::Get().FindFilesRecursive(ReportsAfter, *ReportDir, TEXT("*.import_report.json"), true, false, false);
-
-	FString ReportPath;
-	FDateTime LatestTimestamp = FDateTime::MinValue();
-	for (const FString& Candidate : ReportsAfter)
-	{
-		const FDateTime Timestamp = IFileManager::Get().GetTimeStamp(*Candidate);
-		if (!ExistingReports.Contains(Candidate))
-		{
-			ReportPath = Candidate;
-			break;
-		}
-		if (Timestamp > LatestTimestamp)
-		{
-			LatestTimestamp = Timestamp;
-			ReportPath = Candidate;
-		}
-	}
+	const FString ReportPath = FindNewImportReport(ReportDir, ExistingReports);
 
 	TestTrue(TEXT("Import report was generated"), !ReportPath.IsEmpty() && FPaths::FileExists(ReportPath));
 	if (ReportPath.IsEmpty() || !FPaths::FileExists(ReportPath))
@@ -633,7 +615,10 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	}
 
 	TestEqual(TEXT("Source origin inferred from json input"), (*SourceObject)->GetStringField(TEXT("origin")), TEXT("local_json"));
-	TestTrue(TEXT("Source identity emitted"), !(*SourceObject)->GetStringField(TEXT("identity")).IsEmpty());
+	TestEqual(TEXT("Source file path identifies this invocation"),
+		(*SourceObject)->GetStringField(TEXT("filePath")), SourceFilePath);
+	TestEqual(TEXT("Source identity identifies this invocation"),
+		(*SourceObject)->GetStringField(TEXT("identity")), DesignImageBakeUtils::BuildSourceDocumentIdentity(SourceFilePath));
 	TestEqual(TEXT("Top-level sourceFilePath aliases source.filePath"), RootObject->GetStringField(TEXT("sourceFilePath")), (*SourceObject)->GetStringField(TEXT("filePath")));
 	TestEqual(TEXT("Top-level sourceIdentity aliases source.identity"), RootObject->GetStringField(TEXT("sourceIdentity")), (*SourceObject)->GetStringField(TEXT("identity")));
 

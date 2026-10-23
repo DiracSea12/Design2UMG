@@ -316,7 +316,8 @@ bool FSafeReimportSaveFailureRollbackTest::RunTest(const FString&)
 	const FDesignReimportResult Retry = FixtureReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("retry after rollback succeeds"), Retry.bSucceeded);
 	TestNotNull(TEXT("Retry reuses the rolled-back widget name without an orphan collision"), WBP->WidgetTree->FindWidget(TEXT("FreshText")));
-	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+	UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("Head present after save retry"), Head))
 	{
 		TestEqual(TEXT("retry applies the design update"), Head->GetText().ToString(), FString(TEXT("Head v2")));
 	}
@@ -386,7 +387,8 @@ bool FSafeReimportSaveWritabilityPrecheckTest::RunTest(const FString&)
 		FString SidecarNow;
 		TestTrue(TEXT("scenario B sidecar still readable"), FixtureReadFileString(SidecarFile, SidecarNow));
 		TestTrue(TEXT("scenario B sidecar untouched"), SidecarNow == SidecarBefore);
-		if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+		UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+		if (TestNotNull(TEXT("Head present after sidecar writability rejection"), Head))
 		{
 			TestEqual(TEXT("scenario B in-memory text rolled back"), Head->GetText().ToString(), FString(TEXT("fail-v1")));
 		}
@@ -415,7 +417,8 @@ bool FSafeReimportSaveWritabilityPrecheckTest::RunTest(const FString&)
 	// After writability is restored, retrying the same v2 succeeds (the asset was not poisoned by the two failed rounds).
 	const FDesignReimportResult Retry = FixtureReimport(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("retry succeeds after restoring writability"), Retry.bSucceeded);
-	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+	UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("Head present after writability retry"), Head))
 	{
 		TestEqual(TEXT("retry applies the design update"), Head->GetText().ToString(), FString(TEXT("fail-v2")));
 	}
@@ -481,7 +484,8 @@ bool FSafeReimportManifestWriteFailurePropagatesTest::RunTest(const FString&)
 	TestEqual(TEXT("completion not reported"), FixtureCountKind(Result, TEXT("reimport_completed")), 0);
 
 	// The uasset saved the new state: memory and disk agree (not rolled back to the old value).
-	if (UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+	UTextBlock* Head = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("Head present after manifest write failure"), Head))
 	{
 		TestEqual(TEXT("in-memory text stays at the saved v2 value"), Head->GetText().ToString(), FString(TEXT("half-v2")));
 	}

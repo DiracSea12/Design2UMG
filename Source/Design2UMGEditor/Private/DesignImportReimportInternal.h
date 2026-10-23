@@ -41,8 +41,8 @@ namespace DesignImportPipeline
 		bool bNewKindMapped = false;
 	};
 
-	/** Non-owning lookups over immutable prepared IR. Widget-name lookups are rebuilt after structural
- * updates and used only while reparenting leaves widget identities unchanged. */
+	/** Non-owning lookups over one IR snapshot. Apply plans borrow only the final tree after resource preparation.
+ * Widget-name lookups are rebuilt after structural updates and used only while reparenting leaves widget identities unchanged. */
 	struct FReimportTreeIndex
 	{
 		TMap<FString, const FUMGWidgetNode*> DesignNodesById;
@@ -251,6 +251,12 @@ namespace DesignImportPipeline
 		FDesign2UMGComponentMappingBuildState& MappingBuildState,
 		const FUMGWidgetNode*& ScopeRoot,
 		bool& bPrototypeHostContinued);
+	bool ValidateReimportSource(
+		const FDesign2UMGGenerationManifestSidecar& Manifest,
+		const FUMGWidgetNode& PreparedScopeRoot,
+		FReimportTreeIndex& TreeIndex,
+		FDesign2UMGComponentMappingBuildState& MappingBuildState,
+		FString& OutFailureReason);
 	bool BuildReimportUpdatePlan(
 		const FDesign2UMGGenerationManifestSidecar& Manifest,
 		const FUMGWidgetNode& PreparedScopeRoot,
@@ -277,8 +283,7 @@ namespace DesignImportPipeline
 		const FReimportApplySharedState& Shared,
 		TSet<FString>& UpdatedD2UOwned,
 		const TArray<FString>& KeepAsIsWidgetNames);
-	void EnsureReimportWidgetGuids(UWidgetBlueprint* WBP);
-	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize);
+	void FinalizeReimportedAssetState(UWidgetBlueprint* WBP, FIntPoint DesignSize, const TOptional<FBox2D>& ExportBounds);
 	/** Apply the existing ownership merge without saving; caller owns transaction completion. */
 	FDesignReimportResult ApplyPreparedReimport(
 		const FReimportSession& Session, UWidgetBlueprint* WBP,

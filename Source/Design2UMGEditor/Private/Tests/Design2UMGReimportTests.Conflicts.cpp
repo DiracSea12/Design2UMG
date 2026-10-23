@@ -40,8 +40,8 @@ bool FSafeReimportUnreadableManifestConflictTest::RunTest(const FString&)
 		return false;
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
-	const FString AssetFile = FixtureAssetFilePath(TargetPackage);
-	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
+	const FString AssetHashBefore = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable before reimport"), AssetHashBefore.IsEmpty());
 
 	// Corrupt sidecar: not even valid JSON.
 	TestTrue(TEXT("corrupt sidecar written"), FixtureWriteFileString(
@@ -53,7 +53,9 @@ bool FSafeReimportUnreadableManifestConflictTest::RunTest(const FString&)
 	TestEqual(TEXT("exactly one full-conflict diagnostic"), FixtureCountKind(Result, TEXT("reimport_full_conflict")), 1);
 	TestTrue(TEXT("conflict reason cites invalid JSON"),
 		FixtureHasMessage(Result, TEXT("reimport_full_conflict"), TEXT("is not valid JSON")));
-	TestTrue(TEXT("target asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
+	const FString AssetHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable after reimport"), AssetHashAfter.IsEmpty());
+	TestEqual(TEXT("target asset bytes unchanged"), AssetHashAfter, AssetHashBefore);
 	TestTrue(TEXT("no implicit resolution copy"), Result.ResolutionCopyPath.IsEmpty());
 	TestFalse(TEXT("no _Resolution asset file"),
 		FPaths::FileExists(FixtureAssetFilePath(FPaths::GetPath(TargetPackage) / TEXT("WBP_FixturePage_Resolution"))));
@@ -82,8 +84,8 @@ bool FSafeReimportScopeMismatchConflictTest::RunTest(const FString&)
 		return false;
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
-	const FString AssetFile = FixtureAssetFilePath(TargetPackage);
-	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
+	const FString AssetHashBefore = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable before reimport"), AssetHashBefore.IsEmpty());
 
 	const FString V2 = MakeFixtureDoc(
 		MakeFixtureText(TEXT("fixture_t1"), TEXT("AlphaText"), 24, 24, TEXT("Two")),
@@ -108,7 +110,9 @@ bool FSafeReimportScopeMismatchConflictTest::RunTest(const FString&)
 	TestTrue(TEXT("conflict reason reports both scopes verbatim"), bExactMessage);
 
 	// The asset stays as it was: file bytes unchanged, the in-memory text still the v1 value (the pipeline returns at the matching stage).
-	TestTrue(TEXT("asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
+	const FString AssetHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable after reimport"), AssetHashAfter.IsEmpty());
+	TestEqual(TEXT("asset bytes unchanged"), AssetHashAfter, AssetHashBefore);
 	if (UTextBlock* Alpha = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("AlphaText"))))
 	{
 		TestEqual(TEXT("in-memory text untouched"), Alpha->GetText().ToString(), FString(TEXT("One")));
@@ -149,8 +153,8 @@ bool FSafeReimportRestructureConflictTest::RunTest(const FString&)
 		return false;
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
-	const FString AssetFile = FixtureAssetFilePath(TargetPackage);
-	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
+	const FString AssetHashBefore = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable before reimport"), AssetHashBefore.IsEmpty());
 
 	// Simulate a project restructure: remove every manifest-recorded instance from the tree and put the project's own widgets in.
 	FDesign2UMGGenerationManifestSidecar Sidecar;
@@ -183,7 +187,9 @@ bool FSafeReimportRestructureConflictTest::RunTest(const FString&)
 
 	// The project-side structure is left untouched.
 	TestNotNull(TEXT("project replacement widget preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectReplacement")));
-	TestTrue(TEXT("asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
+	const FString AssetHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable after reimport"), AssetHashAfter.IsEmpty());
+	TestEqual(TEXT("asset bytes unchanged"), AssetHashAfter, AssetHashBefore);
 
 	FixtureWipeOutput(OutputDir);
 	return true;
@@ -210,8 +216,8 @@ bool FSafeReimportResolutionCopySkipsExistingTest::RunTest(const FString&)
 		return false;
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
-	const FString AssetFile = FixtureAssetFilePath(TargetPackage);
-	const int64 BytesBefore = IFileManager::Get().FileSize(*AssetFile);
+	const FString AssetHashBefore = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable before reimport"), AssetHashBefore.IsEmpty());
 	const FString CopyPackage = FPaths::GetPath(TargetPackage) / TEXT("WBP_FixturePage_Resolution");
 	const FString CopyAssetFile = FixtureAssetFilePath(CopyPackage);
 
@@ -227,10 +233,13 @@ bool FSafeReimportResolutionCopySkipsExistingTest::RunTest(const FString&)
 	TestTrue(TEXT("copy asset file exists"), FPaths::FileExists(CopyAssetFile));
 	FDesign2UMGGenerationManifestSidecar CopySidecar;
 	TestTrue(TEXT("copy has its own manifest"), FixtureLoadSidecar(CopyPackage, CopySidecar));
-	TestTrue(TEXT("original asset bytes unchanged"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
+	const FString AssetHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("target asset readable after reimport"), AssetHashAfter.IsEmpty());
+	TestEqual(TEXT("original asset bytes unchanged"), AssetHashAfter, AssetHashBefore);
 	TestFalse(TEXT("original still has no manifest"),
 		FPaths::FileExists(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage)));
-	const int64 CopyBytes = IFileManager::Get().FileSize(*CopyAssetFile);
+	const FString CopyHashBefore = Design2UMGGenerationManifest::ComputeSavedAssetHash(CopyPackage);
+	TestFalse(TEXT("resolution copy readable before retry"), CopyHashBefore.IsEmpty());
 
 	// Second explicit choice: the copy already exists -> skip, no overwrite.
 	Result = FixtureReimport(V1, nullptr, TargetPackage, /*bGenerateResolutionCopy=*/true);
@@ -240,8 +249,12 @@ bool FSafeReimportResolutionCopySkipsExistingTest::RunTest(const FString&)
 		FixtureHasMessageWithAll(Result, TEXT("reimport_resolution_copy"),
 			{ TEXT("Resolution copy skipped"), TEXT("already exists") }));
 	TestEqual(TEXT("copy counted once"), FixtureCountKind(Result, TEXT("reimport_resolution_copy")), 1);
-	TestTrue(TEXT("existing copy asset untouched"), IFileManager::Get().FileSize(*CopyAssetFile) == CopyBytes);
-	TestTrue(TEXT("original asset still untouched"), IFileManager::Get().FileSize(*AssetFile) == BytesBefore);
+	const FString CopyHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(CopyPackage);
+	TestFalse(TEXT("resolution copy readable after retry"), CopyHashAfter.IsEmpty());
+	TestEqual(TEXT("existing copy asset untouched"), CopyHashAfter, CopyHashBefore);
+	const FString OriginalHashAfterRetry = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("original asset readable after retry"), OriginalHashAfterRetry.IsEmpty());
+	TestEqual(TEXT("original asset still untouched"), OriginalHashAfterRetry, AssetHashBefore);
 
 	FixtureWipeOutput(OutputDir);
 	return true;

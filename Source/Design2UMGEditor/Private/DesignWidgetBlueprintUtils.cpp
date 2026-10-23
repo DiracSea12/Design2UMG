@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "DesignWidgetBlueprintUtils.h"
 
+#include "Components/Widget.h"
 #include "Misc/EngineVersionComparison.h"
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintEditorUtils.h"
@@ -19,6 +20,26 @@
 
 namespace DesignWidgetBlueprintUtils
 {
+	void EnsureWidgetVariableGuids(UWidgetBlueprint* WBP)
+	{
+#if !UE_VERSION_OLDER_THAN(5, 6, 0)
+		// Capture the GUID map before mutation so undo and save rollback restore it with the asset.
+		if (WBP->WidgetTree)
+		{
+			WBP->Modify();
+			WBP->ForEachSourceWidget([WBP](UWidget* TreeWidget)
+			{
+				const FName WidgetName = TreeWidget->GetFName();
+				if (!WBP->WidgetVariableNameToGuidMap.Contains(WidgetName))
+				{
+					WBP->WidgetVariableNameToGuidMap.Add(
+						WidgetName, FGuid::NewDeterministicGuid(TreeWidget->GetPathName()));
+				}
+			});
+		}
+#endif
+	}
+
 	void DeleteSubtreeSilently(UWidgetBlueprint* Blueprint, UWidget* Root)
 	{
 #if !UE_VERSION_OLDER_THAN(5, 6, 0)

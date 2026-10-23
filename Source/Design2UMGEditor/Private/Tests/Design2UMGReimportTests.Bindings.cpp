@@ -115,12 +115,14 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	TestNotNull(TEXT("DevHandler function still resolvable"),
 		WBP->SkeletonGeneratedClass ? WBP->SkeletonGeneratedClass->FindFunctionByName(TEXT("DevHandler")) : nullptr);
 	TestNotNull(TEXT("project-added child preserved"), WBP->WidgetTree->FindWidget(TEXT("ProjectNote")));
-	if (UUserWidget* MappedV2 = ComponentFixtures::CastInput(MappedWeak.Get()))
+	UUserWidget* MappedV2 = FixtureFindMappedInstance(WBP);
+	if (TestNotNull(TEXT("mapped instance present after v2"), MappedV2))
 	{
 		TestTrue(TEXT("mapped identity preserved across v2"), MappedV2 == MappedBefore);
 		TestEqual(TEXT("mapped input refreshed in v2"), ComponentFixtures::Read<FTextProperty>(MappedV2, TEXT("TextValue")).ToString(), FString(TEXT("life-v2")));
 	}
-	if (UTextBlock* HeadV2 = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head"))))
+	UTextBlock* HeadV2 = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("Head present after v2"), HeadV2))
 	{
 		TestEqual(TEXT("D2U text refreshed in v2"), HeadV2->GetText().ToString(), FString(TEXT("head-v2")));
 	}
@@ -134,14 +136,16 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	{
 		TestTrue(TEXT("trigger button identity stable across both reimports"), LinkV3 == LinkWeak.Get());
 	}
-	if (UUserWidget* MappedV3 = ComponentFixtures::CastInput(MappedWeak.Get()))
+	UUserWidget* MappedV3 = FixtureFindMappedInstance(WBP);
+	if (TestNotNull(TEXT("mapped instance present after v3"), MappedV3))
 	{
-		TestTrue(TEXT("mapped identity stable across both reimports"), MappedV3 == MappedBefore);
+		TestTrue(TEXT("mapped identity stable across both reimports"), MappedV3 == MappedWeak.Get());
 		TestEqual(TEXT("mapped input refreshed in v3"), ComponentFixtures::Read<FTextProperty>(MappedV3, TEXT("TextValue")).ToString(), FString(TEXT("life-v3")));
 	}
-	if (UTextBlock* HeadV3 = Cast<UTextBlock>(HeadWeak.Get()))
+	UTextBlock* HeadV3 = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
+	if (TestNotNull(TEXT("Head present after v3"), HeadV3))
 	{
-		TestTrue(TEXT("Head identity stable across both reimports"), HeadV3 == WBP->WidgetTree->FindWidget(TEXT("Head")));
+		TestTrue(TEXT("Head identity stable across both reimports"), HeadV3 == HeadWeak.Get());
 		TestEqual(TEXT("D2U text refreshed in v3"), HeadV3->GetText().ToString(), FString(TEXT("head-v3")));
 		TestTrue(TEXT("Head parent relationship stable"),
 			HeadV3->GetParent() && HeadV3->GetParent()->GetFName() == FName(TEXT("InfoPanel")));
