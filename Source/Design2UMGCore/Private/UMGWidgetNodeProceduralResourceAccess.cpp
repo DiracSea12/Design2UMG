@@ -39,6 +39,16 @@ namespace Design2UMGWidgetNodeProceduralResourceAccess
 		{
 			Result.HeightOverride = Node.WidgetStyle.HeightOverride.GetValue();
 		}
+        if (Result.Gradient.Mesh.IsSet() || Node.Brush.Shader.IsSet())
+        {
+            if (!Result.WidthOverride.IsSet() && Node.Bounds.W > 0) Result.WidthOverride = Node.Bounds.W;
+            if (!Result.HeightOverride.IsSet() && Node.Bounds.H > 0) Result.HeightOverride = Node.Bounds.H;
+        }
+        if(Node.Brush.Shader.IsSet())
+        {
+            if(!Result.WidthOverride.IsSet()&&Node.Brush.Shader->Size.X>0)Result.WidthOverride=Node.Brush.Shader->Size.X;
+            if(!Result.HeightOverride.IsSet()&&Node.Brush.Shader->Size.Y>0)Result.HeightOverride=Node.Brush.Shader->Size.Y;
+        }
 		if (Node.Shadow.ShadowBlur.IsSet())
 		{
 			Result.ShadowBlur = Node.Shadow.ShadowBlur.GetValue();

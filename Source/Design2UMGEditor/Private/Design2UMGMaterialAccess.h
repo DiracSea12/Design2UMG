@@ -6,6 +6,7 @@
 class UMaterial;
 class UMaterialExpression;
 class UMaterialInterface;
+class UTexture;
 
 namespace Design2UMGMaterialAccess
 {
@@ -14,4 +15,5 @@ namespace Design2UMGMaterialAccess
 	void CacheShadersForRendering(UMaterialInterface& Material);
 	void WaitForCompilation(UMaterialInterface& Material);
 	void RecompileForRendering(UMaterialInterface& Material);
+	void GetUsedTextures(const UMaterialInterface& Material, TArray<UTexture*>& OutTextures);
 }

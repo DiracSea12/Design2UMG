@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportPlanning.h"
+#include "PencilShaderTextures.h"
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
@@ -77,6 +78,10 @@ namespace
             if (Geometry.FillPaints.IsSet()) for (const auto& Paint : Geometry.FillPaints.GetValue()) CollectPaint(Paint);
             if (Geometry.StrokePaint.IsSet()) CollectPaint(Geometry.StrokePaint.GetValue());
         }
+        for(const auto* Payload:{&Node.Brush.Shader,&Node.Effect.Shader})
+            if (Payload->IsSet())
+                for (const auto& Image : PencilShaderTextures::ImageUniforms(Payload->GetValue()))
+                    OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Image.Value.TrimStartAndEnd());
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
 			CollectImageSources(Child, OutSources);

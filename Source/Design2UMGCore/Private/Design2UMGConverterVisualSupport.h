@@ -39,10 +39,12 @@ namespace Design2UMGConverterVisualSupport
 
 	FUMGWidgetNode WrapWithBorder(
 		FUMGWidgetNode Widget,
-		const TSharedPtr<FDesignNode>& Node);
+		const TSharedPtr<FDesignNode>& Node,
+		bool& OutExplicitStrokePainted);
 
 	FUMGWidgetNode ApplyVisualEffectWrappers(
 		FUMGWidgetNode Widget,
 		const TSharedPtr<FDesignNode>& Node,
-		const FVisualMapperOptions& VisualMapperOptions);
+		const FVisualMapperOptions& VisualMapperOptions,
+		bool bExplicitStrokePainted);
 }

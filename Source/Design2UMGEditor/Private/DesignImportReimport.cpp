@@ -4,6 +4,7 @@
 #include "GeneratedAssetLifecycle.h"
 #include "DesignImageResourceLimits.h"
 #include "PreBuildResourceNormalizer.h"
+#include "RetainerCaptureBounds.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 
 #include "Design2UMGPrototypeGraphWiring.h"
@@ -199,6 +200,7 @@ namespace DesignImportPipeline
 		const FString AssetName = WBP->GetName();
 		TArray<TStrongObjectPtr<UMaterialInterface>> PreparedMaterials;
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(PreparedRoot, PrepareFailureReason)
+			|| !RetainerCaptureBounds::Prepare(PreparedRoot, PrepareFailureReason)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(PreparedRoot, PrepareFailureReason)
 			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(PreparedRoot, PreparedMaterials, PrepareFailureReason)
 			|| !FPreBuildResourceNormalizer::NormalizeGeneratedTextures(

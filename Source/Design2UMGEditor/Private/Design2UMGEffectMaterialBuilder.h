@@ -24,7 +24,7 @@ namespace Design2UMGEffectMaterialBuilder
 		EUMGGeometryMaskShape Shape,
 		const FVector2D& Size,
 		const FVector4& CornerRadii);
-	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial();
+	UMaterialInterface* GetOrCreateInnerShadowRetainerMaterial(int32 BlendMode = 0);
 	/** Resolve and persist typed effect parameters without WidgetTree-owned materials. */
 	UMaterialInterface* GetOrCreateRetainerEffectMaterial(
 		const FUMGEffectData& Effect, UMaterialInterface* ExistingMaterial = nullptr);

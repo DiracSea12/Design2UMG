@@ -7,9 +7,15 @@
 #include "Design2UMGConverterVisualSupport.h"
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "HAL/FileManager.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
+#include "UMGPropertyKeys.h"
 #include "VisualMapper.h"
+#include "VisualMapperFillTransfer.h"
 #include "Design2UMGCoreTestHelpers.h"
 
 using namespace Design2UMGCoreTests;
@@ -182,7 +188,6 @@ bool FVisualMapperMultiFillElidesEmptyBorderContentTest::RunTest(const FString& 
 	Border.Name = TEXT("MultiFillLeaf");
 	Border.Bounds.W = 96.0f;
 	Border.Bounds.H = 48.0f;
-	Border.Brush.BrushColor = FLinearColor::Transparent;
 	VisualMapper::ApplyRoundedCorner(Border, Node->Visual.CornerRadius, 96.0f, 48.0f);
 
 	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
@@ -209,7 +214,6 @@ bool FVisualMapperMultiFillPromotesBorderContentTest::RunTest(const FString& Par
 	Border.Name = TEXT("MultiFillContainer");
 	Border.Bounds.W = 96.0f;
 	Border.Bounds.H = 48.0f;
-	Border.Brush.BrushColor = FLinearColor::Transparent;
 
 	FUMGWidgetNode Content;
 	Content.Type = TEXT("HorizontalBox");
@@ -262,7 +266,6 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	Border.Name = TEXT("MultiFillPadded");
 	Border.Bounds.W = 96.0f;
 	Border.Bounds.H = 48.0f;
-	Border.Brush.BrushColor = FLinearColor::Transparent;
 	Border.WidgetStyle.Padding = FMargin(8.0f);
 	FUMGBoxShadowLayerData& BoxShadow = Border.Shadow.BoxShadows.AddDefaulted_GetRef();
 	BoxShadow.Spread = 3.0f;
@@ -286,7 +289,81 @@ bool FVisualMapperMultiFillKeepsPaddedBorderContentTest::RunTest(const FString& 
 	}
 	TestEqual(TEXT("Padding remains owned by Border"), Wrapped.Children[2].Type, FString(TEXT("Border")));
 	TestTrue(TEXT("Padding remains present"), Wrapped.Children[2].WidgetStyle.Padding.IsSet());
+	TestTrue(TEXT("Content carrier has an explicit transparent fill"),
+		Wrapped.Children[2].Brush.BrushColor.IsSet()
+		&& Wrapped.Children[2].Brush.BrushColor.GetValue().Equals(FLinearColor::Transparent));
 	TestEqual(TEXT("Retained content does not duplicate the box shadow"), Wrapped.Children[2].Shadow.BoxShadows.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperShaderFillKeepsContentTransparentTest,
+	"Design2UMG.VisualMapper.ShaderFillKeepsContentTransparent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperShaderFillKeepsContentTransparentTest::RunTest(const FString& Parameters)
+{
+	const FString ShaderFile = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("FillSurface_"), TEXT(".glsl"));
+	if (!TestTrue(TEXT("Write fill shader fixture"), FFileHelper::SaveStringToFile(
+		TEXT("void main(){gl_FragColor=vec4(0.1,0.2,0.3,1.0);}"), *ShaderFile,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*ShaderFile); };
+
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 48.0f);
+	FDesignFill Fill;
+	Fill.Type = EDesignFillType::Shader;
+	Fill.Shader.Emplace();
+	Fill.Shader->Url = ShaderFile;
+	Node->Visual.Fills.Add(MoveTemp(Fill));
+	Node->Visual.CornerRadius.bUniform = true;
+	Node->Visual.CornerRadius.Uniform = 4.0f;
+	Node->Visual.Stroke.Thickness.bUniform = true;
+	Node->Visual.Stroke.Thickness.Uniform = 2.0f;
+	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
+	Node->LayoutData.Layout = EDesignLayout::None;
+	Node->LayoutData.ExplicitClip = true;
+
+	FUMGWidgetNode Content;
+	Content.Type = TEXT("CanvasPanel");
+	Content.Id = TEXT("shader_surface");
+	Content.Name = TEXT("ShaderSurface");
+	Content.Bounds.W = 96.0f;
+	Content.Bounds.H = 48.0f;
+	FUMGWidgetNode Text;
+	Text.Type = TEXT("TextBlock");
+	Text.Text.Text = TEXT("Content above fill");
+	Content.Children.Add(MoveTemp(Text));
+	VisualMapper::ApplyVisualProperties(Content, Node);
+	FUMGWidgetNode Border = VisualMapper::WrapWithBorder(MoveTemp(Content), Node);
+	TestFalse(TEXT("Production shader carrier starts without a brush color"), Border.Brush.BrushColor.IsSet());
+	TestFalse(TEXT("Plain fill shader needs no backdrop layers"), VisualMapperFillTransfer::RequiresBackdropLayers(Border, Node));
+
+	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithMultiFill(MoveTemp(Border), Node, FVisualMapperOptions());
+	if (!TestEqual(TEXT("Shader fill precedes its retained content carrier"), Wrapped.Children.Num(), 2))
+	{
+		return false;
+	}
+	const FUMGWidgetNode& Paint = Wrapped.Children[0];
+	const FUMGWidgetNode& Carrier = Wrapped.Children[1];
+	TestTrue(TEXT("Paint layer owns the shader"), Paint.Brush.Shader.IsSet());
+	TestEqual(TEXT("Paint layer retains the authored corner"), Paint.Brush.OutlineCornerRadius.Get(0.0f), 4.0f);
+	TestEqual(TEXT("Content remains a Border"), Carrier.Type, FString(TEXT("Border")));
+	TestTrue(TEXT("Content fill is explicitly transparent instead of engine-default white"),
+		Carrier.Brush.BrushColor.IsSet() && Carrier.Brush.BrushColor.GetValue().Equals(FLinearColor::Transparent));
+	TestFalse(TEXT("Content does not duplicate the shader"), Carrier.Brush.Shader.IsSet());
+	TestEqual(TEXT("Content carrier retains its independent outline width"), Carrier.Brush.OutlineThickness.Get(0.0f), 2.0f);
+	TestTrue(TEXT("Content carrier retains its independent outline color"),
+		Carrier.Brush.OutlineColor.IsSet()
+		&& Carrier.Brush.OutlineColor.GetValue().Equals(FLinearColor(FColor(0x11, 0x22, 0x33))));
+	TestEqual(TEXT("Content carrier retains rounded outline drawing"),
+		Carrier.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType), ESlateBrushDrawType::RoundedBox);
+	TestEqual(TEXT("Content width hint is preserved"), Carrier.WidgetStyle.WidthOverride.Get(0.0f), 96.0f);
+	TestEqual(TEXT("Content height hint is preserved"), Carrier.WidgetStyle.HeightOverride.Get(0.0f), 48.0f);
+	TestEqual(TEXT("Clipping remains on the shared overlay"), Wrapped.Render.Clipping.Get(FString()), FString(TEXT("ClipToBounds")));
+	TestTrue(TEXT("Content panel and text remain intact"), Carrier.Children.Num() == 1
+		&& Carrier.Children[0].Type == TEXT("CanvasPanel") && Carrier.Children[0].Children.Num() == 1
+		&& Carrier.Children[0].Children[0].Text.Text.Get(FString()) == TEXT("Content above fill"));
 	return true;
 }
 
@@ -418,4 +495,362 @@ bool FVisualMapperStrokeBrushSelectionTest::RunTest(const FString&)
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperBackdropPaintLayersTest,
+    "Design2UMG.VisualMapper.BackdropPaintLayers", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperBackdropPaintLayersTest::RunTest(const FString&)
+{
+    const FString ShaderFile = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("PencilBackgroundUniform_"), TEXT(".glsl"));
+    const FString ShaderSource = TEXT(R"(#version 100
+precision mediump float;
+/** @default pencil:background */
+uniform sampler2D Back;
+void main(){gl_FragColor=texture2D(Back,vec2(0.5));}
+)");
+    if (!TestTrue(TEXT("Write annotation fixture"), FFileHelper::SaveStringToFile(ShaderSource, *ShaderFile, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+        return false;
+    ON_SCOPE_EXIT { IFileManager::Get().Delete(*ShaderFile); };
+
+    auto Node = MakeShared<FDesignNode>();
+    Node->Type = EDesignNodeType::Frame; Node->Id = TEXT("surface"); Node->Name = TEXT("Surface");
+    Node->Transform.SetWidthValue(FDesignSize::Fixed(96)); Node->Transform.SetHeightValue(FDesignSize::Fixed(64));
+    FDesignFill Fill; Fill.Type = EDesignFillType::Color; Fill.SolidColor = TEXT("#FFFF00FF");
+    Node->Visual.Fills.Add(Fill);
+    FUMGWidgetNode Container; Container.Type = TEXT("CanvasPanel"); Container.Id = Node->Id; Container.Name = Node->Name;
+    Container.Render.RenderOpacity = .6f;
+    Container.Brush.OutlineThickness = 2.0f;
+    FUMGWidgetNode Child; Child.Type = TEXT("Image"); Child.Brush.Shader.Emplace();
+    Child.Brush.Shader->Url = ShaderFile;
+    FDesignShaderValue Background; Background.Kind = FDesignShaderValue::EKind::String; Background.String = TEXT("pencil:background");
+    Child.Brush.Shader->Uniforms.Add(TEXT("Back"), Background); Container.Children.Add(Child);
+    TestTrue(TEXT("Background descendant requires explicit ancestor paint"), VisualMapperFillTransfer::RequiresBackdropLayers(Container, Node));
+    FUMGWidgetNode Layered = VisualMapper::WrapWithMultiFill(MoveTemp(Container), Node, FVisualMapperOptions());
+    TestEqual(TEXT("Ancestor has paint and original content"), Layered.Children.Num(), 2);
+    if (Layered.Children.Num() == 2)
+    {
+        TestEqual(TEXT("Real child retained once"), Layered.Children[1].Children.Num(), 1);
+        TestEqual(TEXT("Layout type retained"), Layered.Children[1].Type, FString(TEXT("CanvasPanel")));
+        TestTrue(TEXT("Transferred fill keeps the independent native outline"), Layered.Children[1].Brush.OutlineThickness.IsSet() && FMath::IsNearlyEqual(Layered.Children[1].Brush.OutlineThickness.GetValue(), 2.0f));
+        TestTrue(TEXT("Source opacity stays on group"), Layered.Render.RenderOpacity.IsSet() && FMath::IsNearlyEqual(Layered.Render.RenderOpacity.GetValue(), .6f));
+    }
+    FUMGWidgetNode ShadowContainer;
+    ShadowContainer.Type = TEXT("CanvasPanel");
+    FUMGWidgetNode ShadowChild;
+    ShadowChild.Shadow.BoxShadows.AddDefaulted_GetRef().BlendMode = TEXT("multiply");
+    ShadowContainer.Children.Add(MoveTemp(ShadowChild));
+    TestTrue(TEXT("Subtree blended shadow requires ancestor paint"), VisualMapperFillTransfer::RequiresBackdropLayers(ShadowContainer, Node));
+
+    auto OutsetChild = MakeShared<FDesignNode>();
+    OutsetChild->Id = TEXT("outset-child");
+    OutsetChild->Transform.X = -8;
+    OutsetChild->Transform.SetWidthValue(FDesignSize::Fixed(16));
+    OutsetChild->Transform.SetHeightValue(FDesignSize::Fixed(16));
+    Node->Children.Add(OutsetChild);
+    VisualMapperFillTransfer::MarkBackdropProducers(Layered, Node);
+    TestTrue(TEXT("Context opacity group retains source capture outsets"), Layered.Render.BackgroundCaptureInsets.IsSet() && FMath::IsNearlyEqual(Layered.Render.BackgroundCaptureInsets->Left, 8.0f));
+    TestTrue(TEXT("Only preceding paint is a producer and keeps source outsets"),
+        Layered.Children.Num() == 2 && Layered.Children[0].Render.BackgroundCaptureInsets.IsSet()
+        && FMath::IsNearlyEqual(Layered.Children[0].Render.BackgroundCaptureInsets->Left, 8.0f)
+        && !Layered.Children[1].Render.BackgroundCaptureInsets.IsSet());
+
+    auto FractionalNode = MakeFixedNode(EDesignNodeType::Frame, 96.0f, 64.0f);
+    FractionalNode->Id = Node->Id;
+    FractionalNode->Visual.Stroke.Align = EDesignStrokeAlign::Center;
+    FractionalNode->Visual.Stroke.Thickness.bUniform = true;
+    FractionalNode->Visual.Stroke.Thickness.Uniform = 1.0f;
+    VisualMapperFillTransfer::MarkBackdropProducers(Layered, FractionalNode);
+    TestTrue(TEXT("Context capture rounds half-pixel stroke outsets outward"),
+        Layered.Render.BackgroundCaptureInsets.Get(FMargin(0)) == FMargin(1));
+    TestTrue(TEXT("Preceding paint receives whole-pixel capture outsets without capturing later content"),
+        Layered.Children.Num() == 2
+        && Layered.Children[0].Render.BackgroundCaptureInsets.Get(FMargin(0)) == FMargin(1)
+        && !Layered.Children[1].Render.BackgroundCaptureInsets.IsSet());
+
+    const auto HalfGroup = []()
+    {
+        FUMGWidgetNode Group;
+        Group.Type = TEXT("Overlay");
+        Group.Render.RenderOpacity = .5f;
+        FUMGWidgetNode Paint;
+        Paint.Type = TEXT("Image");
+        Paint.Brush.BrushColor = FLinearColor::Red;
+        Group.Children.Add(Paint);
+        Paint.Brush.BrushColor = FLinearColor::Blue;
+        Group.Children.Add(MoveTemp(Paint));
+        return Group;
+    };
+    FUMGWidgetNode CaptureTree;
+    CaptureTree.Type = TEXT("Overlay");
+    FUMGWidgetNode Prefix;
+    Prefix.Type = TEXT("Overlay");
+    Prefix.Children.Add(HalfGroup());
+    CaptureTree.Children.Add(MoveTemp(Prefix));
+    FUMGWidgetNode ContextSource;
+    ContextSource.Type = TEXT("RetainerBox");
+    ContextSource.Effect.Shader = Child.Brush.Shader;
+    ContextSource.Children.Add(HalfGroup());
+    CaptureTree.Children.Add(MoveTemp(ContextSource));
+    CaptureTree.Children.Add(HalfGroup());
+    VisualMapperFillTransfer::MarkBackdropProducers(CaptureTree, Node);
+    TestTrue(TEXT("Internal opacity groups are captured only in real prefix and source branches"),
+        CaptureTree.Children[0].Children[0].Render.BackgroundCaptureInsets.IsSet()
+        && CaptureTree.Children[1].Children[0].Render.BackgroundCaptureInsets.IsSet()
+        && !CaptureTree.Children[2].Render.BackgroundCaptureInsets.IsSet());
+    CaptureTree.Render.RenderOpacity = .6f;
+    VisualMapperFillTransfer::MarkBackdropProducers(CaptureTree, Node);
+    TestTrue(TEXT("Final opacity capture includes its later internal groups"), CaptureTree.Children[2].Render.BackgroundCaptureInsets.IsSet());
+
+    FUMGWidgetNode DefaultContainer;
+    DefaultContainer.Type = TEXT("CanvasPanel");
+    DefaultContainer.Children.Add(Child);
+    auto& DefaultShader = DefaultContainer.Children[0].Brush.Shader.GetValue();
+    DefaultShader.Url = ShaderFile;
+    DefaultShader.Uniforms.Reset();
+    TestTrue(TEXT("Official block-comment background default requires ancestor paint"),
+        VisualMapperFillTransfer::RequiresBackdropLayers(DefaultContainer, Node));
+    FDesignShaderValue ImageOverride;
+    ImageOverride.Kind = FDesignShaderValue::EKind::String;
+    ImageOverride.String = TEXT("texture.png");
+    DefaultShader.Uniforms.Add(TEXT("Back"), ImageOverride);
+    TestFalse(TEXT("Explicit sampler value overrides its background default"),
+        VisualMapperFillTransfer::RequiresBackdropLayers(DefaultContainer, Node));
+
+    Node->Visual.Fills[0].BlendMode = TEXT("overlay");
+    FUMGWidgetNode Paint; Paint.Type = TEXT("Border"); Paint.Id = Node->Id; Paint.Name = Node->Name;
+    FUMGWidgetNode Blended = VisualMapper::WrapWithMultiFill(MoveTemp(Paint), Node, FVisualMapperOptions());
+    TestTrue(TEXT("Ordinary blend reaches independent paint"), !Blended.Children.IsEmpty() && Blended.Children[0].Render.PaintBlendMode.Get(FString()) == TEXT("overlay"));
+    FUMGWidgetNode Plain; Plain.Type = TEXT("CanvasPanel"); Node->Visual.Fills[0].BlendMode.Reset();
+    TestFalse(TEXT("Plain single fill is unchanged"), VisualMapperFillTransfer::RequiresBackdropLayers(Plain, Node));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperGlyphShadowBlendTransferTest,
+    "Design2UMG.VisualMapper.GlyphShadowBlendTransfer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperGlyphShadowBlendTransferTest::RunTest(const FString&)
+{
+    FDesignFill Fill = FDesignFill::FromColor(TEXT("#FFFF00FF"));
+    auto TextNode = MakeShared<FDesignNode>();
+    TextNode->Type = EDesignNodeType::Text;
+    TextNode->Id = TEXT("shadow-text");
+    TextNode->Name = TEXT("ShadowText");
+    TextNode->Visual.Fills.Add(Fill);
+    TextNode->Transform.SetWidthValue(FDesignSize::Fixed(96));
+    TextNode->Transform.SetHeightValue(FDesignSize::Fixed(24));
+    FDesignEffect TextShadow;
+    TextShadow.Type = EDesignEffectType::Shadow;
+    TextShadow.Shadow.Color = TEXT("#000000FF");
+    TextShadow.Shadow.Spread = 3.0f;
+    TextShadow.Shadow.Blur = 4.0f;
+    TextShadow.Shadow.OffsetX = 3.0f;
+    TextShadow.Shadow.OffsetY = 2.0f;
+    TextNode->Visual.Effects.Add(TextShadow);
+    TextShadow.BlendMode = TEXT("MULTIPLY");
+    TextNode->Visual.Effects.Add(TextShadow);
+    FUMGWidgetNode TextPaint;
+    TextPaint.Type = TEXT("TextBlock");
+    TextPaint.Id = TextNode->Id;
+    TextPaint.Name = TextNode->Name;
+    VisualMapper::ApplyVisualProperties(TextPaint, TextNode);
+    TestFalse(TEXT("Glyph color stays on the native text paint"), VisualMapperFillTransfer::RequiresBackdropLayers(TextPaint, TextNode));
+    TestTrue(TEXT("Text shadows retain the complete stack and canonicalize only UMG mode"),
+        TextPaint.Shadow.BoxShadows.Num() == 2 && TextPaint.Shadow.BoxShadows[1].BlendMode == TEXT("multiply")
+        && TextNode->Visual.Effects[1].BlendMode == TEXT("MULTIPLY"));
+    const auto TextShadowLayers = TextPaint.Shadow.BoxShadows;
+    TestTrue(TEXT("Glyph shadow keeps legal blur/offset and ignores unsupported spread"),
+        !TextShadowLayers.ContainsByPredicate([](const FUMGBoxShadowLayerData& Layer) { return !FMath::IsNearlyZero(Layer.Spread); })
+        && TextShadowLayers.Num() == 2 && TextShadowLayers[0].Blur == 4.0f
+        && TextShadowLayers[0].Offset == FVector2D(3.0f, 2.0f));
+    TextPaint.Shadow.BoxShadows.Reset();
+    FUMGWidgetNode TextGroup = VisualMapper::WrapWithBoxShadow(MoveTemp(TextPaint), TextNode, TextShadowLayers);
+    TestTrue(TEXT("Blended text shadows use a single native subtree capture"),
+        !TextGroup.Children.IsEmpty() && TextGroup.Children[0].Shadow.BoxShadows.Num() == 2);
+
+    TextNode->Visual.Effects[1].BlendMode = TEXT("NORMAL");
+    FUMGWidgetNode PlainText;
+    PlainText.Type = TEXT("TextBlock");
+    VisualMapper::ApplyVisualProperties(PlainText, TextNode);
+    TestTrue(TEXT("Normal-only text shadows keep the original native route"), PlainText.Shadow.BoxShadows.IsEmpty());
+
+    TextNode->Visual.Fills[0].BlendMode = TEXT("MULTIPLY");
+    FDesignEffect Inner;
+    Inner.Type = EDesignEffectType::Shadow;
+    Inner.BlendMode = TEXT("SCREEN");
+    Inner.Shadow.BlendMode = Inner.BlendMode;
+    Inner.Shadow.bInner = true;
+    Inner.Shadow.Color = TEXT("#FF000080");
+    Inner.Shadow.Blur = 3.0f;
+    Inner.Shadow.OffsetX = 2.0f;
+    Inner.Shadow.OffsetY = 1.0f;
+    TextNode->Visual.Effects.Add(Inner);
+    FUMGWidgetNode MixedText;
+    MixedText.Type = TEXT("TextBlock");
+    MixedText.Id = TextNode->Id;
+    MixedText.Name = TextNode->Name;
+    VisualMapper::ApplyVisualProperties(MixedText, TextNode);
+    FUMGWidgetNode MixedGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(MixedText), TextNode, FVisualMapperOptions(), false);
+    const FUMGWidgetNode* SharedShadow = nullptr;
+    int32 RawGlyphCount = 0;
+    int32 IndependentInnerCount = 0;
+    bool RawGlyphHasBlend = false;
+    TFunction<void(const FUMGWidgetNode&)> Inspect = [&](const FUMGWidgetNode& Item)
+    {
+        if (Item.Type == TEXT("TextBlock"))
+        {
+            ++RawGlyphCount;
+            RawGlyphHasBlend |= Item.Render.PaintBlendMode.IsSet();
+        }
+        if (Item.Effect.EffectMaterial.Get(FString()) == UMGPropertyKeys::RetainerSubtreeShadowEffectRef)
+            SharedShadow = &Item;
+        if (Item.Effect.EffectMaterial.Get(FString()) == UMGPropertyKeys::RetainerInnerShadowEffectRef)
+            ++IndependentInnerCount;
+        for (const auto& ItemChild : Item.Children) Inspect(ItemChild);
+    };
+    Inspect(MixedGroup);
+    TestTrue(TEXT("Glyph fill and single inner are owned by one raw-alpha shadow capture"),
+        SharedShadow && SharedShadow->Render.PaintBlendMode.Get(FString()) == TEXT("multiply")
+        && SharedShadow->Effect.InnerShadowBlendMode.Get(FString()) == TEXT("screen")
+        && SharedShadow->Effect.EffectColor.IsSet() && SharedShadow->Shadow.BoxShadows.Num() == 2
+        && RawGlyphCount == 1 && !RawGlyphHasBlend && IndependentInnerCount == 0
+        && !MixedGroup.Render.PaintBlendMode.IsSet());
+    if (TestTrue(TEXT("Combined inner shadow retains its required offset"),
+        SharedShadow && SharedShadow->Effect.EffectOffset.IsSet()))
+        TestTrue(TEXT("Combined inner offset uses the actual expanded capture size"),
+            FMath::IsNearlyEqual(SharedShadow->Effect.EffectOffset->X * SharedShadow->Bounds.W, 2.0, KINDA_SMALL_NUMBER)
+            && FMath::IsNearlyEqual(SharedShadow->Effect.EffectOffset->Y * SharedShadow->Bounds.H, 1.0, KINDA_SMALL_NUMBER));
+    TextNode->Visual.Effects.RemoveAll([](const FDesignEffect& Effect) { return !Effect.Shadow.bInner; });
+    FUMGWidgetNode InnerText;
+    InnerText.Type = TEXT("TextBlock");
+    InnerText.Id = TextNode->Id;
+    InnerText.Name = TextNode->Name;
+    VisualMapper::ApplyVisualProperties(InnerText, TextNode);
+    FUMGWidgetNode InnerGlyphGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(InnerText), TextNode, FVisualMapperOptions(), false);
+    SharedShadow = nullptr; RawGlyphCount = 0; IndependentInnerCount = 0; RawGlyphHasBlend = false;
+    Inspect(InnerGlyphGroup);
+    TestTrue(TEXT("Glyph inner-only blend reuses the same capture with no outer layers"),
+        SharedShadow && SharedShadow->Shadow.BoxShadows.IsEmpty() && SharedShadow->Effect.EffectColor.IsSet()
+        && RawGlyphCount == 1 && !RawGlyphHasBlend && IndependentInnerCount == 0);
+    TextNode->Type = EDesignNodeType::IconFont;
+    TextNode->Visual.Effects.Reset();
+    FUMGWidgetNode IconPaint;
+    IconPaint.Type = TEXT("TextBlock");
+    VisualMapper::ApplyVisualProperties(IconPaint, TextNode);
+    TestEqual(TEXT("Official icon color fill keeps its independent paint mode"), IconPaint.Render.PaintBlendMode.Get(FString()), FString(TEXT("multiply")));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperStrokeInnerBlendTransferTest,
+    "Design2UMG.VisualMapper.StrokeInnerBlendTransfer", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
+{
+    FDesignFill Fill = FDesignFill::FromColor(TEXT("#FFFF00FF"));
+    FDesignEffect Inner;
+    Inner.Type = EDesignEffectType::Shadow;
+    Inner.BlendMode = TEXT("SCREEN");
+    Inner.Shadow.BlendMode = Inner.BlendMode;
+    Inner.Shadow.bInner = true;
+    Inner.Shadow.Color = TEXT("#FF000080");
+    Inner.Shadow.Blur = 3.0f;
+    Inner.Shadow.OffsetX = 2.0f;
+    Inner.Shadow.OffsetY = 1.0f;
+    auto ShapeNode = MakeShared<FDesignNode>();
+    ShapeNode->Type = EDesignNodeType::Rectangle;
+    ShapeNode->Id = TEXT("shape-blend"); ShapeNode->Name = TEXT("ShapeBlend");
+    ShapeNode->Transform.SetWidthValue(FDesignSize::Fixed(96));
+    ShapeNode->Transform.SetHeightValue(FDesignSize::Fixed(64));
+    ShapeNode->Visual.Fills.Add(Fill);
+    ShapeNode->Visual.Effects.Add(Inner);
+    FUMGWidgetNode InnerShape;
+    InnerShape.Type = TEXT("Border");
+    VisualMapper::ApplyVisualProperties(InnerShape, ShapeNode);
+    FUMGWidgetNode InnerShapeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(InnerShape), ShapeNode, FVisualMapperOptions(), false);
+    TestTrue(TEXT("Ordinary inner shadow passes only its own paint mode"),
+        InnerShapeGroup.Effect.EffectMaterial.Get(FString()) == UMGPropertyKeys::RetainerInnerShadowEffectRef
+        && InnerShapeGroup.Effect.InnerShadowBlendMode.Get(FString()) == TEXT("screen")
+        && !InnerShapeGroup.Render.PaintBlendMode.IsSet());
+    ShapeNode->Visual.Effects.Reset();
+    ShapeNode->Visual.Stroke.Thickness.bUniform = true;
+    ShapeNode->Visual.Stroke.Thickness.Uniform = 4.0f;
+    ShapeNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FF000080"));
+    ShapeNode->Visual.Stroke.Fill->BlendMode = TEXT("OVERLAY");
+    FUMGWidgetNode StrokedShape;
+    StrokedShape.Type = TEXT("Border");
+    VisualMapper::ApplyVisualProperties(StrokedShape, ShapeNode);
+    FUMGWidgetNode StrokeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(StrokedShape), ShapeNode, FVisualMapperOptions(), true);
+    TestTrue(TEXT("Already-native stroke becomes a single independent blended paint"),
+        StrokeGroup.Children.Num() == 2 && !StrokeGroup.Children[0].Brush.OutlineThickness.IsSet()
+        && StrokeGroup.Children[1].Render.PaintBlendMode.Get(FString()) == TEXT("overlay"));
+
+    ShapeNode->Visual.Fills[0].BlendMode = TEXT("MULTIPLY");
+    FUMGWidgetNode LayeredShape;
+    LayeredShape.Type = TEXT("Border");
+    FUMGWidgetNode ShapeContent;
+    ShapeContent.Type = TEXT("Image");
+    LayeredShape.Children.Add(MoveTemp(ShapeContent));
+    VisualMapper::ApplyVisualProperties(LayeredShape, ShapeNode);
+    TestTrue(TEXT("Layered fill fixture starts with a native outline"), LayeredShape.Brush.OutlineThickness.IsSet());
+    FUMGWidgetNode LayeredStrokeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(LayeredShape), ShapeNode, FVisualMapperOptions(), true);
+    TestTrue(TEXT("Layered fill clears its original outline and preserves child content"),
+        LayeredStrokeGroup.Children.Num() == 2 && LayeredStrokeGroup.Children[0].Children.Num() == 2
+        && LayeredStrokeGroup.Children[0].Children[0].Render.PaintBlendMode.Get(FString()) == TEXT("multiply")
+        && !LayeredStrokeGroup.Children[0].Children[1].Brush.OutlineThickness.IsSet()
+        && !LayeredStrokeGroup.Children[0].Children[1].Brush.OutlineColor.IsSet()
+        && LayeredStrokeGroup.Children[0].Children[1].Children.Num() == 1
+        && LayeredStrokeGroup.Children[1].Render.PaintBlendMode.Get(FString()) == TEXT("overlay")
+        && FMath::IsNearlyEqual(LayeredStrokeGroup.Children[1].Path.StrokeThickness.Get(0), 4.0f));
+
+    ShapeNode->Visual.Fills.Reset();
+    FUMGWidgetNode StrokeOnlyShape;
+    StrokeOnlyShape.Type = TEXT("Border");
+    StrokeOnlyShape.Id = ShapeNode->Id;
+    StrokeOnlyShape.Name = ShapeNode->Name;
+    VisualMapper::ApplyVisualProperties(StrokeOnlyShape, ShapeNode);
+    StrokeOnlyShape.Render.RenderOpacity = .6f;
+    StrokeOnlyShape.Render.RenderAngle = 30.0f;
+    StrokeOnlyShape.Render.RenderTransformScale = FVector2D(2.0f, 3.0f);
+    StrokeOnlyShape.Render.RenderTransformPivot = FVector2D(.25f, .75f);
+    StrokeOnlyShape.Render.RenderTranslation = FVector2D(7.0f, 9.0f);
+    FUMGWidgetNode CollapsedStroke = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(StrokeOnlyShape), ShapeNode, FVisualMapperOptions(), true);
+    TestTrue(TEXT("Stroke-only paint collapses to one image with its independent blend"),
+        CollapsedStroke.Type == TEXT("Image") && CollapsedStroke.Children.IsEmpty()
+        && CollapsedStroke.Id == ShapeNode->Id && CollapsedStroke.Name == ShapeNode->Name
+        && CollapsedStroke.Render.PaintBlendMode.Get(FString()) == TEXT("overlay"));
+    TestTrue(TEXT("Collapsed stroke keeps object opacity and transforms"),
+        CollapsedStroke.Render.RenderOpacity.Get(1.0f) == .6f
+        && CollapsedStroke.Render.RenderAngle.Get(0.0f) == 30.0f
+        && CollapsedStroke.Render.RenderTransformScale.Get(FVector2D::ZeroVector) == FVector2D(2.0f, 3.0f)
+        && CollapsedStroke.Render.RenderTransformPivot.Get(FVector2D::ZeroVector) == FVector2D(.25f, .75f)
+        && CollapsedStroke.Render.RenderTranslation.Get(FVector2D::ZeroVector) == FVector2D(7.0f, 9.0f));
+
+    ShapeNode->Type = EDesignNodeType::Line;
+    ShapeNode->Visual.Stroke.Cap = EDesignStrokeCap::Circular;
+    FUMGWidgetNode StrokeOnlyLine;
+    StrokeOnlyLine.Type = TEXT("Image");
+    StrokeOnlyLine.Render.RenderOpacity = .6f;
+    StrokeOnlyLine.Render.RenderTranslation = FVector2D(7.0f, 9.0f);
+    FUMGWidgetNode CollapsedLine = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+        MoveTemp(StrokeOnlyLine), ShapeNode, FVisualMapperOptions(), false);
+    TestTrue(TEXT("Stroke-only line retains blend, opacity and centered ink offset"),
+        CollapsedLine.Type == TEXT("Image") && CollapsedLine.Children.IsEmpty()
+        && CollapsedLine.Render.PaintBlendMode.Get(FString()) == TEXT("overlay")
+        && CollapsedLine.Render.RenderOpacity.Get(1.0f) == .6f
+        && CollapsedLine.Render.RenderTranslation.Get(FVector2D::ZeroVector) == FVector2D(7.0f, 7.0f));
+    TestTrue(TEXT("Collapsed line keeps the cap-expanded canvas and original layout width"),
+        CollapsedLine.Path.CanvasSize.Get(FVector2D::ZeroVector) == FVector2D(100.0f, 4.0f)
+        && CollapsedLine.WidgetStyle.WidthOverride.Get(0.0f) == 96.0f
+        && CollapsedLine.WidgetStyle.HeightOverride.Get(0.0f) == 4.0f
+        && CollapsedLine.Render.RenderTransformScale.Get(FVector2D::ZeroVector).Equals(FVector2D(100.0f / 96.0f, 1.0f)));
+
+    TestTrue(TEXT("Current Figma LIGHTEN adapts while unknown source modes remain errors"),
+        VisualMapperFillTransfer::CanonicalPaintBlendMode(TEXT("LIGHTEN")) == TEXT("light")
+        && VisualMapperFillTransfer::CanonicalPaintBlendMode(TEXT("unknown-mode")) == TEXT("unknown-mode"));
+
+    return true;
+}
 #endif // WITH_DEV_AUTOMATION_TESTS

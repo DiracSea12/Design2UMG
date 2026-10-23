@@ -229,6 +229,9 @@ namespace
 			return;
 		}
 
+		if (Node.Render.BackgroundCaptureInsets.IsSet())
+			Design2UMGWidgetMetadata::SetBackgroundCaptureInsets(Widget, Node.Render.BackgroundCaptureInsets.GetValue());
+
 		if (Node.WidgetStyle.Visibility.IsSet())
 		{
 			Widget->SetVisibility(FUMGValueParser::ParseVisibility(Node.WidgetStyle.Visibility.GetValue()));
@@ -279,7 +282,7 @@ namespace
 		}
 	}
 
-	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
+	void ApplyWidgetProperties(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
 		if (!Widget)
 		{
@@ -291,7 +294,7 @@ namespace
 		{
 			if (Class == UBorder::StaticClass())
 			{
-				UMGBrushPropertyApplier::ApplyBorderProps(Widget, Node, Budget);
+				UMGBrushPropertyApplier::ApplyBorderProps(Widget, Node, Budget, TextureMap);
 				break;
 			}
 			if (const FApplyPropsFunc* Func = ApplierMap.Find(Class))

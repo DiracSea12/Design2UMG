@@ -85,6 +85,15 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
+    if(Node.Brush.Shader.IsSet())
+    {
+        UMaterialInterface* Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString()));
+        if(!Material)return false;
+        ImageWidget->SetBrushFromMaterial(Material);
+        ImageWidget->SetDesiredSizeOverride(Node.Brush.Shader->Size);
+        return true;
+    }
+	if (Node.Path.HasPaintGeometry()) return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
 	// --- material (procedural shape) path ---
 	UTexture2D* ProceduralTexture = nullptr;
 	FUMGProceduralResourceRequest ResourceRequest;

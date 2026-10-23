@@ -5,6 +5,7 @@
 #include "Design2UMGLog.h"
 #include "DesignColorUtils.h"
 #include "LayoutMapper.h"
+#include "VisualMapperFillTransfer.h"
 #include "UMGWidgetTypes.h"
 #include "UMGValueParser.h"
 
@@ -246,20 +247,31 @@ namespace Design2UMGConverterVisualSupport
 
 	FUMGWidgetNode WrapWithBorder(
 		FUMGWidgetNode Widget,
-		const TSharedPtr<FDesignNode>& Node)
+		const TSharedPtr<FDesignNode>& Node,
+		bool& OutExplicitStrokePainted)
 	{
-		return VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
+		return VisualMapper::WrapWithBorder(MoveTemp(Widget), Node, &OutExplicitStrokePainted);
 	}
 
 	FUMGWidgetNode ApplyVisualEffectWrappers(
 		FUMGWidgetNode Widget,
 		const TSharedPtr<FDesignNode>& Node,
-		const FVisualMapperOptions& VisualMapperOptions)
+		const FVisualMapperOptions& VisualMapperOptions,
+		bool bExplicitStrokePainted)
 	{
-		if (Node->HasMultiFill())
+		int32 PaintLayerCount = 0;
+		if (VisualMapperFillTransfer::RequiresBackdropLayers(Widget, Node) || Node->HasMultiFill() || Node->Visual.Fills.ContainsByPredicate(
+            [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; }))
 		{
-			Widget = VisualMapper::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions);
+			Widget = VisualMapperFillTransfer::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions, &PaintLayerCount);
 		}
+
+        const bool bBlendedStroke = Node->Visual.Stroke.Fill.IsSet()
+            && Node->Visual.Stroke.Fill->Type != EDesignFillType::Shader
+            && !Node->Visual.Stroke.Fill->BlendMode.IsEmpty()
+            && VisualMapperFillTransfer::CanonicalPaintBlendMode(Node->Visual.Stroke.Fill->BlendMode) != TEXT("normal");
+        if (!bExplicitStrokePainted || bBlendedStroke)
+			Widget = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node, PaintLayerCount);
 
 		if (Node->Visual.GeometryMask.HasMask())
 		{
@@ -281,16 +293,24 @@ namespace Design2UMGConverterVisualSupport
 			}
 		}
 
-		if (InnerShadow && Node.IsValid() && Node->Transform.Width.Value > 0.0f && Node->Transform.Height.Value > 0.0f)
+        const auto NonNormal = [](const FString& Mode)
+        { return !Mode.IsEmpty() && VisualMapperFillTransfer::CanonicalPaintBlendMode(Mode) != TEXT("normal"); };
+        const bool bCombinedGlyphShadows = InnerShadow
+            && (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+            && (NonNormal(Widget.Render.PaintBlendMode.Get(FString())) || NonNormal(InnerShadow->BlendMode)
+                || Widget.Shadow.BoxShadows.ContainsByPredicate([&](const FUMGBoxShadowLayerData& Layer)
+                    { return NonNormal(Layer.BlendMode); }));
+
+		if (InnerShadow && !bCombinedGlyphShadows && Node.IsValid() && Node->Transform.Width.Value > 0.0f && Node->Transform.Height.Value > 0.0f)
 		{
 			Widget = VisualMapper::WrapWithInnerShadow(MoveTemp(Widget), Node, *InnerShadow);
 		}
 
-		if (Widget.Shadow.BoxShadows.Num() > 0)
+		if (Widget.Shadow.BoxShadows.Num() > 0 || bCombinedGlyphShadows)
 		{
 			const TArray<FUMGBoxShadowLayerData> BoxShadows = Widget.Shadow.BoxShadows;
 			Widget.Shadow.BoxShadows.Reset();
-			Widget = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows);
+			Widget = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, BoxShadows, bCombinedGlyphShadows ? InnerShadow : nullptr);
 		}
 
 		float MaxForegroundBlur = 0.0f;
@@ -323,6 +343,12 @@ namespace Design2UMGConverterVisualSupport
 			Widget = VisualMapper::WrapWithBackgroundBlur(MoveTemp(Widget), MaxBackgroundBlur);
 		}
 
+        for(const auto& Effect:Node->Visual.Effects)
+        {
+            if(!Effect.bEnabled || Effect.Type!=EDesignEffectType::Shader || !Effect.Shader.IsSet()) continue;
+            Widget=VisualMapper::WrapWithShaderEffect(MoveTemp(Widget),Node,Effect.Shader.GetValue());
+        }
+		VisualMapperFillTransfer::MarkBackdropProducers(Widget, Node);
 		return Widget;
 	}
 }

@@ -44,6 +44,12 @@ namespace
 			Widget.Render.RenderTransformScale = FVector2D(ScaleX, ScaleY);
 		}
 
+		if ((!FMath::IsNearlyZero(Node->Transform.Rotation) || Node->Transform.bFlipX || Node->Transform.bFlipY)
+			&& !Node->Transform.TransformOrigin.Equals(FVector2D(0.5, 0.5)))
+		{
+			Widget.Render.RenderTransformPivot = Node->Transform.TransformOrigin;
+		}
+
 		if (Node->LayoutData.ExplicitClip.Get(false))
 		{
 			Widget.Render.Clipping = TEXT("ClipToBounds");
@@ -147,9 +153,21 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 	VisualMapperFillTransfer::ApplyFillProperties(Widget, Node);
 	ApplyRenderTransformPropertiesInternal(Widget, Node);
 
-	ApplyRoundedCorner(Widget, Node->Visual.CornerRadius, Node->Transform.Width.Value, Node->Transform.Height.Value);
-	ApplyStroke(Widget, ResolveStrokeCompositedOverFill(Node));
+	// Raster paths already own their shape corners and stroke paint.
+	if (!Widget.Path.Geometry.IsSet())
+	{
+		ApplyRoundedCorner(Widget, Node->Visual.CornerRadius, Node->Transform.Width.Value, Node->Transform.Height.Value);
+		ApplyStroke(Widget, ResolveStrokeCompositedOverFill(Node));
+	}
 
+    const FString GlyphPaintMode = Widget.Render.PaintBlendMode.Get(FString());
+    const bool bTextShadowStack = Node->Type == EDesignNodeType::Text
+        && ((!GlyphPaintMode.IsEmpty() && GlyphPaintMode != TEXT("normal"))
+            || Node->Visual.Effects.ContainsByPredicate([](const FDesignEffect& Effect)
+            {
+                return Effect.bEnabled && Effect.Type == EDesignEffectType::Shadow
+                    && !Effect.BlendMode.IsEmpty() && VisualMapperFillTransfer::CanonicalPaintBlendMode(Effect.BlendMode) != TEXT("normal");
+            }));
 	int32 ShadowCount = 0;
 	bool bTextShadowAssigned = false;
 	for (const FDesignEffect& Effect : Node->Visual.Effects)
@@ -166,7 +184,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 			{
 				break;
 			}
-			if (Node->Type == EDesignNodeType::Text)
+			if (Node->Type == EDesignNodeType::Text && !bTextShadowStack)
 			{
 				// TextBlock supports only one shadow in UE5, so later shadows override earlier ones.
 				if (bTextShadowAssigned)
@@ -186,7 +204,9 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 				Layer.Offset = FVector2D(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
 				Layer.Blur = Effect.Shadow.Blur;
 				// Glyph shadows use their painted alpha, not an expanded box.
-				Layer.Spread = Node->Type == EDesignNodeType::IconFont ? 0.0f : Effect.Shadow.Spread;
+				Layer.Spread = (Node->Type == EDesignNodeType::IconFont || Node->Type == EDesignNodeType::Text)
+					? 0.0f : Effect.Shadow.Spread;
+				Layer.BlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(Effect.BlendMode);
 				Layer.bShowShadowBehindNode = Effect.Shadow.bShowShadowBehindNode;
 				Layer.Color = FUMGValueParser::ParseColor(
 					Effect.Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Effect.Shadow.Color);
@@ -236,6 +256,8 @@ void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorne
 
 void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
+	// Non-solid paints use the exported stroke outline, not Slate's solid outline color.
+	if (Stroke.Fill.IsSet() && Stroke.Fill->Type != EDesignFillType::Color) return;
 	const FMargin HalfInsets = VisualMapperStrokeSupport::GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
 		: FMath::Max(FMath::Max(Stroke.Thickness.Top, Stroke.Thickness.Bottom),

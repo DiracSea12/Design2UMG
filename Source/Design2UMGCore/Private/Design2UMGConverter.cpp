@@ -586,19 +586,42 @@ namespace Design2UMGConverterPrivate
 			VisualSettings.PlaceholderHatchStyle = Context.State.SettingsSnapshot.PlaceholderHatchStyle;
 			VisualSettings.VisualMapperOptions = Context.State.SettingsSnapshot.VisualMapperOptions;
 
+			bool bExplicitStrokePainted = false;
 			const bool bPlaceholderUsesDirectImage = VisualSupport::TryApplyPlaceholderSurfaceTint(Widget, Node, VisualSettings);
 			if (VisualSupport::ShouldWrapNodeWithBorder(Node, bPlaceholderUsesDirectImage))
 			{
 				UE_LOG(LogDesign2UMG, Verbose, TEXT("ConvertNode: '%s' → WrapWithBorder (fill=%d corner=%d stroke=%d)"),
 					*Widget.Name, VisualSupport::HasVisualFill(Node), Node->Visual.CornerRadius.HasRadius(), Node->Visual.Stroke.HasStroke());
-				Widget = VisualSupport::WrapWithBorder(MoveTemp(Widget), Node);
+				Widget = VisualSupport::WrapWithBorder(MoveTemp(Widget), Node, bExplicitStrokePainted);
 			}
 			else if (LayoutMapper::HasPadding(Node) && !bPlaceholderUsesDirectImage)
 			{
 				LayoutMapper::ApplyPadding(Widget, Node->LayoutData.ExplicitPadding.Get(FDesignPadding{}));
 			}
 
-			Widget = VisualSupport::ApplyVisualEffectWrappers(MoveTemp(Widget), Node, VisualSettings.VisualMapperOptions);
+			if (!AbsoluteChildren.IsEmpty())
+			{
+				// Padding remains inside the flow subtree; absolute coordinates use the parent origin.
+				FUMGWidgetNode Canvas;
+				Canvas.Type = UMGWidgetTypes::CanvasPanel;
+				Canvas.Id = Widget.Id;
+				Canvas.Name = Widget.Name;
+				Canvas.Bounds = Widget.Bounds;
+				Canvas.Slot = Widget.Slot;
+				Canvas.Render = MoveTemp(Widget.Render);
+				Widget.Render = FUMGRenderStyleData();
+				Widget.Id += TEXT("__flow");
+				Widget.Name += TEXT("_Flow");
+				Widget.Bounds.X = Widget.Bounds.Y = 0.0f;
+				Widget.Slot = FUMGSlotData();
+				Widget.Slot.Anchors.Max.X = Widget.Slot.Anchors.Max.Y = 1.0f;
+				Widget.Slot.Offsets.Right = Widget.Slot.Offsets.Bottom = 0.0f;
+				Canvas.Children.Add(MoveTemp(Widget));
+				Canvas.Children.Append(MoveTemp(AbsoluteChildren));
+				Widget = MoveTemp(Canvas);
+			}
+
+			Widget = VisualSupport::ApplyVisualEffectWrappers(MoveTemp(Widget), Node, VisualSettings.VisualMapperOptions, bExplicitStrokePainted);
 		}
 
 		FUMGWidgetNode WrapWithPrototypeNavigation(

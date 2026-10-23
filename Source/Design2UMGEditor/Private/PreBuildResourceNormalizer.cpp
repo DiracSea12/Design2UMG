@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PreBuildResourceNormalizer.h"
+#include "PencilShaderMaterials.h"
 #include "DesignResourceResolver.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetTypes.h"
@@ -66,6 +67,7 @@ namespace
 		FUMGPathData Path = Node.Path;
 		auto Width = Node.WidgetStyle.WidthOverride;
 		auto Height = Node.WidgetStyle.HeightOverride;
+		bool bShaderMask = Node.Brush.Shader.IsSet();
 		Writer << Path.Geometry << Path.FillRule << Path.FillColor << Path.StrokeColor
 			<< Path.StrokeThickness << Path.StrokeCap << Path.StrokeJoin << Path.StrokeGeometry
 			<< Path.CanvasSize << Path.ViewBox << Path.FitGeometryToBounds << Path.StrokeAlignment << Width << Height << bShaderMask;
@@ -355,6 +357,8 @@ namespace
 
 		if (!FProceduralShapeGenerator::IsSupportedMaterialRef(ResourceRequest.MaterialRef))
 		{
+			// Shader materials are paint outputs, not procedural texture inputs.
+			if (Node.Brush.Shader.IsSet()) return false;
 			const FString SubstitutePath = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
 			UTexture2D* SubstituteTexture = SubstitutePath.IsEmpty()
 				? nullptr
@@ -527,9 +531,11 @@ bool FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
-	return NormalizePathTextures(Root, PackagePath / TEXT("D2U_PathTextures"), AssetPrefix, &OutError, Budget)
+	return PencilShaderMaterials::PrepareGeometryMasks(Root,OutError)
+        && NormalizePathTextures(Root, PackagePath / TEXT("D2U_PathTextures"), AssetPrefix, &OutError, Budget)
 		&& NormalizeProceduralTextures(Root, PackagePath / TEXT("D2U_ProceduralTextures"), AssetPrefix, &OutError, Budget)
-		&& NormalizeImageTransformTextures(Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetPrefix, &OutError, Budget);
+		&& NormalizeImageTransformTextures(Root, PackagePath / TEXT("D2U_ImageTransforms"), AssetPrefix, &OutError, Budget)
+        && PencilShaderMaterials::Prepare(Root,OutError,*Budget);
 }
 
 bool FPreBuildResourceNormalizer::NormalizePathTextures(

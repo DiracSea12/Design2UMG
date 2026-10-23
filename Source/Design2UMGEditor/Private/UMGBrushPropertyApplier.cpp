@@ -120,18 +120,25 @@ namespace UMGBrushPropertyApplier
 		}
 	}
 
-	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
+	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
 		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 		if (!Budget) Budget = &LocalBudget;
 		UBorder* Border = CastChecked<UBorder>(Widget);
 		Border->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Border->Background;
+        if(Node.Brush.Shader.IsSet())
+        {
+            if(auto Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString())))
+            {Brush.SetResourceObject(Material);Brush.DrawAs=ESlateBrushDrawType::Image;Brush.ImageSize=Node.Brush.Shader->Size;Border->SetBrush(Brush);}
+            return;
+        }
 		bool bBrushChanged = false;
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget)
+		FDesignPathRasterRequest PathRequest;
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap, &PathRequest)
 			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Brush.SetResourceObject(GeneratedTexture);

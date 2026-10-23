@@ -59,7 +59,7 @@ namespace
 			|| Brush.MaterialParams.IsSet()
 			|| Brush.Shape.IsSet()
 			|| Brush.Image.HasAny()
-			|| Brush.Gradient.HasAny();
+			|| Brush.Gradient.HasAny() || Brush.Shader.IsSet();
 	}
 
 	bool CanElideEmptyWrappedPanel(
@@ -114,7 +114,7 @@ namespace
 			|| Border.Brush.BrushColor.IsSet()
 			|| Border.Brush.Image.TexturePath.IsSet()
 			|| Border.Brush.MaterialRef.IsSet()
-			|| Border.Brush.Gradient.HasAny();
+			|| Border.Brush.Gradient.HasAny() || Border.Brush.Shader.IsSet();
 
 		if (!bHasBackgroundProperty)
 		{
@@ -421,8 +421,9 @@ namespace
 	}
 }
 
-FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
+FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, bool* OutStrokePainted)
 {
+	if (OutStrokePainted) *OutStrokePainted = false;
 	FUMGWidgetNode Border;
 	Border.Type = UMGWidgetTypes::Border;
 	Border.Id = Widget.Id;
@@ -501,7 +502,7 @@ FUMGWidgetNode VisualMapper::WrapWithBorder(FUMGWidgetNode&& Widget, const TShar
 
 	if (bNeedsExplicitStroke)
 	{
-		return VisualMapperStrokeSupport::WrapWithExplicitSideStroke(MoveTemp(Border), Node);
+		return VisualMapperStrokeSupport::WrapWithExplicitSideStroke(MoveTemp(Border), Node, OutStrokePainted);
 	}
 
 	return Border;

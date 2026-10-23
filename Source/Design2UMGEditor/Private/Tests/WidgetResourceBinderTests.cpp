@@ -219,6 +219,21 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 	TestTrue(TEXT("Procedural MaterialRef does not bind the fallback texture"), ProceduralTexture != FallbackTexture);
 	TestTrue(TEXT("Brush ImageSize set by material path"), Brush.ImageSize.X > 0.0f && Brush.ImageSize.Y > 0.0f);
 
+	UMaterial* ExpectedMaterial = UMaterial::GetDefaultMaterial(MD_UI);
+	if (!TestNotNull(TEXT("Target UI material exists"), ExpectedMaterial))
+	{
+		return false;
+	}
+	Node.Brush.MaterialRef = ExpectedMaterial->GetPathName();
+	FDesignShaderData Shader;
+	Shader.Size = FVector2D(32.0f, 16.0f);
+	Node.Brush.Shader = Shader;
+	UImage* MaterialImage = NewObject<UImage>();
+	TestTrue(TEXT("Shader MaterialRef binds with competing TexturePath"),
+		FWidgetResourceBinder::BindImageResource(MaterialImage, Node, nullptr));
+	TestTrue(TEXT("Brush resource is the target UI material"),
+		Design2UMGWidgetPropertyAccess::GetBrush(*MaterialImage).GetResourceObject() == ExpectedMaterial);
+
 	return true;
 }
 

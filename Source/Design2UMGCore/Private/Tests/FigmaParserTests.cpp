@@ -406,6 +406,228 @@ bool FFigmaParserVisualExplicitClearTest::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExpandedStrokePaintTest,
+	"Design2UMG.Unit.FigmaParser.ExpandedStrokePaint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
+{
+	const FString Upper = TEXT("M-2.5 -2.5 L29 -2.5 L29 2.5 L-2.5 2.5 Z");
+	const FString Lower = TEXT("M-2.5 14.75 L29 14.75 L29 19.75 L-2.5 19.75 Z");
+	const FString Source = MakeLeafNode(TEXT("outline"), TEXT("Outline"), TEXT("VECTOR"), 0, 0, 26.5, 17.25,
+		FString::Printf(TEXT(",\"size\":{\"x\":26.5,\"y\":17.25},"
+			"\"absoluteRenderBounds\":{\"x\":-2.5,\"y\":-2.5,\"width\":31.5,\"height\":22.25},"
+			"\"fillGeometry\":[],\"fills\":[],\"strokeWeight\":5,\"strokeAlign\":\"CENTER\",\"strokes\":[%s],"
+			"\"strokeGeometry\":[{\"path\":\"%s\",\"windingRule\":\"NONZERO\"},"
+			"{\"path\":\"%s\",\"windingRule\":\"EVENODD\"}]"), *MakeSolidFillJson(0, 0, 1), *Upper, *Lower));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Expanded stroke source parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Source), Document))) return false;
+	if (!TestEqual(TEXT("One source path"), Document.Children.Num(), 1)) return false;
+	const auto& Node = Document.Children[0];
+	FUMGWidgetNode Surface = PathWidgetBuilder::CreatePathWidget(Node);
+	TestFalse(TEXT("Expanded outline is not restroked as a centerline"), Surface.Path.StrokeThickness.IsSet());
+	FUMGWidgetNode Painted = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Surface), Node);
+	if (!TestTrue(TEXT("Static source outlines compose into one native surface"), Painted.Children.IsEmpty() && Painted.Path.SourcePaintGeometry.IsSet())) return false;
+	const auto& Common = Painted.Path.SourcePaintGeometry.GetValue();
+	if (!TestTrue(TEXT("Common geometry contains both source outlines"), Common.Geometry.StrokePaths.IsSet() && Common.Geometry.StrokePaths->Num() == 2)) return false;
+	TestEqual(TEXT("First source contour unchanged"), Common.Geometry.StrokePaths.GetValue()[0].Path, Upper);
+	TestEqual(TEXT("Second source contour unchanged"), Common.Geometry.StrokePaths.GetValue()[1].Path, Lower);
+	TestEqual(TEXT("Common geometry retains each path rule"), Common.Geometry.StrokePaths.GetValue()[1].FillRule, FString(TEXT("evenodd")));
+	TestEqual(TEXT("Open center strokes do not acquire alignment clipping"), Common.StrokeAlignment, FString(TEXT("center")));
+	TestTrue(TEXT("Source local canvas retained"), Painted.Path.ViewBox.IsSet() && Painted.Path.ViewBox->Equals(FVector4(0, 0, 26.5, 17.25)));
+	TestFalse(TEXT("Filled source outline has no second stroke"), Painted.Path.StrokeThickness.IsSet());
+	TestEqual(TEXT("Source stroke metadata remains unchanged"), Node->Visual.Stroke.Thickness.Uniform, 5.0f);
+
+	auto InsideNode = MakeShared<FDesignNode>(*Node);
+	InsideNode->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+	InsideNode->Shape.PaintGeometry.FillPaths = TArray<FDesignGeometryPath>{{TEXT("M0 0L26.5 0L26.5 17.25L0 17.25Z"), TEXT("evenodd")}};
+	const FUMGWidgetNode Inside = VisualMapperFillTransfer::WrapWithPaintedStroke(PathWidgetBuilder::CreatePathWidget(InsideNode), InsideNode);
+	if (!TestTrue(TEXT("Inside alignment stays in the source context"), Inside.Path.SourcePaintGeometry.IsSet()
+		&& Inside.Path.SourcePaintGeometry->StrokeAlignment == TEXT("inner"))) return false;
+	TestEqual(TEXT("The interior retains its own winding rule"), Inside.Path.SourcePaintGeometry->Geometry.FillPaths.GetValue()[0].FillRule, FString(TEXT("evenodd")));
+
+	auto PrimitiveNode = MakeShared<FDesignNode>(*Node);
+	PrimitiveNode->Type = EDesignNodeType::Rectangle;
+	FUMGWidgetNode NativeBorder;
+	NativeBorder.Type = TEXT("Border");
+	VisualMapper::ApplyStroke(NativeBorder, PrimitiveNode->Visual.Stroke);
+	FUMGWidgetNode NativePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(NativeBorder), PrimitiveNode);
+	TestEqual(TEXT("An existing native stroke keeps its paint surface"), NativePaint.Type, FString(TEXT("Border")));
+	TestEqual(TEXT("Native stroke keeps the declared thickness"), NativePaint.Brush.OutlineThickness.Get(0.0f), 5.0f);
+	TestFalse(TEXT("Native stroke is not replaced by source area geometry"), NativePaint.Path.Geometry.IsSet());
+	TestTrue(TEXT("A native primitive adds no source stroke layers"), NativePaint.Children.IsEmpty());
+
+	auto ResourceNode = MakeShared<FDesignNode>(*PrimitiveNode);
+	FDesignFill ResourceFill;
+	ResourceFill.Type = EDesignFillType::Image;
+	ResourceFill.Image.Url = TEXT("/Textures/paint.png");
+	ResourceNode->Visual.Fills.Add(ResourceFill);
+	FUMGWidgetNode ResourceBorder;
+	ResourceBorder.Type = TEXT("Border");
+	ResourceBorder.Brush.Image.TexturePath = ResourceFill.Image.Url;
+	VisualMapper::ApplyStroke(ResourceBorder, ResourceNode->Visual.Stroke);
+	TestTrue(TEXT("Resource fill uses Box rather than native outline drawing"),
+		ResourceBorder.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType) == ESlateBrushDrawType::Box);
+	FUMGWidgetNode ResourcePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ResourceBorder), ResourceNode);
+	if (!TestTrue(TEXT("Resource border keeps a single background surface"), ResourcePaint.Type == UMGWidgetTypes::Border
+		&& ResourcePaint.Children.IsEmpty() && ResourcePaint.Path.SourcePaintGeometry.IsSet())) return false;
+	TestEqual(TEXT("Resource fill is retained in the complete static paint list"),
+		ResourcePaint.Path.SourcePaintGeometry->FillPaints.GetValue()[0].Image.TexturePath.Get(FString()), ResourceFill.Image.Url);
+	TestEqual(TEXT("Box brush still paints the source outline geometry"),
+		ResourcePaint.Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[0].Path, Upper);
+
+	const FString FillPath = TEXT("M0 0 L26.5 0 L26.5 17.25 L0 17.25 Z");
+	auto FilledNode = MakeShared<FDesignNode>(*Node);
+	FDesignFill Fill;
+	Fill.Type = EDesignFillType::Color;
+	Fill.SolidColor = TEXT("#FF0000");
+	FilledNode->Visual.Fills.Add(Fill);
+	FilledNode->Shape.Geometry = FillPath;
+	FilledNode->Shape.FillRule = TEXT("nonzero");
+	FilledNode->Shape.PaintGeometry.FillPaths = TArray<FDesignGeometryPath>{{FillPath, TEXT("nonzero")}};
+	auto TranslucentNode = MakeShared<FDesignNode>(*FilledNode);
+	TranslucentNode->Transform.SetOpacityValue(0.35f);
+	FUMGWidgetNode TranslucentSurface = PathWidgetBuilder::CreatePathWidget(TranslucentNode);
+	TranslucentSurface.Render.RenderOpacity = 0.35f;
+	const FUMGWidgetNode Combined = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(TranslucentSurface), TranslucentNode);
+	TestTrue(TEXT("A leaf source fill and stroke share one paint surface"), Combined.Type == TEXT("Image") && Combined.Children.IsEmpty());
+	TestTrue(TEXT("Object opacity remains on the final single image"), Combined.Render.RenderOpacity.IsSet()
+		&& FMath::IsNearlyEqual(Combined.Render.RenderOpacity.GetValue(), 0.35f));
+	TestTrue(TEXT("Combined source regions retain their independent rules"), Combined.Path.SourcePaintGeometry.IsSet()
+		&& Combined.Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[1].FillRule == TEXT("evenodd"));
+	TestTrue(TEXT("Combined paint carries a stroke color without reintroducing a centerline"), Combined.Path.SourcePaintGeometry->StrokePaint.IsSet()
+		&& !Combined.Path.StrokeThickness.IsSet());
+	auto GradientNode = MakeShared<FDesignNode>(*FilledNode);
+	GradientNode->Visual.Fills.Reset();
+	FDesignFill GradientFill;
+	GradientFill.Type = EDesignFillType::Gradient;
+	FDesignGradientStop& FirstStop = GradientFill.Gradient.Colors.AddDefaulted_GetRef();
+	FirstStop.Color = TEXT("#80402080");
+	FirstStop.Position = 0.0f;
+	FDesignGradientStop& LastStop = GradientFill.Gradient.Colors.AddDefaulted_GetRef();
+	LastStop.Color = TEXT("#20408040");
+	LastStop.Position = 1.0f;
+	GradientNode->Visual.Fills.Add(GradientFill);
+	FUMGWidgetNode GradientSurface = PathWidgetBuilder::CreatePathWidget(GradientNode);
+	VisualMapper::ApplyVisualProperties(GradientSurface, GradientNode);
+	TestTrue(TEXT("The real single-gradient builder supplies a non-white placeholder"),
+		GradientSurface.Path.FillColor.IsSet() && !GradientSurface.Path.FillColor->Equals(FLinearColor::White));
+	const FLinearColor Tint(0.5f, 0.75f, 1.0f, 0.6f);
+	GradientSurface.Brush.BrushColor = Tint;
+	const auto OriginalStops = GradientSurface.Brush.Gradient.Stops;
+	GradientSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(GradientSurface), GradientNode);
+	if (!TestTrue(TEXT("A real single gradient reaches the complete source surface"), GradientSurface.Path.SourcePaintGeometry.IsSet()
+		&& GradientSurface.Path.SourcePaintGeometry->FillPaints.IsSet()
+		&& GradientSurface.Path.SourcePaintGeometry->FillPaints->Num() == 1)) return false;
+	const auto& GradientPaint = GradientSurface.Path.SourcePaintGeometry->FillPaints.GetValue()[0];
+	TestTrue(TEXT("Gradient placeholder is not applied as a second tint; real tint alpha remains"), GradientPaint.Color.Equals(Tint));
+	TestTrue(TEXT("Gradient stop colors and alpha remain owned by the gradient"), GradientPaint.Gradient.Stops.Num() == 2
+		&& GradientPaint.Gradient.Stops[0].Color.Equals(OriginalStops[0].Color)
+		&& GradientPaint.Gradient.Stops[1].Color.Equals(OriginalStops[1].Color));
+
+	FUMGWidgetNode FillSurface = PathWidgetBuilder::CreatePathWidget(FilledNode);
+	FUMGWidgetNode Content;
+	Content.Id = TEXT("Content");
+	FillSurface.Children.Add(Content);
+	FUMGWidgetNode Filled = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(FillSurface), FilledNode);
+	TestTrue(TEXT("A composed surface retains content without a second paint child"),
+		Filled.Type == UMGWidgetTypes::Border && Filled.Children.Num() == 1 && Filled.Children[0].Id == Content.Id);
+	TestTrue(TEXT("The complete source surface keeps fill and stroke paint descriptions"),
+		Filled.Path.SourcePaintGeometry.IsSet() && Filled.Path.SourcePaintGeometry->FillPaints.IsSet()
+		&& Filled.Path.SourcePaintGeometry->FillPaints->Num() == 1 && Filled.Path.SourcePaintGeometry->StrokePaint.IsSet());
+	auto MultiNode = MakeShared<FDesignNode>(*TranslucentNode);
+	FDesignFill SecondFill;
+	SecondFill.Type = EDesignFillType::Image;
+	SecondFill.Image.Url = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+	SecondFill.Image.Opacity = 0.4f;
+	MultiNode->Visual.Fills.Add(SecondFill);
+	int32 PaintLayers = 0;
+	FUMGWidgetNode MultiContent = PathWidgetBuilder::CreatePathWidget(MultiNode);
+	MultiContent.Render.RenderOpacity = 0.35f;
+	FUMGWidgetNode MultiSurface = VisualMapperFillTransfer::WrapWithMultiFill(
+		MoveTemp(MultiContent), MultiNode, FVisualMapperOptions(), &PaintLayers);
+	MultiSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(MultiSurface), MultiNode, PaintLayers);
+	if (!TestTrue(TEXT("All static fills are owned by the final surface"), MultiSurface.Path.SourcePaintGeometry.IsSet()
+		&& MultiSurface.Path.SourcePaintGeometry->FillPaints.IsSet())) return false;
+	const auto& MultiPaints = MultiSurface.Path.SourcePaintGeometry->FillPaints.GetValue();
+	if (!TestEqual(TEXT("Both static fills remain in their original order"), MultiPaints.Num(), 2)) return false;
+	TestEqual(TEXT("Image paint opacity is applied once"), MultiPaints[1].Color.A, SecondFill.Image.Opacity, 0.0f);
+	TestEqual(TEXT("Object opacity remains on the final surface"), MultiSurface.Render.RenderOpacity.Get(1.0f), 0.35f, 0.0f);
+	TestFalse(TEXT("A retained layout carrier has no independent fill or stroke paint"),
+		MultiSurface.Children.ContainsByPredicate([](const FUMGWidgetNode& Child)
+		{
+			const FUMGVisualBrushData& Brush = Child.Brush;
+			return Child.Path.HasAny()
+				|| Brush.OutlineCornerRadius.IsSet() || Brush.CornerRadii.IsSet()
+				|| Brush.OutlineThickness.IsSet() || Brush.Margin.IsSet() || Brush.DrawAs.IsSet()
+				|| Brush.BrushColor.IsSet() || Brush.OutlineColor.IsSet()
+				|| Brush.MaterialRef.IsSet() || Brush.MaterialParams.IsSet() || Brush.Shape.IsSet()
+				|| Brush.Image.HasAny() || Brush.Gradient.HasAny() || Brush.Shader.IsSet()
+				|| !Child.Children.IsEmpty();
+		}));
+
+	const FString FitSource = MakeLeafNode(TEXT("fit-surface"), TEXT("Fit surface"), TEXT("FRAME"), 0, 0, 100, 80,
+		TEXT(",\"size\":{\"x\":100,\"y\":80},\"opacity\":0.35,"
+			"\"fills\":[{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":1,\"b\":1}},"
+			"{\"type\":\"IMAGE\",\"scaleMode\":\"FIT\",\"opacity\":0.4,\"imageRef\":\"/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture\"}],"
+			"\"strokes\":[{\"type\":\"GRADIENT_LINEAR\",\"gradientHandlePositions\":[{\"x\":0,\"y\":0},{\"x\":1,\"y\":0},{\"x\":0,\"y\":1}],"
+			"\"gradientStops\":[{\"position\":0,\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":1}},{\"position\":1,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}}]}],"
+			"\"individualStrokeWeights\":{\"top\":1,\"right\":2,\"bottom\":1,\"left\":2},\"strokeAlign\":\"INSIDE\","
+			"\"fillGeometry\":[{\"path\":\"M0 0L100 0L100 80L0 80Z\",\"windingRule\":\"NONZERO\"}],"
+			"\"strokeGeometry\":[{\"path\":\"M-2 -2L102 -2L102 82L-2 82Z M2 2L98 2L98 78L2 78Z\",\"windingRule\":\"EVENODD\"}]"));
+	FDesignDocument FitDocument;
+	if (!TestTrue(TEXT("A supported FIT frame with nonuniform gradient stroke parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(FitSource), FitDocument))
+		|| !TestEqual(TEXT("The FIT source has one node"), FitDocument.Children.Num(), 1)) return false;
+	const auto& FitNode = FitDocument.Children[0];
+	TestTrue(TEXT("The frame takes the existing ScaleBox fill route"), FitNode->Shape.Geometry.IsEmpty() && !FitNode->Visual.Stroke.Thickness.bUniform);
+	FUMGWidgetNode FitContent;
+	FitContent.Type = TEXT("CanvasPanel");
+	FitContent.Id = FitNode->Id;
+	FitContent.Name = FitNode->Name;
+	VisualMapper::ApplyVisualProperties(FitContent, FitNode);
+	int32 FitLayers = 0;
+	FUMGWidgetNode FitSurface = VisualMapperFillTransfer::WrapWithMultiFill(MoveTemp(FitContent), FitNode, FVisualMapperOptions(), &FitLayers);
+	if (!TestTrue(TEXT("The real mapper creates the supported FIT ScaleBox image layer"), FitLayers == 2
+		&& FitSurface.Children[1].Type == UMGWidgetTypes::ScaleBox && FitSurface.Children[1].Children.Num() == 1)) return false;
+	TestTrue(TEXT("The generated ScaleBox child retains Fill/Fill slots"),
+		FitSurface.Children[1].Children[0].Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Fill
+		&& FitSurface.Children[1].Children[0].Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Fill);
+	const FString FitImage = FitSurface.Children[1].Children[0].Brush.Image.TexturePath.Get(FString());
+	FitSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(FitSurface), FitNode, FitLayers);
+	if (!TestTrue(TEXT("The FIT frame reaches complete surface paint"), FitSurface.Path.SourcePaintGeometry.IsSet()
+		&& FitSurface.Path.SourcePaintGeometry->FillPaints.IsSet() && FitSurface.Path.SourcePaintGeometry->FillPaints->Num() == 2)) return false;
+	const auto& FitPaint = FitSurface.Path.SourcePaintGeometry->FillPaints.GetValue()[1];
+	TestEqual(TEXT("The captured FIT paint retains the actual nested image"), FitPaint.Image.TexturePath.Get(FString()), FitImage);
+	TestEqual(TEXT("Generated Fill slots are preserved by existing static Stretch sampling"), FitPaint.Image.CropFitMode.Get(FString()), FString(TEXT("Stretch")));
+	TestTrue(TEXT("Nested image paint alpha and object opacity remain separate"), FMath::IsNearlyEqual(FitPaint.Color.A, 0.4f)
+		&& FMath::IsNearlyEqual(FitSurface.Render.RenderOpacity.Get(1.0f), 0.35f));
+
+	auto SideNode = MakeShared<FDesignNode>(*FilledNode);
+	SideNode->Type = EDesignNodeType::Frame;
+	SideNode->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+	SideNode->Visual.Stroke.Thickness.bUniform = false;
+	SideNode->Visual.Stroke.Thickness.Top = SideNode->Visual.Stroke.Thickness.Right = SideNode->Visual.Stroke.Thickness.Bottom = 0.0f;
+	SideNode->Visual.Stroke.Thickness.Left = 2.0f;
+	FUMGWidgetNode SideContent;
+	SideContent.Type = TEXT("HorizontalBox");
+	VisualMapper::ApplyVisualProperties(SideContent, SideNode);
+	bool bStrokePainted = false;
+	FUMGWidgetNode SidePaint = VisualMapper::WrapWithBorder(MoveTemp(SideContent), SideNode, &bStrokePainted);
+	TestTrue(TEXT("A successfully constructed explicit side owns the stroke"), bStrokePainted);
+	const int32 SideLayers = SidePaint.Children.Num();
+	FUMGWidgetNode SideEffects = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+		MoveTemp(SidePaint), SideNode, FVisualMapperOptions(), bStrokePainted);
+	TestEqual(TEXT("Later paint does not duplicate an already painted side"), SideEffects.Children.Num(), SideLayers);
+	auto UnpaintedSideNode = MakeShared<FDesignNode>(*SideNode);
+	UnpaintedSideNode->Visual.Stroke.Fill->Type = EDesignFillType::Gradient;
+	FUMGWidgetNode UnpaintedContent;
+	UnpaintedContent.Type = TEXT("HorizontalBox");
+	bool bUnpaintedStroke = true;
+	VisualMapper::WrapWithBorder(MoveTemp(UnpaintedContent), UnpaintedSideNode, &bUnpaintedStroke);
+	TestFalse(TEXT("A side stroke that did not resolve a solid color has no owner"), bUnpaintedStroke);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FFigmaParserLinearGradientEndpointsTest,
 	"Design2UMG.Gradient.FigmaParserLinearEndpoints",

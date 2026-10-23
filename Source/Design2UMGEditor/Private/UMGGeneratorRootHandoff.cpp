@@ -5,6 +5,7 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGLog.h"
 #include "PreBuildResourceNormalizer.h"
+#include "RetainerCaptureBounds.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "UMGWidgetTreeBuilder.h"
@@ -23,6 +24,7 @@ namespace UMGGeneratorRootHandoff
 		Prepared.Root = WidgetData.RootWidget;
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 				Prepared.Root, Prepared.ErrorMessage)
+			|| !RetainerCaptureBounds::Prepare(Prepared.Root, Prepared.ErrorMessage)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage)
 			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage))
 		{

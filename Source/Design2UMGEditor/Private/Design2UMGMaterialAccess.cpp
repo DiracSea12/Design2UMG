@@ -4,10 +4,20 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
 #include "MaterialShared.h"
+#include "RHI.h"
 #include "Misc/EngineVersionComparison.h"
 
 namespace Design2UMGMaterialAccess
 {
+	void GetUsedTextures(const UMaterialInterface& Material, TArray<UTexture*>& OutTextures)
+	{
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+		Material.GetUsedTextures(OutTextures, EMaterialQualityLevel::Num, true, GMaxRHIFeatureLevel, true);
+#else
+		Material.GetUsedTextures(OutTextures);
+#endif
+	}
+
 	void AddExpression(UMaterial& Material, UMaterialExpression& Expression)
 	{
 #if UE_VERSION_OLDER_THAN(5, 1, 0)

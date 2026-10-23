@@ -463,7 +463,7 @@ void FUMGWidgetTreeBuilder::ApplyWidgetProperties(UWidget* Widget, const FUMGWid
 		return;
 	}
 
-	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node, Budget);
+	UMGPropertyApplierInternal::ApplyWidgetProperties(Widget, Node, Budget, TextureMap);
 	if (UImage* Image = Cast<UImage>(Widget))
 	{
 		FWidgetResourceBinder::BindImageResource(Image, Node, TextureMap, Budget);

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "PencilShaderRuntimeBindings.h"
 #include "Design2UMGAssetRegistryAccess.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -625,6 +626,15 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 		UE_LOG(LogDesign2UMG, Error,
 			TEXT("SaveWidgetBlueprint: missing valid DesignTimeSize for %s; source design size is required"),
 			*WBP->GetPathName());
+		DiscardFailedAsset();
+		return Result;
+	}
+
+	FString ShaderBindingError;
+	if (!PencilShaderRuntimeBindings::Prepare(WBP, ShaderBindingError,
+		GenerationOutput ? &GenerationOutput->Manifest.D2UOwnedNames : nullptr))
+	{
+		UE_LOG(LogDesign2UMG, Error, TEXT("Shader runtime binding preparation failed: %s"), *ShaderBindingError);
 		DiscardFailedAsset();
 		return Result;
 	}
