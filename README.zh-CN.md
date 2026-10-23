@@ -12,6 +12,8 @@ Design2UMG 把设计文件转换成 Unreal Engine 5 的 UMG Widget Blueprint。
 - 通过 Figma REST API 导入。
 - 通过本地 Figma export JSON 导入。
 
+> **Pencil 描边限制：** 当前不支持 Pencil 2.6–2.11 历史描边格式转换。旧稿描边可能缺失或显示不正确，这部分尚未完整支持或验收；完整支持 Pencil 仍是长期目标。
+
 仍可使用但不属于当前正式承诺的桥接/调试能力：
 
 - MCP JSON bridge import。

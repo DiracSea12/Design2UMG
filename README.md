@@ -14,6 +14,8 @@ Formal release scope:
 - Pencil `.pen` files
 - Figma Design import through REST API or local export JSON
 
+> **Pencil stroke limitation:** Conversion of the historical stroke format used by Pencil 2.6–2.11 is currently unsupported. Strokes in older documents may be missing or display incorrectly; this part is not fully supported or validated. Full Pencil support remains the long-term goal.
+
 Bridge / debug utilities that remain available but are not formal release promises:
 - MCP JSON bridge import
 - Live Pencil MCP connection for local tooling/debug workflows
@@ -56,7 +58,7 @@ For a plain-language coverage boundary and a contributor-versus-maintainer split
 
 ## Requirements
 
-- Unreal Engine: Windows / UE 5.0–5.8 version adaptation is implemented. The 2026-10-10 regression runs covered 5.0.3, 5.1.1, 5.2.1, 5.3.2, 5.4.4, 5.5.4, 5.6.1, 5.7.1, and 5.8.2; each completed generation and saved-asset reload for all 81 design cases. Day-to-day builds and CI currently use UE 5.7.1. These historical runs do not mean every later commit has been retested on every version; other operating systems need separate validation.
+- Unreal Engine: Windows / UE 5.0–5.8 version adaptation is implemented. The 2026-10-10 regression runs covered 5.0.3, 5.1.1, 5.2.1, 5.3.2, 5.4.4, 5.5.4, 5.6.1, 5.7.1, and 5.8.2; each completed generation and saved-asset reload for all 81 design cases. Local validation uses UE 5.7.1; the GitHub CI environment uses UE 5.8.3. These historical runs do not mean every later commit has been retested on every version; other operating systems need separate validation.
 - Pencil extension in VS Code with a `.pen` document open in its design editor (optional, for live Pencil import; currently verified with 0.6.77)
 - Figma Personal Access Token (optional, for Figma import)
 
@@ -122,7 +124,7 @@ This MCP JSON path is a bridge/debug utility. The current release contract does 
 
 ### 5. Read the active Pencil document
 
-Open a `.pen` file in the pen.dev design editor in VS Code, then choose **Design2UMG > Connect to Pencil...** in Unreal Editor. The connection uses the installed Pencil 0.6.77 MCP server over stdio and reads frames and variables through its `execute` tool without changing the design. Select a frame, review the preview, and generate the Widget Blueprint.
+Open a `.pen` file in the pen.dev design editor in VS Code, then choose **Design2UMG > Connect to Pencil...** in Unreal Editor. The connection uses the installed Pencil 0.6.77 MCP server over stdio and reads frames and variables through its `execute` tool without changing the design. Select a frame, review the preview, and generate the Widget Blueprint. Bundled `pencil:<library>.lib.pen` imports load both component definitions and variables from the installed extension, with import aliases preserved; source design files are not rewritten.
 
 After updating Pencil, close and reopen an existing design tab so the new extension registers the document. Use the latest installed extension; the plugin discovers its server automatically, with the server path and app name settings available as overrides.
 
@@ -238,7 +240,7 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the full pipeline, module b
   -> UMGGenerator
 ```
 
-Key principle: **Bounds is the source of truth** for layout projection.
+Key principle: **Bounds is the source of truth** for layout projection. Layout dimensions remain separate from the PNG export bounds, which also contain source-defined outer shadows and unclipped content. Reference PNG dimensions never set either size. One-pixel dimensions are valid; exports above the GPU texture dimension are rendered in tiles, within the existing 64 × 1024 × 1024 pixel export budget.
 
 ## Supported Widget Types
 
