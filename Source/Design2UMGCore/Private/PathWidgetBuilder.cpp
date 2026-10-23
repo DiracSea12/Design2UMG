@@ -186,7 +186,7 @@ namespace
 
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.HasColors())
 		{
-			return PrimaryFill.Gradient.Colors[0].Color;
+			return PrimaryFill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : PrimaryFill.Gradient.Colors[0].Color;
 		}
 
 		for (const FDesignFill& Fill : Node->Visual.Fills)
@@ -198,7 +198,7 @@ namespace
 
 			if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.HasColors())
 			{
-				return Fill.Gradient.Colors[0].Color;
+				return Fill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : Fill.Gradient.Colors[0].Color;
 			}
 		}
 

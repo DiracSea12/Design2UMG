@@ -6,6 +6,8 @@
 
 namespace DesignImageResources { class FImageOperationBudget; }
 
+struct FDesignMeshGradient;
+
 class UObject;
 class UTexture2D;
 
@@ -37,13 +39,15 @@ namespace ProceduralShapeGeneratorAssets
 		float RadiusBL,
 		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
 
-	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateGradientLinear(int32 Width, int32 Height, const FVector2D& StartNormalized, const FVector2D& EndNormalized, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+	UTexture2D* GenerateMeshGradient(int32 Width, int32 Height, const FDesignMeshGradient& Mesh, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+
+	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateGradientLinear(int32 Width, int32 Height, const FVector2D& StartNormalized, const FVector2D& EndNormalized, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
 	UTexture2D* GenerateRadialGradient(
 		int32 Width,
 		int32 Height,

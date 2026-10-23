@@ -70,7 +70,48 @@ namespace
 		TArray<uint8> Signature;
 		FMemoryWriter Writer(Signature);
 		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
-			<< StrokeWidth << StrokeCap << StrokeJoin;
+			<< StrokeWidth << StrokeCap << StrokeJoin << Path.CanvasSize << Path.ViewBox << Path.FitGeometryToBounds
+			<< Path.StrokeAlignment << Request.PaintSize << Request.PaintOffset;
+		if (Path.SourcePaintGeometry.IsSet())
+		{
+			auto Source = Path.SourcePaintGeometry.GetValue();
+			Writer << Source;
+		}
+		bool bHasImage = FillImage != nullptr;
+		Writer << bHasImage;
+		if (FillImage)
+		{
+			auto Image = *FillImage;
+			Writer << Image.TexturePath << Image.Mode << Image.CropFitMode << SourceImageId << SourceObject;
+			bool bHasTransform = Image.Transform.IsSet();
+			Writer << bHasTransform;
+			if (bHasTransform)
+			{
+				auto Transform = Image.Transform.GetValue();
+				Writer << Transform.A << Transform.B << Transform.TX << Transform.C << Transform.D << Transform.TY;
+			}
+		}
+		FString StrokePath = StrokeGeometry;
+		Writer << StrokePath;
+		for (const auto* Paint : {FillPaint, StrokePaint})
+		{
+			bool bHasPaint = Paint != nullptr;
+			Writer << bHasPaint;
+			if (Paint)
+			{
+				auto SourceWidth = Paint->WidthOverride;
+				auto SourceHeight = Paint->HeightOverride;
+				Writer << SourceWidth << SourceHeight;
+				auto Gradient = Paint->Gradient;
+				Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size;
+				bool bHasMesh = Gradient.Mesh.IsSet();
+				Writer << bHasMesh;
+				if (bHasMesh) Gradient.Mesh->WriteSignature(Writer);
+				int32 StopCount = Gradient.Stops.Num();
+				Writer << StopCount;
+				for (auto& Stop : Gradient.Stops) Writer << Stop.Position << Stop.Color;
+			}
+		}
 		return Signature;
 	}
 

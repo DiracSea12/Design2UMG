@@ -17,6 +17,7 @@ namespace
 		{
 			switch (Type)
 			{
+			case EDesignGradientType::Mesh: return TEXT("Mesh");
 			case EDesignGradientType::Radial:
 				return TEXT("Radial");
 			case EDesignGradientType::Angular:

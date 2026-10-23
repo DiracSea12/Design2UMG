@@ -2,6 +2,7 @@
 
 #include "ProceduralShapeGeneratorAssets.h"
 #include "DesignImageResourceLimits.h"
+#include "DesignMeshGradient.h"
 #include "Math/VectorRegister.h"
 
 #include "Design2UMGLog.h"
@@ -509,7 +510,111 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+    UTexture2D* GenerateMeshGradient(int32 Width, int32 Height, const FDesignMeshGradient& Mesh,
+        UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
+    {
+        if (!Mesh.IsValid()) return nullptr;
+        const FVector2D PaintSize(Width, Height);
+        const FIntRect Region = RasterRegion ? *RasterRegion : FIntRect(0, 0, Width, Height);
+        Width = Region.Width(); Height = Region.Height();
+        UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
+        if (!Texture) return nullptr;
+        TArray<FColor> Pixels;
+        Pixels.Init(FColor::Transparent, Width * Height);
+        struct FVertex { FVector2D Position; FColor Color; };
+        // Pencil tessellates each bicubic cell into a fixed 32 by 32 grid.
+        constexpr int32 Segments = 32;
+        constexpr int32 Side = Segments + 1;
+        TArray<FVertex> Cell;
+        Cell.SetNumUninitialized(Side * Side);
+        auto Cubic = [](const FVector2D* P, double T)
+        {
+            const double S = 1 - T;
+            return P[0]*(S*S*S) + P[1]*(3*S*S*T) + P[2]*(3*S*T*T) + P[3]*(T*T*T);
+        };
+        auto Edge = [](const FVector2D& A, const FVector2D& B, const FVector2D& P)
+        {
+            return (B.X-A.X)*(P.Y-A.Y) - (B.Y-A.Y)*(P.X-A.X);
+        };
+        auto TopLeft = [](const FVector2D& A, const FVector2D& B)
+        {
+            return B.Y < A.Y || (B.Y == A.Y && B.X > A.X);
+        };
+        auto DrawTriangle = [&](FVertex A, FVertex B, FVertex C)
+        {
+            double Area = Edge(A.Position, B.Position, C.Position);
+            if (Area == 0) return;
+            if (Area < 0) { Swap(B, C); Area = -Area; }
+            const int32 MinX = FMath::Clamp(FMath::CeilToInt(FMath::Min3(A.Position.X, B.Position.X, C.Position.X)-0.5), 0, Width-1);
+            const int32 MaxX = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Position.X, B.Position.X, C.Position.X)-0.5), 0, Width-1);
+            const int32 MinY = FMath::Clamp(FMath::CeilToInt(FMath::Min3(A.Position.Y, B.Position.Y, C.Position.Y)-0.5), 0, Height-1);
+            const int32 MaxY = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Position.Y, B.Position.Y, C.Position.Y)-0.5), 0, Height-1);
+            const bool AB = TopLeft(A.Position, B.Position), BC = TopLeft(B.Position, C.Position), CA = TopLeft(C.Position, A.Position);
+            for (int32 Y = MinY; Y <= MaxY; ++Y)
+            for (int32 X = MinX; X <= MaxX; ++X)
+            {
+                const FVector2D P(X+0.5, Y+0.5);
+                const double E0 = Edge(B.Position, C.Position, P), E1 = Edge(C.Position, A.Position, P), E2 = Edge(A.Position, B.Position, P);
+                if (E0 < 0 || (E0 == 0 && !BC) || E1 < 0 || (E1 == 0 && !CA) || E2 < 0 || (E2 == 0 && !AB)) continue;
+                const double U = E0 / Area, V = E1 / Area, W = E2 / Area;
+                const double Alpha = (U*A.Color.A + V*B.Color.A + W*C.Color.A) / 255;
+                FColor& Dest = Pixels[Y*Width+X];
+                const double DestWeight = Dest.A / 255.0 * (1-Alpha);
+                const double OutAlpha = Alpha + DestWeight;
+                if (OutAlpha == 0) continue;
+                auto Channel = [&](uint8 R, uint8 S, uint8 T, uint8 D)
+                {
+                    return uint8(FMath::Clamp(FMath::RoundToInt(((U*R+V*S+W*T)*Alpha + D*DestWeight) / OutAlpha), 0, 255));
+                };
+                Dest = FColor(Channel(A.Color.R,B.Color.R,C.Color.R,Dest.R),
+                    Channel(A.Color.G,B.Color.G,C.Color.G,Dest.G), Channel(A.Color.B,B.Color.B,C.Color.B,Dest.B),
+                    uint8(FMath::Clamp(FMath::RoundToInt(OutAlpha*255),0,255)));
+            }
+        };
+        for (int32 Row = 0; Row < Mesh.Rows-1; ++Row)
+        for (int32 Column = 0; Column < Mesh.Columns-1; ++Column)
+        {
+            const auto& A = Mesh.Vertices[Row*Mesh.Columns+Column];
+            const auto& B = Mesh.Vertices[Row*Mesh.Columns+Column+1];
+            const auto& C = Mesh.Vertices[(Row+1)*Mesh.Columns+Column];
+            const auto& D = Mesh.Vertices[(Row+1)*Mesh.Columns+Column+1];
+            const FVector2D Net[4][4] = {
+                {A.Position, A.Position+A.RightHandle, B.Position+B.LeftHandle, B.Position},
+                {A.Position+A.BottomHandle, A.Position+A.RightHandle+A.BottomHandle, B.Position+B.LeftHandle+B.BottomHandle, B.Position+B.BottomHandle},
+                {C.Position+C.TopHandle, C.Position+C.RightHandle+C.TopHandle, D.Position+D.LeftHandle+D.TopHandle, D.Position+D.TopHandle},
+                {C.Position, C.Position+C.RightHandle, D.Position+D.LeftHandle, D.Position}};
+            for (int32 Y = 0; Y <= Segments; ++Y)
+            for (int32 X = 0; X <= Segments; ++X)
+            {
+                const double U = double(X)/Segments, V = double(Y)/Segments;
+                FVector2D Vertical[4];
+                for (int32 I=0; I<4; ++I) Vertical[I] = Cubic(Net[I], U);
+                FVertex& Vertex = Cell[Y*Side+X];
+                const FVector2D Position = Cubic(Vertical,V);
+                Vertex.Position = Position * PaintSize - FVector2D(Region.Min);
+                const double SU = U*U*(3-2*U), SV = V*V*(3-2*V);
+                auto Mix = [&](uint8 TL, uint8 TR, uint8 BL, uint8 BR)
+                {
+                    // The source packs smoothstep-interpolated channels into RGBA bytes.
+                    return uint8(FMath::Clamp(FMath::Lerp(FMath::Lerp(double(TL),double(TR),SU), FMath::Lerp(double(BL),double(BR),SU),SV),0.0,255.0));
+                };
+                Vertex.Color = FColor(Mix(A.Color.R,B.Color.R,C.Color.R,D.Color.R), Mix(A.Color.G,B.Color.G,C.Color.G,D.Color.G),
+                    Mix(A.Color.B,B.Color.B,C.Color.B,D.Color.B), Mix(A.Color.A,B.Color.A,C.Color.A,D.Color.A));
+            }
+            for (int32 Y=0; Y<Segments; ++Y)
+            for (int32 X=0; X<Segments; ++X)
+            {
+                DrawTriangle(Cell[Y*Side+X], Cell[(Y+1)*Side+X], Cell[Y*Side+X+1]);
+                DrawTriangle(Cell[Y*Side+X+1], Cell[(Y+1)*Side+X], Cell[(Y+1)*Side+X+1]);
+            }
+        }
+        // Paint opacity belongs to the composited mesh layer, not its individual triangles.
+        for (FColor& Pixel : Pixels) Pixel.A = uint8(FMath::Clamp(FMath::RoundToInt(Pixel.A * Mesh.Opacity),0,255));
+        FillTextureData(Texture, Pixels);
+        return Texture;
+    }
+
+	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, ColorStart, ColorEnd](int32 X, int32 Y)
 		{

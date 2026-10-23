@@ -136,6 +136,7 @@ bool Design2UMGWidgetNodeAccess::TryParseImageTransform(const FString& Value, FU
 
 FString Design2UMGWidgetNodeAccess::GetGradientMaterialRef(const FUMGVisualBrushData::FGradientData& Gradient)
 {
+	if (Gradient.Mesh.IsSet()) return TEXT("meshgradient");
 	if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
 	{
 		return TEXT("radialgradient");
@@ -149,6 +150,7 @@ FString Design2UMGWidgetNodeAccess::GetGradientMaterialRef(const FUMGVisualBrush
 
 FString Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(const FUMGVisualBrushData::FGradientData& Gradient)
 {
+	if (Gradient.Mesh.IsSet()) return DesignMeshGradientJson::SerializeIdentity(Gradient.Mesh.GetValue());
 	if (Gradient.Stops.Num() == 0)
 	{
 		return FString();

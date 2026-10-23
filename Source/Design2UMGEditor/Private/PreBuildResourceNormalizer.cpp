@@ -127,6 +127,9 @@ namespace
 		auto& Gradient = Request.Gradient;
 		Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint
 			<< Gradient.Center << Gradient.Size;
+		bool bHasMesh = Gradient.Mesh.IsSet();
+		Writer << bHasMesh;
+		if (bHasMesh) Gradient.Mesh->WriteSignature(Writer);
 		int32 StopCount = Gradient.Stops.Num();
 		Writer << StopCount;
 		for (auto& Stop : Gradient.Stops) Writer << Stop.Position << Stop.Color;

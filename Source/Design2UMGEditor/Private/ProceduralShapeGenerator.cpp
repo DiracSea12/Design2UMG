@@ -70,6 +70,7 @@ namespace
 		Ring,
 		RoundedRect,
 		GradientLinear,
+		MeshGradient,
 		GradientH,
 		GradientV,
 		RadialGradient,
@@ -88,6 +89,7 @@ namespace
 		if (MaterialRef.Equals(TEXT("ring"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::Ring;
 		if (MaterialRef.Equals(TEXT("roundedrect"), ESearchCase::IgnoreCase)
 			|| MaterialRef.Equals(TEXT("polygon"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::RoundedRect;
+		if (MaterialRef.Equals(TEXT("meshgradient"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::MeshGradient;
 		if (MaterialRef.Equals(TEXT("gradientlinear"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientLinear;
 		if (MaterialRef.Equals(TEXT("gradienth"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientH;
 		if (MaterialRef.Equals(TEXT("gradientv"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientV;
@@ -597,6 +599,19 @@ namespace
 		const EProceduralShapeKind ShapeKind = ResolveMaterialRefShape(Request.MaterialRef);
 		bRecognized = ShapeKind != EProceduralShapeKind::Unknown;
 		if (!bRecognized) return nullptr;
+
+		if (ShapeKind == EProceduralShapeKind::MeshGradient)
+		{
+            FDesignMeshGradient ExternalMesh;
+            const FDesignMeshGradient* Mesh = Request.Gradient.Mesh.IsSet() ? &Request.Gradient.Mesh.GetValue() : nullptr;
+            if (!Mesh && Request.MaterialParams.IsSet())
+            {
+                TSharedPtr<FJsonObject> Object;
+                if (DesignJsonUtils::TryParseObject(Request.MaterialParams.GetValue(), Object)
+                    && DesignMeshGradientJson::Parse(Object, ExternalMesh)) Mesh = &ExternalMesh;
+            }
+            return Mesh ? ProceduralShapeGeneratorAssets::GenerateMeshGradient(Width, Height, *Mesh, Outer, Budget, RasterRegion) : nullptr;
+		}
 
 		if (ShapeKind == EProceduralShapeKind::HorizontalStroke)
 		{
