@@ -46,7 +46,6 @@ namespace DesignRemoteImageImporterInternal
 	struct FResolveContext
 	{
 		FString ImportPath;
-		FString FrameName;
 		float TimeoutSeconds = 20.0f;
 		bool bResolveRemoteImages = false;
 		bool bAllowUnsafeRemoteUrls = false;

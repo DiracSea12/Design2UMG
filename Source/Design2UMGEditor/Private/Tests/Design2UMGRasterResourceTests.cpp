@@ -2,6 +2,8 @@
 
 #include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignPathRasterizer.h"
+#include "Design2UMGConverter.h"
+#include "DesignSchema.h"
 #include "PreBuildResourceNormalizer.h"
 #include "Misc/ScopeExit.h"
 #include "ProceduralShapeGenerator.h"
@@ -10,6 +12,9 @@
 #include "UMGWidgetNodeAccess.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "UMGWidgetTypes.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "WidgetResourceBinder.h"
 #include "TextureResource.h"
 #include "UObject/Package.h"
 #include "Design2UMGEffectMaterialBuilder.h"
@@ -17,6 +22,8 @@
 #include "UMGPropertyKeys.h"
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "Components/Image.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "Engine/Texture2D.h"
@@ -75,7 +82,7 @@ bool FDesignPathMalformedInputTest::RunTest(const FString&)
 	AddExpectedError(TEXT("failed to parse path data"), EAutomationExpectedErrorFlags::Contains, Invalid.Num());
 	for (const FString& Geometry : Invalid)
 	{
-		TestNull(*Geometry, FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor::White));
+		TestNull(*Geometry, FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor::White)));
 	}
 	for (const FString& Geometry : {
 		FString(TEXT("M0 0 10 0 10 10 0 10Z")),
@@ -85,7 +92,7 @@ bool FDesignPathMalformedInputTest::RunTest(const FString&)
 		FString(TEXT("M0 0 Q10 0 10 10 T0 0Z")),
 		FString(TEXT("M0 0 A10 10 0 01 10 10 L0 10Z"))})
 	{
-		TestNotNull(*Geometry, FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor::White));
+		TestNotNull(*Geometry, FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor::White)));
 	}
 	FDesignPathRasterizer::FlushPendingTextureUpdates();
 	return true;
@@ -100,7 +107,11 @@ bool FDesignPathDegenerateBoundsTest::RunTest(const FString&)
 	ON_SCOPE_EXIT { FDesignPathRasterizer::ClearCache(); };
 	for (const FString& Geometry : { FString(TEXT("M0 0L16 0")), FString(TEXT("M0 0L0 16")) })
 	{
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Geometry, 32, 32, {}, TEXT("nonzero"), FLinearColor::White, 1.0f);
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(32, 32), {});
+		Request.Path.FillRule = TEXT("nonzero");
+		Request.Path.StrokeColor = FLinearColor::White;
+		Request.Path.StrokeThickness = 1.0f;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request);
 		if (!TestNotNull(TEXT("A visible axis-aligned stroke produces a texture"), Texture)) continue;
 		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
 		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
@@ -110,7 +121,131 @@ bool FDesignPathDegenerateBoundsTest::RunTest(const FString&)
 		TestTrue(TEXT("The line has actual visible pixels"), PaintedPixels > 0);
 		TestTrue(TEXT("A thin line does not fill the whole image"), PaintedPixels < 32 * 32);
 	}
-	UTexture2D* EmptyFill = FDesignPathRasterizer::Rasterize(TEXT("M0 0L16 0"), 32, 2, FLinearColor::White);
+
+	FDesignPathRasterRequest SharedCurve(TEXT("M2 0L4 0L4 2L2 2Z"), FIntPoint(32, 32), FLinearColor::White);
+	SharedCurve.Path.CanvasSize = FVector2D(16, 16);
+	SharedCurve.Path.ViewBox = FVector4(0, 0, 16, 16);
+	SharedCurve.Path.SourcePaintGeometry.Emplace();
+	SharedCurve.Path.SourcePaintGeometry->Geometry.FillPaths = TArray<FDesignGeometryPath>{
+		{TEXT("M2 0L4 0L4 2L2 2Z M0 0C0 -16 16 -16 16 0L16 16L0 16Z"), TEXT("nonzero")}};
+	UTexture2D* SharedTexture = FDesignPathRasterizer::Rasterize(SharedCurve);
+	if (TestNotNull(TEXT("Shared curve bounds produce a texture"), SharedTexture))
+	{
+		FTexture2DMipMap& Mip = SharedTexture->GetPlatformData()->Mips[0];
+		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
+		if (TestNotNull(TEXT("Shared curve texture pixels are available"), Pixels))
+		{
+			TestTrue(TEXT("Shared curve bounds place the fill at its translated coordinate"), Pixels[14 * 32 + 5].A > 0);
+			TestEqual(TEXT("The fill leaves its endpoint-only coordinate"), Pixels[1 * 32 + 5].A, uint8(0));
+		}
+		Mip.BulkData.Unlock();
+	}
+
+	for (const FString& Alignment : {FString(TEXT("inner")), FString(TEXT("outer"))})
+	{
+		const int32 Canvas = Alignment == TEXT("inner") ? 16 : 20;
+		const FString Region = TEXT("M-2 -2L18 -2L18 18L-2 18Z M2 2L14 2L14 14L2 14Z");
+		FDesignPathRasterRequest Aligned;
+		Aligned.Size = FIntPoint(Canvas * 2, Canvas * 2);
+		Aligned.Path.CanvasSize = FVector2D(Canvas, Canvas);
+		Aligned.Path.ViewBox = FVector4(0, 0, 16, 16);
+		Aligned.Path.StrokeGeometry = Region;
+		Aligned.Path.FillRule = TEXT("evenodd");
+		Aligned.Path.FillColor = FLinearColor::White;
+		FUMGSourcePaintGeometry Source;
+		Source.Geometry.FillPaths = TArray<FDesignGeometryPath>{{TEXT("M0 0L16 0L16 16L0 16Z"), TEXT("nonzero")}};
+		Source.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{Region, TEXT("evenodd")},
+			{TEXT("M7 7L9 7L9 9L7 9Z"), TEXT("nonzero")}};
+		Source.StrokeAlignment = Alignment;
+		Aligned.Path.SourcePaintGeometry = MoveTemp(Source);
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Aligned);
+		if (!TestNotNull(TEXT("An aligned source region produces a texture"), Texture)) continue;
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
+		if (TestNotNull(TEXT("Aligned source pixels are available"), Pixels))
+		{
+			TestTrue(TEXT("The aligned region retains its visible side"), Pixels[16 * Canvas * 2 + 1].A > 0);
+			TestEqual(TEXT("Alignment excludes the other side without fitting the unmasked region"), Pixels[16 * Canvas * 2 + 5].A, uint8(0));
+			TestEqual(TEXT("A standalone region does not repaint its sibling regions"), Pixels[16 * Canvas * 2 + 16].A, uint8(0));
+		}
+		Mip.BulkData.Unlock();
+		if (Alignment == TEXT("inner"))
+		{
+			auto SurfaceNode = MakeShared<FDesignNode>();
+			SurfaceNode->Id = TEXT("surface");
+			SurfaceNode->Name = TEXT("Surface");
+			SurfaceNode->Type = EDesignNodeType::Path;
+			SurfaceNode->Transform.Width = FDesignSize::Fixed(16);
+			SurfaceNode->Transform.Height = FDesignSize::Fixed(16);
+			SurfaceNode->Shape.Geometry = TEXT("M0 0L16 0L16 16L0 16Z");
+			SurfaceNode->Shape.ViewBox = FVector4(0, 0, 16, 16);
+			SurfaceNode->Shape.PaintGeometry = Aligned.Path.SourcePaintGeometry->Geometry;
+			FDesignFill Fill;
+			Fill.Type = EDesignFillType::Color;
+			Fill.SolidColor = TEXT("#FFFFFFFF");
+			SurfaceNode->Visual.Fills.Add(Fill);
+			FDesignFill Stroke;
+			Stroke.Type = EDesignFillType::Color;
+			Stroke.SolidColor = TEXT("#000000FF");
+			SurfaceNode->Visual.Stroke.Fill = Stroke;
+			SurfaceNode->Visual.Stroke.Thickness.bUniform = true;
+			SurfaceNode->Visual.Stroke.Thickness.Uniform = 2.0f;
+			SurfaceNode->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+			FDesignDocument Document;
+			Document.Children.Add(SurfaceNode);
+			const FUMGWidgetData Converted = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+			TFunction<const FUMGWidgetNode*(const FUMGWidgetNode&)> FindSurface;
+			FindSurface = [&](const FUMGWidgetNode& Widget) -> const FUMGWidgetNode*
+			{
+				if (Widget.Path.SourcePaintGeometry.IsSet() && Widget.Path.SourcePaintGeometry->FillPaints.IsSet()) return &Widget;
+				for (const auto& Child : Widget.Children) if (const auto* Surface = FindSurface(Child)) return Surface;
+				return nullptr;
+			};
+			const FUMGWidgetNode* Surface = FindSurface(Converted.RootWidget);
+			if (!TestNotNull(TEXT("The real converter produces a complete static surface"), Surface)) continue;
+			TestFalse(TEXT("A complete surface does not fake the legacy fill color"), Surface->Path.FillColor.IsSet());
+			TestFalse(TEXT("A complete surface does not fake the legacy stroke color"), Surface->Path.StrokeColor.IsSet());
+			FDesignPathRasterRequest SurfaceRequest;
+			if (!TestTrue(TEXT("The unmodified conversion output builds a native raster request"), FDesignPathRasterizer::TryBuildRequest(*Surface, SurfaceRequest))) continue;
+			if (!TestEqual(TEXT("The converted source canvas retains the raster extent"), SurfaceRequest.Size, FIntPoint(32, 32))) continue;
+			UTexture2D* Combined = FDesignPathRasterizer::Rasterize(SurfaceRequest);
+			if (!TestNotNull(TEXT("Fill and source stroke composite into one texture"), Combined)) continue;
+			FTexture2DMipMap& CombinedMip = Combined->GetPlatformData()->Mips[0];
+			const FColor* CombinedPixels = static_cast<const FColor*>(CombinedMip.BulkData.LockReadOnly());
+			if (TestNotNull(TEXT("Combined source pixels are available"), CombinedPixels))
+			{
+				TestEqual(TEXT("The source stroke paints over the fill before object opacity"), CombinedPixels[16 * 32 + 1], FColor::Black);
+				TestEqual(TEXT("Each source region retains its rule in the combined paint"), CombinedPixels[16 * 32 + 16], FColor::Black);
+				TestEqual(TEXT("Unstroked fill stays opaque within the object"), CombinedPixels[16 * 32 + 22], FColor::White);
+			}
+			CombinedMip.BulkData.Unlock();
+		}
+	}
+
+	FDesignPathRasterRequest Square(TEXT("M10 10L30 10"), FIntPoint(40, 20), {});
+	Square.Path.CanvasSize = FVector2D(40, 20);
+	Square.Path.StrokeColor = FLinearColor::White;
+	Square.Path.StrokeThickness = 10.0f;
+	Square.Path.StrokeCap = TEXT("square");
+	UTexture2D* SquareTexture = FDesignPathRasterizer::Rasterize(Square);
+	if (TestNotNull(TEXT("A square-capped segment rasterizes"), SquareTexture))
+	{
+		const FColor* Pixels = static_cast<const FColor*>(SquareTexture->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		TestTrue(TEXT("Square caps include their rectangular corner"), Pixels[5 * 40 + 5].A > 0);
+		TestEqual(TEXT("Square caps stop at half the stroke width, without an extra circular tip"), Pixels[10 * 40 + 4].A, uint8(0));
+		SquareTexture->GetPlatformData()->Mips[0].BulkData.Unlock();
+	}
+	Square.Path.Geometry = TEXT("M10 10L30 30");
+	Square.Path.CanvasSize = FVector2D(40, 40);
+	Square.Size = FIntPoint(40, 40);
+	UTexture2D* Diagonal = FDesignPathRasterizer::Rasterize(Square);
+	if (TestNotNull(TEXT("A diagonal square-capped segment rasterizes"), Diagonal))
+	{
+		const FColor* Pixels = static_cast<const FColor*>(Diagonal->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		TestTrue(TEXT("The pixel loop includes rotated square corners"), Pixels[10 * 40 + 3].A > 0);
+		Diagonal->GetPlatformData()->Mips[0].BulkData.Unlock();
+	}
+	UTexture2D* EmptyFill = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(TEXT("M0 0L16 0"), FIntPoint(32, 2), FLinearColor::White));
 	TestNotNull(TEXT("A zero-area fill is an empty raster, not a resource failure"), EmptyFill);
 	return true;
 }
@@ -130,6 +265,8 @@ bool FDesignPathAllocationLimitTest::RunTest(const FString&)
 	FIntPoint Size;
 	TestTrue(TEXT("Ordinary design size accepted"), FDesignPathRasterizer::TryGetRasterSize(20.0f, 10.0f, Size));
 	TestEqual(TEXT("Supersampling retained"), Size, FIntPoint(40, 20));
+	TestTrue(TEXT("Fractional design size accepted"), FDesignPathRasterizer::TryGetRasterSize(20.25f, 10.75f, Size));
+	TestEqual(TEXT("Fractional dimensions are rounded in raster pixels"), Size, FIntPoint(41, 22));
 	AddExpectedError(TEXT("invalid or excessive path texture size"), EAutomationExpectedErrorFlags::Contains, 4);
 	for (float Width : {12000.0f, MAX_flt, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
 	{
@@ -140,7 +277,7 @@ bool FDesignPathAllocationLimitTest::RunTest(const FString&)
 	TestFalse(TEXT("Supersampled total pixel limit enforced"), FDesignPathRasterizer::TryGetRasterSize(5000.0f, 5000.0f, Size));
 	AddExpectedError(TEXT("invalid or excessive raster size"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestNull(TEXT("Direct rasterization cannot bypass limits"),
-		FDesignPathRasterizer::Rasterize(TEXT("M0 0L10 0L10 10Z"), MAX_int32, MAX_int32, FLinearColor::White));
+		FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(TEXT("M0 0L10 0L10 10Z"), FIntPoint(MAX_int32, MAX_int32), FLinearColor::White)));
 	return true;
 }
 
@@ -205,8 +342,9 @@ bool FPathCacheBudgetTest::RunTest(const FString&)
 	for (int32 Index = 0; Index < 17; ++Index)
 	{
 		const FLinearColor Color(Index / 16.0f, 0.5f, 0.5f, 1.0f);
-		if (!TestNotNull(TEXT("Ordinary large path generates"),
-			FDesignPathRasterizer::Rasterize(Geometry, 2048, 2048, Color, TEXT("evenodd")))) return false;
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(2048, 2048), Color);
+		Request.Path.FillRule = TEXT("evenodd");
+		if (!TestNotNull(TEXT("Ordinary large path generates"), FDesignPathRasterizer::Rasterize(Request))) return false;
 		TestTrue(TEXT("Retained cache pixels never exceed one raster budget"),
 			FDesignPathRasterizer::GetCachedPixelCount() <= FDesignPathRasterizer::MaxRasterPixels);
 		FDesignPathRasterizer::FlushPendingTextureUpdates();
@@ -217,7 +355,9 @@ bool FPathCacheBudgetTest::RunTest(const FString&)
 	CollectGarbage(RF_NoFlags);
 	for (int32 Index = 0; Index < 257; ++Index)
 	{
-		if (!FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(Index / 256.0f, 0, 0, 1), TEXT("evenodd"))) return false;
+		FDesignPathRasterRequest Request(Geometry, FIntPoint(8, 8), FLinearColor(Index / 256.0f, 0, 0, 1));
+		Request.Path.FillRule = TEXT("evenodd");
+		if (!FDesignPathRasterizer::Rasterize(Request)) return false;
 	}
 	TestEqual(TEXT("Entry budget is enforced on insertion, not one request later"),
 		FDesignPathRasterizer::GetCachedPixelCount(), 256ll * 8 * 8);
@@ -602,8 +742,8 @@ bool FPathCacheRequestIdentityTest::RunTest(const FString&)
 	TestTrue(TEXT("The refusal names the cumulative operation limit"), Error.Contains(TEXT("operation limit")));
 	// The lower-level raster cache must not round distinct alpha values into one key.
 	const FString Geometry = Absolute.Path.Geometry.GetValue();
-	UTexture2D* HalfAlpha = FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(1, 1, 1, 0.5f));
-	UTexture2D* BelowHalf = FDesignPathRasterizer::Rasterize(Geometry, 8, 8, FLinearColor(1, 1, 1, 0.49999f));
+	UTexture2D* HalfAlpha = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor(1, 1, 1, 0.5f)));
+	UTexture2D* BelowHalf = FDesignPathRasterizer::Rasterize(FDesignPathRasterRequest(Geometry, FIntPoint(8, 8), FLinearColor(1, 1, 1, 0.49999f)));
 	if (!TestNotNull(TEXT("Half alpha raster"), HalfAlpha) || !TestNotNull(TEXT("Below-half alpha raster"), BelowHalf)) return false;
 	const auto PixelAlpha = [](UTexture2D* Texture)
 	{
@@ -677,6 +817,8 @@ bool FShadowKernelBudgetTest::RunTest(const FString&)
 	TestEqual(TEXT("No kernel for zero blur"), Radius, 0);
 	TestTrue(TEXT("A normal large UI shadow remains admissible without allocating"), TryGetShadowKernelRadius(2048, 2048, 40, Radius));
 	TestEqual(TEXT("Ordinary discrete support is unchanged"), Radius, 60);
+	TestTrue(TEXT("Vectorized large shadow stays within the filter-operation budget"), TryGetShadowKernelRadius(1760, 1300, 160, Radius));
+	TestEqual(TEXT("Large shadow keeps the full discrete support"), Radius, 240);
 	TestTrue(TEXT("Coefficient boundary accepted without allocating"), TryGetShadowKernelRadius(8, 8, 2730, Radius));
 	TestEqual(TEXT("Coefficient radius boundary"), Radius, 4095);
 	TestFalse(TEXT("Coefficient limit is independent of texture dimensions"), TryGetShadowKernelRadius(8, 8, 2731, Radius));

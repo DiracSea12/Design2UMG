@@ -52,7 +52,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
 	UTexture2D* GenerateRadialGradientMultiStop(
 		int32 Width,
 		int32 Height,
@@ -60,7 +60,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
 
 	// Discrete CPU convolution is limited to 32 KiB of coefficients and 2^30 taps.
 	// This check does not allocate; both direct callers and the generator use it.

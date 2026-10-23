@@ -2,6 +2,7 @@
 
 #include "ProceduralShapeGeneratorAssets.h"
 #include "DesignImageResourceLimits.h"
+#include "Math/VectorRegister.h"
 
 #include "Design2UMGLog.h"
 #include "Engine/Texture2D.h"
@@ -181,12 +182,23 @@ namespace
 			Value /= Sum;
 		}
 
+		// Keep the scalar accumulation order; four lanes only process independent pixels.
+		const bool bVectorized = static_cast<int64>(Width) * Height * (2ll * KernelRadius + 1) * 2 > DesignImageResources::ShadowFilterMaxOperations;
 		TArray<float> Temp;
 		Temp.SetNumUninitialized(Width * Height);
 		for (int32 Y = 0; Y < Height; ++Y)
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
+				if (bVectorized && X >= KernelRadius && X + 3 < Width - KernelRadius)
+				{
+					VectorRegister4Float Accumulator = VectorZeroFloat();
+					for (int32 K = -KernelRadius; K <= KernelRadius; ++K)
+						Accumulator = VectorAdd(Accumulator, VectorMultiply(VectorLoad(&Alpha[Y * Width + X + K]), VectorLoadFloat1(&Kernel[K + KernelRadius])));
+					VectorStore(Accumulator, &Temp[Y * Width + X]);
+					X += 3;
+					continue;
+				}
 				float Accumulator = 0.0f;
 				for (int32 KernelIndex = -KernelRadius; KernelIndex <= KernelRadius; ++KernelIndex)
 				{
@@ -201,6 +213,18 @@ namespace
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
+				if (bVectorized && X + 3 < Width)
+				{
+					VectorRegister4Float Accumulator = VectorZeroFloat();
+					for (int32 K = -KernelRadius; K <= KernelRadius; ++K)
+					{
+						const int32 SampleY = FMath::Clamp(Y + K, 0, Height - 1);
+						Accumulator = VectorAdd(Accumulator, VectorMultiply(VectorLoad(&Temp[SampleY * Width + X]), VectorLoadFloat1(&Kernel[K + KernelRadius])));
+					}
+					VectorStore(Accumulator, &Alpha[Y * Width + X]);
+					X += 3;
+					continue;
+				}
 				float Accumulator = 0.0f;
 				for (int32 KernelIndex = -KernelRadius; KernelIndex <= KernelRadius; ++KernelIndex)
 				{
@@ -322,8 +346,10 @@ namespace ProceduralShapeGeneratorAssets
 		int32 Height,
 		UObject* Outer,
 		DesignImageResources::FImageOperationBudget* Budget,
-		TFunctionRef<FColor(int32 X, int32 Y)> PixelColorAt)
+		TFunctionRef<FColor(int32 X, int32 Y)> PixelColorAt, const FIntRect* RasterRegion = nullptr)
 	{
+		const FIntRect Region = RasterRegion ? *RasterRegion : FIntRect(0, 0, Width, Height);
+		Width = Region.Width(); Height = Region.Height();
 		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
 		if (!Texture)
 		{
@@ -336,7 +362,7 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
-				Pixels[Y * Width + X] = PixelColorAt(X, Y);
+				Pixels[Y * Width + X] = PixelColorAt(X + Region.Min.X, Y + Region.Min.Y);
 			}
 		}
 
@@ -489,10 +515,10 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -503,19 +529,19 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -526,7 +552,7 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateGradientLinear(
@@ -535,7 +561,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& StartNormalized,
 		const FVector2D& EndNormalized,
 		const TArray<FGradientStop>& Stops,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -560,10 +586,10 @@ namespace ProceduralShapeGeneratorAssets
 				0.0f,
 				1.0f);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -588,10 +614,10 @@ namespace ProceduralShapeGeneratorAssets
 			float T = NX * DirX + NY * DirY - TMin;
 			T = TRange > KINDA_SMALL_NUMBER ? FMath::Clamp(T / TRange, 0.0f, 1.0f) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -608,7 +634,7 @@ namespace ProceduralShapeGeneratorAssets
 			float T = Angle / (2.0f * PI);
 			T -= FMath::FloorToFloat(T);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateRadialGradient(
@@ -619,13 +645,13 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, ColorCenter, ColorEdge](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return FMath::Lerp(ColorCenter, ColorEdge, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateRadialGradientMultiStop(
@@ -635,7 +661,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -646,23 +672,31 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	bool TryGetShadowKernelRadius(int32 Width, int32 Height, float BlurRadius, int32& OutRadius)
 	{
 		OutRadius = 0;
-		constexpr int32 MaxKernelRadius = 4095; // 8191 float coefficients, under 32 KiB.
-		constexpr int64 MaxFilterSamples = 1ll << 30;
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height)
 			|| !FMath::IsFinite(BlurRadius) || BlurRadius < 0.0f) return false;
 		const float Sigma = BlurRadius * 0.5f;
 		if (Sigma < 0.5f) return true;
 		// Reject before ceil-to-int, coefficient allocation, or the two raster sweeps.
-		if (Sigma > MaxKernelRadius / 3.0f) return false;
+		if (Sigma > DesignImageResources::ShadowFilterMaxKernelRadius / 3.0f) return false;
 		const int32 Radius = FMath::CeilToInt(Sigma * 3.0f);
 		const int64 SamplesPerPixel = 2ll * (2ll * Radius + 1);
-		if (static_cast<int64>(Width) * Height > MaxFilterSamples / SamplesPerPixel) return false;
+		if (static_cast<int64>(Width) * Height > DesignImageResources::ShadowFilterMaxOperations / SamplesPerPixel)
+		{
+			// Two float masks and the texture coexist during filtering.
+			constexpr uint64 WorkingBytesPerPixel = 2 * sizeof(float) + sizeof(FColor);
+			if (static_cast<uint64>(Width) * Height > DesignImageResources::ShadowFilterMaxWorkingBytes / WorkingBytesPerPixel) return false;
+			const int64 VectorBlocks = FMath::Max(0, Width - 2 * Radius) / 4;
+			const int64 HorizontalGroups = Width - VectorBlocks * 3;
+			const int64 VerticalGroups = Width / 4 + Width % 4;
+			const int64 FilterOperations = (HorizontalGroups + VerticalGroups) * Height * (2ll * Radius + 1);
+			if (FilterOperations > DesignImageResources::ShadowFilterMaxOperations) return false;
+		}
 		OutRadius = Radius;
 		return true;
 	}

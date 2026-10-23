@@ -48,5 +48,4 @@ public:
 
 private:
 	static bool IsRootCanvasChild(UPanelWidget* ParentWidget, UWidgetTree* WidgetTree);
-	static bool HasValidSlotHistory(const FUMGSlotData& Slot);
 };

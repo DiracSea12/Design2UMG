@@ -6,6 +6,15 @@
 #include "Design2UMGConverter.h"
 #include "DesignSchema.h"
 #include "PenParser.h"
+#include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
+#include "UMGWidgetTreeBuilder.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/SizeBox.h"
+#include "Components/Border.h"
+#include "UObject/StrongObjectPtr.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "Design2UMGTestNodes.h"
@@ -67,6 +76,7 @@ namespace
 		Reusable->bReusable = true;
 		Reusable->Children.Add(
 			MakeNode(TEXT("rc-child-1"), TEXT("RCChild"), EDesignNodeType::Rectangle, 0.0f, 0.0f, 100.0f, 100.0f));
+		Reusable->Children[0]->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#ff0000")));
 
 		const TSharedPtr<FDesignNode> Host =
 			MakeNode(TEXT("host-1"), TEXT("HostFrame"), EDesignNodeType::Frame, 200.0f, 0.0f, 400.0f, 300.0f);
@@ -317,13 +327,72 @@ bool FConverterRefExpandTest::RunTest(const FString&)
 		BuildRefExpandDocument(),
 		FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Reusable root is skipped from render tree"), Data.RootWidget.Name, FString(TEXT("HostFrame")));
-	TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1);
+	if (!TestEqual(TEXT("Host frame child count"), Data.RootWidget.Children.Num(), 1)) return false;
 	TestEqual(TEXT("Expanded child is wrapped in a SizeBox"), Data.RootWidget.Children[0].Type, FString(TEXT("SizeBox")));
+	if (!TestEqual(TEXT("Expanded wrapper child count"), Data.RootWidget.Children[0].Children.Num(), 1)) return false;
 	TestEqual(TEXT("Expanded child keeps instance name"), Data.RootWidget.Children[0].Children[0].Name, FString(TEXT("RefNode")));
 	TestEqual(TEXT("Expanded child keeps instance id"), Data.RootWidget.Children[0].Children[0].Id, FString(TEXT("ref-1")));
 	TestFalse(TEXT("Expanded child has concrete runtime type"), Data.RootWidget.Children[0].Children[0].Type.IsEmpty());
 	TestNotEqual(TEXT("Expanded child is not a raw ref node"), Data.RootWidget.Children[0].Children[0].Type, FString(TEXT("Ref")));
 
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaAbsoluteAutoLayoutTest,
+	"Design2UMG.Converter.AbsoluteAutoLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaAbsoluteAutoLayoutTest::RunTest(const FString&)
+{
+	using namespace Design2UMGCoreTests;
+	const FString Fill = TEXT(",\"fills\":[{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":0,\"b\":0}}]");
+	const FString Children =
+		MakeLeafNode(TEXT("first"), TEXT("FlowFirst"), TEXT("RECTANGLE"), 110, 210, 20, 20, Fill) + TEXT(",") +
+		MakeLeafNode(TEXT("absolute"), TEXT("AbsoluteChild"), TEXT("RECTANGLE"), 135, 225, 15, 15,
+			Fill + TEXT(",\"layoutPositioning\":\"ABSOLUTE\"")) + TEXT(",") +
+		MakeLeafNode(TEXT("second"), TEXT("FlowSecond"), TEXT("RECTANGLE"), 138, 210, 20, 20, Fill);
+	const FString Parent = MakeContainerNode(TEXT("parent"), TEXT("AutoLayout"), TEXT("FRAME"), 100, 200, 160, 80,
+		Children, TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"NO_WRAP\",\"itemSpacing\":8,\"paddingLeft\":10,\"paddingTop\":10,\"paddingRight\":10,\"paddingBottom\":10"));
+	FDesignDocument Doc;
+	if (!TestTrue(TEXT("Absolute layout document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Parent), Doc))) return false;
+	const TSharedPtr<FDesignNode>& Absolute = Doc.Children[0]->Children[1];
+	TestEqual(TEXT("Absolute X is parent-relative"), Absolute->Transform.X, 35.0f);
+	TestEqual(TEXT("Absolute Y is parent-relative"), Absolute->Transform.Y, 25.0f);
+	TestEqual(TEXT("Flow coordinates stay unset"), Doc.Children[0]->Children[0]->Transform.X, 0.0f);
+	const FUMGWidgetData Result = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	if (!TestTrue(TEXT("Absolute document converts"), Result.ConversionError.IsEmpty())) return false;
+	const TStrongObjectPtr<UWidgetTree> Tree(NewObject<UWidgetTree>());
+	const FIntPoint DesignSize(160, 80);
+	Tree->RootWidget = FUMGWidgetTreeBuilder::CreateWidgetRecursive(Tree.Get(), Result.RootWidget, nullptr, nullptr, &DesignSize);
+	if (!TestNotNull(TEXT("Native tree generated"), Tree->RootWidget.Get())) return false;
+	UWidget* AbsoluteWidget = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UWidget>(Tree.Get(), TEXT("AbsoluteChild"));
+	if (!TestNotNull(TEXT("Absolute child generated"), AbsoluteWidget)) return false;
+	UCanvasPanelSlot* AbsoluteSlot = Cast<UCanvasPanelSlot>(AbsoluteWidget->Slot);
+	if (TestNotNull(TEXT("Absolute child uses a native Canvas slot"), AbsoluteSlot))
+	{
+		TestEqual(TEXT("Runtime absolute position is not shifted by flow padding"), AbsoluteSlot->GetPosition(), FVector2D(35, 25));
+		TestEqual(TEXT("Runtime absolute size retained"), AbsoluteSlot->GetSize(), FVector2D(15, 15));
+	}
+	UWidget* First = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UWidget>(Tree.Get(), TEXT("FlowFirst"));
+	if (!TestNotNull(TEXT("First flow child generated"), First)) return false;
+	UPanelWidget* FlowParent = First->GetParent();
+	if (Cast<USizeBox>(FlowParent)) FlowParent = FlowParent->GetParent();
+	UHorizontalBox* Flow = Cast<UHorizontalBox>(FlowParent);
+	if (TestNotNull(TEXT("Flow remains a native horizontal box"), Flow))
+	{
+		TestEqual(TEXT("Absolute child consumes no flow slot"), Flow->GetChildrenCount(), 2);
+		UBorder* FlowBorder = Cast<UBorder>(Flow->GetParent());
+		if (TestNotNull(TEXT("Flow retains its padding border"), FlowBorder))
+		{
+			TestEqual(TEXT("Only flow receives container padding"), FlowBorder->GetPadding(), FMargin(10));
+			UCanvasPanelSlot* FlowSlot = Cast<UCanvasPanelSlot>(FlowBorder->Slot);
+			if (TestNotNull(TEXT("Flow surface fills the native Canvas"), FlowSlot))
+			{
+				TestEqual(TEXT("Flow surface starts at the parent origin"), FlowSlot->GetPosition(), FVector2D::ZeroVector);
+				TestEqual(TEXT("Stretched flow has no trailing Canvas margins"), FlowSlot->GetOffsets(), FMargin(0));
+			}
+		}
+	}
 	return true;
 }
 

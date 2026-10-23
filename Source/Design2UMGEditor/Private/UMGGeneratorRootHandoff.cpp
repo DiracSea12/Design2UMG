@@ -5,6 +5,7 @@
 #include "Design2UMGComponentMappingGeneration.h"
 #include "Design2UMGLog.h"
 #include "PreBuildResourceNormalizer.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "UMGWidgetTreeBuilder.h"
 #include "Blueprint/WidgetTree.h"
@@ -15,7 +16,8 @@ namespace UMGGeneratorRootHandoff
 	FPreparedRoot PrepareRootForBuild(
 		const FUMGWidgetData& WidgetData,
 		const FString& PackagePath,
-		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget)
+		const FString& AssetName, DesignImageResources::FImageOperationBudget* Budget,
+		const FDesignImageImportSettingsSnapshot* ImageSettings)
 	{
 		FPreparedRoot Prepared;
 		Prepared.Root = WidgetData.RootWidget;
@@ -39,6 +41,10 @@ namespace UMGGeneratorRootHandoff
 		}
 
 		Prepared.DesignSize = FIntPoint(RootWidth, RootHeight);
+		FUMGWidgetData ImageData;
+		ImageData.RootWidget = MoveTemp(Prepared.Root);
+		DesignImportPlanning::ResolveImages(ImageData, nullptr, ImageSettings);
+		Prepared.Root = MoveTemp(ImageData.RootWidget);
 		if (!FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 			Prepared.Root, PackagePath, AssetName, Prepared.ErrorMessage, Budget)) return Prepared;
 

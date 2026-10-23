@@ -56,6 +56,17 @@ namespace
 		{
 			OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Source);
 		}
+        if (Node.Path.SourcePaintGeometry.IsSet())
+        {
+            const auto& Geometry = Node.Path.SourcePaintGeometry.GetValue();
+            const auto CollectPaint = [&](const FUMGSurfacePaint& Paint)
+            {
+                const FString Image = Paint.Image.TexturePath.Get(FString()).TrimStartAndEnd();
+                if (!Image.IsEmpty()) OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Image);
+            };
+            if (Geometry.FillPaints.IsSet()) for (const auto& Paint : Geometry.FillPaints.GetValue()) CollectPaint(Paint);
+            if (Geometry.StrokePaint.IsSet()) CollectPaint(Geometry.StrokePaint.GetValue());
+        }
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
 			CollectImageSources(Child, OutSources);

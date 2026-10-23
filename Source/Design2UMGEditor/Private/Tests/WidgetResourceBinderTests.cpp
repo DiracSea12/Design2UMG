@@ -14,6 +14,7 @@
 #include "Components/Image.h"
 #include "TextureResource.h"
 #include "Engine/Texture2D.h"
+#include "Materials/Material.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -195,6 +196,11 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 	// Set both MaterialRef and TexturePath.
 	Node.Brush.MaterialRef = TEXT("roundedrect");
 	Node.Brush.Image.TexturePath = TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture");
+	UTexture2D* FallbackTexture = LoadObject<UTexture2D>(nullptr, *Node.Brush.Image.TexturePath.GetValue());
+	if (!TestNotNull(TEXT("Competing fallback texture loads"), FallbackTexture))
+	{
+		return false;
+	}
 
 	UImage* ImageWidget = NewObject<UImage>();
 
@@ -205,6 +211,12 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 
 	// Verify the brush comes from a procedural texture with a nonzero ImageSize.
 	const FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
+	UTexture2D* ProceduralTexture = Cast<UTexture2D>(Brush.GetResourceObject());
+	if (!TestNotNull(TEXT("Procedural MaterialRef binds a texture resource"), ProceduralTexture))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Procedural MaterialRef does not bind the fallback texture"), ProceduralTexture != FallbackTexture);
 	TestTrue(TEXT("Brush ImageSize set by material path"), Brush.ImageSize.X > 0.0f && Brush.ImageSize.Y > 0.0f);
 
 	return true;

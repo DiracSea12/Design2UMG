@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Automation/Design2UMGAutomationRender.h"
+#include "DesignImportPlanning.h"
 
 #include "Automation/Design2UMGAutomationGeometryDump.h"
 #include "Automation/Design2UMGAutomationIrDump.h"
@@ -15,6 +16,7 @@
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
+#include "PenParser.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "UMGSchema.h"
 #include "UMGWidgetRenderer.h"
@@ -74,6 +76,7 @@ namespace
 		FString ErrorMessage;
 		FIntPoint RenderSize = FIntPoint::ZeroValue;
 		FIntPoint DesignTimeSize = FIntPoint::ZeroValue;
+		FIntPoint SourceExportSize = FIntPoint::ZeroValue;
 		bool bRenderSizeOverridden = false;
 		TSharedPtr<FJsonObject> SourceStructure;
 		TSharedPtr<FJsonObject> AssetStructure;
@@ -211,8 +214,23 @@ namespace
 		Root->SetStringField(TEXT("error_message"), Result.ErrorMessage);
 		Root->SetNumberField(TEXT("render_width"), Result.RenderSize.X);
 		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
+		Root->SetNumberField(TEXT("render_export_max_pixels"), FUMGWidgetRenderer::MaxExportPixels);
+		Root->SetNumberField(TEXT("render_target_max_pixels"), FUMGWidgetRenderer::MaxExportPixels);
+		Root->SetNumberField(TEXT("render_target_max_dimension"), GetMax2DTextureDimension());
+		FUMGWidgetExportPlan ExportPlan;
+		if (FUMGWidgetRenderer::BuildExportPlan(Result.RenderSize, static_cast<int32>(GetMax2DTextureDimension()), ExportPlan))
+		{
+			Root->SetBoolField(TEXT("render_tiled"), ExportPlan.TileCount.X * ExportPlan.TileCount.Y > 1);
+			Root->SetNumberField(TEXT("render_tile_width"), ExportPlan.TileSize.X);
+			Root->SetNumberField(TEXT("render_tile_height"), ExportPlan.TileSize.Y);
+			Root->SetNumberField(TEXT("render_tile_columns"), ExportPlan.TileCount.X);
+			Root->SetNumberField(TEXT("render_tile_rows"), ExportPlan.TileCount.Y);
+		}
+
 		Root->SetNumberField(TEXT("design_time_width"), Result.DesignTimeSize.X);
 		Root->SetNumberField(TEXT("design_time_height"), Result.DesignTimeSize.Y);
+		Root->SetNumberField(TEXT("source_export_width"), Result.SourceExportSize.X);
+		Root->SetNumberField(TEXT("source_export_height"), Result.SourceExportSize.Y);
 		Root->SetStringField(
 			TEXT("render_size_authority"),
 			Result.bRenderSizeOverridden
@@ -298,7 +316,7 @@ namespace
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
-		if (!DesignJsonUtils::TryParseObject(PenJson, RootObject))
+		if (!FPenParser::ParseSourceObject(PenJson, RootObject))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse .pen JSON: %s"), *PenFilePath);
 			return false;
@@ -359,7 +377,7 @@ namespace
 	FImportAnalysisInput AnalysisInput;
 	AnalysisInput.bResolveImages = true;
 	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	OutAnalysis = DesignImportPipeline::AnalyzeImport(OutDocument, AnalysisInput);
+	OutAnalysis = DesignImportPlanning::AnalyzeImport(OutDocument, AnalysisInput);
 		if (!OutAnalysis.ErrorMessage.IsEmpty())
 		{
 			OutError = OutAnalysis.ErrorMessage;
@@ -496,7 +514,7 @@ namespace
 		FImportAnalysisInput AnalysisInput;
 		AnalysisInput.bResolveImages = true;
 		AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
-		return DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+		return DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 	};
 
 		auto MakeAutomationImportRequest = [&](const bool bResolveImages)
@@ -563,6 +581,8 @@ namespace
 				{
 					OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(GeneratedBlueprint->WidgetTree);
 					OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(GeneratedBlueprint);
+					const FVector2D ExportSize = FUMGWidgetRenderer::GetBlueprintExportBounds(GeneratedBlueprint).GetSize();
+					OutResult.SourceExportSize = FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y));
 				}
 			}
 		};
@@ -603,11 +623,13 @@ namespace
 
 		OutResult.GeneratedAssetPath = WidgetBlueprint->GetPathName();
 		OutResult.DesignTimeSize = ResolveBlueprintDesignTimeSize(WidgetBlueprint);
+		const FVector2D ExportSize = FUMGWidgetRenderer::GetBlueprintExportBounds(WidgetBlueprint).GetSize();
+		OutResult.SourceExportSize = FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y));
 		OutResult.AssetStructure = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(WidgetBlueprint->WidgetTree);
 		// Keep the design canvas when its aspect matches and calibration adds no union padding.
 		// Apply a larger calibrated canvas to contain outer shadows or overflowing children.
 		TOptional<FVector2D> EffectiveRenderSizeOverride = Spec.RenderSizeOverride;
-		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 1 && OutResult.DesignTimeSize.Y > 1)
+		if (EffectiveRenderSizeOverride.IsSet() && OutResult.DesignTimeSize.X > 0 && OutResult.DesignTimeSize.Y > 0)
 		{
 			const FVector2D OverrideSize = EffectiveRenderSizeOverride.GetValue();
 			const int32 OverrideWidth = FMath::RoundToInt(OverrideSize.X);
@@ -738,7 +760,7 @@ namespace
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = true;
 			AnalysisInput.SettingsSnapshot = &AutomationSettingsSnapshot;
-			const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPipeline::AnalyzeImport(Data, AnalysisInput);
+			const FImportInPlaceAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(Data, AnalysisInput);
 		DeferredAnalysisResult = AnalysisResult;
 		DiagnosticDocument = SourceDocument;
 		if (AnalysisResult.ErrorMessage.IsEmpty())

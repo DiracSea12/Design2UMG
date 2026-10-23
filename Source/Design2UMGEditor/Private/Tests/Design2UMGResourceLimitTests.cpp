@@ -77,6 +77,16 @@ bool FDesign2UMGRemoteImageResourceLimitsTest::RunTest(const FString& Parameters
 	TestTrue(TEXT("Dimensions at side and pixel limits are accepted"), FImagePayloadIO::ValidateDimensions(4, 3, Limits, Error));
 	TestFalse(TEXT("Width above side limit is rejected"), FImagePayloadIO::ValidateDimensions(5, 1, Limits, Error));
 	TestFalse(TEXT("Pixel count above limit is rejected"), FImagePayloadIO::ValidateDimensions(4, 4, Limits, Error));
+	FImageResourceLimits BgraLimits;
+	BgraLimits.MaxDimension = TNumericLimits<int32>::Max();
+	BgraLimits.MaxPixels = TNumericLimits<int64>::Max();
+	const int32 HugeSide = BgraLimits.MaxDimension;
+	TestTrue(TEXT("Dimension policy does not impose a BGRA allocation limit"), BgraLimits.AllowsDimensions(HugeSide, HugeSide));
+	TestFalse(TEXT("BGRA decoding preserves its additional byte representation limit"),
+		FImagePayloadIO::ValidateDimensions(HugeSide, HugeSide, BgraLimits, Error));
+	TestEqual(TEXT("BGRA byte limit keeps the original pixel diagnostic"), Error,
+		FString::Printf(TEXT("Image pixel count exceeds the limit (%dx%d, limit %lld)"),
+			HugeSide, HugeSide, static_cast<long long>(BgraLimits.MaxPixels)));
 
 	TestTrue(TEXT("URL count at limit is accepted"), FImagePayloadIO::ValidateUrlCount(2, Limits, Error));
 	TestFalse(TEXT("URL count above limit is rejected"), FImagePayloadIO::ValidateUrlCount(3, Limits, Error));

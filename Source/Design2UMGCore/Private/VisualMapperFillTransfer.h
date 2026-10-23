@@ -10,6 +10,7 @@ struct FUMGWidgetNode;
 
 namespace VisualMapperFillTransfer
 {
+	void ApplyGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient);
 	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	FUMGWidgetNode WrapWithMultiFill(
 		FUMGWidgetNode&& Widget,

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Design2UMGWidgetPropertyAccess.h"
+#include "DesignImportPlanning.h"
 #include "Design2UMGImageTestUtils.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersionComparison.h"
@@ -1476,6 +1477,49 @@ bool FLocalComponentDependencyImportTest::RunTest(const FString&)
 	TestEqual(TEXT("Published file identity preserved"), Document.Metadata.FindRef(TEXT("fileKey")), FString(TEXT("component-blueprint-test")));
 	return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentLocalImagePaintTest,
+	"Design2UMG.ComponentBlueprints.LocalImagePaint",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FComponentLocalImagePaintTest::RunTest(const FString&)
+{
+	const FString Identity = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Folder = TEXT("/Game/Design2UMG/Automation/ComponentImage_") + Identity;
+	const FString ImagePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG") / (Identity + TEXT(".png"));
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().Delete(*ImagePath);
+		Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder);
+	};
+	TArray<FColor> Pixels;
+	Pixels.Init(FColor::White, 4);
+	TArray64<uint8> Png;
+	FImageUtils::PNGCompressImageArray(2, 2, Pixels, Png);
+	if (!TestTrue(TEXT("Write local source image"), FFileHelper::SaveArrayToFile(Png, *ImagePath))) return false;
+	TSharedPtr<FJsonObject> Json;
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(MakeComponentImportJson(TEXT("Cancel"))), Json)) return false;
+	TSharedPtr<FJsonObject> Rectangle;
+	const FString Paint = TEXT(R"JSON({"id":"paint","name":"Paint","type":"RECTANGLE","absoluteBoundingBox":{"x":0,"y":0,"width":32,"height":32},"fills":[{"type":"IMAGE","imageRef":"local-image","scaleMode":"FILL"}],"strokes":[{"type":"GRADIENT_LINEAR","gradientHandlePositions":[{"x":0,"y":0},{"x":1,"y":0},{"x":0,"y":1}],"gradientStops":[{"position":0,"color":{"r":1,"g":0,"b":0,"a":1}},{"position":1,"color":{"r":0,"g":0,"b":1,"a":1}}]}],"strokeWeight":2,"strokeAlign":"INSIDE"})JSON");
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Paint), Rectangle)) return false;
+	const auto Definition = Json->GetObjectField(TEXT("design2umgComponentDependencies"))->GetArrayField(TEXT("definitions"))[0]->AsObject()->GetObjectField(TEXT("document"));
+	auto Children = Definition->GetArrayField(TEXT("children"));
+	Children.Add(MakeShared<FJsonValueObject>(Rectangle));
+	Definition->SetArrayField(TEXT("children"), Children);
+	FString Source;
+	FJsonSerializer::Serialize(Json.ToSharedRef(), TJsonWriterFactory<>::Create(&Source));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Image component parses"), FFigmaParser::ParseDocument(Source, Document))) return false;
+	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	Data.MutableSourceDocument().ResolvedComponentImageUrls.Add(TEXT("local-image"), ImagePath);
+	FDesign2UMGGenerationSettingsSnapshot Settings;
+	Settings.ImageSettings.RemoteImageImportPath = Folder / TEXT("Images");
+	FDesign2UMGGenerationOutput Output;
+	if (!TestNotNull(TEXT("Component resolves source bitmap before composing its native background"),
+		DesignImportGeneration::GenerateWidgetBlueprint(Data, Folder, &Settings, &Output))) return false;
+	TestEqual(TEXT("Reusable native component remains present"), Output.Components.Num(), 1);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FComponentPageUserContentTest,
 	"Design2UMG.ComponentBlueprints.SavedUserPageContents",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1829,7 +1873,7 @@ bool FPreviewContextDependencyGenerationTest::RunTest(const FString& Parameters)
 			Input.OriginalData = MakeShared<FUMGWidgetData>(Original);
 			Input.EditedJson = FUMGJsonSerializer::Serialize(Data);
 			Input.bResolveImages = false;
-			auto Refreshed = DesignImportPipeline::AnalyzePreviewRefresh(Input);
+			auto Refreshed = DesignImportPlanning::AnalyzePreviewRefreshInput(Input);
 			if (!TestTrue(TEXT("Preview refresh with dependencies succeeds"), Refreshed.bSucceeded)) continue;
 			Data = MoveTemp(Refreshed.Data);
 		}

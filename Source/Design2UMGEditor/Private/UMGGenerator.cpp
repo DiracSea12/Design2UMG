@@ -436,6 +436,7 @@ const FDesign2UMGGenerationSettingsSnapshot& ResolveGenerationSettingsSnapshot(
 		ClearGeneratedWidgetNavigationState(&Blueprint);
 		DumpTemplateTextBlockFontState(TEXT("template-precompile"), &Blueprint);
 		ApplyDesignPreviewSize(&Blueprint, DesignSize, TEXT("pre-compile"));
+		FUMGWidgetRenderer::SetBlueprintExportBounds(&Blueprint, WidgetData.ExportBounds);
 		Package.MarkPackageDirty();
 
 		if (Settings.ComponentBlueprints)
@@ -510,7 +511,8 @@ UWidgetBlueprint* FUMGGenerator::BuildWidgetBlueprint(
 	// Prepare persistent effects before touching an existing WidgetTree.
 	UMGGeneratorRootHandoff::FPreparedRoot PreparedRoot =
 		UMGGeneratorRootHandoff::PrepareRootForBuild(
-			WidgetData, PackagePath, AssetTarget.AssetName, Budget);
+			WidgetData, PackagePath, AssetTarget.AssetName, Budget,
+			GenerationSettings ? &GenerationSettings->ImageSettings : nullptr);
 	const FUMGWidgetNode& PreparedRootRef = PreparedRoot.Root;
 	const FIntPoint& DesignSize = PreparedRoot.DesignSize;
 	if (!ValidatePreparedRoot(WidgetData, PreparedRoot, OutGenerationOutput))

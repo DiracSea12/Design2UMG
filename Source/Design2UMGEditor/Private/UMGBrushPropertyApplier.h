@@ -8,6 +8,7 @@ namespace DesignImageResources { class FImageOperationBudget; }
 class UBackgroundBlur;
 class URetainerBox;
 class UWidget;
+class UTexture2D;
 
 namespace UMGBrushPropertyApplier
 {

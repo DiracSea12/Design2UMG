@@ -486,6 +486,7 @@ namespace
 			FJsonFields Image;
 			AddOptionalString(Image, TEXT("TexturePath"), Brush.Image.TexturePath);
 			AddOptionalString(Image, TEXT("Mode"), Brush.Image.Mode);
+			AddOptionalString(Image, TEXT("CropFitMode"), Brush.Image.CropFitMode);
 			if (Brush.Image.Transform.IsSet())
 			{
 				Image.Add(FJsonField(TEXT("Transform"), RenderImageTransformData(Brush.Image.Transform.GetValue())));

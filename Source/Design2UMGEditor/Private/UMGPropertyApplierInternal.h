@@ -5,6 +5,7 @@
 #include "UMGSchema.h"
 
 class UWidget;
+class UTexture2D;
 
 namespace DesignImageResources { class FImageOperationBudget; }
 

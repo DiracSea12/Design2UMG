@@ -4,6 +4,7 @@
 // typed-node applier in GetPropsApplierMap().
 
 #include "UMGPropertyApplierInternal.h"
+#include "Design2UMGWidgetMetadata.h"
 #include "Design2UMGWidgetPropertyAccess.h"
 
 #include "UMGBrushPropertyApplier.h"

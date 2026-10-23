@@ -48,20 +48,6 @@ bool FWidgetLayoutAdapter::HasMeaningfulSlot(const FUMGSlotData& Slot)
 	return Groups.bCanvas || Groups.bPadding || Groups.bBox || Groups.bGrid;
 }
 
-bool FWidgetLayoutAdapter::HasValidSlotHistory(const FUMGSlotData& Slot)
-{
-	return !FMath::IsNearlyEqual(Slot.Offsets.Left, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Top, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Right, 100.0f) ||
-		!FMath::IsNearlyEqual(Slot.Offsets.Bottom, 100.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Min.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Max.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Anchors.Max.Y, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Alignment.X, 0.0f) ||
-		!FMath::IsNearlyEqual(Slot.Alignment.Y, 0.0f);
-}
-
 FUMGSlotData FWidgetLayoutAdapter::Resolve(
 	const FUMGWidgetNode& Node,
 	UPanelWidget* ParentWidget,
@@ -89,17 +75,6 @@ FUMGSlotData FWidgetLayoutAdapter::Resolve(
 	FLayoutContext Context;
 	Context.DesignSize = DesignSize;
 
-	if (HasValidSlotHistory(Node.Slot))
-	{
-		if (Node.Slot.Anchors.Min.X == Node.Slot.Anchors.Max.X)
-		{
-			Context.OldAnchorX = Node.Slot.Anchors.Min.X;
-		}
-		if (Node.Slot.Anchors.Min.Y == Node.Slot.Anchors.Max.Y)
-		{
-			Context.OldAnchorY = Node.Slot.Anchors.Min.Y;
-		}
-	}
 
 	FDesignPixelBounds NormalizedBounds;
 	NormalizedBounds.X = Node.Bounds.X / DesignSize.X;

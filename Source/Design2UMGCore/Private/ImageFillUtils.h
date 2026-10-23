@@ -14,7 +14,7 @@ namespace ImageFillUtils
 			Widget.Brush.Image.TexturePath = Image.Url;
 		}
 
-		if (!Image.Transform.IsIdentity())
+		if (Image.bFitCropToNode || !Image.Transform.IsIdentity())
 		{
 			Widget.Brush.Image.Mode = TEXT("Crop");
 			FUMGVisualBrushData::FImageTransformData Transform;
@@ -25,6 +25,11 @@ namespace ImageFillUtils
 			Transform.D = Image.Transform.D;
 			Transform.TY = Image.Transform.TY;
 			Widget.Brush.Image.Transform = Transform;
+			if (Image.bFitCropToNode && Image.Mode != EDesignImageMode::Crop)
+			{
+				Widget.Brush.Image.CropFitMode = Image.Mode == EDesignImageMode::Fill ? TEXT("Fill")
+					: Image.Mode == EDesignImageMode::Fit ? TEXT("Fit") : TEXT("Stretch");
+			}
 		}
 		else if (Image.Mode == EDesignImageMode::Fill)
 		{

@@ -11,6 +11,7 @@ namespace DesignImageResources { class FImageOperationBudget; }
 class UImage;
 class UObject;
 class UTexture2D;
+struct FDesignPathRasterRequest;
 
 class FWidgetResourceBinder
 {
@@ -27,9 +28,11 @@ public:
 		Resolved
 	};
 
+	// OutPathRequest receives the built request only when a path texture resolves successfully.
 	static EProceduralTextureResult TryResolveProceduralTexture(
 		const FUMGWidgetNode& Node,
 		UObject* Outer,
 		UTexture2D*& OutTexture,
-		FUMGProceduralResourceRequest* OutRequest = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+		FUMGProceduralResourceRequest* OutRequest = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr,
+		const TMap<FString, UTexture2D*>* TextureMap = nullptr, FDesignPathRasterRequest* OutPathRequest = nullptr);
 };

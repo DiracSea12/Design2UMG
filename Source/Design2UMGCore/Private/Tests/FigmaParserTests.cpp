@@ -7,6 +7,7 @@
 #include "DesignReferenceExpansion.h"
 #include "DesignTreeLimits.h"
 #include "DesignSchema.h"
+#include "UMGWidgetTypes.h"
 #include "Design2UMGConverter.h"
 #include "SizeEstimator.h"
 #include "Interfaces/IPluginManager.h"
@@ -14,6 +15,9 @@
 #include "Misc/Paths.h"
 #include "FigmaTestDocBuilder.h"
 #include "VisualMapper.h"
+#include "VisualMapperFillTransfer.h"
+#include "PathWidgetBuilder.h"
+#include "Design2UMGConverterVisualSupport.h"
 
 using namespace Design2UMGCoreTests;
 
@@ -253,6 +257,28 @@ bool FFigmaParserExpandedDropShadowUsesLayoutBoundsTest::RunTest(const FString&)
 	if (!TestEqual(TEXT("One normalized shadow"), Widget.Shadow.BoxShadows.Num(), 1))
 		return false;
 	TestTrue(TEXT("Shadow behind flag reaches the shared shadow layer"), Widget.Shadow.BoxShadows[0].bShowShadowBehindNode);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaParserPathLocalCanvasTest,
+	"Design2UMG.Unit.FigmaParser.PathLocalCanvas",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaParserPathLocalCanvasTest::RunTest(const FString&)
+{
+	const FString Path = TEXT("M0 0 L86.25 0 L86.25 210.5 Z");
+	const FString Vector = MakeLeafNode(TEXT("path"), TEXT("Path"), TEXT("VECTOR"), 0, 0, 210.5, 86.25,
+		FString::Printf(TEXT(",\"size\":{\"x\":86.25,\"y\":210.5},\"rotation\":90,"
+			"\"fillGeometry\":[{\"path\":\"%s\",\"windingRule\":\"NONZERO\"}],\"fills\":[%s]"),
+			*Path, *MakeSolidFillJson(1, 1, 1)));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Source-local path parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Vector), Document))
+		|| !TestEqual(TEXT("One path is retained"), Document.Children.Num(), 1)) return false;
+	const FUMGWidgetNode Widget = PathWidgetBuilder::CreatePathWidget(Document.Children[0]);
+	TestTrue(TEXT("Local coordinates do not use the rotated absolute bounding box"),
+		Widget.Path.ViewBox.IsSet() && Widget.Path.ViewBox->Equals(FVector4(0, 0, 86.25, 210.5)));
+	TestTrue(TEXT("Target canvas and source path retain their separate contracts"),
+		Widget.Path.CanvasSize.IsSet() && Widget.Path.CanvasSize->Equals(FVector2D(210.5, 86.25))
+		&& Widget.Path.Geometry.Get(FString()) == Path);
 	return true;
 }
 
@@ -689,6 +715,206 @@ bool FFigmaParserErrorInputTest::RunTest(const FString&)
 		FDesignDocument Doc;
 		TestFalse(TEXT("Missing document field returns false"), FFigmaParser::ParseDocument(TEXT("{\"foo\":1}"), Doc));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaParserReusedOutputTest,
+	"Design2UMG.Unit.FigmaParser.ReusedOutput",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaParserReusedOutputTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("First document parses"), FFigmaParser::ParseDocument(TEXT(R"({"fileKey":"first-file","document":{"id":"first","name":"First","type":"FRAME"}})"), Document))) return false;
+	if (!TestTrue(TEXT("Second document parses"), FFigmaParser::ParseDocument(TEXT(R"({"document":{"id":"second","name":"Second","type":"FRAME"}})"), Document))) return false;
+	TestEqual(TEXT("Second parse replaces children"), Document.Children.Num(), 1);
+	TestFalse(TEXT("Second parse removes old metadata"), Document.Metadata.Contains(TEXT("fileKey")));
+	if (Document.Children.Num() == 1) TestEqual(TEXT("Only the second node remains"), Document.Children[0]->Id, FString(TEXT("second")));
+	AddExpectedError(TEXT("Missing 'document' field"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Missing document fails"), FFigmaParser::ParseDocument(TEXT("{}"), Document));
+	TestEqual(TEXT("Failure clears the output"), Document.Children.Num(), 0);
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExplicitNoWrapTest,
+	"Design2UMG.Unit.FigmaParser.ExplicitNoWrap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExplicitNoWrapTest::RunTest(const FString&)
+{
+	TArray<FString> Children;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		const FString Id = FString::Printf(TEXT("item-%d"), Index);
+		Children.Add(MakeLeafNode(*Id, *Id, TEXT("RECTANGLE"), Index * 30, Index % 2 == 0 ? 0 : 10,
+			30, Index % 2 == 0 ? 40 : 20, TEXT(",\"layoutSizingHorizontal\":\"FILL\"")));
+	}
+	const FString Parent = MakeContainerNode(TEXT("row"), TEXT("Row"), TEXT("FRAME"), 0, 0, 180, 40,
+		FString::Join(Children, TEXT(",")), TEXT(",\"layoutMode\":\"HORIZONTAL\",\"layoutWrap\":\"NO_WRAP\",\"counterAxisAlignItems\":\"CENTER\""));
+	FDesignDocument Doc;
+	if (!TestTrue(TEXT("No-wrap document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Parent), Doc))) return false;
+	TestEqual(TEXT("Explicit NO_WRAP wins over child Y differences"), Doc.Children[0]->LayoutData.Layout, EDesignLayout::Horizontal);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaNonSolidStrokeTest,
+	"Design2UMG.Unit.FigmaParser.NonSolidStroke",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
+{
+	const FString Gradient = TEXT("{\"type\":\"GRADIENT_LINEAR\",\"gradientStops\":[{\"position\":0,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}},{\"position\":1,\"color\":{\"r\":0,\"g\":1,\"b\":0,\"a\":1}}]}");
+	FDesignDocument Doc;
+	const FString Shape = MakeLeafNode(TEXT("shape"), TEXT("Shape"), TEXT("RECTANGLE"), 0, 0, 100, 100,
+		FString::Printf(TEXT(",\"strokeWeight\":2,\"strokes\":[%s],\"strokeGeometry\":[{\"path\":\"M0 0 L100 0 L100 100 L0 100 Z M2 2 L2 98 L98 98 L98 2 Z\",\"windingRule\":\"NONZERO\"}]"), *Gradient));
+	if (!TestTrue(TEXT("Gradient stroke document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Shape), Doc))) return false;
+	TestTrue(TEXT("Gradient stroke retains its thickness"), Doc.Children[0]->Visual.Stroke.HasStroke());
+	if (TestTrue(TEXT("Gradient stroke retains its paint"), Doc.Children[0]->Visual.Stroke.Fill.IsSet()))
+	{
+		TestTrue(TEXT("Stroke paint stays gradient, not black"), Doc.Children[0]->Visual.Stroke.Fill->Type == EDesignFillType::Gradient);
+		TestEqual(TEXT("Stroke retains both gradient stops"), Doc.Children[0]->Visual.Stroke.Fill->Gradient.Colors.Num(), 2);
+	}
+	FUMGWidgetNode Surface;
+	Surface.Type = TEXT("Border");
+	Surface.Id = TEXT("shape");
+	Surface.Name = TEXT("Shape");
+	const FUMGWidgetNode Painted = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Surface), Doc.Children[0]);
+	TestEqual(TEXT("Stroke-only shape remains one native image"), Painted.Type, FString(TEXT("Image")));
+	TestTrue(TEXT("Stroke-only shape adds no wrappers"), Painted.Children.IsEmpty());
+	TestTrue(TEXT("A uniform primitive uses its canonical contour"), Painted.Path.Geometry.IsSet());
+	TestEqual(TEXT("Canonical primitive uses the declared stroke width"), Painted.Path.StrokeThickness.Get(0.0f), 2.0f);
+	TestFalse(TEXT("Canonical paint does not inherit source region bounds"), Painted.Path.SourcePaintGeometry.IsSet());
+	TestEqual(TEXT("Original gradient stops reach the native resource"), Painted.Brush.Gradient.Stops.Num(), 2);
+	const TSharedPtr<FDesignNode> Line = MakeShared<FDesignNode>(*Doc.Children[0]);
+	Line->Type = EDesignNodeType::Line;
+	Line->Shape.PaintGeometry.StrokePaths.Reset();
+	Line->Transform.SetWidthValue(FDesignSize::Fixed(100));
+	Line->Transform.SetHeightValue(FDesignSize::Fixed(0));
+	Line->Visual.Stroke.Thickness.Uniform = 10;
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Circular;
+	Line->Visual.Stroke.Fill->Gradient.StartPoint = FVector2D(0.1f, 0.0f);
+	Line->Visual.Stroke.Fill->Gradient.EndPoint = FVector2D(0.9f, 0.0f);
+	FUMGWidgetNode LineWidget;
+	LineWidget.Type = TEXT("Image");
+	LineWidget.Bounds.W = 100;
+	const FUMGWidgetNode PaintedLine = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(LineWidget), Line);
+	TestEqual(TEXT("Cap painting does not change the layout width"), PaintedLine.WidgetStyle.WidthOverride.Get(0), 100.0f);
+	TestEqual(TEXT("Cap padding shifts the centerline inside its canvas"), PaintedLine.Path.Geometry.Get(FString()), FString(TEXT("M5.000000 5.000000 L105.000000 5.000000")));
+	TestTrue(TEXT("Native render expansion retains the authored centerline length"), PaintedLine.Render.RenderTransformScale.Get(FVector2D(1, 1)).Equals(FVector2D(1.1, 1), 0.0001));
+	TestTrue(TEXT("A stroke-only line stays one native image"), PaintedLine.Type == TEXT("Image") && PaintedLine.Children.IsEmpty());
+	TestTrue(TEXT("Independent canvas includes both half-stroke caps"), PaintedLine.Path.CanvasSize.Get(FVector2D::ZeroVector).Equals(FVector2D(110, 10)));
+	TestTrue(TEXT("Gradient start keeps its authored line coordinate"), FMath::IsNearlyEqual(PaintedLine.Brush.Gradient.StartPoint.GetValue().X * 110.0f - 5.0f, 10.0f, KINDA_SMALL_NUMBER));
+	TestTrue(TEXT("Gradient end keeps its authored line coordinate"), FMath::IsNearlyEqual(PaintedLine.Brush.Gradient.EndPoint.GetValue().X * 110.0f - 5.0f, 90.0f, KINDA_SMALL_NUMBER));
+	FUMGWidgetNode TransformedLine;
+	TransformedLine.Type = TEXT("Image");
+	TransformedLine.Bounds.W = 100;
+	TransformedLine.Render.RenderTransformScale = FVector2D(2, 3);
+	TransformedLine.Render.RenderAngle = 30.0f;
+	TransformedLine.Render.RenderTransformPivot = FVector2D(0.25, 0.75);
+	TransformedLine.Render.RenderTranslation = FVector2D(7, 9);
+	const FUMGWidgetNode TransformedPaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(TransformedLine), Line);
+	TestTrue(TEXT("Ink expansion composes with authored scale"), TransformedPaint.Render.RenderTransformScale.GetValue().Equals(FVector2D(2.2, 3), 0.0001));
+	TestEqual(TEXT("Authored rotation survives"), TransformedPaint.Render.RenderAngle.GetValue(), 30.0f);
+	TestTrue(TEXT("Authored pivot survives"), TransformedPaint.Render.RenderTransformPivot.GetValue().Equals(FVector2D(0.25, 0.75)));
+	TestTrue(TEXT("Noncentral pivot correction follows the authored rotation and scale"), TransformedPaint.Render.RenderTranslation.GetValue().Equals(FVector2D(7.0 - 5.0 * FMath::Cos(PI / 6), 1.5), 0.0001));
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Square;
+	Line->Children.Add(MakeShared<FDesignNode>());
+	FUMGWidgetNode ContentLine;
+	ContentLine.Type = TEXT("Border");
+	ContentLine.Bounds.W = 100;
+	const FUMGWidgetNode ContentPaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ContentLine), Line);
+	TestTrue(TEXT("Line content retains the existing native overlay and two layers"), ContentPaint.Type == TEXT("Overlay") && ContentPaint.Children.Num() == 2);
+	if (ContentPaint.Children.Num() == 2)
+	{
+		const FUMGWidgetNode& CapLayer = ContentPaint.Children[1];
+		TestEqual(TEXT("Square caps do not widen the overlay's layout"), ContentPaint.Bounds.W, 100.0f);
+		TestEqual(TEXT("Square cap image keeps the original desired width"), CapLayer.WidgetStyle.WidthOverride.GetValue(), 100.0f);
+		TestTrue(TEXT("Square caps reserve the same half-stroke canvas extent"), CapLayer.Path.CanvasSize.GetValue().Equals(FVector2D(110, 10)));
+	}
+	Line->Children.Empty();
+	Line->Visual.Stroke.Cap = EDesignStrokeCap::Butt;
+	FUMGWidgetNode ButtLine;
+	ButtLine.Type = TEXT("Image");
+	const FUMGWidgetNode ButtPaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ButtLine), Line);
+	TestTrue(TEXT("Butt caps add no horizontal extent"), ButtPaint.Path.CanvasSize.GetValue().Equals(FVector2D(100, 10)));
+
+	Doc.Children[0]->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
+	Doc.Children[0]->Visual.Fills.Add(Doc.Children[0]->Visual.Stroke.Fill.GetValue());
+	FUMGWidgetNode Filled;
+	Filled.Type = TEXT("Border");
+	Filled.Id = TEXT("filled");
+	Filled.Name = TEXT("Filled");
+	Filled.Brush.Gradient = Painted.Brush.Gradient;
+	Filled.Brush.BrushColor = FLinearColor::White;
+	Filled.Brush.OutlineThickness = 2.0f;
+	Filled.WidgetStyle.StrokePadding = FMargin(1.0f);
+	const FUMGWidgetNode PaintedBorder = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Filled), Doc.Children[0]);
+	TestEqual(TEXT("An inside primitive retains its combined native surface"), PaintedBorder.Type, FString(TEXT("Border")));
+	TestTrue(TEXT("Combined primitive paint adds no source layers"), PaintedBorder.Children.IsEmpty());
+	TestEqual(TEXT("Combined primitive keeps the declared width"), PaintedBorder.Path.StrokeThickness.Get(0.0f), 2.0f);
+	TestFalse(TEXT("Combined primitive has no source region bounds"), PaintedBorder.Path.SourcePaintGeometry.IsSet());
+	TestTrue(TEXT("Unselected source geometry does not clear native padding"), PaintedBorder.WidgetStyle.StrokePadding.IsSet());
+	auto ImageNode = MakeShared<FDesignNode>(*Doc.Children[0]);
+	ImageNode->Visual.Fills.Reset();
+	FDesignFill ImageFill;
+	ImageFill.Type = EDesignFillType::Image;
+	ImageFill.Image.Url = TEXT("/Textures/fill.png");
+	ImageNode->Visual.Fills.Add(ImageFill);
+	FUMGWidgetNode ImageSurface;
+	ImageSurface.Type = TEXT("Border");
+	ImageSurface.Brush.BrushColor = FLinearColor(1, 1, 1, 0.4f);
+	ImageSurface.Brush.Image.TexturePath = ImageFill.Image.Url;
+	ImageSurface.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData();
+	ImageSurface.Brush.Image.Transform->TX = 0.25f;
+	const FUMGWidgetNode ImagePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ImageSurface), ImageNode);
+	TestEqual(TEXT("Combined primitive preserves fill alpha"), ImagePaint.Path.FillColor.Get(FLinearColor::Transparent).A, 0.4f);
+	TestEqual(TEXT("Combined primitive preserves image resource"), ImagePaint.Brush.Image.TexturePath.Get(FString()), ImageFill.Image.Url);
+	TestTrue(TEXT("Combined primitive preserves authored image coordinates"), ImagePaint.Brush.Image.Transform.IsSet()
+		&& ImagePaint.Brush.Image.Transform->TX == 0.25f);
+	const auto Frame = MakeShared<FDesignNode>(*Doc.Children[0]);
+	Frame->Type = EDesignNodeType::Frame;
+	Frame->Shape.PaintGeometry.StrokePaths.Reset();
+	Frame->Visual.Stroke.Align = EDesignStrokeAlign::Center;
+	Frame->Visual.Fills.Reset();
+	FUMGWidgetNode FrameSurface;
+	FrameSurface.Type = TEXT("Border");
+	const FUMGWidgetNode FramePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(FrameSurface), Frame);
+	TestTrue(TEXT("A frame derives its real rounded contour without exported stroke geometry"),
+		FramePaint.Path.Geometry.IsSet() && FramePaint.Brush.Gradient.Stops.Num() == 2);
+
+	AddExpectedError(TEXT("FigmaParser: Unsupported stroke paint"), EAutomationExpectedErrorFlags::Contains, 1);
+	const FString ImageShape = MakeLeafNode(TEXT("image-shape"), TEXT("ImageShape"), TEXT("RECTANGLE"), 0, 0, 100, 100,
+		TEXT(",\"strokeWeight\":2,\"strokes\":[{\"type\":\"IMAGE\",\"imageRef\":\"test-image\"}]"));
+	if (!TestTrue(TEXT("Image stroke document parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(ImageShape), Doc))) return false;
+	TestFalse(TEXT("Unsupported image paint is not fabricated as black"), Doc.Children[0]->Visual.Stroke.HasStroke());
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaAbsoluteFlowFitSizeTest,
+	"Design2UMG.Unit.FigmaParser.AbsoluteFlowFitSize",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaAbsoluteFlowFitSizeTest::RunTest(const FString&)
+{
+	const TSharedPtr<FDesignNode> Parent = MakeShared<FDesignNode>();
+	Parent->Type = EDesignNodeType::Frame;
+	Parent->Transform.SetWidthValue(FDesignSize::Fit(68));
+	Parent->Transform.SetHeightValue(FDesignSize::Fixed(80));
+	Parent->LayoutData.Layout = EDesignLayout::Horizontal;
+	Parent->LayoutData.SetGap(8);
+	FDesignPadding Padding;
+	Padding.Left = Padding.Right = 10;
+	Parent->LayoutData.SetPadding(Padding);
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		const TSharedPtr<FDesignNode> Child = MakeShared<FDesignNode>();
+		Child->Type = EDesignNodeType::Rectangle;
+		Child->Transform.SetWidthValue(FDesignSize::Fixed(Index == 1 ? 1000 : 20));
+		Child->Transform.SetHeightValue(FDesignSize::Fixed(20));
+		Child->LayoutData.bAbsoluteLayoutPositioning = Index == 1;
+		Child->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FF0000")));
+		Parent->Children.Add(Child);
+	}
+	TestEqual(TEXT("Absolute child contributes no flow fit width"), SizeEstimator::EstimateNodeSize(Parent, 0.0f).X, 68.0);
 	return true;
 }
 

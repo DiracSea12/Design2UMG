@@ -9,31 +9,38 @@
 #include "Design2UMGLog.h"
 #include "UMGImageCropUtils.h"
 #include "UMGWidgetNodeProceduralResourceAccess.h"
+#include "UMGWidgetNodeAccess.h"
 
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
-	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget)
+	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
-		if (!Node.Path.Geometry.IsSet()) return false;
-		FIntPoint Size;
-		if (!FDesignPathRasterizer::TryGetRasterSize(
-			Node.WidgetStyle.WidthOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)),
-			Node.WidgetStyle.HeightOverride.Get(static_cast<float>(DesignPathRasterDefaults::DefaultPixelSize)), Size)) return false;
-		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(
-			Node.Path.Geometry.GetValue(), Size.X, Size.Y, Node.Path.FillColor,
-			Node.Path.FillRule.Get(DesignPathRasterDefaults::FillRule), Node.Path.StrokeColor,
-			Node.Path.StrokeThickness.Get(0.0f), Node.Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap),
-			Node.Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin), nullptr, Budget);
+		FDesignPathRasterRequest Request;
+		if (!FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)) return false;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request, nullptr, Budget);
 		if (!Texture) return false;
 		Image->SetBrushFromTexture(Texture);
 		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
-		Brush.ImageSize = FVector2D(Size.X / DesignPathRasterDefaults::Supersample, Size.Y / DesignPathRasterDefaults::Supersample);
+		Brush.ImageSize = FVector2D(Request.PaintSize.X / DesignPathRasterDefaults::Supersample, Request.PaintSize.Y / DesignPathRasterDefaults::Supersample);
+		if (Node.Path.CanvasSize.IsSet() || Node.Path.StrokeAlignment.IsSet())
+			Brush.ImageSize = FVector2D(Node.WidgetStyle.WidthOverride.Get(Brush.ImageSize.X), Node.WidgetStyle.HeightOverride.Get(Brush.ImageSize.Y));
 		Brush.Tiling = ESlateBrushTileType::NoTile;
+		const auto UV = Request.GetCanvasUVTransform();
+		Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
 		Image->SetBrush(Brush);
 		Image->SetDesiredSizeOverride(Brush.ImageSize);
+		FUMGWidgetNode Expanded = Node;
+		FDesignPathRasterizer::ApplyCanvasTransform(Expanded, Request);
+		if (Request.HasExpandedCanvas())
+		{
+			Image->SetRenderScale(Expanded.Render.RenderTransformScale.Get(FVector2D(1, 1)));
+			Image->SetRenderTranslation(Expanded.Render.RenderTranslation.Get(FVector2D::ZeroVector));
+		}
+
 		return true;
 	}
 }
@@ -42,8 +49,18 @@ FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolv
 	const FUMGWidgetNode& Node,
 	UObject* Outer,
 	UTexture2D*& OutTexture,
-	FUMGProceduralResourceRequest* OutRequest, DesignImageResources::FImageOperationBudget* Budget)
+	FUMGProceduralResourceRequest* OutRequest, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap,
+	FDesignPathRasterRequest* OutPathRequest)
 {
+	if (Node.Path.HasPaintGeometry())
+	{
+		FDesignPathRasterRequest Request;
+		OutTexture = FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)
+			? FDesignPathRasterizer::Rasterize(Request, nullptr, Budget) : nullptr;
+		if (OutTexture && OutPathRequest) *OutPathRequest = MoveTemp(Request);
+		return OutTexture ? EProceduralTextureResult::Resolved : EProceduralTextureResult::UnknownShape;
+	}
+
 	FUMGProceduralResourceRequest ResourceRequest;
 	if (!Design2UMGWidgetNodeProceduralResourceAccess::TryBuildProceduralResourceRequest(Node, ResourceRequest))
 	{
@@ -86,7 +103,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 		return true;
 	}
 	case EProceduralTextureResult::EmptyMaterialRef:
-		return BindPathTexture(ImageWidget, Node, Budget);
+		return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
 	case EProceduralTextureResult::UnknownShape:
 		UE_LOG(LogDesign2UMG, Warning, TEXT("Image '%s' has unknown procedural shape type '%s'; falling back to TexturePath."), *Node.Name, *ResourceRequest.MaterialRef);
 		break;
@@ -100,7 +117,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	const FString TrimmedPath = TexPath.TrimStartAndEnd();
 	if (TrimmedPath.IsEmpty())
 	{
-		return BindPathTexture(ImageWidget, Node, Budget);
+		return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
 	}
 
 	UTexture2D* Texture = nullptr;
@@ -117,7 +134,7 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 	}
 	if (!Texture)
 	{
-		return BindPathTexture(ImageWidget, Node, Budget);
+		return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
 	}
 
 	const FSlateBrush OldBrush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);

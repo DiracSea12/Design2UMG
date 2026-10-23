@@ -43,7 +43,8 @@ bool FPenRelativeImageFillAnchorTest::RunTest(const FString& Parameters)
 
 	const FString ExistingPng = FPaths::Combine(TempRoot, TEXT("assets"), TEXT("badge.png"));
 	TestTrue(TEXT("Write anchor fixture png"), FFileHelper::SaveStringToFile(TEXT("png-bytes"), *ExistingPng));
-	const FString ExistingAbsolutePng = FPaths::Combine(TempRoot, TEXT("elsewhere.png"));
+	const FString ExistingAbsolutePng = FPaths::ConvertRelativePathToFull(FPaths::Combine(TempRoot, TEXT("elsewhere.png")));
+	TestFalse(TEXT("Absolute url fixture is absolute"), FPaths::IsRelative(ExistingAbsolutePng));
 	TestTrue(TEXT("Write anchor fixture absolute png"), FFileHelper::SaveStringToFile(TEXT("png-bytes"), *ExistingAbsolutePng));
 
 	FDesignDocument Document;
@@ -83,8 +84,8 @@ bool FPenRelativeImageFillAnchorTest::RunTest(const FString& Parameters)
 }
 
 // Integration coverage: LoadPenDocument (both whole-document and node-filtered entries) anchors
-// relative image fill urls against the .pen directory; a broken sibling reference stays authored
-// so downstream skip behavior matches Pencil opening the same document.
+// resource paths against the .pen directory even when an image is missing. Resource
+// import diagnoses the missing file; parsing does not create it.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenRelativeImageFillAnchorLoadTest,
 	"Design2UMG.PenParser.RelativeImageFillAnchorLoad",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -136,7 +137,11 @@ bool FPenRelativeImageFillAnchorLoadTest::RunTest(const FString& Parameters)
 	if (WholeDocument.Children.Num() == 2)
 	{
 		TestTrue(TEXT("Whole load anchors existing relative url"), WholeDocument.Children[0]->Visual.Fills[0].Image.Url == ExpectedAnchored);
-		TestTrue(TEXT("Whole load keeps broken link authored"), WholeDocument.Children[1]->Visual.Fills[0].Image.Url == TEXT("assets/focory.png"));
+		TestEqual(TEXT("Whole load resolves missing image against the document directory"),
+			WholeDocument.Children[1]->Visual.Fills[0].Image.Url,
+			FPaths::ConvertRelativePathToFull(FPaths::Combine(TempRoot, TEXT("assets/focory.png"))));
+		TestFalse(TEXT("Whole load does not create the missing image"),
+			FPaths::FileExists(WholeDocument.Children[1]->Visual.Fills[0].Image.Url));
 	}
 	else
 	{

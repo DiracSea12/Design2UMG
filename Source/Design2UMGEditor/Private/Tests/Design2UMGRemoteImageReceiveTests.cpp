@@ -6,6 +6,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignRemoteImageImporter.h"
+#include "DesignPreviewContracts.h"
 #include "DesignRemoteImageImporterInternal.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGSettings.h"
@@ -1162,7 +1163,7 @@ bool FRemoteImageReceiveSharedInvalidUrlCachesProcessingFailureTest::RunTest(con
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_A"), SharedUrl));
 	Data.RootWidget.Children.Add(MakeReceiveBudgetImageNode(TEXT("ReceiveBudget_Invalid_B"), SharedUrl));
 
-	const FDesignImageImportResult ImageResult = FDesignRemoteImageImporter::ResolveRemoteImages(Data);
+	const FDesignImageImportResult ImageResult = FDesignRemoteImageImporter::ResolveRemoteImages(Data, FDesignImageImportSettingsSnapshot::FromSettings(*UDesign2UMGSettings::Get()));
 	const FString& Report = ImageResult.DisplaySummary;
 	TestEqual(TEXT("Two nodes still cause one transport request"), Server.GetRequestCount(), 1);
 	TestTrue(TEXT("Both nodes report the shared processing failure"), Report.Contains(TEXT("failed=2")));
@@ -1483,5 +1484,45 @@ bool FRemoteImageReceivePreviewEntryEnforcesReceiveBudgetTest::RunTest(const FSt
 // waits past the server's late write and verifies that neither payload nor budget
 // changes after DownloadUrls returns. A shared-reference-count watcher was removed
 // because it sampled a wrapper implementation detail rather than this behavior.
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImagePayloadWebPDecodeTest,
+	"Design2UMG.RemoteImages.Decode.WebP",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImagePayloadWebPDecodeTest::RunTest(const FString&)
+{
+	// Own lossless 2x2 fixture: channel order, alpha and top-down rows are the decode contract.
+	const TArray<uint8> Compressed = {
+		0x52, 0x49, 0x46, 0x46, 0x34, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+		0x56, 0x50, 0x38, 0x4c, 0x27, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
+		0x10, 0x1f, 0x30, 0xff, 0x02, 0x82, 0x22, 0xff, 0x47, 0x13, 0x10, 0x14,
+		0xf9, 0x3f, 0x9a, 0x80, 0xa0, 0xe8, 0xba, 0xe5, 0x82, 0x77, 0x42, 0x82,
+		0x9a, 0xb6, 0x0d, 0x58, 0xfc, 0x26, 0x1d, 0x11, 0xfd, 0x8f, 0x03, 0x00
+	};
+	DesignImageResources::FImageResourceLimits Limits;
+	TArray64<uint8> Pixels;
+	int32 Width = 0, Height = 0;
+	FString Error;
+	EDesignImageDiagnosticCategory Category = EDesignImageDiagnosticCategory::Decode;
+	if (!TestTrue(TEXT("Production decoder accepts WebP"),
+		FImagePayloadIO::DecodeToBGRA8(Compressed, Limits, Width, Height, Pixels, Error))) return false;
+	TestTrue(TEXT("WebP keeps original dimensions"), Width == 2 && Height == 2);
+	const uint8 Expected[] = { 0, 0, 255, 255, 0, 255, 0, 128, 255, 0, 0, 255, 0, 255, 255, 255 };
+	TestTrue(TEXT("WebP yields straight-alpha top-down BGRA"),
+		Pixels.Num() == sizeof(Expected) && FMemory::Memcmp(Pixels.GetData(), Expected, sizeof(Expected)) == 0);
+	Limits.MaxPixels = 3;
+	TestFalse(TEXT("WebP dimensions use the shared input pixel limit"),
+		FImagePayloadIO::DecodeToBGRA8(Compressed, Limits, Width, Height, Pixels, Error, nullptr, &Category));
+	TestTrue(TEXT("WebP budget rejection is explicit and leaves no decoded pixels"),
+		Category == EDesignImageDiagnosticCategory::Budget && !Error.IsEmpty() && Pixels.IsEmpty());
+	TArray<uint8> Truncated = Compressed;
+	Truncated.SetNum(12);
+	Limits = DesignImageResources::FImageResourceLimits();
+	TestFalse(TEXT("Malformed WebP has an explicit decode failure"),
+		FImagePayloadIO::DecodeToBGRA8(Truncated, Limits, Width, Height, Pixels, Error, nullptr, &Category));
+	TestTrue(TEXT("Malformed WebP retains decode diagnostics"),
+		Category == EDesignImageDiagnosticCategory::Decode && !Error.IsEmpty());
+	return true;
+}
 
 #endif // WITH_AUTOMATION_WORKER

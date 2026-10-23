@@ -6,6 +6,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
+#include "DesignSourceExportBounds.h"
 #include "UMGSchema.h"
 #include "VisualMapper.h"
 #include "Design2UMGCoreTestHelpers.h"
@@ -419,6 +420,28 @@ bool FVisualMapperSubtreePaintBoundsTest::RunTest(const FString&)
 	// The parent shadow is displaced entirely rightwards, so it adds no left gutter.
 	TestEqual(TEXT("Rotation moves descendant overflow to the left"), CapturePadding().Left, -20.0f);
 	Middle->Transform.Rotation = 0;
+	Middle->Transform.TransformOrigin = FVector2D::ZeroVector;
+	Middle->Transform.bFlipX = true;
+	const auto ExportBounds = [&]()
+	{
+		return DesignSourceExportBounds::Calculate(Root, [](const TSharedPtr<FDesignNode>& Node) { return Node; });
+	};
+	TestEqual(TEXT("Local-zero flip paints left of the original slot"), CapturePadding().Left, -20.0f);
+	TestTrue(TEXT("Source export shares the local-zero flip origin"), ExportBounds().Min.Equals(FVector2D(-20, 0)));
+	Middle->Transform.Rotation = 45;
+	FUMGWidgetNode Transformed;
+	VisualMapper::ApplyRenderTransformProperties(Transformed, Middle);
+	TestTrue(TEXT("Flip and rotation use the declared native pivot"), Transformed.Render.RenderTransformPivot.Get(FVector2D(0.5, 0.5)).IsNearlyZero());
+	TestTrue(TEXT("Source export composes rotation after local-zero flip"), ExportBounds().Min.Equals(FVector2D(-43, -15)));
+	const FMargin TransformedPadding = CapturePadding();
+	TestEqual(TEXT("Left capture retains the rotated descendant overflow"), TransformedPadding.Left, -43.0f);
+	TestEqual(TEXT("Top capture includes root-shadow filter support"), TransformedPadding.Top, -16.0f);
+	Middle->Transform.Rotation = 0;
+	Middle->Transform.bFlipX = false;
+	FUMGWidgetNode Untransformed;
+	VisualMapper::ApplyRenderTransformProperties(Untransformed, Middle);
+	TestFalse(TEXT("Identity source transform needs no explicit native pivot"), Untransformed.Render.RenderTransformPivot.IsSet());
+	Middle->Transform.TransformOrigin = FVector2D(0.5, 0.5);
 	TestEqual(TEXT("Contained absolute children need no extra bottom padding"), CapturePadding().Bottom, -1.0f);
 	Root->LayoutData.Layout = EDesignLayout::Horizontal;
 	TestEqual(TEXT("Flow children reserve outsets at their eventual layout edge"), CapturePadding().Bottom, -21.0f);

@@ -1,20 +1,26 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignPathRasterizer.h"
+#include "UObject/ObjectKey.h"
 #include "ProceduralShapeGenerator.h"
+#include "UMGImageCropUtils.h"
 #include "Design2UMGLog.h"
+#include "DesignResourceResolver.h"
+#include "UMGWidgetNodeAccess.h"
 #include "Engine/Texture2D.h"
 #include "HAL/IConsoleManager.h"
 #include "Hash/CityHash.h"
 #include "RenderingThread.h"
 #include "TextureResource.h"
 #include "Serialization/MemoryWriter.h"
+#include "Misc/EngineVersionComparison.h"
 
 // --- Path cache (file-local) ---
 struct FPathPoint
 {
 	float X = 0.0f;
 	float Y = 0.0f;
+	bool bClosesContour = false;
 };
 
 void SampleCubicBezier(
@@ -46,11 +52,21 @@ namespace
 		TArray<uint8> Signature;
 	};
 
-	TArray<uint8> MakeCacheSignature(
-		FString Geometry, int32 Width, int32 Height, TOptional<FLinearColor> FillColor,
-		FString Rule, TOptional<FLinearColor> StrokeColor, float StrokeWidth,
-		FString StrokeCap, FString StrokeJoin)
+	TArray<uint8> MakeCacheSignature(FDesignPathRasterRequest Request, FGuid SourceImageId, FObjectKey SourceObject)
 	{
+		auto& Path = Request.Path;
+		FString Geometry = Path.Geometry.Get(FString());
+		int32 Width = Request.Size.X, Height = Request.Size.Y;
+		auto FillColor = Path.FillColor, StrokeColor = Path.StrokeColor;
+		FString Rule = Path.FillRule.Get(DesignPathRasterDefaults::FillRule);
+		FString StrokeCap = Path.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
+		FString StrokeJoin = Path.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
+		float StrokeWidth = Path.StrokeThickness.Get(0.0f);
+		FString StrokeGeometry = Path.StrokeGeometry.Get(FString());
+		const auto* FillPaint = Request.FillPaint.IsSet() ? &Request.FillPaint.GetValue() : nullptr;
+		const auto* StrokePaint = Request.StrokePaint.IsSet() ? &Request.StrokePaint.GetValue() : nullptr;
+		const auto* FillImage = Request.FillImage.IsSet() ? &Request.FillImage.GetValue() : nullptr;
+
 		TArray<uint8> Signature;
 		FMemoryWriter Writer(Signature);
 		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
@@ -151,14 +167,12 @@ namespace
 
 		if (bSquareCap)
 		{
-			const FVector2D Direction = Segment.GetSafeNormal();
-			const FVector2D ExtendedStart = Start - Direction * Radius;
-			const FVector2D ExtendedEnd = End + Direction * Radius;
-			const FVector2D ExtendedSegment = ExtendedEnd - ExtendedStart;
-			const float ExtendedLengthSq = ExtendedSegment.SizeSquared();
-			const float T = FMath::Clamp(FVector2D::DotProduct(Point - ExtendedStart, ExtendedSegment) / ExtendedLengthSq, 0.0f, 1.0f);
-			const FVector2D ClosestPoint = ExtendedStart + ExtendedSegment * T;
-			return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
+			const float SegmentLength = FMath::Sqrt(SegmentLengthSq);
+			const FVector2D Direction = Segment / SegmentLength;
+			const FVector2D Relative = Point - Start;
+			const float Along = FVector2D::DotProduct(Relative, Direction);
+			const float Across = FVector2D::CrossProduct(Direction, Relative);
+			return Along >= -Radius && Along <= SegmentLength + Radius && FMath::Abs(Across) <= Radius;
 		}
 
 		const float RawT = FVector2D::DotProduct(Point - Start, Segment) / SegmentLengthSq;
@@ -172,78 +186,168 @@ namespace
 		return (Point - ClosestPoint).SizeSquared() <= Radius * Radius;
 	}
 
-	void RasterizeStroke(
-		const TArray<TArray<FPathPoint>>& SubPaths,
-		TArray<FColor>& InOutPixels,
-		int32 Width,
-		int32 Height,
-		const FColor& StrokeColor,
-		float StrokeWidth,
-		const FString& StrokeCap,
-		const FString& StrokeJoin)
-	{
-		if (StrokeColor.A == 0 || StrokeWidth <= KINDA_SMALL_NUMBER)
-		{
-			return;
-		}
+	// Pencil's native makeStroked wrapper supplies this limit when none is authored.
+	constexpr float StrokeMiterLimit = 4.0f;
 
+	bool GetStrokePoints(const TArray<FPathPoint>& Path, TArray<FVector2D>& Points, bool bCenterline = true)
+	{
+		Points.Reset();
+		for (const FPathPoint& Point : Path)
+		{
+			const FVector2D Position(Point.X, Point.Y);
+			if (!bCenterline || Points.IsEmpty() || !Points.Last().Equals(Position, KINDA_SMALL_NUMBER)) Points.Add(Position);
+		}
+		const bool bClosed = !Path.IsEmpty() && (bCenterline ? Path.Last().bClosesContour : IsClosedPath(Path));
+		if (bCenterline && bClosed && Points.Num() > 1 && Points.Last().Equals(Points[0], KINDA_SMALL_NUMBER))
+		{
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+			Points.Pop(false);
+#else
+			Points.Pop(EAllowShrinking::No);
+#endif
+		}
+		return bClosed;
+	}
+
+	void GetStrokeSegment(const TArray<FVector2D>& Points, int32 Index, bool bClosed, bool bSquareCap,
+		float Radius, FVector2D& Start, FVector2D& End)
+	{
+		Start = Points[Index]; End = Points[(Index + 1) % Points.Num()];
+		if (!bClosed && bSquareCap)
+		{
+			const FVector2D Direction = (End - Start).GetSafeNormal();
+			if (Index == 0) Start -= Direction * Radius;
+			if (Index == Points.Num() - 2) End += Direction * Radius;
+		}
+	}
+
+	void GetStrokeJoin(const FVector2D& Previous, const FVector2D& Vertex, const FVector2D& Next,
+		float Radius, bool bMiter, TArray<FVector2D>& Polygon)
+	{
+		Polygon.Reset();
+		const FVector2D Incoming = (Vertex - Previous).GetSafeNormal();
+		const FVector2D Outgoing = (Next - Vertex).GetSafeNormal();
+		const double Turn = FVector2D::CrossProduct(Incoming, Outgoing);
+		if (FMath::Abs(Turn) <= SMALL_NUMBER) return;
+		const double Side = Turn > 0.0 ? -1.0 : 1.0;
+		const FVector2D First = Vertex + FVector2D(-Incoming.Y, Incoming.X) * (Radius * Side);
+		const FVector2D Last = Vertex + FVector2D(-Outgoing.Y, Outgoing.X) * (Radius * Side);
+		Polygon.Add(Vertex); Polygon.Add(First);
+		if (bMiter)
+		{
+			const FVector2D Tip = First + Incoming * (FVector2D::CrossProduct(Last - First, Outgoing) / Turn);
+			if ((Tip - Vertex).SizeSquared() <= FMath::Square(double(Radius) * StrokeMiterLimit)) Polygon.Add(Tip);
+		}
+		Polygon.Add(Last);
+	}
+
+	void DrawStrokeJoin(TArray<FColor>& Pixels, int32 Width, int32 Height,
+		const TArray<FVector2D>& Polygon, const FColor& Color)
+	{
+		if (Polygon.Num() < 3) return;
+		FBox2D Bounds(ForceInit);
+		for (const FVector2D& Point : Polygon) Bounds += Point;
+		const int32 Left = FMath::Max(0, FMath::FloorToInt(Bounds.Min.X));
+		const int32 Top = FMath::Max(0, FMath::FloorToInt(Bounds.Min.Y));
+		const int32 Right = FMath::Min(Width - 1, FMath::CeilToInt(Bounds.Max.X));
+		const int32 Bottom = FMath::Min(Height - 1, FMath::CeilToInt(Bounds.Max.Y));
+		for (int32 Y = Top; Y <= Bottom; ++Y) for (int32 X = Left; X <= Right; ++X)
+		{
+			const FVector2D Sample(X + 0.5, Y + 0.5);
+			bool bPositive = false, bNegative = false;
+			for (int32 Index = 0; Index < Polygon.Num(); ++Index)
+			{
+				const double Cross = FVector2D::CrossProduct(Polygon[(Index + 1) % Polygon.Num()] - Polygon[Index], Sample - Polygon[Index]);
+				bPositive |= Cross > 0.0; bNegative |= Cross < 0.0;
+			}
+			if (!(bPositive && bNegative)) Pixels[Y * Width + X] = Color;
+		}
+	}
+
+	FBox2D GetStrokeInkBounds(const TArray<TArray<FPathPoint>>& Paths, float StrokeWidth,
+		const FString& StrokeCap, const FString& StrokeJoin, bool bCenterline = true)
+	{
+		FBox2D Bounds(ForceInit);
+		const float Radius = StrokeWidth * 0.5f;
+		const bool bSquare = StrokeCap.Equals(TEXT("square"), ESearchCase::IgnoreCase);
+		const bool bRoundCap = StrokeCap.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+		const bool bRoundJoin = StrokeJoin.Equals(TEXT("round"), ESearchCase::IgnoreCase);
+		const bool bMiter = StrokeJoin.Equals(TEXT("miter"), ESearchCase::IgnoreCase);
+		TArray<FVector2D> Points, Join;
+		const auto IncludeCircle = [&](const FVector2D& Center)
+		{
+			Bounds += Center - FVector2D(Radius, Radius); Bounds += Center + FVector2D(Radius, Radius);
+		};
+		for (const auto& Path : Paths)
+		{
+			const bool bClosed = GetStrokePoints(Path, Points, bCenterline);
+			if (Points.Num() < 2) continue;
+			const int32 Segments = bCenterline && bClosed ? Points.Num() : Points.Num() - 1;
+			for (int32 Index = 0; Index < Segments; ++Index)
+			{
+				FVector2D Start, End; GetStrokeSegment(Points, Index, bClosed, bCenterline && bSquare, Radius, Start, End);
+				if ((End - Start).SizeSquared() <= KINDA_SMALL_NUMBER) continue;
+				const FVector2D Direction = (End - Start).GetSafeNormal();
+				const FVector2D Normal(-Direction.Y * Radius, Direction.X * Radius);
+				if (!bCenterline && bSquare) { Start -= Direction * Radius; End += Direction * Radius; }
+				Bounds += Start - Normal; Bounds += Start + Normal; Bounds += End - Normal; Bounds += End + Normal;
+				if (!bCenterline && bRoundCap) { IncludeCircle(Start); IncludeCircle(End); }
+			}
+			if (bCenterline && !bClosed && bRoundCap) { IncludeCircle(Points[0]); IncludeCircle(Points.Last()); }
+			for (int32 Index = bClosed ? 0 : 1; Index < (bCenterline && bClosed ? Points.Num() : Points.Num() - 1); ++Index)
+			{
+				if (bRoundJoin) IncludeCircle(Points[Index]);
+				else if (bCenterline)
+				{
+					GetStrokeJoin(Points[(Index + Points.Num() - 1) % Points.Num()], Points[Index], Points[(Index + 1) % Points.Num()], Radius, bMiter, Join);
+					for (const FVector2D& Point : Join) Bounds += Point;
+				}
+			}
+		}
+		return Bounds;
+	}
+
+	void RasterizeStroke(const TArray<TArray<FPathPoint>>& SubPaths, TArray<FColor>& InOutPixels,
+		int32 Width, int32 Height, const FColor& StrokeColor, float StrokeWidth,
+		const FString& StrokeCap, const FString& StrokeJoin, bool bCenterline)
+	{
+		if (StrokeColor.A == 0 || StrokeWidth <= KINDA_SMALL_NUMBER) return;
 		const float Radius = StrokeWidth * 0.5f;
 		const bool bCircularCap = StrokeCap.Equals(TEXT("round"), ESearchCase::IgnoreCase);
 		const bool bSquareCap = StrokeCap.Equals(TEXT("square"), ESearchCase::IgnoreCase);
 		const bool bCircularJoin = StrokeJoin.Equals(TEXT("round"), ESearchCase::IgnoreCase);
-
-		for (const TArray<FPathPoint>& Path : SubPaths)
+		const bool bMiter = StrokeJoin.Equals(TEXT("miter"), ESearchCase::IgnoreCase);
+		TArray<FVector2D> Points, Join;
+		for (const auto& Path : SubPaths)
 		{
-			if (Path.Num() < 2)
+			const bool bClosed = GetStrokePoints(Path, Points, bCenterline);
+			if (Points.Num() < 2) continue;
+			const int32 Segments = bCenterline && bClosed ? Points.Num() : Points.Num() - 1;
+			for (int32 Index = 0; Index < Segments; ++Index)
 			{
-				continue;
+				FVector2D Start, End; GetStrokeSegment(Points, Index, bClosed, bCenterline && bSquareCap, Radius, Start, End);
+				if ((End - Start).SizeSquared() <= KINDA_SMALL_NUMBER) continue;
+				const FVector2D Direction = (End - Start).GetSafeNormal();
+				const float BoundsRadius = !bCenterline && bSquareCap ? Radius * (FMath::Abs(Direction.X) + FMath::Abs(Direction.Y)) : Radius;
+				const int32 MinX = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.X, End.X) - BoundsRadius - 1.0f));
+				const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(FMath::Max(Start.X, End.X) + BoundsRadius + 1.0f));
+				const int32 MinY = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.Y, End.Y) - BoundsRadius - 1.0f));
+				const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(FMath::Max(Start.Y, End.Y) + BoundsRadius + 1.0f));
+				for (int32 Y = MinY; Y <= MaxY; ++Y) for (int32 X = MinX; X <= MaxX; ++X)
+					if (IsPointInsideStrokeSegment(FVector2D(X + 0.5, Y + 0.5), Start, End, Radius, !bCenterline && bCircularCap, !bCenterline && bSquareCap)) InOutPixels[Y * Width + X] = StrokeColor;
 			}
-
-			const bool bClosed = IsClosedPath(Path);
-			const int32 LastPointIndex = Path.Num() - 1;
-			for (int32 Index = 0; Index < LastPointIndex; ++Index)
+			if (bCenterline && !bClosed && bCircularCap)
 			{
-				const FVector2D Start(Path[Index].X, Path[Index].Y);
-				const FVector2D End(Path[Index + 1].X, Path[Index + 1].Y);
-				if ((End - Start).SizeSquared() <= KINDA_SMALL_NUMBER)
-				{
-					continue;
-				}
-
-				const int32 MinX = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.X, End.X) - Radius - 1.0f));
-				const int32 MaxX = FMath::Min(Width - 1, FMath::CeilToInt(FMath::Max(Start.X, End.X) + Radius + 1.0f));
-				const int32 MinY = FMath::Max(0, FMath::FloorToInt(FMath::Min(Start.Y, End.Y) - Radius - 1.0f));
-				const int32 MaxY = FMath::Min(Height - 1, FMath::CeilToInt(FMath::Max(Start.Y, End.Y) + Radius + 1.0f));
-
-				for (int32 Y = MinY; Y <= MaxY; ++Y)
-				{
-					for (int32 X = MinX; X <= MaxX; ++X)
-					{
-						const FVector2D Sample(X + 0.5f, Y + 0.5f);
-						if (IsPointInsideStrokeSegment(Sample, Start, End, Radius, bCircularCap, bSquareCap))
-						{
-							InOutPixels[Y * Width + X] = StrokeColor;
-						}
-					}
-				}
+				DrawFilledCircle(InOutPixels, Width, Height, Points[0], Radius, StrokeColor);
+				DrawFilledCircle(InOutPixels, Width, Height, Points.Last(), Radius, StrokeColor);
 			}
-
-			if (bCircularJoin)
+			for (int32 Index = bClosed ? 0 : 1; Index < (bCenterline && bClosed ? Points.Num() : Points.Num() - 1); ++Index)
 			{
-				const int32 JoinStartIndex = bClosed ? 0 : 1;
-				// Closed paths duplicate the first point as their last entry (see IsClosedPath),
-				// so all distinct vertices are already covered by 0..Last-1 and the end index
-				// needs no closed/open distinction.
-				const int32 JoinEndIndex = LastPointIndex - 1;
-				for (int32 Index = JoinStartIndex; Index <= JoinEndIndex; ++Index)
+				if (bCircularJoin) DrawFilledCircle(InOutPixels, Width, Height, Points[Index], Radius, StrokeColor);
+				else if (bCenterline)
 				{
-					DrawFilledCircle(
-						InOutPixels,
-						Width,
-						Height,
-						FVector2D(Path[Index].X, Path[Index].Y),
-						Radius,
-						StrokeColor);
+					GetStrokeJoin(Points[(Index + Points.Num() - 1) % Points.Num()], Points[Index], Points[(Index + 1) % Points.Num()], Radius, bMiter, Join);
+					DrawStrokeJoin(InOutPixels, Width, Height, Join, StrokeColor);
 				}
 			}
 		}
@@ -340,9 +444,10 @@ namespace
 	}
 }
 
-bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds)
+bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths, FBox2D& OutBounds, bool* OutAllClosed = nullptr)
 {
 	OutSubPaths.Reset();
+	if (OutAllClosed) *OutAllClosed = true;
 	OutBounds.Init();
 	const TCHAR* P = *Data;
 	FPathPoint Current = {0, 0};
@@ -412,6 +517,7 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 			Y = Abs(Y, Current.Y);
 			Current = {X, Y};
 			Start = Current;
+			if (OutAllClosed && ActivePath) *OutAllClosed = false;
 			ActivePath = &OutSubPaths.AddDefaulted_GetRef();
 			ActivePath->Add(Current);
 			OutBounds += FVector2D(X, Y);
@@ -547,6 +653,7 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 			if (ActivePath && ActivePath->Num() > 0)
 			{
 				ActivePath->Add(Start);
+				ActivePath->Last().bClosesContour = true;
 			}
 			Current = Start;
 			ActivePath = nullptr;
@@ -558,6 +665,7 @@ bool ParsePathData(const FString& Data, TArray<TArray<FPathPoint>>& OutSubPaths,
 		if (P <= IterationStart) return Fail();
 	}
 
+	if (OutAllClosed && ActivePath) *OutAllClosed = false;
 	for (const auto& Path : OutSubPaths)
 	{
 		for (const FPathPoint& Point : Path)
@@ -741,8 +849,8 @@ void ScanlineFill(
 		{
 			for (int32 i = 0; i + 1 < Intersections.Num(); i += 2)
 			{
-				int32 X0 = FMath::Max(0, FMath::CeilToInt(Intersections[i].Key));
-				int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i + 1].Key));
+				int32 X0 = FMath::Max(0, FMath::CeilToInt(Intersections[i].Key - 0.5f));
+				int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i + 1].Key - 0.5f));
 				for (int32 X = X0; X < X1; ++X)
 					OutPixels[Y * Width + X] = FillColor;
 			}
@@ -762,8 +870,8 @@ void ScanlineFill(
 				}
 				else if (PrevWinding != 0 && Winding == 0)
 				{
-					int32 X0 = FMath::Max(0, FMath::CeilToInt(SpanStart));
-					int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i].Key));
+					int32 X0 = FMath::Max(0, FMath::CeilToInt(SpanStart - 0.5f));
+					int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i].Key - 0.5f));
 					for (int32 X = X0; X < X1; ++X)
 						OutPixels[Y * Width + X] = FillColor;
 				}
@@ -788,8 +896,8 @@ bool FDesignPathRasterizer::TryGetRasterSize(float Width, float Height, FIntPoin
 		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: invalid or excessive path texture size %.3fx%.3f"), Width, Height);
 		return false;
 	}
-	const int64 RasterWidth = static_cast<int64>(FMath::Max(1, FMath::RoundToInt(Width))) * Supersample;
-	const int64 RasterHeight = static_cast<int64>(FMath::Max(1, FMath::RoundToInt(Height))) * Supersample;
+	const int64 RasterWidth = FMath::Max(1, FMath::RoundToInt(Width * Supersample));
+	const int64 RasterHeight = FMath::Max(1, FMath::RoundToInt(Height * Supersample));
 	if (!IsRasterSizeAllowed(RasterWidth, RasterHeight))
 	{
 		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: path texture exceeds the pixel budget (%lldx%lld)"), RasterWidth, RasterHeight);
@@ -812,6 +920,26 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	FString* OutError,
 	DesignImageResources::FImageOperationBudget* Budget)
 {
+	FUMGPathData PathData = Request.Path;
+	const bool bSourceStrokeRegion = IsSourceStrokeRegion(PathData);
+	const FString Geometry = GetPathPaintGeometry(PathData);
+	const int32 Width = Request.Size.X, Height = Request.Size.Y;
+	const int32 PaintWidth = Request.PaintSize.X > 0 ? Request.PaintSize.X : Width;
+	const int32 PaintHeight = Request.PaintSize.Y > 0 ? Request.PaintSize.Y : Height;
+	const FVector2D PaintOrigin(Request.PaintOffset.X, Request.PaintOffset.Y);
+	const FIntRect PaintRegion(FIntPoint::ZeroValue - Request.PaintOffset, Request.Size - Request.PaintOffset);
+	const auto& FillColor = PathData.FillColor;
+	const auto& StrokeColor = PathData.StrokeColor;
+	const FString FillRule = PathData.FillRule.Get(DesignPathRasterDefaults::FillRule);
+	const FString StrokeCap = PathData.StrokeCap.Get(DesignPathRasterDefaults::StrokeCap);
+	const FString StrokeJoin = PathData.StrokeJoin.Get(DesignPathRasterDefaults::StrokeJoin);
+	const float StrokeWidth = PathData.StrokeThickness.Get(0.0f);
+	const FString StrokeGeometry = bSourceStrokeRegion ? FString() : PathData.StrokeGeometry.Get(FString());
+	const auto* FillPaint = Request.FillPaint.IsSet() ? &Request.FillPaint.GetValue() : nullptr;
+	const auto* StrokePaint = Request.StrokePaint.IsSet() ? &Request.StrokePaint.GetValue() : nullptr;
+	const auto* FillImage = Request.FillImage.IsSet() ? &Request.FillImage.GetValue() : nullptr;
+	UTexture2D* FillTexture = Request.FillTexture;
+
 	check(IsInGameThread());
 	if (OutError) OutError->Reset();
 	if (Geometry.IsEmpty()) return nullptr;
@@ -823,15 +951,56 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 		return nullptr;
 	}
 
+    const auto* Surface = PathData.SourcePaintGeometry.IsSet() ? &PathData.SourcePaintGeometry.GetValue() : nullptr;
+    const bool bSourceSurface = Surface && Surface->FillPaints.IsSet() && Surface->StrokePaint.IsSet();
 	const bool bHasVisibleFill = HasVisibleColor(FillColor);
 	const bool bHasVisibleStroke = HasVisibleColor(StrokeColor) && StrokeWidth > KINDA_SMALL_NUMBER;
-	if (!bHasVisibleFill && !bHasVisibleStroke)
+	if (!bSourceSurface && !bHasVisibleFill && !bHasVisibleStroke)
 	{
 		return nullptr;
 	}
 
+	UTexture2D* SourceImage = nullptr;
+	if (FillImage)
+	{
+		SourceImage = FillTexture ? FillTexture : DesignResourceResolver::LoadTextureFromPath(FillImage->TexturePath.Get(FString()), DesignResourceResolver::ELoadMode::LoadThenFind);
+		if (!SourceImage)
+		{
+			if (OutError) *OutError = TEXT("Path fill image is not available");
+			return nullptr;
+		}
+	}
 	// --- Cache lookup ---
-	const TArray<uint8> CacheSignature = MakeCacheSignature(Geometry, Width, Height, FillColor, FillRule, StrokeColor, StrokeWidth, StrokeCap, StrokeJoin);
+	TArray<uint8> CacheSignature = MakeCacheSignature(Request,
+		SourceImage ? SourceImage->Source.GetId() : FGuid(), FObjectKey(SourceImage));
+    TMap<FString, UTexture2D*> SurfaceTextures;
+    if (bSourceSurface)
+    {
+        const auto ResolveImage = [&](const FUMGSurfacePaint& Paint) -> bool
+        {
+            const FString ImagePath = Paint.Image.TexturePath.Get(FString());
+            if (ImagePath.IsEmpty()) return true;
+            UTexture2D* Texture = Request.SurfaceTextures.FindRef(ImagePath);
+            if (!Texture) Texture = DesignResourceResolver::LoadTextureFromPath(ImagePath, DesignResourceResolver::ELoadMode::LoadThenFind);
+            if (!Texture) { if (OutError) *OutError = TEXT("Path surface image texture missing: ") + ImagePath; return false; }
+            SurfaceTextures.Add(ImagePath, Texture);
+            return true;
+        };
+        for (const auto& Paint : Surface->FillPaints.GetValue()) if (!ResolveImage(Paint)) return nullptr;
+        if (!ResolveImage(Surface->StrokePaint.GetValue())) return nullptr;
+        TArray<FString> ImagePaths;
+        SurfaceTextures.GetKeys(ImagePaths);
+        ImagePaths.Sort();
+        FMemoryWriter Writer(CacheSignature);
+        Writer.Seek(CacheSignature.Num());
+        for (auto& ImagePath : ImagePaths)
+        {
+            UTexture2D* Texture = SurfaceTextures.FindChecked(ImagePath);
+            FGuid Id = Texture->Source.GetId();
+            FObjectKey Object(Texture);
+            Writer << ImagePath << Id << Object;
+        }
+    }
 	const uint64 CacheKey = MakeCacheKey(CacheSignature);
 	if (FPathCacheEntry* Found = GPathCache.Find(CacheKey))
 	{
@@ -847,52 +1016,41 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 
 	TArray<TArray<FPathPoint>> SubPaths;
 	FBox2D Bounds;
-	if (!ParsePathData(Geometry, SubPaths, Bounds))
+	bool AllClosed;
+	if (!ParsePathData(Geometry, SubPaths, Bounds, &AllClosed))
 	{
 		if (OutError) *OutError = TEXT("Failed to parse path data");
 		UE_LOG(LogDesign2UMG, Warning, TEXT("DesignPathRasterizer: failed to parse path data"));
 		return nullptr;
 	}
 
-	// Recalculate precise bounds from all sampled points.
-	// Bounds from ParsePathData cover only control points and may miss curve bulges.
-	Bounds.Init();
-	for (const auto& Path : SubPaths)
+	if (!ResolveSourcePaintGeometryBounds(PathData))
 	{
-		for (const auto& Pt : Path)
-			Bounds += FVector2D(Pt.X, Pt.Y);
+		if (OutError) *OutError = TEXT("Failed to parse shared source paint bounds");
+		return nullptr;
 	}
+	const FPathPaintTransform PaintTransform = TransformPathToPaint(PathData, SubPaths, Bounds, PaintWidth, PaintHeight,
+		bHasVisibleStroke, bHasVisibleFill, FillPaint, StrokePaint, PaintOrigin);
+	const float Scale = PaintTransform.Scale, CoordinateScaleX = PaintTransform.ScaleX, CoordinateScaleY = PaintTransform.ScaleY;
+	const float OffsetX = PaintTransform.OffsetX, OffsetY = PaintTransform.OffsetY;
 
-	// Transform path coordinates to pixel space
-	FVector2D BoundsSize = Bounds.GetSize();
-	// Centerlines may have a collapsed axis. Reserve stroke thickness on that axis;
-	// fill-only zero-area geometry remains a valid, transparent raster.
-	const float CollapsedExtent = bHasVisibleStroke ? StrokeWidth : 1.0f;
-	if (BoundsSize.X == 0)
+	TArray<TArray<FPathPoint>> StrokePaths;
+	if (!StrokeGeometry.IsEmpty())
 	{
-		Bounds.Min.X -= CollapsedExtent * 0.5f;
-		BoundsSize.X = CollapsedExtent;
-	}
-	if (BoundsSize.Y == 0)
-	{
-		Bounds.Min.Y -= CollapsedExtent * 0.5f;
-		BoundsSize.Y = CollapsedExtent;
-	}
-
-	float ScaleX = Width / BoundsSize.X;
-	float ScaleY = Height / BoundsSize.Y;
-	float Scale = FMath::Min(ScaleX, ScaleY);
-	float OffsetX = (Width - BoundsSize.X * Scale) / 2.0f - Bounds.Min.X * Scale;
-	float OffsetY = (Height - BoundsSize.Y * Scale) / 2.0f - Bounds.Min.Y * Scale;
-
-	for (auto& Path : SubPaths)
-	{
-		for (auto& Pt : Path)
+		FBox2D StrokeBounds;
+		if (!ParsePathData(StrokeGeometry, StrokePaths, StrokeBounds))
 		{
-			Pt.X = Pt.X * Scale + OffsetX;
-			Pt.Y = Pt.Y * Scale + OffsetY;
+			if (OutError) *OutError = TEXT("Failed to parse stroke geometry");
+			return nullptr;
 		}
+		for (auto& Path : StrokePaths)
+			for (auto& Point : Path)
+			{
+				Point.X = Point.X * CoordinateScaleX + OffsetX;
+				Point.Y = Point.Y * CoordinateScaleY + OffsetY;
+			}
 	}
+	const auto& StrokeContours = StrokePaths.IsEmpty() ? SubPaths : StrokePaths;
 
 	// Cache hits allocate nothing. Charge misses before allocating the raster buffer.
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
@@ -908,7 +1066,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	TArray<FColor> Pixels;
 	Pixels.SetNumZeroed(static_cast<int32>(static_cast<int64>(Width) * Height));
 
-	const bool bEvenOdd = FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase);
+	bool bEvenOdd = FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase);
 	if (bHasVisibleFill)
 	{
 		ScanlineFill(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
@@ -917,7 +1075,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	// For implicit nonzero fills with multiple contours, compare an evenodd raster.
 	// Select evenodd when nonzero coverage exceeds it by 20%, preserving glyph holes.
 	// Explicit fill rules bypass this extra rasterization.
-	if (bHasVisibleFill && !bEvenOdd)
+	if (bHasVisibleFill && FillRule.IsEmpty())
 	{
 		TArray<FColor> EvenOddPixels;
 		ScanlineFill(SubPaths, EvenOddPixels, Width, Height, FillColor->ToFColor(true), true);
@@ -930,24 +1088,240 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 				TEXT("DesignPathRasterizer: fallback to evenodd fill for complex path (subpaths=%d coverage nonzero=%lld evenodd=%lld)"),
 				SubPaths.Num(), NonZeroCoverage, EvenOddCoverage);
 			Pixels = MoveTemp(EvenOddPixels);
+			bEvenOdd = true;
 		}
 	}
 
-	if (bHasVisibleStroke)
+	if (bSourceStrokeRegion)
+	{
+		const auto& Source = PathData.SourcePaintGeometry.GetValue();
+		if (Source.StrokeAlignment == TEXT("inner") || Source.StrokeAlignment == TEXT("outer"))
+		{
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{
+				if (OutError) *OutError = BudgetError;
+				return nullptr;
+			}
+			TArray<FColor> Interior;
+			Interior.SetNumZeroed(Pixels.Num());
+			if (Source.Geometry.FillPaths.IsSet())
+			{
+				TArray<FColor> FillMask;
+				for (const auto& FillPath : Source.Geometry.FillPaths.GetValue())
+				{
+					TArray<TArray<FPathPoint>> FillContours;
+					FBox2D FillBounds;
+					if (!ParsePathData(FillPath.Path, FillContours, FillBounds))
+					{
+						if (OutError) *OutError = TEXT("Failed to parse source fill geometry");
+						return nullptr;
+					}
+					for (auto& Contour : FillContours)
+						for (auto& Point : Contour)
+						{
+							Point.X = Point.X * CoordinateScaleX + OffsetX;
+							Point.Y = Point.Y * CoordinateScaleY + OffsetY;
+						}
+					if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+					{
+						if (OutError) *OutError = BudgetError;
+						return nullptr;
+					}
+					ScanlineFill(FillContours, FillMask, Width, Height, FColor::White,
+						FillPath.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
+					for (int32 Index = 0; Index < Interior.Num(); ++Index)
+						Interior[Index].A = FMath::Max(Interior[Index].A, FillMask[Index].A);
+				}
+			}
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+				if ((Interior[Index].A > 0) != (Source.StrokeAlignment == TEXT("inner")))
+					Pixels[Index] = FColor::Transparent;
+		}
+	}
+
+	const FString Alignment = AllClosed ? PathData.StrokeAlignment.Get(TEXT("center")) : FString(TEXT("center"));
+	const bool bAlignedStroke = PathData.StrokeAlignment.IsSet() && StrokeGeometry.IsEmpty();
+	if (bHasVisibleStroke && !StrokePaint && !bAlignedStroke)
 	{
 		const float ScaledStrokeWidth = FMath::Max(1.0f, StrokeWidth * Scale);
 		RasterizeStroke(
-			SubPaths,
+			StrokeContours,
 			Pixels,
 			Width,
 			Height,
 			StrokeColor->ToFColor(true),
 			ScaledStrokeWidth,
 			StrokeCap,
-			StrokeJoin);
+			StrokeJoin, StrokeGeometry.IsEmpty());
 	}
 
-	UTexture2D* Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
+	const auto PaintMask = [&](TArray<FColor>& Mask, const FUMGProceduralResourceRequest& SourcePaint) -> UTexture2D*
+	{
+		FUMGProceduralResourceRequest Paint = SourcePaint;
+		Paint.WidthOverride = static_cast<float>(PaintWidth);
+		Paint.HeightOverride = static_cast<float>(PaintHeight);
+		UTexture2D* Painted = FProceduralShapeGenerator::GenerateFromMaterialRef(Paint, nullptr, OutError, Budget, &PaintRegion);
+		if (!Painted) return nullptr;
+		FProceduralShapeGenerator::FlushPendingTextureUpdates();
+		const FColor* Colors = static_cast<const FColor*>(Painted->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+		for (int32 Index = 0; Index < Mask.Num(); ++Index)
+		{
+			const FColor Tint = Mask[Index];
+			const uint8 Coverage = Tint.A;
+			Mask[Index] = Colors[Index];
+			if (&SourcePaint == StrokePaint)
+			{
+				FLinearColor Tinted = FLinearColor::FromSRGBColor(Colors[Index]) * FLinearColor::FromSRGBColor(Tint);
+				Tinted.A = Colors[Index].A / 255.0f;
+				Mask[Index] = Tinted.ToFColor(true);
+			}
+			Mask[Index].A = static_cast<uint8>((static_cast<uint32>(Mask[Index].A) * Coverage + 127) / 255);
+		}
+		Painted->GetPlatformData()->Mips[0].BulkData.Unlock();
+		FProceduralShapeGenerator::ReleaseTransientTexture(Painted);
+		return Painted;
+	};
+	UTexture2D* Texture = nullptr;
+	if (bSourceSurface)
+	{
+		for (auto& Pixel : Pixels) Pixel = FColor::Transparent;
+		const auto RasterizeRegions = [&](const TOptional<TArray<FDesignGeometryPath>>& Regions, TArray<FColor>& Mask) -> bool
+		{
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{ if (OutError) *OutError = BudgetError; return false; }
+			Mask.SetNumZeroed(Pixels.Num());
+			if (!Regions.IsSet()) return true;
+			for (const auto& Region : Regions.GetValue())
+			{
+				TArray<TArray<FPathPoint>> Contours;
+				FBox2D RegionBounds;
+				if (!ParsePathData(Region.Path, Contours, RegionBounds))
+				{ if (OutError) *OutError = TEXT("Failed to parse source surface geometry"); return false; }
+				for (auto& Contour : Contours) for (auto& Point : Contour)
+				{
+					Point.X = Point.X * CoordinateScaleX + OffsetX;
+					Point.Y = Point.Y * CoordinateScaleY + OffsetY;
+				}
+				if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+				{ if (OutError) *OutError = BudgetError; return false; }
+				TArray<FColor> RegionMask;
+				ScanlineFill(Contours, RegionMask, Width, Height, FColor::White,
+					Region.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
+				for (int32 Index = 0; Index < Mask.Num(); ++Index)
+					if (RegionMask[Index].A > Mask[Index].A) Mask[Index] = RegionMask[Index];
+			}
+			return true;
+		};
+		TArray<FColor> FillMask, StrokeMask;
+		if (!RasterizeRegions(Surface->Geometry.FillPaths, FillMask) || !RasterizeRegions(Surface->Geometry.StrokePaths, StrokeMask)) return nullptr;
+		if (Surface->StrokeAlignment != TEXT("center"))
+			for (int32 Index = 0; Index < StrokeMask.Num(); ++Index)
+				if ((FillMask[Index].A > 0) != (Surface->StrokeAlignment == TEXT("inner"))) StrokeMask[Index] = FColor::Transparent;
+
+		const auto CompositePaint = [&](const TArray<FColor>& Mask, const FUMGSurfacePaint& SourcePaint) -> bool
+		{
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{ if (OutError) *OutError = BudgetError; return false; }
+			TArray<FColor> Painted = Mask;
+			if (SourcePaint.Gradient.HasAny())
+			{
+				FUMGProceduralResourceRequest Paint;
+				Paint.Gradient = SourcePaint.Gradient;
+				Paint.MaterialRef = Design2UMGWidgetNodeAccess::GetGradientMaterialRef(Paint.Gradient);
+				if (!PaintMask(Painted, Paint)) return false;
+			}
+			const FString ImagePath = SourcePaint.Image.TexturePath.Get(FString());
+			if (!ImagePath.IsEmpty())
+			{
+				const auto Transform = SourcePaint.Image.Mode.Get(FString()) == TEXT("Crop")
+					? SourcePaint.Image.Transform.Get(FUMGVisualBrushData::FImageTransformData()) : FUMGVisualBrushData::FImageTransformData();
+				UTexture2D* ImageTexture = FProceduralShapeGenerator::ApplyAffineCrop(SurfaceTextures.FindChecked(ImagePath),
+					Transform.A, Transform.B, Transform.TX, Transform.C, Transform.D, Transform.TY,
+					PaintWidth, PaintHeight, OutError, Budget, SourcePaint.Image.CropFitMode.Get(FString()), &PaintRegion);
+				if (!ImageTexture) return false;
+				FProceduralShapeGenerator::FlushPendingTextureUpdates();
+				const FColor* Colors = static_cast<const FColor*>(ImageTexture->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+				for (int32 Index = 0; Index < Painted.Num(); ++Index)
+				{
+					Painted[Index] = (FLinearColor::FromSRGBColor(Colors[Index]) * FLinearColor::FromSRGBColor(Painted[Index])).ToFColor(true);
+				}
+				ImageTexture->GetPlatformData()->Mips[0].BulkData.Unlock();
+				FProceduralShapeGenerator::ReleaseTransientTexture(ImageTexture);
+			}
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+			{
+				const FLinearColor Under = FLinearColor::FromSRGBColor(Pixels[Index]);
+				const FLinearColor Over = FLinearColor::FromSRGBColor(Painted[Index]) * SourcePaint.Color;
+				const float Alpha = Over.A + Under.A * (1.0f - Over.A);
+				FLinearColor Combined = Over * Over.A + Under * Under.A * (1.0f - Over.A);
+				if (Alpha > 0.0f) Combined /= Alpha;
+				Combined.A = Alpha;
+				Pixels[Index] = Combined.ToFColor(true);
+			}
+			return true;
+		};
+		for (const auto& Paint : Surface->FillPaints.GetValue()) if (!CompositePaint(FillMask, Paint)) return nullptr;
+		if (!CompositePaint(StrokeMask, Surface->StrokePaint.GetValue())) return nullptr;
+	}
+	else
+	{
+		Texture = FillPaint ? PaintMask(Pixels, *FillPaint) : nullptr;
+		if (FillPaint && !Texture) return nullptr;
+		if (SourceImage)
+		{
+			const auto Transform = FillImage->Mode.Get(FString()) == TEXT("Crop")
+				? FillImage->Transform.Get(FUMGVisualBrushData::FImageTransformData()) : FUMGVisualBrushData::FImageTransformData();
+			Texture = FProceduralShapeGenerator::ApplyAffineCrop(SourceImage, Transform.A, Transform.B, Transform.TX,
+				Transform.C, Transform.D, Transform.TY, PaintWidth, PaintHeight, OutError, Budget, FillImage->CropFitMode.Get(FString()), &PaintRegion);
+			if (!Texture) return nullptr;
+			FProceduralShapeGenerator::FlushPendingTextureUpdates();
+			const FColor* ImagePixels = static_cast<const FColor*>(Texture->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+			{
+				Pixels[Index] = (FLinearColor::FromSRGBColor(ImagePixels[Index]) * FLinearColor::FromSRGBColor(Pixels[Index])).ToFColor(true);
+			}
+			Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
+			FProceduralShapeGenerator::ReleaseTransientTexture(Texture);
+		}
+
+		if ((StrokePaint || bAlignedStroke) && bHasVisibleStroke)
+		{
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{
+				if (OutError) *OutError = BudgetError;
+				return nullptr;
+			}
+			TArray<FColor> StrokePixels;
+			StrokePixels.SetNumZeroed(Pixels.Num());
+			const bool bClipStroke = bAlignedStroke && Alignment != TEXT("center");
+			RasterizeStroke(StrokeContours, StrokePixels, Width, Height, StrokeColor->ToFColor(true),
+				FMath::Max(1.0f, StrokeWidth * Scale * (bClipStroke ? 2.0f : 1.0f)), StrokeCap, StrokeJoin, StrokeGeometry.IsEmpty());
+			if (bClipStroke)
+			{
+				if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+				{ if (OutError) *OutError = BudgetError; return nullptr; }
+				TArray<FColor> Interior;
+				ScanlineFill(SubPaths, Interior, Width, Height, FColor::White, bEvenOdd);
+				for (int32 Index = 0; Index < StrokePixels.Num(); ++Index)
+					if ((Interior[Index].A > 0) != (Alignment == TEXT("inner"))) StrokePixels[Index] = FColor::Transparent;
+			}
+			UTexture2D* PaintedStroke = StrokePaint ? PaintMask(StrokePixels, *StrokePaint) : nullptr;
+			if (StrokePaint && !PaintedStroke) return nullptr;
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+			{
+				const FLinearColor Background = FLinearColor::FromSRGBColor(Pixels[Index]);
+				const FLinearColor Foreground = FLinearColor::FromSRGBColor(StrokePixels[Index]);
+				const float Alpha = Foreground.A + Background.A * (1.0f - Foreground.A);
+				FLinearColor Combined = Foreground * Foreground.A + Background * (Background.A * (1.0f - Foreground.A));
+				if (Alpha > 0.0f) Combined /= Alpha;
+				Combined.A = Alpha;
+				Pixels[Index] = Combined.ToFColor(true);
+			}
+			if (!Texture) Texture = PaintedStroke;
+		}
+	}
+
+	if (!Texture) Texture = UTexture2D::CreateTransient(Width, Height, PF_B8G8R8A8, NAME_None);
 	if (!Texture)
 		return nullptr;
 
@@ -964,10 +1338,38 @@ UTexture2D* FDesignPathRasterizer::Rasterize(
 	Texture->MipGenSettings = TMGS_NoMipmaps;
 	Texture->LODGroup = TEXTUREGROUP_UI;
 	Texture->Filter = TF_Bilinear;
+	Texture->AddressX = TA_Clamp;
+	Texture->AddressY = TA_Clamp;
 	Texture->NeverStream = true;
 
-	void* TextureData = Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
+	FColor* TextureData = static_cast<FColor*>(Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE));
 	FMemory::Memcpy(TextureData, Pixels.GetData(), Pixels.Num() * sizeof(FColor));
+	// Bilinear sampling mixes a 2x2 footprint: extend edge RGB by one texel without changing coverage.
+	for (int32 Y = 0; Y < Height; ++Y)
+	{
+		for (int32 X = 0; X < Width; ++X)
+		{
+			const int32 Index = Y * Width + X;
+			if (Pixels[Index].A != 0) continue;
+			FLinearColor EdgeColor(0.0f, 0.0f, 0.0f, 0.0f);
+			float AlphaWeight = 0.0f;
+			for (int32 NeighborY = FMath::Max(0, Y - 1); NeighborY <= FMath::Min(Height - 1, Y + 1); ++NeighborY)
+			{
+				for (int32 NeighborX = FMath::Max(0, X - 1); NeighborX <= FMath::Min(Width - 1, X + 1); ++NeighborX)
+				{
+					const FColor& Neighbor = Pixels[NeighborY * Width + NeighborX];
+					if (Neighbor.A == 0) continue;
+					EdgeColor += FLinearColor::FromSRGBColor(Neighbor) * Neighbor.A;
+					AlphaWeight += Neighbor.A;
+				}
+			}
+			if (AlphaWeight > 0.0f)
+			{
+				TextureData[Index] = (EdgeColor / AlphaWeight).ToFColor(true);
+				TextureData[Index].A = 0;
+			}
+		}
+	}
 	Texture->GetPlatformData()->Mips[0].BulkData.Unlock();
 	Texture->UpdateResource();
 	bHasPendingTextureUpdates = true;

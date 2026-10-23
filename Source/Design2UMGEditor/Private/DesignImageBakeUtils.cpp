@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImageBakeUtils.h"
+#include "DesignRemoteImageImporterInternal.h"
 
 #include "Design2UMGLog.h"
 #include "DesignSchema.h"
@@ -381,42 +382,15 @@ bool DesignImageBakeUtils::DecodeImageFileToBGRA8(
 	TArray64<uint8>& OutRawData,
 	FString& OutError)
 {
+	using DesignRemoteImageImporterInternal::FImagePayloadIO;
+	const DesignImageResources::FImageResourceLimits Limits;
 	TArray<uint8> CompressedData;
-	if (!FFileHelper::LoadFileToArray(CompressedData, *ImagePath) || CompressedData.Num() == 0)
+	if (!FImagePayloadIO::LoadLocalFile(ImagePath, Limits, CompressedData, OutError)) return false;
+	if (!FImagePayloadIO::DecodeToBGRA8(CompressedData, Limits, OutWidth, OutHeight, OutRawData, OutError))
 	{
-		OutError = FString::Printf(TEXT("Failed to read image data: %s"), *ImagePath);
+		OutError += TEXT(": ") + ImagePath;
 		return false;
 	}
-
-	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-	const EImageFormat Format = ImageWrapperModule.DetectImageFormat(CompressedData.GetData(), CompressedData.Num());
-	if (Format == EImageFormat::Invalid)
-	{
-		OutError = FString::Printf(TEXT("Unsupported image format: %s"), *ImagePath);
-		return false;
-	}
-
-	TSharedPtr<IImageWrapper> Wrapper = ImageWrapperModule.CreateImageWrapper(Format);
-	if (!Wrapper.IsValid() || !Wrapper->SetCompressed(CompressedData.GetData(), CompressedData.Num()))
-	{
-		OutError = FString::Printf(TEXT("Failed to parse image data: %s"), *ImagePath);
-		return false;
-	}
-
-	OutWidth = Wrapper->GetWidth();
-	OutHeight = Wrapper->GetHeight();
-	if (OutWidth <= 0 || OutHeight <= 0)
-	{
-		OutError = FString::Printf(TEXT("Invalid image dimensions: %s"), *ImagePath);
-		return false;
-	}
-
-	if (!Wrapper->GetRaw(ERGBFormat::BGRA, 8, OutRawData))
-	{
-		OutError = FString::Printf(TEXT("Failed to decode image pixels: %s"), *ImagePath);
-		return false;
-	}
-
 	return true;
 }
 

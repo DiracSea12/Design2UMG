@@ -2,6 +2,7 @@
 #include "UMGBrushPropertyApplier.h"
 #include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignImageResourceLimits.h"
+#include "DesignPathRasterizer.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "DesignResourceResolver.h"
@@ -16,6 +17,7 @@
 #include "Components/Image.h"
 #include "Components/RetainerBox.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
@@ -135,6 +137,12 @@ namespace UMGBrushPropertyApplier
 			Brush.SetResourceObject(GeneratedTexture);
 			Brush.DrawAs = ESlateBrushDrawType::Image;
 			Brush.ImageSize = FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY());
+			if (Node.Path.HasPaintGeometry())
+			{
+				const auto UV = PathRequest.GetCanvasUVTransform();
+				Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
+				Brush.ImageSize = FVector2D(PathRequest.CanvasBounds.Size());
+			}
 			bBrushChanged = true;
 		}
 		else
@@ -235,10 +243,13 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
+		if (!Node.Path.HasPaintGeometry())
 		{
-			Brush.SetResourceObject(Cropped);
-		}, Budget) || bBrushChanged;
+			bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
+			{
+				Brush.SetResourceObject(Cropped);
+			}, Budget) || bBrushChanged;
+		}
 
 		if (bBrushChanged)
 		{

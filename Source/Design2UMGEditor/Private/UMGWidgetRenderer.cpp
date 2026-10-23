@@ -9,8 +9,12 @@
 #include "ProceduralShapeGenerator.h"
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/Change.h"
+#include "Misc/ITransaction.h"
 
 #include "WidgetBlueprint.h"
+#include "Design2UMGWidgetMetadata.h"
+#include "UObject/Package.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -29,9 +33,18 @@
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Input/HittestGrid.h"
+#include "Interfaces/ISlate3DRenderer.h"
+#include "Types/PaintArgs.h"
+#include "Rendering/DrawElements.h"
+#include "Rendering/ElementBatcher.h"
+#include "Rendering/SlateRenderBatch.h"
+#include "Rendering/SlateDrawBuffer.h"
+#include "Rendering/SlateRenderer.h"
+#include "Misc/App.h"
 #include "RHI.h"
 #include "Slate/WidgetRenderer.h"
 #include "TextureResource.h"
+#include "TextureCompiler.h"
 #include "RenderingThread.h"
 #include "Styling/SlateBrush.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
@@ -44,6 +57,7 @@
 
 namespace
 {
+	bool RenderSlateWidgetToPngData(TSharedRef<SWidget> SlateWidget, const FIntPoint& LayoutSize, TArray<uint8>& OutPngData, FIntPoint& OutSize, UWidgetTree* WidgetTree = nullptr, FString* OutError = nullptr);
 	void DumpOwnedTextBlockFontState(const TCHAR* Stage, UWidgetTree* WidgetTree, const FString& OwnerName)
 	{
 		FUMGWidgetRenderer::DumpTextBlockFontStates(ELogVerbosity::Log, Stage, WidgetTree, TEXT("owner"), OwnerName);
@@ -154,12 +168,25 @@ namespace
 		}
 
 		Texture->ConditionalPostLoad();
+		FTextureCompilingManager::Get().FinishCompilation({ Texture });
 		Texture->FinishCachePlatformData();
 		Texture->TemporarilyDisableStreaming();
 		Texture->UpdateResource();
 		Texture->SetForceMipLevelsToBeResident(30.0f);
 		Texture->WaitForStreaming();
 		Texture->GetPlatformData();
+	}
+
+	void WarmUpMaterialResources(UMaterialInterface* Material)
+	{
+		if (!Material) return;
+		Design2UMGMaterialAccess::WaitForCompilation(*Material->GetMaterial());
+		TArray<UTexture*> Textures;
+		Design2UMGMaterialAccess::GetUsedTextures(*Material, Textures);
+		for (UTexture* Texture : Textures)
+		{
+			if (UTexture2D* Texture2D = Cast<UTexture2D>(Texture)) WarmUpTextureResource(Texture2D);
+		}
 	}
 
 	void WarmUpFontData(const FFontData& FontData)
@@ -256,6 +283,15 @@ namespace
 				{
 					WarmUpTextureResource(Texture);
 				}
+				else if (UMaterialInterface* Material = Cast<UMaterialInterface>(Brush->GetResourceObject()))
+				{
+					WarmUpMaterialResources(Material);
+				}
+			}
+			if (const URetainerBox* Retainer = Cast<URetainerBox>(Widget))
+			{
+				// The native getter exposes a const view; preparation only completes render caches.
+				WarmUpMaterialResources(const_cast<UMaterialInterface*>(Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Retainer)));
 			}
 		});
 	}
@@ -292,7 +328,17 @@ namespace
 
 	bool IsValidRenderSize(const FIntPoint& Size)
 	{
-		return Size.X > 1 && Size.Y > 1;
+		return Size.X > 0 && Size.Y > 0;
+	}
+
+	bool IsWithinExportPixelBudget(const FIntPoint& Size, FString* OutError = nullptr)
+	{
+		if (static_cast<int64>(Size.X) * Size.Y > FUMGWidgetRenderer::MaxExportPixels)
+		{
+			if (OutError) *OutError = FString::Printf(TEXT("render export exceeds pixel budget: %dx%d"), Size.X, Size.Y);
+			return false;
+		}
+		return true;
 	}
 
 	// The render target must stay within the active RHI's max 2D texture dimension;
@@ -304,14 +350,6 @@ namespace
 		return Size.X <= MaxTextureDimension && Size.Y <= MaxTextureDimension;
 	}
 
-	FString RenderSizeExceedsRHITextureLimitMessage(const FIntPoint& Size)
-	{
-		return FString::Printf(
-			TEXT("render target exceeds max texture dimension: %dx%d (max %d)"),
-			Size.X,
-			Size.Y,
-			static_cast<int32>(GetMax2DTextureDimension()));
-	}
 
 	FIntPoint ComputePreviewRenderSize(const FIntPoint& FallbackSize, const TSharedRef<SVirtualWindow>& Window)
 	{
@@ -357,6 +395,63 @@ namespace
 				ClearedCount);
 		}
 	}
+}
+
+namespace
+{
+
+
+	const TCHAR* ExportBoundsMetadataKey = TEXT("Design2UMG.ExportBounds");
+
+	// Package metadata is not part of the blueprint's reflected transaction state.
+	class FExportBoundsChange final : public FSwapChange
+	{
+	public:
+		explicit FExportBoundsChange(FString InValue) : Value(MoveTemp(InValue)) {}
+		TUniquePtr<FChange> Execute(UObject* Object) override
+		{
+			UWidgetBlueprint* Blueprint = CastChecked<UWidgetBlueprint>(Object);
+			auto& Metadata = Design2UMGWidgetMetadata::PackageMetadata(Blueprint);
+			TUniquePtr<FChange> Inverse = MakeUnique<FExportBoundsChange>(Metadata.GetValue(Blueprint, ExportBoundsMetadataKey));
+			Metadata.SetValue(Blueprint, ExportBoundsMetadataKey, *Value);
+			return Inverse;
+		}
+		FString ToString() const override { return TEXT("Source export bounds"); }
+	private:
+		FString Value;
+	};
+}
+
+bool FUMGWidgetRenderer::BuildExportPlan(const FIntPoint& Size, int32 MaxTextureDimension, FUMGWidgetExportPlan& OutPlan, FString* OutError)
+{
+	OutPlan = FUMGWidgetExportPlan();
+	if (Size.X <= 0 || Size.Y <= 0 || MaxTextureDimension <= 0) return false;
+	if (!IsWithinExportPixelBudget(Size, OutError)) return false;
+	OutPlan.Size = Size;
+	const bool bSingleTarget = Size.X <= MaxTextureDimension && Size.Y <= MaxTextureDimension;
+	const int32 TileEdge = FMath::Min(MaxTextureDimension, DesignImageResources::RenderTileEdge);
+	OutPlan.TileSize = bSingleTarget ? Size : FIntPoint(FMath::Min(Size.X, TileEdge), FMath::Min(Size.Y, TileEdge));
+	OutPlan.TileCount = FIntPoint(FMath::DivideAndRoundUp(Size.X, OutPlan.TileSize.X), FMath::DivideAndRoundUp(Size.Y, OutPlan.TileSize.Y));
+	return true;
+}
+
+void FUMGWidgetRenderer::SetBlueprintExportBounds(UWidgetBlueprint* WidgetBlueprint, const TOptional<FBox2D>& Bounds)
+{
+	auto& Metadata = Design2UMGWidgetMetadata::PackageMetadata(WidgetBlueprint);
+	const FString Value = Bounds.IsSet()
+		? FVector4(Bounds->Min.X, Bounds->Min.Y, Bounds->Max.X, Bounds->Max.Y).ToString() : FString();
+	const FString PreviousValue = Metadata.GetValue(WidgetBlueprint, ExportBoundsMetadataKey);
+	if (Value == PreviousValue) return;
+	if (GUndo && !GIsTransacting) GUndo->StoreUndo(WidgetBlueprint, MakeUnique<FExportBoundsChange>(PreviousValue));
+	Metadata.SetValue(WidgetBlueprint, ExportBoundsMetadataKey, *Value);
+}
+
+FBox2D FUMGWidgetRenderer::GetBlueprintExportBounds(UWidgetBlueprint* WidgetBlueprint)
+{
+	FVector4 Bounds;
+	if (Bounds.InitFromString(Design2UMGWidgetMetadata::PackageMetadata(WidgetBlueprint).GetValue(WidgetBlueprint, ExportBoundsMetadataKey)))
+		return FBox2D(FVector2D(Bounds.X, Bounds.Y), FVector2D(Bounds.Z, Bounds.W));
+	return FBox2D(FVector2D::ZeroVector, GetBlueprintDesignSize(WidgetBlueprint));
 }
 
 TOptional<FVector2D> FUMGWidgetRenderer::GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
@@ -521,7 +616,7 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	}
 	const FVector2D DesignSize = GetBlueprintDesignSize(WidgetBP);
 	const FIntPoint LayoutPixelSize = ResolveDesignLayoutPixelSize(DesignSize);
-	const bool bHasValidDesignSize = DesignSize.X > 1.0f && DesignSize.Y > 1.0f && IsValidRenderSize(LayoutPixelSize);
+	const bool bHasValidDesignSize = DesignSize.X > 0.0f && DesignSize.Y > 0.0f && IsValidRenderSize(LayoutPixelSize);
 	if (!bHasValidDesignSize)
 	{
 		UE_LOG(LogDesign2UMG, Warning,
@@ -532,9 +627,11 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 
 	// Canvas calibration: an explicit override pins the virtual window/RT extent;
 	// the widget tree keeps laying out against its own geometry.
+	const FBox2D ExportBounds = GetBlueprintExportBounds(WidgetBP);
+	const FVector2D ExportSize = ExportBounds.GetSize();
 	const FIntPoint SlateRenderSize = RenderSizeOverride.IsSet()
 		? FIntPoint(FMath::RoundToInt(RenderSizeOverride.GetValue().X), FMath::RoundToInt(RenderSizeOverride.GetValue().Y))
-		: LayoutPixelSize;
+		: FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y));
 	if (!IsValidRenderSize(SlateRenderSize))
 	{
 		UE_LOG(LogDesign2UMG, Warning,
@@ -542,14 +639,11 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 			SlateRenderSize.X, SlateRenderSize.Y);
 		return false;
 	}
-	if (!IsRenderSizeWithinRHITextureLimits(SlateRenderSize))
+	FString ExportError;
+	if (!IsWithinExportPixelBudget(SlateRenderSize, &ExportError))
 	{
-		const FString Reason = RenderSizeExceedsRHITextureLimitMessage(SlateRenderSize);
-		UE_LOG(LogDesign2UMG, Error, TEXT("RenderWidgetToPng: %s"), *Reason);
-		if (OutError)
-		{
-			*OutError = Reason;
-		}
+		UE_LOG(LogDesign2UMG, Error, TEXT("RenderWidgetToPng: %s"), *ExportError);
+		if (OutError) *OutError = ExportError;
 		return false;
 	}
 	// Keep the root at its design extent when the export canvas includes overflow.
@@ -559,12 +653,16 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	TSharedRef<SWidget> WindowContent = SlateWidget;
 	const bool bCalibrationXOverflow = SlateRenderSize.X > LayoutPixelSize.X;
 	const bool bCalibrationYOverflow = SlateRenderSize.Y > LayoutPixelSize.Y;
-	if (RootExportOffset.IsSet() || bCalibrationXOverflow || bCalibrationYOverflow)
+	if (RootExportOffset.IsSet() || (!RenderSizeOverride.IsSet() && !ExportBounds.Min.IsNearlyZero()) || bCalibrationXOverflow || bCalibrationYOverflow)
 	{
 		FVector2D Offset = FVector2D::ZeroVector;
 		if (RootExportOffset.IsSet())
 		{
 			Offset = RootExportOffset.GetValue();
+		}
+		else if (!RenderSizeOverride.IsSet())
+		{
+			Offset = -ExportBounds.Min;
 		}
 		else if (bCalibrationXOverflow && bCalibrationYOverflow)
 		{
@@ -579,6 +677,14 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 			.Alignment(FVector2D::ZeroVector)
 			.AutoSize(false)
 			[SlateWidget];
+	}
+	if (!IsRenderSizeWithinRHITextureLimits(SlateRenderSize))
+	{
+		const bool bRendered = RenderSlateWidgetToPngData(WindowContent, SlateRenderSize, OutPngData, OutSize, Widget->WidgetTree, OutError);
+		if (bRendered && OutRenderedWidget) OutRenderedWidget->Reset(Widget);
+		if (bRendered && OutRenderedSlateWidget) *OutRenderedSlateWidget = SlateWidget;
+		if (!bRendered && OutError && OutError->IsEmpty()) *OutError = TEXT("Failed to render tiled source canvas");
+		return bRendered;
 	}
 	TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
 	Window->SetContent(WindowContent);
@@ -650,20 +756,119 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 
 namespace
 {
-	bool RenderSlateWidgetToPngData(TSharedRef<SWidget> SlateWidget, const FIntPoint& LayoutSize, TArray<uint8>& OutPngData, FIntPoint& OutSize)
+	bool RenderTiledSlateWidgetToPixels(TSharedRef<SWidget> Content, const FIntPoint& Size, TArray<FColor>& Pixels, UWidgetTree* WidgetTree, FString* OutError)
+	{
+		FUMGWidgetExportPlan Plan;
+		if (!FUMGWidgetRenderer::BuildExportPlan(Size, static_cast<int32>(GetMax2DTextureDimension()), Plan, OutError)) return false;
+		TSharedRef<SVirtualWindow> Window = SNew(SVirtualWindow);
+		Window->SetContent(Content);
+		Window->Resize(FVector2D(Size));
+		Window->SlatePrepass(1.0f);
+		FWidgetRenderer Renderer(true);
+		ISlate3DRenderer* SlateRenderer = Renderer.GetSlateRenderer();
+		FSlateRenderer* MainRenderer = FSlateApplication::Get().GetRenderer();
+		FHittestGrid HitTestGrid;
+		HitTestGrid.SetHittestArea(FVector2D::ZeroVector, FVector2D(Size));
+		const FGeometry Geometry = FGeometry::MakeRoot(FVector2D(Size), FSlateLayoutTransform(1.0f));
+		const FSlateRect Clip(0, 0, Size.X, Size.Y);
+		FProceduralShapeGenerator::FlushPendingTextureUpdates();
+		FDesignPathRasterizer::FlushPendingTextureUpdates();
+		// Warm the native Retainers at full logical geometry, without a full-sized output target.
+		{
+			ISlate3DRenderer::FScopedAcquireDrawBuffer Warmup(*SlateRenderer);
+			FSlateWindowElementList& Elements = Warmup.GetDrawBuffer().AddWindowElementList(Window);
+			FScopeLock ScopeLock(MainRenderer->GetResourceCriticalSection());
+			Window->Paint(FPaintArgs(nullptr, HitTestGrid, FVector2D::ZeroVector, FApp::GetCurrentTime(), 0.1f), Geometry, Clip, Elements, 0, FWidgetStyle(), Window->IsEnabled());
+		}
+		FlushRenderingCommands();
+		Window->SlatePrepass(1.0f);
+		HitTestGrid.Clear();
+		ISlate3DRenderer::FScopedAcquireDrawBuffer Frame(*SlateRenderer);
+		FSlateDrawBuffer& DrawBuffer = Frame.GetDrawBuffer();
+		FSlateWindowElementList& Elements = DrawBuffer.AddWindowElementList(Window);
+		const double PaintTime = FApp::GetCurrentTime();
+		const double RealTime = FPlatformTime::Seconds() - GStartTime;
+		const float DeltaTime = static_cast<float>(FApp::GetDeltaTime());
+		{
+			FScopeLock ScopeLock(MainRenderer->GetResourceCriticalSection());
+			Window->Paint(FPaintArgs(nullptr, HitTestGrid, FVector2D::ZeroVector, PaintTime, 0.1f), Geometry, Clip, Elements, 0, FWidgetStyle(), Window->IsEnabled());
+			SlateRenderer->DrawWindow_GameThread(DrawBuffer);
+		}
+		// A root-window postprocess reads neighboring pixels from the output target.
+		// Replaying it on independent tiles would lose those samples at tile edges.
+		for (const FSlateRenderBatch& Batch : Elements.GetBatchData().GetRenderBatches())
+		{
+			if (Batch.GetShaderType() == ESlateShader::PostProcess)
+			{
+				if (OutError) *OutError = TEXT("Tiled export requires cross-tile background-blur sampling; native postprocess is not yet supported");
+				FlushRenderingCommands();
+				return false;
+			}
+		}
+		// A native Retainer falls back to unfiltered children when its target is oversized.
+		// Report that unsupported capture instead of exporting a silently missing effect.
+		bool bCaptureFits = true;
+		if (WidgetTree) WidgetTree->ForEachWidgetAndDescendants([&](UWidget* Widget)
+		{
+			if (const URetainerBox* Retainer = Cast<URetainerBox>(Widget); Retainer && Design2UMGWidgetPropertyAccess::IsRetainRendering(*Retainer))
+			{
+				const FGeometry& Cached = Retainer->GetCachedGeometry();
+				const auto Scale = Cached.GetAccumulatedRenderTransform().GetMatrix().GetScale().GetVector();
+				const FVector2D Capture = FVector2D(Cached.GetLocalSize()) * FVector2D(Scale);
+				const FIntPoint CaptureSize(FMath::RoundToInt(FMath::Abs(Capture.X)), FMath::RoundToInt(FMath::Abs(Capture.Y)));
+				if (!IsRenderSizeWithinRHITextureLimits(CaptureSize))
+				{
+					bCaptureFits = false;
+					if (OutError) *OutError = FString::Printf(TEXT("Retainer capture exceeds RHI texture dimension: %dx%d (%s)"), CaptureSize.X, CaptureSize.Y, *Retainer->GetName());
+				}
+			}
+		});
+		if (!bCaptureFits)
+		{
+			FlushRenderingCommands();
+			return false;
+		}
+		Pixels.SetNumUninitialized(Size.X * Size.Y);
+		for (int32 Y = 0; Y < Size.Y; Y += Plan.TileSize.Y)
+		{
+			for (int32 X = 0; X < Size.X; X += Plan.TileSize.X)
+			{
+				const FIntPoint TileSize(FMath::Min(Plan.TileSize.X, Size.X - X), FMath::Min(Plan.TileSize.Y, Size.Y - Y));
+				TStrongObjectPtr<UTextureRenderTarget2D> Target(NewObject<UTextureRenderTarget2D>());
+				Target->Filter = TF_Bilinear;
+				Target->ClearColor = FLinearColor::Transparent;
+				Target->SRGB = true;
+				Target->RenderTargetFormat = RTF_RGBA8;
+				Target->InitCustomFormat(TileSize.X, TileSize.Y, PF_B8G8R8A8, true);
+				FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
+				if (!Resource) return false;
+				// Only the projection viewport moves. Layout, clips, paint data and shader time stay fixed.
+				DrawBuffer.ViewOffset = FVector2D(-X, -Y);
+				FRenderThreadUpdateContext Context = { &DrawBuffer, PaintTime - GStartTime, DeltaTime, RealTime, DeltaTime, Resource, SlateRenderer, true };
+				MainRenderer->AddWidgetRendererUpdate(Context, false);
+				FlushRenderingCommands();
+				TArray<FColor> TilePixels;
+				const bool bRead = Resource->ReadPixels(TilePixels);
+				Target->ReleaseResource();
+				if (!bRead || TilePixels.Num() != TileSize.X * TileSize.Y) return false;
+				FUMGWidgetRenderer::UnpremultiplyPixels(TilePixels);
+				for (int32 Row = 0; Row < TileSize.Y; ++Row)
+					FMemory::Memcpy(&Pixels[(Y + Row) * Size.X + X], &TilePixels[Row * TileSize.X], TileSize.X * sizeof(FColor));
+			}
+		}
+		return true;
+	}
+
+	bool RenderSlateWidgetToPixels(TSharedRef<SWidget> SlateWidget, const FIntPoint& LayoutSize, TArray<FColor>& Pixels, UWidgetTree* WidgetTree = nullptr, FString* OutError = nullptr)
 	{
 		if (!IsValidRenderSize(LayoutSize))
 		{
 			return false;
 		}
 
+		if (!IsWithinExportPixelBudget(LayoutSize)) return false;
 		if (!IsRenderSizeWithinRHITextureLimits(LayoutSize))
-		{
-			UE_LOG(LogDesign2UMG, Error,
-				TEXT("RenderWidgetTreeToPng: %s"),
-				*RenderSizeExceedsRHITextureLimitMessage(LayoutSize));
-			return false;
-		}
+			return RenderTiledSlateWidgetToPixels(SlateWidget, LayoutSize, Pixels, WidgetTree, OutError);
 
 		const FIntPoint OutputSize = LayoutSize;
 		TSharedRef<SWidget> WindowContent = SlateWidget;
@@ -699,23 +904,26 @@ namespace
 			return false;
 		}
 
-		TArray<FColor> Pixels;
-		Resource->ReadPixels(Pixels);
+		const bool bReadPixels = Resource->ReadPixels(Pixels);
 		FUMGWidgetRenderer::UnpremultiplyPixels(Pixels);
 		RT->ReleaseResource();
 		RT->MarkAsGarbage();
 
-		if (Pixels.Num() == 0) return false;
+		return bReadPixels && Pixels.Num() == OutputSize.X * OutputSize.Y;
+	}
 
-		IImageWrapperModule& WrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-		TSharedPtr<IImageWrapper> Wrapper = WrapperModule.CreateImageWrapper(EImageFormat::PNG);
-		if (!Wrapper.IsValid()) return false;
-
-		Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), OutputSize.X, OutputSize.Y, ERGBFormat::BGRA, 8);
+	bool RenderSlateWidgetToPngData(TSharedRef<SWidget> SlateWidget, const FIntPoint& Size, TArray<uint8>& OutPngData, FIntPoint& OutSize, UWidgetTree* WidgetTree, FString* OutError)
+	{
+		TArray<FColor> Pixels;
+		if (!RenderSlateWidgetToPixels(SlateWidget, Size, Pixels, WidgetTree, OutError)) return false;
+		IImageWrapperModule& Module = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Wrapper = Module.CreateImageWrapper(EImageFormat::PNG);
+		if (!Wrapper.IsValid() || !Wrapper->SetRaw(Pixels.GetData(), Pixels.Num() * sizeof(FColor), Size.X, Size.Y, ERGBFormat::BGRA, 8)) return false;
 		OutPngData = Wrapper->GetCompressed();
-		OutSize = OutputSize;
+		OutSize = Size;
 		return OutPngData.Num() > 0;
 	}
+
 }
 
 bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize)
@@ -751,7 +959,7 @@ bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArra
 
 	const FVector2D DesignSize = GetBlueprintDesignSize(WidgetBP);
 	const FIntPoint LayoutPixelSize = ResolveDesignLayoutPixelSize(DesignSize);
-	if (!(DesignSize.X > 1.0f && DesignSize.Y > 1.0f && IsValidRenderSize(LayoutPixelSize)))
+	if (!(DesignSize.X > 0.0f && DesignSize.Y > 0.0f && IsValidRenderSize(LayoutPixelSize)))
 	{
 		UE_LOG(LogDesign2UMG, Warning,
 			TEXT("RenderWidgetTreeToPng: missing valid DesignTimeSize for %s; source design size is required"),
@@ -762,5 +970,18 @@ bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArra
 	UE_LOG(LogDesign2UMG, Log,
 		TEXT("RenderWidgetTreeToPng: render source design size %dx%d"),
 		LayoutPixelSize.X, LayoutPixelSize.Y);
-	return RenderSlateWidgetToPngData(SlateWidget.ToSharedRef(), LayoutPixelSize, OutPngData, OutSize);
+	const FBox2D ExportBounds = GetBlueprintExportBounds(WidgetBP);
+	const FVector2D ExportSize = ExportBounds.GetSize();
+	TSharedRef<SWidget> Content = SlateWidget.ToSharedRef();
+	if (!ExportBounds.Min.IsNearlyZero() || !ExportSize.Equals(FVector2D(LayoutPixelSize)))
+	{
+		Content = SNew(SConstraintCanvas)
+			+ SConstraintCanvas::Slot()
+			.Anchors(FAnchors(0.f, 0.f))
+			.Offset(FMargin(-ExportBounds.Min.X, -ExportBounds.Min.Y, LayoutPixelSize.X, LayoutPixelSize.Y))
+			.Alignment(FVector2D::ZeroVector)
+			.AutoSize(false)
+			[Content];
+	}
+	return RenderSlateWidgetToPngData(Content, FIntPoint(FMath::CeilToInt(ExportSize.X), FMath::CeilToInt(ExportSize.Y)), OutPngData, OutSize, WidgetBP->WidgetTree);
 }

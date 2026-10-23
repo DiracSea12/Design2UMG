@@ -14,5 +14,5 @@ namespace VisualMapperStrokeSupport
 	bool HasUniformRectStroke(const FDesignStroke& Stroke);
 	bool NeedsExplicitSideStroke(const TSharedPtr<FDesignNode>& Node);
 	bool HasAnyConvertedChildStrokeCoverage(const FUMGWidgetNode& Border);
-	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node);
+	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node, bool* OutStrokePainted = nullptr);
 }

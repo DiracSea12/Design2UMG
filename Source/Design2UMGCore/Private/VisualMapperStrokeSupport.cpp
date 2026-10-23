@@ -371,8 +371,9 @@ namespace VisualMapperStrokeSupport
 		return false;
 	}
 
-	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node)
+	FUMGWidgetNode WrapWithExplicitSideStroke(FUMGWidgetNode&& Border, const TSharedPtr<FDesignNode>& Node, bool* OutStrokePainted)
 	{
+		if (OutStrokePainted) *OutStrokePainted = false;
 		FLinearColor StrokeColor;
 		if (!TryResolveStrokeColor(Node->Visual.Stroke, StrokeColor))
 		{
@@ -418,6 +419,7 @@ namespace VisualMapperStrokeSupport
 			Overlay.Children.Add(MoveTemp(Border));
 		}
 
+		const int32 ContentChildCount = Overlay.Children.Num();
 		const float TopThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Top);
 		const float BottomThickness = GetStrokeSideThicknessInternal(Node->Visual.Stroke.Thickness, EStrokeSide::Bottom);
 		const bool bCombineHorizontalSides = TopThickness >= 1.0f
@@ -459,6 +461,7 @@ namespace VisualMapperStrokeSupport
 				SideSpec.VerticalAlignment);
 		}
 
+		if (OutStrokePainted) *OutStrokePainted = Overlay.Children.Num() > ContentChildCount;
 		FoldStrokeOverlayIntoCanvas(Overlay, *Node);
 		return Overlay;
 	}

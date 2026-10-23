@@ -26,36 +26,6 @@ namespace
 				return TEXT("Linear");
 			}
 		}
-
-		void ApplyTypedGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
-		{
-			Brush.Gradient.Type = ToTypedGradientTypeString(Gradient.GradientType);
-			Brush.Gradient.Rotation = Gradient.Rotation;
-			if (Gradient.StartPoint.IsSet())
-			{
-				Brush.Gradient.StartPoint = Gradient.StartPoint.GetValue();
-			}
-			if (Gradient.EndPoint.IsSet())
-			{
-				Brush.Gradient.EndPoint = Gradient.EndPoint.GetValue();
-			}
-			if (Gradient.Center.IsSet())
-			{
-				Brush.Gradient.Center = Gradient.Center.GetValue();
-			}
-			if (Gradient.Size.IsSet())
-			{
-				Brush.Gradient.Size = Gradient.Size.GetValue();
-			}
-			Brush.Gradient.Stops.Reset();
-			for (const FDesignGradientStop& Stop : Gradient.Colors)
-			{
-				FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
-				TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
-				TypedStop.Position = Stop.Position;
-			}
-		}
-
 	}
 
 	void AddTextureSizeHints(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
@@ -217,6 +187,45 @@ namespace
 			return false;
 		}
 
+        if(Fill.Type==EDesignFillType::Shader && Fill.Shader.IsSet())
+        {
+            Layer.Type=UMGWidgetTypes::Image;
+            Layer.Brush.Shader=Fill.Shader;
+            Layer.Brush.Shader->bFillPaint = true;
+            Layer.Brush.Shader->CaptureInsets = UMGRetainerCapture::FillInsets(*Node);
+            Layer.Brush.Shader->Size=FVector2D(Node->Transform.Width.Value,Node->Transform.Height.Value);
+            Layer.Path=Widget.Path;
+            Layer.Brush.OutlineCornerRadius = Widget.Brush.OutlineCornerRadius;
+            Layer.Brush.CornerRadii = Widget.Brush.CornerRadii;
+            if(Layer.Path.Geometry.IsSet()) Layer.Path.FillColor=FLinearColor::White;
+            AddTextureSizeHints(Layer,Node);
+            return true;
+        }
+		if (Widget.Path.Geometry.IsSet())
+		{
+			Layer.Type = UMGWidgetTypes::Image;
+			Layer.Path.Geometry = Widget.Path.Geometry;
+			Layer.Path.ViewBox = Widget.Path.ViewBox;
+			Layer.Path.SourcePaintGeometry = Widget.Path.SourcePaintGeometry;
+			Layer.Path.FitGeometryToBounds = Widget.Path.FitGeometryToBounds;
+			Layer.Path.CanvasSize = Widget.Path.CanvasSize;
+			Layer.Path.FillRule = Widget.Path.FillRule;
+			Layer.Path.FillColor = FLinearColor::White;
+			if (Fill.Type == EDesignFillType::Color)
+				Layer.Path.FillColor = FUMGValueParser::ParseColor(Fill.SolidColor);
+			else if (Fill.Type == EDesignFillType::Gradient)
+				VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient);
+			else if (Fill.Type == EDesignFillType::Image && !Fill.Image.Url.IsEmpty())
+			{
+				ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
+				Layer.Brush.Image.TexturePath = Fill.Image.Url;
+				ApplyMultiFillImageChildOpacity(Layer, Fill, Options);
+			}
+			else return false;
+			AddTextureSizeHints(Layer, Node);
+			return true;
+		}
+
 		if (Fill.Type == EDesignFillType::Color)
 		{
 			Layer.Type = UMGWidgetTypes::Border;
@@ -227,7 +236,7 @@ namespace
 		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.Colors.Num() > 0)
 		{
 			Layer.Type = UMGWidgetTypes::Image;
-			GradientHelpers::ApplyTypedGradientBrushData(Layer.Brush, Fill.Gradient);
+			VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient);
 			AddTextureSizeHints(Layer, Node);
 			return true;
 		}
@@ -272,6 +281,35 @@ namespace
 
 namespace VisualMapperFillTransfer
 {
+	void ApplyGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
+	{
+		Brush.Gradient.Type = GradientHelpers::ToTypedGradientTypeString(Gradient.GradientType);
+		Brush.Gradient.Rotation = Gradient.Rotation;
+		Brush.Gradient.Mesh = Gradient.Mesh;
+		if (Gradient.StartPoint.IsSet())
+		{
+			Brush.Gradient.StartPoint = Gradient.StartPoint.GetValue();
+		}
+		if (Gradient.EndPoint.IsSet())
+		{
+			Brush.Gradient.EndPoint = Gradient.EndPoint.GetValue();
+		}
+		if (Gradient.Center.IsSet())
+		{
+			Brush.Gradient.Center = Gradient.Center.GetValue();
+		}
+		if (Gradient.Size.IsSet())
+		{
+			Brush.Gradient.Size = Gradient.Size.GetValue();
+		}
+		Brush.Gradient.Stops.Reset();
+		for (const FDesignGradientStop& Stop : Gradient.Colors)
+		{
+			FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
+			TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
+			TypedStop.Position = Stop.Position;
+		}
+	}
 	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -321,7 +359,7 @@ namespace VisualMapperFillTransfer
 
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.Colors.Num() > 0)
 		{
-			GradientHelpers::ApplyTypedGradientBrushData(Widget.Brush, PrimaryFill.Gradient);
+			VisualMapperFillTransfer::ApplyGradientBrushData(Widget.Brush, PrimaryFill.Gradient);
 			AddTextureSizeHints(Widget, Node);
 			return;
 		}
