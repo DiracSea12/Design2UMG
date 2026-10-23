@@ -46,6 +46,11 @@
 #include "Components/Border.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/Material.h"
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+#include "MaterialShared.h"
+#else
+#include "MaterialDomain.h"
+#endif
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionVertexColor.h"

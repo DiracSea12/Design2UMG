@@ -8,6 +8,7 @@
 #include "DesignTreeLimits.h"
 #include "PenParserInternal.h"
 #include "Dom/JsonObject.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Misc/FileHelper.h"

@@ -12,6 +12,12 @@
 #include "UMGWidgetNodeProceduralResourceAccess.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Materials/Material.h"
+#include "Misc/EngineVersionComparison.h"
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+#include "MaterialShared.h"
+#else
+#include "MaterialDomain.h"
+#endif
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionVertexColor.h"
 #include "Materials/MaterialExpressionConstant.h"

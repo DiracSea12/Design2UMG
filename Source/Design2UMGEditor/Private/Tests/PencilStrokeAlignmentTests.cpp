@@ -7,6 +7,7 @@
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "Engine/Texture2D.h"
+#include "TextureResource.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPencilStrokeAlignmentTest, "Design2UMG.Pencil.Stroke.Alignment",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

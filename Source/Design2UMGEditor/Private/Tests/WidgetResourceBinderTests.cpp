@@ -15,6 +15,12 @@
 #include "TextureResource.h"
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
+#include "Misc/EngineVersionComparison.h"
+#if UE_VERSION_OLDER_THAN(5, 2, 0)
+#include "MaterialShared.h"
+#else
+#include "MaterialDomain.h"
+#endif
 
 #if WITH_AUTOMATION_WORKER
 

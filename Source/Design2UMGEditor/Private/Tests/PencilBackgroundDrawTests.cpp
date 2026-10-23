@@ -39,6 +39,7 @@
 #include "Interfaces/SlateRHIRenderingPolicyInterface.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/Material.h"
+#include "MaterialDomain.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialInstanceDynamic.h"
