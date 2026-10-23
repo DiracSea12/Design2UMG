@@ -24,6 +24,7 @@
 #include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
 #include "RefExpander.h"
+#include "PencilScript.h"
 #include "Misc/EngineVersionComparison.h"
 
 namespace Design2UMGConverterInternal
@@ -226,6 +227,61 @@ namespace Design2UMGConverterPrivate
 			if (Node->Type == EDesignNodeType::Ref)
 			{
 				return ConvertExpandedRefNode(Node, ActiveContext, ParentLayout, PreResolutionResolver);
+			}
+			if (Node->Type == EDesignNodeType::Script)
+			{
+				FDesignVariableResolver Resolver(Context.State.Document.Variables);
+				Resolver.SetThemeContext(FDesignVariableResolver::BuildDocumentTheme(Context.State.Document.Themes));
+				Resolver.PushThemeOverride(ActiveContext.ThemeContext);
+				TSharedPtr<FDesignNode> Expanded;
+				FString Error;
+				if (!PencilScript::Expand(Node, Resolver, ActiveContext.InstancePath,
+					Context.State.Document.SourceDocument().SourceFilePath, Expanded, Error))
+				{
+					Context.State.ConversionError = FString::Printf(TEXT("Script '%s' (%s): %s"), *Node->Name, *Node->Id, *Error);
+					return FUMGWidgetNode();
+				}
+				Node = MoveTemp(Expanded);
+				const auto GeneratedSnapshot = RefExpander::DeepCopyNode(Node);
+				TArray<TSharedPtr<FDesignNode>> Pending = GeneratedSnapshot->Children;
+				TArray<TSharedPtr<FDesignNode>> GeneratedRefs;
+				while (!Pending.IsEmpty())
+				{
+#if UE_VERSION_OLDER_THAN(5, 4, 0)
+					auto Generated = Pending.Pop(false);
+#else
+					auto Generated = Pending.Pop(EAllowShrinking::No);
+#endif
+					if (++Context.State.ScriptGeneratedNodeCount > DesignTreeLimits::MaxParsedNodeCount)
+					{
+						Context.State.ConversionError = TEXT("Expanded scripts exceed the design tree node budget.");
+						return FUMGWidgetNode();
+					}
+					Context.State.RefExpansionCache->ReferenceTargetsById.Add(Generated->Id, Generated);
+					if (Generated->Type == EDesignNodeType::Ref) GeneratedRefs.Add(Generated);
+					Pending.Append(Generated->Children);
+				}
+				for (const auto& Ref : GeneratedRefs)
+				{
+					if (!Context.State.RefExpansionCache->ReferenceTargetsById.Contains(Ref->Ref))
+					{
+						Context.State.ConversionError = FString::Printf(TEXT("Script '%s' generated unresolved ref '%s'."), *Node->Id, *Ref->Ref);
+						return FUMGWidgetNode();
+					}
+				}
+				if (PrepareFonts)
+				{
+					// Earlier parent sizing sees only the unexpanded script's resolved box.
+					// Its generated text first becomes measurable below this preparation point.
+					FDesignDocument GeneratedDocument;
+					GeneratedDocument.Fonts = Context.State.Document.Fonts;
+					GeneratedDocument.Children.Add(Node);
+					if (!PrepareFonts(GeneratedDocument, Context.State.Warnings, Context.State.ConversionError,
+						FDesign2UMGConverter::EFontPreparation::ImportSources))
+					{
+						return FUMGWidgetNode();
+					}
+				}
 			}
 
 			const bool bUsingRenderFallback = Design2UMGConverterVisualSupport::ShouldUseRenderFallback(Node);

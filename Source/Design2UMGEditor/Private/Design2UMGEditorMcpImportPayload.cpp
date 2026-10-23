@@ -8,26 +8,28 @@
 #include "Design2UMGEditorImportSupport.h"
 #include "Design2UMGLog.h"
 #include "DesignImportTypes.h"
+#include "DesignImportPipeline.h"
+#include "DesignSchema.h"
 #include "DesignJsonUtils.h"
 #include "ExternalServices/PenMCPBridge.h"
+#include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
-// Same LOCTEXT namespace string as the pre-split orchestrator, so the moved keys keep their identity.
 #define LOCTEXT_NAMESPACE "FDesign2UMGEditorModule"
 
 namespace
 {
 	TArray<FDesignFrameInfo> ExtractFramesFromMCPResult(const FString& NodesJson)
 	{
-	TArray<FDesignFrameInfo> Result;
-	TArray<TSharedPtr<FJsonValue>> Array;
-	if (!DesignJsonUtils::TryParseArray(NodesJson, Array))
-	{
-		UE_LOG(LogDesign2UMG, Error, TEXT("ExtractFramesFromMCPResult: JSON deserialization failed (length=%d)"), NodesJson.Len());
-		return Result;
-	}
+		TArray<FDesignFrameInfo> Result;
+		TArray<TSharedPtr<FJsonValue>> Array;
+		if (!DesignJsonUtils::TryParseArray(NodesJson, Array))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("ExtractFramesFromMCPResult: JSON deserialization failed (length=%d)"), NodesJson.Len());
+			return Result;
+		}
 
 		for (const TSharedPtr<FJsonValue>& Value : Array)
 		{
@@ -57,25 +59,53 @@ namespace
 		return Result;
 	}
 
-	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath)
+	void ProcessMCPData(const FString& NodesJson, const FString& VarsJson, const FString& TargetNodeId, const FString& OutputPath, const FString& SourceFilePath)
 	{
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
-		FUMGWidgetData Data;
-		if (!FPenMCPBridge::ConvertFromMCP(NodesJson, VarsJson, SettingsSnapshot, Data, TargetNodeId))
+		FDesignDocument Document;
+		if (!FPenMCPBridge::ParseFromMCP(NodesJson, VarsJson, Document, TargetNodeId, SourceFilePath))
 		{
-			UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: ConvertFromMCP failed"));
+			UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to parse the live document"));
 			return;
 		}
 
 		FDesignImportRequest ImportRequest =
 			Design2UMGEditorImportRequestSetup::MakePenImportRequest(OutputPath, true, true, SettingsSnapshot);
-		Design2UMGEditorImportRequestSetup::ExecuteImportWithSettings(Data, ImportRequest);
+		DesignImportPipeline::Execute(Document, ImportRequest);
 	}
 }
 
 namespace Design2UMGEditorMcpImportPayload
 {
+	bool ParseActiveDocumentPath(const FString& Response, FString& OutFilePath)
+	{
+		OutFilePath.Reset();
+		const FString Prefix = TEXT("- Currently active canvas editor: `");
+		TArray<FString> Lines;
+		Response.ParseIntoArrayLines(Lines);
+		for (const FString& Line : Lines)
+		{
+			if (!Line.StartsWith(Prefix, ESearchCase::CaseSensitive)) continue;
+			const int32 End = Line.Find(TEXT("`"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Prefix.Len());
+			if (End == INDEX_NONE) return false;
+
+			FString FilePath = Line.Mid(Prefix.Len(), End - Prefix.Len());
+			FPaths::NormalizeFilename(FilePath);
+			if (FilePath.Len() >= 4 && FilePath[0] == TEXT('/') && FChar::IsAlpha(FilePath[1])
+				&& FilePath[2] == TEXT(':') && FilePath[3] == TEXT('/'))
+			{
+				FilePath.RightChopInline(1);
+			}
+			if (FPaths::IsRelative(FilePath)
+				|| !FPaths::GetExtension(FilePath).Equals(TEXT("pen"), ESearchCase::IgnoreCase)) return false;
+
+			OutFilePath = MoveTemp(FilePath);
+			return true;
+		}
+		return false;
+	}
+
 	bool ParseReadDocumentResponse(const FString& Response, FString& OutNodesJson, FString& OutVarsJson)
 	{
 		OutNodesJson.Reset();
@@ -100,7 +130,7 @@ namespace Design2UMGEditorMcpImportPayload
 		return false;
 	}
 
-	void HandleMCPDataReady(const FString& NodesJson, const FString& VarsJson)
+	void HandleMCPDataReady(const FString& NodesJson, const FString& VarsJson, const FString& SourceFilePath)
 	{
 		const TArray<FDesignFrameInfo> Frames = ExtractFramesFromMCPResult(NodesJson);
 		if (Frames.Num() == 0)
@@ -109,13 +139,15 @@ namespace Design2UMGEditorMcpImportPayload
 			return;
 		}
 
+		const FString SingleRootId = Frames.Num() == 1 ? Frames[0].Id : FString();
 		Design2UMGEditorImportFrameSelection::ExecuteFrameImport(
 			Frames,
 			LOCTEXT("PencilFrameSelectorTitle", "Select Frame from Pencil"),
 			LOCTEXT("PencilFrameSelectorHint", "Multiple frames found. Double-click to import:"),
-			[CapturedNodes = NodesJson, CapturedVars = VarsJson](const FString& FrameId)
+			[CapturedNodes = NodesJson, CapturedVars = VarsJson, SourceFilePath, SingleRootId](const FString& FrameId)
 			{
-				ProcessMCPData(CapturedNodes, CapturedVars, FrameId, DesignImportDefaults::PenOutputPath);
+				ProcessMCPData(CapturedNodes, CapturedVars, FrameId.IsEmpty() ? SingleRootId : FrameId,
+					DesignImportDefaults::PenOutputPath, SourceFilePath);
 			});
 	}
 }

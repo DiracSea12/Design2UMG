@@ -97,6 +97,7 @@ namespace Design2UMGConverterInternal
 		TMap<FString, FString> PendingIconFontMappings;
 		FUMGPrototypeNavigationData PrototypeNavigation;
 		int32 RecursionDepth = 0;
+		int32 ScriptGeneratedNodeCount = 0;
 	};
 
 	struct FConversionContext

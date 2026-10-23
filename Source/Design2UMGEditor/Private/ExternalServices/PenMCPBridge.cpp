@@ -1,10 +1,14 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "PenMCPBridge.h"
+#include "DesignImportPlanning.h"
 #include "DesignImportPipeline.h"
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "PenParser.h"
+#include "../../../Design2UMGCore/Private/PencilScript.h"
+#include "DesignReferenceExpansion.h"
 #include "PencilExtensionResources.h"
 #include "UMGSchema.h"
 
@@ -66,66 +70,12 @@ namespace
 		return nullptr;
 	}
 
-	/** Collect reusable component definitions needed for ref expansion. */
-	void CollectReusableNodes(const TArray<TSharedPtr<FJsonValue>>& Nodes, TArray<TSharedPtr<FJsonValue>>& OutReusable)
-	{
-		for (const auto& Node : Nodes)
-		{
-			const TSharedPtr<FJsonObject>& Obj = Node->AsObject();
-			if (!Obj.IsValid())
-				continue;
-
-			bool bReusable = false;
-			if (Obj->TryGetBoolField(TEXT("reusable"), bReusable) && bReusable)
-			{
-				OutReusable.Add(Node);
-			}
-
-			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
-			if (Obj->TryGetArrayField(TEXT("children"), Children))
-			{
-				CollectReusableNodes(*Children, OutReusable);
-			}
-		}
-	}
-
-	bool BuildFilteredChildren(
+	bool ValidateTargetNode(
 		const TArray<TSharedPtr<FJsonValue>>& AllChildren,
-		const FString& TargetNodeId,
-		TArray<TSharedPtr<FJsonValue>>& OutChildren)
+		const FString& TargetNodeId)
 	{
-		if (TargetNodeId.IsEmpty())
+		if (TargetNodeId.IsEmpty() || FindNodeById(AllChildren, TargetNodeId).IsValid())
 		{
-			OutChildren = AllChildren;
-			return true;
-		}
-
-		TSharedPtr<FJsonValue> Found = FindNodeById(AllChildren, TargetNodeId);
-		if (Found.IsValid())
-		{
-			// Keep reusable definitions so downstream ref expansion still works.
-			TArray<TSharedPtr<FJsonValue>> FilteredChildren;
-			CollectReusableNodes(AllChildren, FilteredChildren);
-
-			// Deduplicate when the target node itself is reusable.
-			FString TargetId;
-			if (const TSharedPtr<FJsonObject>& FoundObj = Found->AsObject())
-				FoundObj->TryGetStringField(TEXT("id"), TargetId);
-
-			for (const auto& ReusableNode : FilteredChildren)
-			{
-				FString ReusableId;
-				if (const TSharedPtr<FJsonObject>& ReusableObj = ReusableNode->AsObject())
-					ReusableObj->TryGetStringField(TEXT("id"), ReusableId);
-				if (ReusableId == TargetId)
-				{
-					OutChildren = MoveTemp(FilteredChildren);
-					return true;
-				}
-			}
-
-			FilteredChildren.Add(Found);
-			OutChildren = MoveTemp(FilteredChildren);
 			return true;
 		}
 
@@ -141,20 +91,13 @@ namespace
 	{
 		TSharedPtr<FJsonObject> Doc = MakeShared<FJsonObject>();
 
-		// Prefer the original version when it exists, otherwise fall back to 2.6.
-		FString Version = TEXT("2.6");
-		if (SourceObj->HasField(TEXT("version")))
-		{
-			SourceObj->TryGetStringField(TEXT("version"), Version);
-		}
-		Doc->SetStringField(TEXT("version"), Version);
-
-		for (const TCHAR* Field : { TEXT("variables"), TEXT("themes"), TEXT("fonts"), TEXT("imports") })
+		for (const TCHAR* Field : { TEXT("version"), TEXT("variables"), TEXT("themes"), TEXT("fonts"), TEXT("imports") })
 		{
 			if (SourceObj->HasField(Field))
 				Doc->SetField(Field, SourceObj->TryGetField(Field));
 		}
 
+		// Keep the definition trees intact until parsed render-root selection.
 		Doc->SetArrayField(TEXT("children"), Children);
 		return Doc;
 	}
@@ -181,8 +124,7 @@ namespace
 			VarsObj = MakeShared<FJsonObject>();
 		}
 
-		TArray<TSharedPtr<FJsonValue>> Children;
-		if (!BuildFilteredChildren(NodesArr, TargetNodeId, Children))
+		if (!ValidateTargetNode(NodesArr, TargetNodeId))
 		{
 			return false;
 		}
@@ -194,10 +136,37 @@ namespace
 			VarsObj = Wrapped;
 		}
 
-		OutDocumentObject = BuildDocumentObject(VarsObj, Children);
-		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children"), Children.Num());
+		OutDocumentObject = BuildDocumentObject(VarsObj, NodesArr);
+		UE_LOG(LogPenMCPBridge, Log, TEXT("BuildDocumentJson: %d children"), NodesArr.Num());
 		return OutDocumentObject.IsValid();
 	}
+}
+
+bool FPenMCPBridge::ParseFromMCP(
+	const FString& NodesJson,
+	const FString& VariablesJson,
+	FDesignDocument& OutDocument,
+	const FString& TargetNodeId,
+	const FString& SourceFilePath)
+{
+	OutDocument = FDesignDocument();
+	TSharedPtr<FJsonObject> DocumentObject;
+	if (!AssembleDocumentObject(NodesJson, VariablesJson, DocumentObject, TargetNodeId))
+	{
+		return false;
+	}
+
+	// Register extension resources before parsing the assembled in-memory document.
+	PencilExtensionResources::EnsureIconGlyphsRegistered();
+	PencilExtensionResources::EnsureBundledLibrariesRegistered();
+	if (!FPenParser::ParseDocumentObject(DocumentObject, OutDocument, SourceFilePath))
+	{
+		return false;
+	}
+	PromoteSelectedNodeToRenderRoot(OutDocument, TargetNodeId);
+	PencilExtensionResources::ReportPenResourceGaps(OutDocument);
+
+	return true;
 }
 
 bool FPenMCPBridge::ConvertFromMCP(
@@ -218,29 +187,13 @@ bool FPenMCPBridge::ConvertFromMCP(
 	FUMGWidgetData& OutData,
 	const FString& TargetNodeId)
 {
-	TSharedPtr<FJsonObject> DocumentObject;
-	if (!AssembleDocumentObject(NodesJson, VariablesJson, DocumentObject, TargetNodeId))
-	{
-		return false;
-	}
-
-	// Parse the assembled DOM directly (no DOM->string->DOM round trip), then run the
-	// same analysis the string-based source registry path performs. Extension resources
-	// (icon codepoints, bundled library variables) must be registered pre-parse.
-	PencilExtensionResources::EnsureIconGlyphsRegistered();
-	PencilExtensionResources::EnsureBundledLibrariesRegistered();
 	FDesignDocument Document;
-	if (!FPenParser::ParseDocumentObject(DocumentObject, Document))
+	if (!ParseFromMCP(NodesJson, VariablesJson, Document, TargetNodeId))
 	{
 		return false;
 	}
-	PromoteSelectedNodeToRenderRoot(Document, TargetNodeId);
-	PencilExtensionResources::ReportPenResourceGaps(Document);
 
-	FImportAnalysisInput AnalysisInput;
-	AnalysisInput.bResolveImages = false;
-	AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-	const FImportAnalysisResult Analysis = DesignImportPipeline::AnalyzeImport(Document, AnalysisInput);
+	const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeConversion(Document, SettingsSnapshot);
 	if (!Analysis.ErrorMessage.IsEmpty()) return false;
 	OutData = Analysis.Data;
 	return true;
@@ -263,7 +216,7 @@ bool FPenMCPBridge::BuildFilteredDocumentObject(
 		Children = *ChildrenPtr;
 	}
 
-	if (!BuildFilteredChildren(Children, TargetNodeId, Children))
+	if (!ValidateTargetNode(Children, TargetNodeId))
 	{
 		return false;
 	}
@@ -279,20 +232,108 @@ void FPenMCPBridge::PromoteSelectedNodeToRenderRoot(FDesignDocument& Document, c
 		return;
 	}
 
-	for (const TSharedPtr<FDesignNode>& Child : Document.Children)
+	TMap<FString, TSharedPtr<FDesignNode>> NodesById;
+	Document.BuildReferenceNodeIndex(NodesById);
+	TSharedPtr<FDesignNode> Selected = NodesById.FindRef(TargetNodeId);
+	if (!Selected.IsValid())
 	{
-		if (!Child.IsValid() || !IsEquivalentNodeId(Child->Id, TargetNodeId))
+		for (const auto& Pair : NodesById)
 		{
-			continue;
+			if (IsEquivalentNodeId(Pair.Key, TargetNodeId))
+			{
+				Selected = Pair.Value;
+				break;
+			}
 		}
-		if (Child->bReusable)
-		{
-			Child->bReusable = false;
-			UE_LOG(LogPenMCPBridge, Log,
-				TEXT("Selected node '%s' is a reusable component; treating it as the render root for this import."),
-				*Child->Id);
-		}
-		return;
 	}
+	if (!Selected.IsValid()) return;
+
+	Document.Children = { Selected };
+	TArray<TSharedPtr<FDesignNode>>& Definitions = Document.MutableSourceDocument().ImportedNodes;
+	TMap<FString, TSharedPtr<FDesignNode>> RetainedNodes;
+	Document.BuildReferenceNodeIndex(RetainedNodes);
+	// Libraries and reusable definitions keep their existing import semantics.
+	for (const auto& Pair : NodesById)
+	{
+		if (Pair.Value->bReusable && !RetainedNodes.Contains(Pair.Key)) Definitions.Add(Pair.Value);
+	}
+	Document.BuildReferenceNodeIndex(RetainedNodes);
+
+	TMap<const FDesignNode*, TSet<FString>> Visited;
+	TSet<FString> ActiveReferences;
+	// Keep expanded instances alive while their pointers identify dependency visits.
+	TArray<TSharedPtr<FDesignNode>> Instances;
+	using FTheme = TMap<FString, FString>;
+	TFunction<void(const TSharedPtr<FDesignNode>&, FTheme)> VisitNode;
+	TFunction<void(const FDesignNodePatch&, const FTheme&)> VisitPatch;
+	auto KeepReference = [&](const FString& RefId, const FTheme& Theme)
+	{
+		const TSharedPtr<FDesignNode> Target = NodesById.FindRef(RefId);
+		if (!Target.IsValid()) return;
+		if (!RetainedNodes.Contains(RefId))
+		{
+			Definitions.Add(Target);
+			RetainedNodes.Add(RefId, Target);
+		}
+		VisitNode(Target, Theme);
+	};
+	VisitPatch = [&](const FDesignNodePatch& Patch, const FTheme& Theme)
+	{
+		if (Patch.Ref.IsSet()) KeepReference(Patch.Ref.GetValue(), Theme);
+		if (Patch.Children.IsSet())
+			for (const auto& Child : Patch.Children.GetValue()) VisitNode(Child, Theme);
+		for (const auto& Pair : Patch.Descendants)
+		{
+			if (!Pair.Value.IsValid()) continue;
+			VisitNode(Pair.Value->Replacement, Theme);
+			VisitPatch(Pair.Value->Patch, Theme);
+		}
+	};
+	VisitNode = [&](const TSharedPtr<FDesignNode>& Node, FTheme Theme)
+	{
+		if (!Node.IsValid()) return;
+		for (const auto& Pair : Node->Theme) Theme.Add(Pair.Key, Pair.Value);
+		// Match conversion's canonical theme signature: sorted axes with length-delimited values.
+		TArray<FString> ThemeKeys;
+		Theme.GetKeys(ThemeKeys);
+		ThemeKeys.Sort();
+		FString ThemeSignature;
+		for (const FString& Key : ThemeKeys)
+		{
+			ThemeSignature += FString::Printf(TEXT("%d:%s=%d:%s;"),
+				Key.Len(), *Key, Theme.FindChecked(Key).Len(), *Theme.FindChecked(Key));
+		}
+		TSet<FString>& VisitedThemes = Visited.FindOrAdd(Node.Get());
+		if (VisitedThemes.Contains(ThemeSignature)) return;
+		VisitedThemes.Add(ThemeSignature);
+		if (Node->Type == EDesignNodeType::Ref)
+		{
+			KeepReference(Node->Ref, Theme);
+			if (!ActiveReferences.Contains(Node->Ref))
+			{
+				ActiveReferences.Add(Node->Ref);
+				const auto Expansion = RefExpander::ExpandRef(Node, Document);
+				if (Expansion.IsSuccess())
+				{
+					Instances.Add(Expansion.ExpandedNode);
+					VisitNode(Expansion.ExpandedNode, Theme);
+				}
+				ActiveReferences.Remove(Node->Ref);
+			}
+		}
+		if (Node->Type == EDesignNodeType::Script)
+			for (const FString& Reference : PencilScript::CollectInputReferences(Node, Document, Theme)) KeepReference(Reference, Theme);
+		for (const auto& Child : Node->Children) VisitNode(Child, Theme);
+		if (Node->RefOverrides.IsValid()) VisitPatch(*Node->RefOverrides, Theme);
+		for (const auto& Pair : Node->Descendants)
+		{
+			VisitNode(Pair.Value.Replacement, Theme);
+			VisitPatch(Pair.Value.Patch, Theme);
+		}
+	};
+	const TArray<TSharedPtr<FDesignNode>> SeedDefinitions = Definitions;
+	VisitNode(Selected, {});
+	for (const auto& Definition : SeedDefinitions) VisitNode(Definition, {});
+	Selected->bReusable = false;
 }
 
