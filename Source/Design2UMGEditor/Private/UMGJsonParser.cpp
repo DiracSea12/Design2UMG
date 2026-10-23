@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonParser.h"
+#include "DesignBrowserWidget.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "DesignTreeBudget.h"
@@ -376,6 +377,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	ParseRenderPayload(JsonObject, OutNode.Render);
 	ParseWidgetStatePayload(JsonObject, OutNode.WidgetState);
 	ParseScrollBoxPayload(JsonObject, OutNode.ScrollBox);
+	DesignBrowserWidget::Parse(JsonObject, OutNode.Browser);
 
 	// Parse Children. A present-but-non-array Children field, a non-object child,
 	// or any failing child must fail the WHOLE parse (all-or-nothing): the failed

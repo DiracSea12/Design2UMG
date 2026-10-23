@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetTreeBuilder.h"
+#include "DesignBrowserWidget.h"
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -171,6 +172,7 @@ namespace
 			REG(TextBlock); REG(RichTextBlock); REG(EditableTextBox); REG(MultiLineEditableTextBox);
 			// Display widgets.
 			REG(Image); REG(ProgressBar); REG(Throbber); REG(CircularThrobber); REG(Spacer);
+			REG(WebBrowser);
 			// List widgets.
 			REG(ListView); REG(TileView); REG(TreeView);
 			// Other widgets.
@@ -388,6 +390,14 @@ UWidget* FUMGWidgetTreeBuilder::CreateWidgetRecursive(UWidgetTree* WidgetTree, c
 	// The child blueprint root (or its instance override) owns source visuals. Applying them
 	// again to the UserWidget wrapper would multiply opacity and repeat render transforms.
 	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node, TextureMap, Budget);
+	if (UWebBrowser* Browser = Cast<UWebBrowser>(NewWidget))
+	{
+		if (!DesignBrowserWidget::ApplyTemplate(*Browser, Node.Browser))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("Browser '%s': initial scroll graph generation failed"), *Browser->GetName());
+			return nullptr;
+		}
+	}
 	if (!Budget->GetRefusalError().IsEmpty()) return nullptr;
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).

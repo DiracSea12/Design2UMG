@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonSerializer.h"
+#include "DesignBrowserWidget.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGJsonKeys.h"
 #include "UMGPropertyKeys.h"
@@ -126,6 +127,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		J->SetObjectField(TEXT("WidgetState"), WidgetStateObject);
 	if (TSharedPtr<FJsonObject> ScrollBoxObject = SerializeScrollBoxPayload(Node.ScrollBox))
 		J->SetObjectField(TEXT("ScrollBox"), ScrollBoxObject);
+	if (TSharedPtr<FJsonObject> BrowserObject = DesignBrowserWidget::Serialize(Node.Browser))
+		J->SetObjectField(TEXT("Browser"), BrowserObject);
 
 	if (Node.Children.Num() > 0)
 	{

@@ -44,6 +44,8 @@ public class Design2UMGEditor : ModuleRules
 			"UnrealEd",
 			"EditorSubsystem",
 			"UMGEditor",
+			"WebBrowserWidget",
+				"WebBrowser",
 			"Blutility",
 			"AssetTools",
 			"AssetRegistry",
