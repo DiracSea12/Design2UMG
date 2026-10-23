@@ -63,6 +63,46 @@ namespace Design2UMGMaterialAccess
 #endif
 	}
 
+	bool EnsureReadyForRendering(UMaterial& Material, FString& OutCompileErrors, FString& OutCompileStates)
+	{
+		const auto GetResource = [&Material]() -> const FMaterialResource*
+		{
+			return Material.GetMaterialResource(
+#if UE_VERSION_OLDER_THAN(5, 7, 0)
+				GMaxRHIFeatureLevel
+#else
+				GMaxRHIShaderPlatform
+#endif
+			);
+		};
+		const auto IsReady = [](const FMaterialResource* Resource)
+		{
+			return Resource && Resource->GetCompileErrors().IsEmpty() && Resource->GetGameThreadShaderMap() &&
+				Resource->GetGameThreadShaderMap()->IsValidForRendering();
+		};
+		const auto DescribeState = [](const FMaterialResource* Resource)
+		{
+			const FString Errors = Resource ? FString::Join(Resource->GetCompileErrors(), TEXT("; ")) : FString();
+			return FString::Printf(TEXT("resource=%d shaderMap=%d caching=%d compileErrors=%s"),
+				Resource != nullptr, Resource && Resource->GetGameThreadShaderMap() != nullptr,
+				Resource && Resource->IsCachingShaders(), Errors.IsEmpty() ? TEXT("<none>") : *Errors);
+		};
+		// Re-entering CacheShaders can replace a reused material's already renderable map.
+		WaitForCompilation(Material);
+		if (IsReady(GetResource())) return true;
+		const FString BeforeCache = DescribeState(GetResource());
+		CacheShadersForRendering(Material);
+		const FString AfterCache = DescribeState(GetResource());
+		WaitForCompilation(Material);
+		const FMaterialResource* Resource = GetResource();
+		if (IsReady(Resource)) return true;
+		OutCompileErrors = Resource && !Resource->GetCompileErrors().IsEmpty()
+			? FString::Join(Resource->GetCompileErrors(), TEXT("; ")) : TEXT("no compile errors");
+		OutCompileStates = FString::Printf(TEXT("beforeCache={%s} afterCache={%s} afterEnsure={%s}"),
+			*BeforeCache, *AfterCache, *DescribeState(Resource));
+		return false;
+	}
+
 	void RecompileForRendering(UMaterialInterface& Material)
 	{
 #if UE_VERSION_OLDER_THAN(5, 4, 0)

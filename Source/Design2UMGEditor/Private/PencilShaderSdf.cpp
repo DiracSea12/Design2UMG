@@ -11,8 +11,6 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
-#include "MaterialShared.h"
-#include "Misc/EngineVersionComparison.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
@@ -109,66 +107,11 @@ bool SaveAsset(UObject* Asset, FString& Error)
 
 bool Compile(UMaterial* Material, const TCHAR* Origin, FString& Error)
 {
-    struct FCompileState
-    {
-        bool bResource = false;
-        bool bShaderMap = false;
-        bool bCaching = false;
-        TArray<FString> Errors;
-    };
-    const auto GetResource = [Material]() -> const FMaterialResource*
-    {
-        return Material->GetMaterialResource(
-#if UE_VERSION_OLDER_THAN(5, 7, 0)
-            GMaxRHIFeatureLevel
-#else
-            GMaxRHIShaderPlatform
-#endif
-        );
-    };
-    const auto CaptureState = [](const FMaterialResource* Resource)
-    {
-        FCompileState State;
-        State.bResource = Resource != nullptr;
-        if (Resource)
-        {
-            State.bShaderMap = Resource->GetGameThreadShaderMap() != nullptr;
-            State.bCaching = Resource->IsCachingShaders();
-            State.Errors = Resource->GetCompileErrors();
-        }
-        return State;
-    };
-    const auto IsReady = [](const FMaterialResource* Resource)
-    {
-        return Resource && Resource->GetCompileErrors().IsEmpty() && Resource->GetGameThreadShaderMap() &&
-            Resource->GetGameThreadShaderMap()->IsValidForRendering();
-    };
-    // Re-entering CacheShaders can replace an existing map during on-demand compilation.
-    Design2UMGMaterialAccess::WaitForCompilation(*Material);
-    if (IsReady(GetResource()))
-        return true;
-
-    const FCompileState BeforeCache = CaptureState(GetResource());
-    Design2UMGMaterialAccess::CacheShadersForRendering(*Material);
-    const FCompileState AfterCache = CaptureState(GetResource());
-    Design2UMGMaterialAccess::WaitForCompilation(*Material);
-    const FMaterialResource* Resource = GetResource();
-    if (IsReady(Resource))
-    {
-        return true;
-    }
-    const FCompileState AfterEnsure = CaptureState(Resource);
-    const auto DescribeState = [](const FCompileState& State)
-    {
-        const FString Errors = FString::Join(State.Errors, TEXT("; "));
-        return FString::Printf(TEXT("resource=%d shaderMap=%d caching=%d compileErrors=%s"),
-            State.bResource, State.bShaderMap, State.bCaching, Errors.IsEmpty() ? TEXT("<none>") : *Errors);
-    };
+    FString CompileErrors, CompileStates;
+    if (Design2UMGMaterialAccess::EnsureReadyForRendering(*Material, CompileErrors, CompileStates)) return true;
     Error = FString::Printf(
-        TEXT("Pencil SDF material has no renderable shader map: material=%s platform=%d origin=%s ")
-        TEXT("beforeCache={%s} afterCache={%s} afterEnsure={%s}"),
-        *Material->GetPathName(), static_cast<int32>(GMaxRHIShaderPlatform), Origin,
-        *DescribeState(BeforeCache), *DescribeState(AfterCache), *DescribeState(AfterEnsure));
+        TEXT("Pencil SDF material has no renderable shader map: material=%s platform=%d origin=%s %s"),
+        *Material->GetPathName(), static_cast<int32>(GMaxRHIShaderPlatform), Origin, *CompileStates);
     return false;
 }
 

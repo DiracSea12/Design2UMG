@@ -24,13 +24,11 @@
 #include "Materials/MaterialExpressionTextureProperty.h"
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionComponentMask.h"
-#include "MaterialShared.h"
 #include "Misc/FileHelper.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/SecureHash.h"
 #include "Misc/DefaultValueHelper.h"
-#include "Misc/EngineVersionComparison.h"
 #include "Serialization/JsonSerializer.h"
 #include "UObject/SavePackage.h"
 #include "UObject/StrongObjectPtr.h"
@@ -88,24 +86,11 @@ bool Numbers(const FDesignShaderData& Shader,const PencilShaderSyntax::FUniform&
 }
 bool EnsureCompiled(UMaterial* M,FString& Error)
 {
-    const auto GetResource=[M]() { return M->GetMaterialResource(
-#if UE_VERSION_OLDER_THAN(5,7,0)
-        GMaxRHIFeatureLevel
-#else
-        GMaxRHIShaderPlatform
-#endif
-    ); };
-    const auto IsReady=[](const FMaterialResource* Resource) {
-        return Resource&&Resource->GetCompileErrors().IsEmpty()&&Resource->GetGameThreadShaderMap()&&Resource->GetGameThreadShaderMap()->IsValidForRendering();
-    };
-    // Re-entering CacheShaders can replace a reused material's already renderable map.
-    Design2UMGMaterialAccess::WaitForCompilation(*M);
-    if(IsReady(GetResource()))return true;
-    Design2UMGMaterialAccess::CacheShadersForRendering(*M);Design2UMGMaterialAccess::WaitForCompilation(*M);
-    const auto* Resource=GetResource();
-    if(IsReady(Resource))return true;
-    Error=FString::Printf(TEXT("Shader material has no renderable shader map: %s; %s"),*M->GetPathName(),
-        Resource&&!Resource->GetCompileErrors().IsEmpty()?*FString::Join(Resource->GetCompileErrors(),TEXT("; ")):TEXT("no compile errors"));return false;
+    FString CompileErrors, CompileStates;
+    if (Design2UMGMaterialAccess::EnsureReadyForRendering(*M, CompileErrors, CompileStates)) return true;
+    Error=FString::Printf(TEXT("Shader material has no renderable shader map: %s; %s"),
+        *M->GetPathName(), *CompileErrors);
+    return false;
 }
 UMaterial *Build(const FDesignShaderData &Shader, bool bEffect, const FString &MaskPath, FString &Error,
                  DesignImageResources::FImageOperationBudget &Budget, bool* OutFillObject = nullptr,
