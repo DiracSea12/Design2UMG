@@ -20,6 +20,17 @@ namespace ParserSharedSemantics
 	inline constexpr const TCHAR* SourceSlotCountMetadataKey = TEXT("source.slot.count");
 	inline constexpr const TCHAR* SourceSlotEmptyMetadataKey = TEXT("source.slot.empty");
 
+	// Callers decide whether a source slot exists and which entries count.
+	inline void AddSourceSlotMetadata(FDesignNode& Node, const int32 SlotCount)
+	{
+		Node.Metadata.Add(SourceSlotPresentMetadataKey, TEXT("true"));
+		Node.Metadata.Add(SourceSlotCountMetadataKey, FString::FromInt(SlotCount));
+		if (SlotCount == 0)
+		{
+			Node.Metadata.Add(SourceSlotEmptyMetadataKey, TEXT("true"));
+		}
+	}
+
 	// Wrapping-text vocabulary shared by the text measurement and layout paths.
 	// Each caller keeps its exact prior boolean expression by composing these
 	// terms; the terms themselves carry no null or node-type checks.

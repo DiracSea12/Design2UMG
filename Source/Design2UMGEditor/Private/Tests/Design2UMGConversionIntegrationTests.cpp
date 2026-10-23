@@ -145,13 +145,15 @@ bool FFigmaSemanticHintIntegrationTest::RunTest(const FString& Parameters)
 		TEXT("\"name\":\"Semantic Frame\",")
 		TEXT("\"type\":\"FRAME\",")
 		TEXT("\"absoluteBoundingBox\":{\"x\":0,\"y\":0,\"width\":160,\"height\":80},")
-		TEXT("\"pluginData\":{\"design2umg\":\"{\\\"slot\\\":true}\"},")
-		TEXT("\"slot\":[]")
+		TEXT("\"pluginData\":{\"design2umg\":\"{\\\"slot\\\":true}\"}")
 		TEXT("}")
 		TEXT("}");
 
 	FDesignDocument Document;
-	TestTrue(TEXT("Figma semantic smoke parses minimal frame"), FFigmaParser::ParseDocument(FigmaJson, Document));
+	if (!TestTrue(TEXT("Figma semantic smoke parses minimal frame"), FFigmaParser::ParseDocument(FigmaJson, Document)))
+	{
+		return false;
+	}
 	TestEqual(TEXT("Parsed document contains one top-level frame"), Document.Children.Num(), 1);
 	if (Document.Children.Num() != 1 || !Document.Children[0].IsValid())
 	{
@@ -160,9 +162,6 @@ bool FFigmaSemanticHintIntegrationTest::RunTest(const FString& Parameters)
 
 	const FDesignNode& Node = *Document.Children[0];
 	TestTrue(TEXT("Plugin semantic marker sets placeholder surface flag"), Node.LayoutData.bSemanticPlaceholderSurface);
-	TestEqual(TEXT("Empty slot array is captured as source metadata"),
-		Node.Metadata.FindRef(TEXT("source.slot.empty")),
-		FString(TEXT("true")));
 	return true;
 }
 

@@ -52,11 +52,11 @@ namespace Design2UMGConverterInternal
 			: Warnings(InWarnings)
 			, FatalError(InFatalError)
 		{
-			Document.BuildReusableNodeIndex(ReusableNodesById, InWarnings);
+			Document.BuildReferenceNodeIndex(ReferenceTargetsById, InWarnings);
 		}
 
 		TMap<FRefExpansionCacheKey, FRefExpansionCacheEntry> Entries;
-		TMap<FString, TSharedPtr<FDesignNode>> ReusableNodesById;
+		TMap<FString, TSharedPtr<FDesignNode>> ReferenceTargetsById;
 		TMap<FString, int32> WarningIndices;
 		TArray<FString>* Warnings = nullptr;
 		FString* FatalError = nullptr;
@@ -110,8 +110,10 @@ namespace Design2UMGConverterInternal
 		{
 			FConversionContext Next(State);
 			Next.ThemeContext = ThemeContext;
+			Next.InstancePath = InstancePath;
 			if (Node.IsValid())
 			{
+				Next.InstancePath += FString::Printf(TEXT("%d:%s;"), Node->Id.Len(), *Node->Id);
 				for (const auto& Pair : Node->Theme)
 				{
 					Next.ThemeContext.Add(Pair.Key, Pair.Value);
@@ -122,6 +124,7 @@ namespace Design2UMGConverterInternal
 
 		FConversionState& State;
 		TMap<FString, FString> ThemeContext;
+		FString InstancePath;
 	};
 
 	// Shared guard implementation lives in DesignTreeLimits.h.

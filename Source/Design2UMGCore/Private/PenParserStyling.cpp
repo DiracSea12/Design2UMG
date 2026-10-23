@@ -14,6 +14,47 @@ namespace PenParser
 {
 namespace
 {
+	bool TryParseImageTransform(const TSharedPtr<FJsonValue>& Field, FDesignImageTransform& OutTransform)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Components = nullptr;
+		if (!Field->TryGetArray(Components) || Components->Num() != 6)
+		{
+			return false;
+		}
+		float Values[6];
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(Values); ++Index)
+		{
+			const TSharedPtr<FJsonValue>& Value = (*Components)[Index];
+			if (!Value.IsValid() || Value->Type != EJson::Number
+				|| !Value->TryGetNumber(Values[Index]) || !FMath::IsFinite(Values[Index]))
+			{
+				return false;
+			}
+		}
+		// Pencil maps image UVs into the crop; consumers sample image UVs from
+		// destination UVs, so store the inverse in the shared row-major matrix.
+		const double Determinant = static_cast<double>(Values[0]) * Values[3]
+			- static_cast<double>(Values[1]) * Values[2];
+		if (Determinant == 0.0)
+		{
+			return false;
+		}
+		FDesignImageTransform Parsed;
+		Parsed.A = static_cast<float>(Values[3] / Determinant);
+		Parsed.B = static_cast<float>(-Values[2] / Determinant);
+		Parsed.C = static_cast<float>(-Values[1] / Determinant);
+		Parsed.D = static_cast<float>(Values[0] / Determinant);
+		Parsed.TX = -(Parsed.A * Values[4] + Parsed.B * Values[5]);
+		Parsed.TY = -(Parsed.C * Values[4] + Parsed.D * Values[5]);
+		if (!FMath::IsFinite(Parsed.A) || !FMath::IsFinite(Parsed.B) || !FMath::IsFinite(Parsed.C)
+			|| !FMath::IsFinite(Parsed.D) || !FMath::IsFinite(Parsed.TX) || !FMath::IsFinite(Parsed.TY))
+		{
+			return false;
+		}
+		OutTransform = Parsed;
+		return true;
+	}
+
 	FString FoldPaintOpacityIntoResolvedColor(const FString& ResolvedColor, const float PaintOpacity)
 	{
 		if (PaintOpacity == 1.0f)
@@ -360,6 +401,22 @@ namespace
 	}
 }
 
+FDesignShaderData ParseShader(const TSharedPtr<FJsonObject>& Object, const FDesignVariableResolver& Resolver)
+{
+    auto Typed = MakeShared<FJsonObject>();
+    FString Url; Object->TryGetStringField(TEXT("url"),Url);
+    Typed->SetStringField(TEXT("Url"),Url);
+    const TSharedPtr<FJsonObject>* Uniforms=nullptr;
+    if(Object->TryGetObjectField(TEXT("uniforms"),Uniforms)) Typed->SetObjectField(TEXT("Uniforms"),*Uniforms);
+    FDesignShaderData Shader;
+    DesignShaderJson::Parse(Typed,Shader);
+    Object->TryGetStringField(TEXT("blendMode"),Shader.BlendMode);
+    for(auto& Pair:Shader.Uniforms)
+        if(Pair.Value.Kind==FDesignShaderValue::EKind::String && FDesignVariableResolver::IsVariableRef(Pair.Value.String))
+            Pair.Value.String=Resolver.ResolveString(Pair.Value.String);
+    return Shader;
+}
+
 FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver)
 {
 	FDesignFill Result;
@@ -507,21 +564,33 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 	if (FillType == TEXT("image"))
 	{
 		Result.Type = EDesignFillType::Image;
+		Result.Image.Mode = EDesignImageMode::Fill;
+		Result.Image.bFitCropToNode = true;
 		Obj->TryGetStringField(TEXT("url"), Result.Image.Url);
 		FString Mode;
 		if (Obj->TryGetStringField(TEXT("mode"), Mode))
 		{
-			if (Mode == TEXT("fill"))
+			if (Mode == TEXT("cover") || Mode == TEXT("fill"))
 				Result.Image.Mode = EDesignImageMode::Fill;
-			else if (Mode == TEXT("fit"))
+			else if (Mode == TEXT("contain") || Mode == TEXT("fit"))
 				Result.Image.Mode = EDesignImageMode::Fit;
 			else if (Mode == TEXT("crop"))
 				Result.Image.Mode = EDesignImageMode::Crop;
+			else if (Mode == TEXT("stretch"))
+				Result.Image.Mode = EDesignImageMode::Stretch;
 		}
 		if (!TryGetResolvedNumberField(Obj, TEXT("opacity"), Resolver, Result.Image.Opacity))
 			Result.Image.Opacity = Result.Opacity;
-		const TSharedPtr<FJsonValue>& TransformField = Obj->TryGetField(TEXT("imageTransform"));
-		if (TransformField.IsValid())
+		const TSharedPtr<FJsonValue> Transform = Obj->TryGetField(TEXT("transform"));
+		const TSharedPtr<FJsonValue> TransformField = Obj->TryGetField(TEXT("imageTransform"));
+		if (Transform.IsValid())
+		{
+			if (!TryParseImageTransform(Transform, Result.Image.Transform))
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Invalid transform; expected an invertible affine matrix of six finite numbers. Ignoring transform."));
+			}
+		}
+		else if (TransformField.IsValid())
 		{
 			const TArray<TSharedPtr<FJsonValue>>* Matrix = nullptr;
 			if (!TransformField->TryGetArray(Matrix) || !ParserSharedSemantics::TryParseImageTransformMatrix(
@@ -539,26 +608,76 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 		return Result;
 	}
 
-	if (FillType == TEXT("mesh_gradient"))
-	{
-		Result.Type = EDesignFillType::Gradient;
-		const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));
-		if (ColorsField.IsValid() && ColorsField->Type == EJson::Array)
-		{
-			for (const auto& StopVal : ColorsField->AsArray())
-			{
-				const auto& StopObj = StopVal->AsObject();
-				if (!StopObj.IsValid())
-					continue;
-
-				FDesignGradientStop Stop = ParseGradientStopColor(StopObj, Resolver);
-				Stop.Color = FoldPaintOpacityIntoResolvedColor(Stop.Color, Result.Opacity);
-				if (!TryGetResolvedNumberField(StopObj, TEXT("position"), Resolver, Stop.Position))
-					Stop.Position = Result.Gradient.Colors.Num() > 0 ? 1.0f : 0.0f;
-				Result.Gradient.Colors.Add(Stop);
-			}
-		}
-	}
+    if (FillType == TEXT("shader"))
+    {
+        Result.Type=EDesignFillType::Shader;
+        Result.Shader=ParseShader(Obj,Resolver);
+        Result.Shader->Opacity=Result.Opacity;
+        return Result;
+    }
+    if (FillType == TEXT("mesh_gradient"))
+    {
+        FDesignMeshGradient Mesh;
+        const TArray<TSharedPtr<FJsonValue>>* Colors = nullptr;
+        const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+        if (!Obj->TryGetNumberField(TEXT("columns"), Mesh.Columns)
+            || !Obj->TryGetNumberField(TEXT("rows"), Mesh.Rows)
+            || Mesh.Columns < 2 || Mesh.Rows < 2
+            || !Obj->TryGetArrayField(TEXT("colors"), Colors)
+            || !Obj->TryGetArrayField(TEXT("points"), Points)
+            || int64(Mesh.Columns) * Mesh.Rows != Colors->Num() || Points->Num() != Colors->Num())
+        {
+            UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Invalid mesh_gradient grid dimensions or vertex count."));
+            return Result;
+        }
+        auto ReadPoint = [](const TSharedPtr<FJsonValue>& Value, FVector2D& Out)
+        {
+            const TArray<TSharedPtr<FJsonValue>>* Array = nullptr;
+            double X, Y;
+            if (!Value.IsValid() || !Value->TryGetArray(Array) || Array->Num() != 2
+                || !(*Array)[0]->TryGetNumber(X) || !(*Array)[1]->TryGetNumber(Y)
+                || !FMath::IsFinite(X) || !FMath::IsFinite(Y)) return false;
+            Out = FVector2D(X, Y);
+            return true;
+        };
+        Mesh.Opacity = Result.Opacity;
+        for (int32 Index = 0; Index < Points->Num(); ++Index)
+        {
+            FDesignMeshGradientVertex Vertex;
+            Vertex.LeftHandle = FVector2D(-0.25 / (Mesh.Columns - 1), 0);
+            Vertex.RightHandle = -Vertex.LeftHandle;
+            Vertex.TopHandle = FVector2D(0, -0.25 / (Mesh.Rows - 1));
+            Vertex.BottomHandle = -Vertex.TopHandle;
+            const auto& Point = (*Points)[Index];
+            bool bValid = true;
+            if (Point->Type == EJson::Object)
+            {
+                const auto PointObject = Point->AsObject();
+                bValid = ReadPoint(PointObject->TryGetField(TEXT("position")), Vertex.Position);
+                auto Handle = [&](const TCHAR* Key, FVector2D& Out)
+                {
+                    const auto Value = PointObject->TryGetField(Key);
+                    if (Value.IsValid()) bValid = ReadPoint(Value, Out) && bValid;
+                };
+                Handle(TEXT("leftHandle"), Vertex.LeftHandle);
+                Handle(TEXT("rightHandle"), Vertex.RightHandle);
+                Handle(TEXT("topHandle"), Vertex.TopHandle);
+                Handle(TEXT("bottomHandle"), Vertex.BottomHandle);
+            }
+            else bValid = ReadPoint(Point, Vertex.Position);
+            FString Color;
+            if (!bValid || !(*Colors)[Index]->TryGetString(Color))
+            {
+                UE_LOG(LogDesign2UMG, Warning, TEXT("PenParser: Invalid mesh_gradient point or color."));
+                return Result;
+            }
+            Vertex.Color = FUMGValueParser::ParseColor(Resolver.ResolveColor(Color)).ToFColor(true);
+            Mesh.Vertices.Add(Vertex);
+        }
+        Result.Type = EDesignFillType::Gradient;
+        Result.Gradient.GradientType = EDesignGradientType::Mesh;
+        Result.Gradient.Mesh = MoveTemp(Mesh);
+    }
 
 	return Result;
 }

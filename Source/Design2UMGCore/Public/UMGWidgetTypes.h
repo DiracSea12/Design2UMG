@@ -11,6 +11,7 @@
 namespace UMGWidgetTypes
 {
 	inline constexpr const TCHAR* CanvasPanel = TEXT("CanvasPanel");
+	inline constexpr const TCHAR* WebBrowser = TEXT("WebBrowser");
 	inline constexpr const TCHAR* VerticalBox = TEXT("VerticalBox");
 	inline constexpr const TCHAR* HorizontalBox = TEXT("HorizontalBox");
 	inline constexpr const TCHAR* Overlay = TEXT("Overlay");

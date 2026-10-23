@@ -249,6 +249,30 @@ bool FUMGJsonParser::ParseJson(const FString& JsonString, FUMGWidgetData& OutWid
 	// never leaks a partial tree into the output (all-or-nothing).
 	FUMGWidgetData Candidate;
 	FDesignParserBudget Budget;
+	const TArray<TSharedPtr<FJsonValue>>* ExportBounds = nullptr;
+	if (Root->TryGetArrayField(TEXT("ExportBounds"), ExportBounds))
+	{
+		if (ExportBounds->Num() != 4)
+		{
+			if (OutError) *OutError = TEXT("ExportBounds requires four coordinates");
+			return false;
+		}
+		double Values[4];
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			if (!(*ExportBounds)[Index]->TryGetNumber(Values[Index]))
+			{
+				if (OutError) *OutError = TEXT("ExportBounds requires numeric coordinates");
+				return false;
+			}
+		}
+		if (Values[2] <= Values[0] || Values[3] <= Values[1])
+		{
+			if (OutError) *OutError = TEXT("ExportBounds requires a positive extent");
+			return false;
+		}
+		Candidate.ExportBounds = FBox2D(FVector2D(Values[0], Values[1]), FVector2D(Values[2], Values[3]));
+	}
 
 	const TSharedPtr<FJsonObject>* RootWidget;
 	if (!DesignJsonUtils::TryGetObject(Root, TEXT("RootWidget"), RootWidget))
@@ -600,12 +624,72 @@ void FUMGJsonParser::ParseTextPayload(const TSharedPtr<FJsonObject>& NodeObject,
 	}
 }
 
+void FUMGJsonParser::ParseGradientPayload(const TSharedPtr<FJsonObject>& GradientObject, FUMGVisualBrushData::FGradientData& Gradient)
+{
+	float FloatVal = 0.0f;
+	FString Str;
+	if (TryGetStrictStringField(GradientObject, UMGJsonKeys::Type, Str))
+	{
+		Gradient.Type = Str;
+	}
+	if (TryGetFiniteFloatFieldF(GradientObject, UMGJsonKeys::Rotation, FloatVal))
+	{
+		Gradient.Rotation = FloatVal;
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::StartPoint); JsonValue.IsValid())
+	{
+		Gradient.StartPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::StartPoint);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::EndPoint); JsonValue.IsValid())
+	{
+		Gradient.EndPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::EndPoint);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::Center); JsonValue.IsValid())
+	{
+		Gradient.Center = ParseVector2DValue(JsonValue, UMGJsonKeys::Center);
+	}
+	if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::Size); JsonValue.IsValid())
+	{
+		Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
+	}
+	const TSharedPtr<FJsonObject>* MeshObject = nullptr;
+	if (GradientObject->TryGetObjectField(TEXT("Mesh"), MeshObject))
+	{
+		FDesignMeshGradient Mesh;
+		if (DesignMeshGradientJson::Parse(*MeshObject, Mesh)) Gradient.Mesh = MoveTemp(Mesh);
+	}
+	if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(GradientObject, UMGJsonKeys::Stops))
+	{
+		for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
+		{
+			const TSharedPtr<FJsonObject>* StopObject = nullptr;
+			if (!StopValue->TryGetObject(StopObject) || !StopObject || !(*StopObject).IsValid())
+			{
+				continue;
+			}
+
+			FUMGVisualBrushData::FGradientStopData& Stop = Gradient.Stops.AddDefaulted_GetRef();
+			if (TryGetStrictStringField(*StopObject, UMGPropertyKeys::Color, Str))
+			{
+				Stop.Color = FUMGValueParser::ParseColor(Str);
+			}
+			if (TryGetFiniteFloatFieldF(*StopObject, UMGJsonKeys::Position, FloatVal))
+			{
+				Stop.Position = FloatVal;
+			}
+		}
+	}
+}
+
 void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject, FUMGVisualBrushData& OutBrush)
 {
 	// Parse Brush (v2.4).
 	const TSharedPtr<FJsonObject>* BrushObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Brush"), BrushObject))
 	{
+        const TSharedPtr<FJsonObject>* ShaderObject=nullptr;
+        if((*BrushObject)->TryGetObjectField(TEXT("Shader"),ShaderObject))
+        {FDesignShaderData Shader;if(DesignShaderJson::Parse(*ShaderObject,Shader)) OutBrush.Shader=MoveTemp(Shader);}
 		// Check for a negative unset value before narrowing OutlineCornerRadius to float.
 		double Val;
 		float FloatVal;
@@ -672,6 +756,10 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.Image.Mode = Str;
 			}
+			if (TryGetStrictStringField(*ImageObject, UMGJsonKeys::CropFitMode, Str))
+			{
+				OutBrush.Image.CropFitMode = Str;
+			}
 			if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*ImageObject, UMGJsonKeys::Transform); TransformValue.IsValid())
 			{
 				FUMGVisualBrushData::FImageTransformData Transform;
@@ -688,51 +776,7 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 		const TSharedPtr<FJsonObject>* GradientObject = nullptr;
 		if (DesignJsonUtils::TryGetObject(*BrushObject, TEXT("Gradient"), GradientObject))
 		{
-			if (TryGetStrictStringField(*GradientObject, UMGJsonKeys::Type, Str))
-			{
-				OutBrush.Gradient.Type = Str;
-			}
-			if (TryGetFiniteFloatFieldF(*GradientObject, UMGJsonKeys::Rotation, FloatVal))
-			{
-				OutBrush.Gradient.Rotation = FloatVal;
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::StartPoint); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.StartPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::StartPoint);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::EndPoint); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.EndPoint = ParseVector2DValue(JsonValue, UMGJsonKeys::EndPoint);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Center); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.Center = ParseVector2DValue(JsonValue, UMGJsonKeys::Center);
-			}
-			if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*GradientObject, UMGJsonKeys::Size); JsonValue.IsValid())
-			{
-				OutBrush.Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
-			}
-			if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(*GradientObject, UMGJsonKeys::Stops))
-			{
-				for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
-				{
-					const TSharedPtr<FJsonObject>* StopObject = nullptr;
-					if (!StopValue->TryGetObject(StopObject) || !StopObject || !(*StopObject).IsValid())
-					{
-						continue;
-					}
-
-					FUMGVisualBrushData::FGradientStopData& Stop = OutBrush.Gradient.Stops.AddDefaulted_GetRef();
-					if (TryGetStrictStringField(*StopObject, UMGPropertyKeys::Color, Str))
-					{
-						Stop.Color = FUMGValueParser::ParseColor(Str);
-					}
-					if (TryGetFiniteFloatFieldF(*StopObject, UMGJsonKeys::Position, FloatVal))
-					{
-						Stop.Position = FloatVal;
-					}
-				}
-			}
+			ParseGradientPayload(*GradientObject, OutBrush.Gradient);
 		}
 	}
 }
@@ -743,6 +787,9 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	const TSharedPtr<FJsonObject>* EffectObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Effect"), EffectObject))
 	{
+        const TSharedPtr<FJsonObject>* ShaderObject=nullptr;
+        if((*EffectObject)->TryGetObjectField(TEXT("Shader"),ShaderObject))
+        {FDesignShaderData Shader;if(DesignShaderJson::Parse(*ShaderObject,Shader)) OutEffect.Shader=MoveTemp(Shader);}
 		// Range-check rendering phase values before truncating to int32; PhaseCount is at least one.
 		float FloatVal;
 		FString Str;
@@ -770,6 +817,10 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		if (TryGetStrictStringField(*EffectObject, UMGPropertyKeys::EffectColor, Str))
 		{
 			OutEffect.EffectColor = FUMGValueParser::ParseColor(Str);
+		}
+		if (TryGetStrictStringField(*EffectObject, UMGJsonKeys::InnerShadowBlendMode, Str))
+		{
+			OutEffect.InnerShadowBlendMode = Str;
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::EffectOffset); JsonValue.IsValid())
 		{
@@ -861,6 +912,60 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		{
 			OutPath.StrokeJoin = Str;
 		}
+		if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(*PathDataObject, TEXT("CanvasSize")); Value.IsValid())
+			OutPath.CanvasSize = ParseVector2DValue(Value, TEXT("CanvasSize"));
+		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeAlignment"), Str)) OutPath.StrokeAlignment = Str;
+		bool bFitGeometryToBounds;
+		if ((*PathDataObject)->TryGetBoolField(TEXT("FitGeometryToBounds"), bFitGeometryToBounds)) OutPath.FitGeometryToBounds = bFitGeometryToBounds;
+		FVector4 ViewBox;
+		if (TryGetStrictStringField(*PathDataObject, TEXT("ViewBox"), Str) && TryParseVector4(Str, ViewBox) && ViewBox.Z > 0 && ViewBox.W > 0) OutPath.ViewBox = ViewBox;
+		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeGeometry"), Str)) OutPath.StrokeGeometry = Str;
+		const TSharedPtr<FJsonObject>* SourceObject = nullptr;
+        if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("SourcePaintGeometry"), SourceObject))
+        {
+            FUMGSourcePaintGeometry Source;
+            const auto ReadPaths = [&](const TCHAR* Key, TOptional<TArray<FDesignGeometryPath>>& Paths)
+            {
+                const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+                if (!(*SourceObject)->TryGetArrayField(Key, Values)) return;
+                Paths.Emplace();
+                for (const auto& Value : *Values)
+                {
+                    const TSharedPtr<FJsonObject> Object = Value->AsObject();
+                    FDesignGeometryPath Geometry;
+                    if (TryGetStrictStringField(Object, TEXT("Path"), Geometry.Path)
+                        && TryGetStrictStringField(Object, TEXT("FillRule"), Geometry.FillRule))
+                        Paths->Add(MoveTemp(Geometry));
+                }
+            };
+            ReadPaths(TEXT("FillPaths"), Source.Geometry.FillPaths);
+            ReadPaths(TEXT("StrokePaths"), Source.Geometry.StrokePaths);
+            if (TryGetStrictStringField(*SourceObject, TEXT("StrokeAlignment"), Str)) Source.StrokeAlignment = Str;
+            const auto ReadPaint = [](const TSharedPtr<FJsonObject>& Object)
+            {
+                TSharedPtr<FJsonObject> Holder = MakeShared<FJsonObject>();
+                Holder->SetObjectField(TEXT("Brush"), Object);
+                FUMGVisualBrushData Brush;
+                ParseBrushPayload(Holder, Brush);
+                FUMGSurfacePaint Paint;
+                Paint.Color = Brush.BrushColor.Get(FLinearColor::White);
+                Paint.Gradient = MoveTemp(Brush.Gradient);
+                Paint.Image = MoveTemp(Brush.Image);
+                return Paint;
+            };
+            const TArray<TSharedPtr<FJsonValue>>* Paints = nullptr;
+            if ((*SourceObject)->TryGetArrayField(TEXT("FillPaints"), Paints))
+            {
+                Source.FillPaints = TArray<FUMGSurfacePaint>();
+                for (const auto& Paint : *Paints) Source.FillPaints->Add(ReadPaint(Paint->AsObject()));
+            }
+            const TSharedPtr<FJsonObject>* StrokePaint = nullptr;
+            if ((*SourceObject)->TryGetObjectField(TEXT("StrokePaint"), StrokePaint)) Source.StrokePaint = ReadPaint(*StrokePaint);
+            OutPath.SourcePaintGeometry = MoveTemp(Source);
+        }
+		const TSharedPtr<FJsonObject>* StrokeGradient = nullptr;
+		if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("StrokeGradient"), StrokeGradient)) ParseGradientPayload(*StrokeGradient, OutPath.StrokeGradient);
+
 	}
 }
 
@@ -909,6 +1014,7 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 					Layer.Spread = Val;
 				}
 				TryGetStrictBoolField(*LayerObject, UMGJsonKeys::ShowShadowBehindNode, Layer.bShowShadowBehindNode);
+				TryGetStrictStringField(*LayerObject, UMGJsonKeys::BlendMode, Layer.BlendMode);
 				if (TryGetStrictStringField(*LayerObject, UMGPropertyKeys::Color, Str))
 				{
 					Layer.Color = FUMGValueParser::ParseColor(Str);
@@ -927,6 +1033,9 @@ void FUMGJsonParser::ParseRenderPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	{
 		float Val;
 		FString Str;
+		if (TryGetStrictStringField(*RenderObject, UMGJsonKeys::PaintBlendMode, Str)) OutRender.PaintBlendMode = Str;
+		if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(*RenderObject, UMGJsonKeys::BackgroundCaptureInsets); Value.IsValid())
+			OutRender.BackgroundCaptureInsets = ParsePaddingValue(Value, UMGJsonKeys::BackgroundCaptureInsets);
 		if (TryGetStrictStringField(*RenderObject, UMGPropertyKeys::Clipping, Str))
 		{
 			OutRender.Clipping = Str;

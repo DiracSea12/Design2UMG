@@ -7,18 +7,39 @@
 struct FDesignDocument;
 
 /**
- * Load icon codepoints and bundled design-library variables from the Pencil extension.
+ * Load installed font descriptions, icon codepoints and bundled design-library components and variables from the Pencil extension.
  * Register these resources before converting icons or resolving library imports.
  */
 namespace PencilExtensionResources
 {
-	/** Locate icon-index.json inside the installed extension, parse it, and register the per-family glyph tables into FFontResolver. Idempotent per process. */
+	struct FFontStyle
+	{
+		FString Family;
+		FString Url;
+		int32 Weight = 400;
+		bool bItalic = false;
+		bool bVariable = false;
+		TOptional<FVector2D> WeightRange;
+
+		int32 ResolveWeight(int32 RequestedWeight) const;
+	};
+
+	/** Read literal font descriptions for the requested families (empty selects all) without evaluating JavaScript. */
+	bool ExtractFontStyles(const FString& Bundle, const TSet<FString>& Families,
+		TArray<FFontStyle>& OutStyles, FString& OutError);
+	/** Select a current editor font description by real family, style and effective weight. */
+	bool FindFontStyle(const FString& Family, int32 Weight, bool bItalic, FFontStyle& OutStyle);
+
+	/** Read the installed editor bundle's icon registry and register its family glyphs. Idempotent per process. */
 	void EnsureIconGlyphsRegistered();
 
-	/** Relative paths of the icon index inside an extension root, in priority order. */
+	/** Current editor entry bundle containing the icon registry, relative to the extension root. */
 	void GetIconIndexRelativeCandidates(TArray<FString>& OutRelativePaths);
 
-	/** Locate the extension's bundled library documents (*.lib.pen), extract their variables, and register them into PenBundledLibraries. Idempotent per process. */
+	/** Extract the current unescaped JSON.parse('...') registry as data; never evaluate bundle code. */
+	bool ExtractIconIndexJson(const FString& Bundle, FString& OutJson, FString& OutError);
+
+	/** Locate the extension's bundled library documents (*.lib.pen), register their component definitions and variables into PenBundledLibraries. Idempotent per process. */
 	void EnsureBundledLibrariesRegistered();
 
 	/** Relative directories of the bundled library documents inside an extension root, in priority order. */
@@ -31,18 +52,11 @@ namespace PencilExtensionResources
 	 */
 	bool TryDeriveLibraryNameFromFileName(const FString& FileName, FString& OutLibraryName);
 
-	/** Register every *.lib.pen document in a directory into PenBundledLibraries; returns the number of registered tables. */
+	/** Register every *.lib.pen document in a directory into PenBundledLibraries; returns the number of registered documents. */
 	int32 RegisterLibrariesFromDirectory(const FString& DataDir);
 
 	/**
-	 * Extract a .lib.pen payload's top-level "variables" object and serialize it for
-	 * PenBundledLibraries::RegisterLibraryVariables. Returns false with OutError when the
-	 * payload is not valid JSON or has no "variables" object.
-	 */
-	bool ParseLibPenVariables(const FString& LibPenJson, FString& OutVariablesJson, FString& OutError);
-
-	/**
-	 * Parse an icon-index.json payload into per-family lookup tables.
+	 * Parse a normalized {sets:[...]} icon registry into per-family lookup tables.
 	 * Icon keys are normalized with FFontResolver::NormalizeIconNameKey and family keys are the
 	 * raw family names from the file ("lucide", "Material Symbols Rounded", ...), so registering
 	 * the result through FFontResolver::RegisterKnownIconGlyphs makes queries hit directly.

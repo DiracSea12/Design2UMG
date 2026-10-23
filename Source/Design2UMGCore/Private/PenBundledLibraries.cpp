@@ -6,29 +6,31 @@ namespace PenBundledLibraries
 {
 	namespace
 	{
-		// Library name -> serialized "variables" JSON. Registration and lookup both run on
-		// the game thread (import pipeline entry points), so no locking is needed.
-		TMap<FString, FString>& GetRegistry()
+		// Registration and lookup run on the game thread through the import pipeline.
+		struct FLibraryDocument
 		{
-			static TMap<FString, FString> Registry;
-			return Registry;
+			FString Json;
+			FString SourceFilePath;
+		};
+
+		TMap<FString, FLibraryDocument>& GetDocuments()
+		{
+			static TMap<FString, FLibraryDocument> Documents;
+			return Documents;
 		}
 	}
 
-	void RegisterLibraryVariables(const FString& LibraryName, const FString& VariablesJson)
+	void RegisterLibraryDocument(const FString& LibraryName, const FString& DocumentJson, const FString& SourceFilePath)
 	{
-		if (LibraryName.IsEmpty() || VariablesJson.IsEmpty())
-		{
-			return;
-		}
-		GetRegistry().Add(LibraryName, VariablesJson);
+		GetDocuments().Add(LibraryName, {DocumentJson, SourceFilePath});
 	}
 
-	bool TryGetVariablesJson(const FString& LibraryName, FString& OutJson)
+	bool TryGetDocumentJson(const FString& LibraryName, FString& OutJson, FString* OutSourceFilePath)
 	{
-		if (const FString* Json = GetRegistry().Find(LibraryName))
+		if (const FLibraryDocument* Document = GetDocuments().Find(LibraryName))
 		{
-			OutJson = *Json;
+			OutJson = Document->Json;
+			if (OutSourceFilePath) *OutSourceFilePath = Document->SourceFilePath;
 			return true;
 		}
 		return false;

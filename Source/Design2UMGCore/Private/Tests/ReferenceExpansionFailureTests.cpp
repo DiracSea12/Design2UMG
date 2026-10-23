@@ -10,6 +10,7 @@
 #include "Design2UMGCoreTestHelpers.h"
 #include "DesignTreeLimits.h"
 #include "RefExpander.h"
+#include "PenParser.h"
 #include "SizeEstimator.h"
 
 namespace
@@ -249,6 +250,35 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FReferenceExpansionFailureResultTest::RunTest(const FString&)
 {
+	FDesignDocument OrdinaryDocument;
+	const FString OrdinaryJson = TEXT(R"({"version":"2.21","children":[
+		{"id":"ordinary","type":"frame","width":40,"height":20,"children":[
+			{"id":"ordinary-child","type":"rectangle","width":12,"height":8,"fill":"#ff0000"}]},
+		{"id":"ordinary-instance","type":"ref","ref":"ordinary",
+			"descendants":{"ordinary-child":{"width":33,"fill":"#00ff00"}}}]})");
+	if (!TestTrue(TEXT("Non-component reference document parses"),
+	              FPenParser::ParseDocument(OrdinaryJson, OrdinaryDocument)))
+		return false;
+	const auto OrdinaryResult = RefExpander::ExpandRef(OrdinaryDocument.Children.Last(), OrdinaryDocument);
+	if (!TestTrue(TEXT("Existing non-reusable target expands instead of reporting MissingTarget"),
+	              OrdinaryResult.IsSuccess()))
+		return false;
+	TestEqual(TEXT("Expanded ordinary copy keeps instance identity"), OrdinaryResult.ExpandedNode->Id,
+	          FString(TEXT("ordinary-instance")));
+	if (!TestEqual(TEXT("Ordinary target children are copied"), OrdinaryResult.ExpandedNode->Children.Num(), 1))
+		return false;
+	TestEqual(TEXT("Ordinary target descendant overrides apply"),
+	          OrdinaryResult.ExpandedNode->Children[0]->Transform.Width.Value, 33.0f);
+	TestEqual(TEXT("Ordinary source remains unchanged"),
+	          OrdinaryDocument.Children[0]->Children[0]->Transform.Width.Value, 12.0f);
+	TestFalse(TEXT("Reference expansion does not promote the ordinary source to a component"),
+	          OrdinaryDocument.Children[0]->bReusable);
+	TestFalse(TEXT("Component-only lookup still excludes ordinary nodes"),
+	          OrdinaryDocument.FindReusableNode(TEXT("ordinary")).IsValid());
+	const auto OrdinaryData =
+	    FDesign2UMGConverter::Convert(OrdinaryDocument, FDesign2UMGConversionSettings::Defaults());
+	TestEqual(TEXT("Converter uses ordinary reference targets too"), OrdinaryData.GetConversionStatus(),
+	          EDesign2UMGConversionStatus::Succeeded);
 	FDesignDocument CircularDocument = BuildCircularReferenceDocument();
 	AddExpectedError(TEXT("circular ref detected"), EAutomationExpectedErrorFlags::Contains, 1);
 	const FDesignReferenceExpansionResult CircularResult =

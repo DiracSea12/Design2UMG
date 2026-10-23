@@ -5,6 +5,8 @@
 #include "DesignSchemaFoundation.h"
 #include "DesignSchemaSourceExtensions.generated.h"
 
+struct FDesignNode;
+
 USTRUCT()
 struct FDesignComponentInstanceData
 {
@@ -142,6 +144,9 @@ struct FDesignSourceDocumentData
 {
 	GENERATED_BODY()
 
+	/** Imported document roots participate in reference lookup, not source frame selection or layout. */
+	TArray<TSharedPtr<FDesignNode>> ImportedNodes;
+
 	UPROPERTY() FString SourceFilePath;
 	UPROPERTY() FString ComponentsJson;
 	UPROPERTY() FString ComponentSetsJson;
@@ -174,8 +179,19 @@ struct FDesignParseDiagnostics
 /**
  * Source-only metadata carried alongside the shared design node.
  */
+struct FDesignPencilNodeData
+{
+	/** Authored fields only; children and descendant trees remain in the design tree. */
+	TSharedPtr<class FJsonObject> Properties;
+	FString Context;
+	FString Model;
+	FString MetadataJson;
+	TOptional<TArray<FString>> SlotRecommendations;
+};
+
 struct FDesignSourceNodeData
 {
+	FDesignPencilNodeData Pencil;
 	FDesignComponentInstanceData ComponentInstance;
 	FDesignPrototypeNodeData Prototype;
 	FString SourceNodeType;

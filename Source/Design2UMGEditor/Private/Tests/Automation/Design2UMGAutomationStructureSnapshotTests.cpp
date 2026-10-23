@@ -62,6 +62,10 @@ namespace
 		{
 			ChildFingerprints.Add(BuildNodeFingerprint(Child));
 		}
+		for (const TSharedPtr<FDesignNode>& Imported : Doc.SourceDocument().ImportedNodes)
+		{
+			ChildFingerprints.Add(BuildNodeFingerprint(Imported));
+		}
 
 		return FString::Join(ChildFingerprints, TEXT("||"));
 	}
@@ -470,6 +474,23 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 
 	Document.Children.Add(Component);
 	Document.Children.Add(Screen);
+	TSharedPtr<FDesignNode> ImportedComponent = MakeShared<FDesignNode>();
+	ImportedComponent->Id = TEXT("library:component");
+	ImportedComponent->Type = EDesignNodeType::Frame;
+	ImportedComponent->bReusable = true;
+	TSharedPtr<FDesignNode> ImportedLabel = MakeShared<FDesignNode>();
+	ImportedLabel->Id = TEXT("library:label");
+	ImportedLabel->Name = TEXT("ImportedLabel");
+	ImportedLabel->Type = EDesignNodeType::Text;
+	ImportedLabel->Text.Content = TEXT("Imported Snapshot Probe");
+	ImportedComponent->Children.Add(ImportedLabel);
+	Document.MutableSourceDocument().ImportedNodes.Add(ImportedComponent);
+	TSharedPtr<FDesignNode> ImportedInstance = MakeShared<FDesignNode>();
+	ImportedInstance->Id = TEXT("imported_instance");
+	ImportedInstance->Name = TEXT("ImportedInstance");
+	ImportedInstance->Type = EDesignNodeType::Ref;
+	ImportedInstance->Ref = ImportedComponent->Id;
+	Screen->Children.Add(ImportedInstance);
 
 	const FString BeforeFingerprint = BuildDocumentFingerprint(Document);
 	TestFalse(TEXT("Before snapshot source document should not mark expanded ref instance"),
@@ -480,7 +501,12 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 		|| Instance->Metadata.Contains(TEXT("design2umg.expanded_ref_instance")));
 
 	const TSharedPtr<FJsonObject> Snapshot = Design2UMGAutomationStructureSnapshot::BuildDesignStructureSnapshot(Document, TEXT("screen"));
-	TestTrue(TEXT("Structure snapshot is produced"), Snapshot.IsValid());
+	if (!TestTrue(TEXT("Structure snapshot is produced"), Snapshot.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Snapshot includes local and imported component children"), Snapshot->GetIntegerField(TEXT("total_nodes")), 5);
+	TestEqual(TEXT("Snapshot counts both component labels"), Snapshot->GetIntegerField(TEXT("text_nodes")), 2);
 
 	const FString AfterFingerprint = BuildDocumentFingerprint(Document);
 	TestEqual(TEXT("Building structure snapshot must not mutate source document"), AfterFingerprint, BeforeFingerprint);
@@ -491,6 +517,9 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 		Component->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))
 		|| Screen->Metadata.Contains(TEXT("design2umg.expanded_ref_instance"))
 		|| Instance->Metadata.Contains(TEXT("design2umg.expanded_ref_instance")));
+	TestFalse(TEXT("Snapshot traversal leaves imported definitions unexpanded"),
+		ImportedComponent->bExpandedRefInstance || ImportedLabel->bExpandedRefInstance);
+	TestEqual(TEXT("Snapshot preserves imported label content"), ImportedLabel->Text.Content, FString(TEXT("Imported Snapshot Probe")));
 	return true;
 }
 

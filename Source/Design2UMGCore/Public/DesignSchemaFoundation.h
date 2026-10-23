@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "DesignOptionalValues.h"
+#include "DesignMeshGradient.h"
+#include "DesignShaderData.h"
 #include "DesignSchemaFoundation.generated.h"
 
 /**
@@ -26,7 +28,9 @@ enum class EDesignNodeType : uint8
 	Note,
 	Prompt,
 	Context,
-	Unknown
+	Unknown,
+	Browser,
+	Script
 };
 
 /**
@@ -142,7 +146,8 @@ enum class EDesignGradientType : uint8
 {
 	Linear,
 	Radial,
-	Angular
+	Angular,
+	Mesh
 };
 
 /**
@@ -191,6 +196,9 @@ struct FDesignGradient
 
 	UPROPERTY()
 	TArray<FDesignGradientStop> Colors;
+
+	TOptional<FDesignMeshGradient> Mesh;
+	bool HasColors() const { return Colors.Num() > 0 || (Mesh.IsSet() && Mesh->IsValid()); }
 };
 
 /**
@@ -208,7 +216,7 @@ enum class EDesignImageMode : uint8
 /**
  * 2x3 affine transform for image cropping.
  * Source imageTransform: [[a, b, tx], [c, d, ty]]
- * Maps source UV space [0,1]x[0,1] into node space.
+ * Maps destination-normalized coordinates into source image UVs.
  */
 USTRUCT()
 struct FDesignImageTransform
@@ -257,6 +265,10 @@ struct FDesignImageFill
 
 	UPROPERTY()
 	FDesignImageTransform Transform;
+
+	/** Apply Mode to the crop before mapping it into the node. Otherwise Transform is the final sampling map. */
+	UPROPERTY()
+	bool bFitCropToNode = false;
 };
 
 /**
@@ -268,7 +280,8 @@ enum class EDesignFillType : uint8
 	None,
 	Color,
 	Gradient,
-	Image
+	Image,
+	Shader
 };
 
 /**
@@ -293,6 +306,8 @@ struct FDesignFill
 
 	UPROPERTY()
 	FDesignImageFill Image;
+
+	TOptional<FDesignShaderData> Shader;
 
 	UPROPERTY()
 	bool bEnabled = true;
@@ -575,6 +590,16 @@ enum class EDesignTextAlignVertical : uint8
 	Bottom
 };
 
+/** Editor preparation only; source declarations and generated UMG keep their existing serialization. */
+struct FDesignPreparedFont
+{
+	FString SourceAssetPath;
+	FName TypefaceName;
+	FString AssetPath;
+	/** Identifies the declaration whose real document face was selected during preparation. */
+	FString DeclarationKey;
+};
+
 USTRUCT()
 struct FDesignTextRun
 {
@@ -600,6 +625,9 @@ struct FDesignTextRun
 
 	UPROPERTY()
 	FString FontPostScriptName;
+
+	/** Import-local native composite; generated UMG serializes its resolved asset path. */
+	FDesignPreparedFont PreparedFont;
 
 	UPROPERTY()
 	FDesignOptionalFloat FontSize;
@@ -681,7 +709,8 @@ enum class EDesignEffectType : uint8
 	None,
 	Blur,
 	BackgroundBlur,
-	Shadow
+	Shadow,
+	Shader
 };
 
 USTRUCT()
@@ -735,6 +764,8 @@ struct FDesignEffect
 
 	UPROPERTY()
 	FDesignShadow Shadow;
+
+	TOptional<FDesignShaderData> Shader;
 };
 
 USTRUCT()

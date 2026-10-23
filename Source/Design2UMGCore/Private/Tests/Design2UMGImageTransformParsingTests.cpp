@@ -148,4 +148,20 @@ bool FFigmaImageMatrixParsingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSourceSlotMetadataTest,
+	"Design2UMG.Unit.ParserShared.SourceSlotMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSourceSlotMetadataTest::RunTest(const FString&)
+{
+	for (const int32 Count : {0, 2})
+	{
+		FDesignNode Node;
+		ParserSharedSemantics::AddSourceSlotMetadata(Node, Count);
+		TestEqual(TEXT("Slot presence is preserved"), Node.Metadata.FindRef(TEXT("source.slot.present")), FString(TEXT("true")));
+		TestEqual(TEXT("The caller's count is preserved"), Node.Metadata.FindRef(TEXT("source.slot.count")), FString::FromInt(Count));
+		TestEqual(TEXT("Only an empty slot receives the empty hint"), Node.Metadata.Contains(TEXT("source.slot.empty")), Count == 0);
+	}
+	return true;
+}
+
 #endif

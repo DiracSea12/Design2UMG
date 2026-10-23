@@ -11,6 +11,7 @@ namespace UMGJsonKeys
 	inline constexpr const TCHAR* Type = TEXT("Type");
 	inline constexpr const TCHAR* Mode = TEXT("Mode");
 	inline constexpr const TCHAR* Transform = TEXT("Transform");
+	inline constexpr const TCHAR* CropFitMode = TEXT("CropFitMode");
 	inline constexpr const TCHAR* Rotation = TEXT("Rotation");
 	inline constexpr const TCHAR* StartPoint = TEXT("StartPoint");
 	inline constexpr const TCHAR* EndPoint = TEXT("EndPoint");
@@ -19,6 +20,10 @@ namespace UMGJsonKeys
 	inline constexpr const TCHAR* Stops = TEXT("Stops");
 	inline constexpr const TCHAR* Position = TEXT("Position");
 	inline constexpr const TCHAR* BoxShadows = TEXT("BoxShadows");
+inline constexpr const TCHAR* BlendMode = TEXT("BlendMode");
+inline constexpr const TCHAR* PaintBlendMode = TEXT("PaintBlendMode");
+inline constexpr const TCHAR* InnerShadowBlendMode = TEXT("InnerShadowBlendMode");
+inline constexpr const TCHAR* BackgroundCaptureInsets = TEXT("BackgroundCaptureInsets");
 	inline constexpr const TCHAR* Offset = TEXT("Offset");
 	inline constexpr const TCHAR* Blur = TEXT("Blur");
 	inline constexpr const TCHAR* Spread = TEXT("Spread");

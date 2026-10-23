@@ -28,6 +28,9 @@ FString DesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayou
 {
 	switch (Type)
 	{
+	case EDesignNodeType::Browser:
+		return UMGWidgetTypes::WebBrowser;
+
 	case EDesignNodeType::Frame:
 	case EDesignNodeType::Ref:
 		return MapLayoutToContainer(Layout);

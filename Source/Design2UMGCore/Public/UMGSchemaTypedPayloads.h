@@ -3,7 +3,28 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignMeshGradient.h"
+#include "DesignShaderData.h"
+#include "DesignPathGeometry.h"
 #include "Styling/SlateBrush.h"
+
+/** Native browser settings and retained source viewport configuration. */
+struct FUMGBrowserData
+{
+	FString InitialURL;
+	FString DeviceId;
+	TOptional<float> Zoom;
+	TOptional<float> ScrollX;
+	TOptional<float> ScrollY;
+	// Pencil has no transparency field; absent leaves the native widget default.
+	TOptional<bool> bSupportsTransparency;
+
+	bool HasAny() const
+	{
+		return !InitialURL.IsEmpty() || !DeviceId.IsEmpty() || Zoom.IsSet()
+			|| ScrollX.IsSet() || ScrollY.IsSet() || bSupportsTransparency.IsSet();
+	}
+};
 
 /**
  * Typed text style fields such as font size and letter spacing.
@@ -150,10 +171,11 @@ struct FUMGVisualBrushData
 		TOptional<FString> TexturePath;
 		TOptional<FString> Mode;
 		TOptional<FImageTransformData> Transform;
+		TOptional<FString> CropFitMode;
 
 		bool HasAny() const
 		{
-			return TexturePath.IsSet() || Mode.IsSet() || Transform.IsSet();
+			return TexturePath.IsSet() || Mode.IsSet() || Transform.IsSet() || CropFitMode.IsSet();
 		}
 	};
 
@@ -163,6 +185,8 @@ struct FUMGVisualBrushData
 		float Position = 0.0f;
 	};
 
+	TOptional<FDesignShaderData> Shader;
+
 	struct FGradientData
 	{
 		TOptional<FString> Type;
@@ -171,13 +195,13 @@ struct FUMGVisualBrushData
 		TOptional<FVector2D> EndPoint;
 		TOptional<FVector2D> Center;
 		TOptional<FVector2D> Size;
-
 		TArray<FGradientStopData> Stops;
+		TOptional<FDesignMeshGradient> Mesh;
 
 		bool HasAny() const
 		{
 			return Type.IsSet() || Rotation.IsSet() || StartPoint.IsSet() || EndPoint.IsSet()
-				|| Center.IsSet() || Size.IsSet() || Stops.Num() > 0;
+				|| Center.IsSet() || Size.IsSet() || Stops.Num() > 0 || (Mesh.IsSet() && Mesh->IsValid());
 		}
 	};
 
@@ -230,6 +254,7 @@ struct FUMGEffectData
 		int32 PhaseCount = 1;
 	};
 
+	TOptional<FDesignShaderData> Shader;
 	TOptional<float> BlurStrength;
 	TOptional<bool> bRetainRendering;
 	TOptional<FString> EffectMaterial;
@@ -237,6 +262,7 @@ struct FUMGEffectData
 	TOptional<FVector2D> EffectBlurUVStep;
 	TOptional<FLinearColor> EffectColor;
 	TOptional<FVector2D> EffectOffset;
+	TOptional<FString> InnerShadowBlendMode;
 	TOptional<EUMGGeometryMaskShape> GeometryMaskShape;
 	TOptional<FVector2D> GeometryMaskSize;
 	TOptional<FVector4> GeometryMaskCornerRadii;
@@ -244,13 +270,14 @@ struct FUMGEffectData
 
 	bool HasAny() const
 	{
-		return BlurStrength.IsSet()
+		return Shader.IsSet() || BlurStrength.IsSet()
 			|| bRetainRendering.IsSet()
 			|| EffectMaterial.IsSet()
 			|| TextureParameter.IsSet()
 			|| EffectBlurUVStep.IsSet()
 			|| EffectColor.IsSet()
 			|| EffectOffset.IsSet()
+			|| InnerShadowBlendMode.IsSet()
 			|| GeometryMaskShape.IsSet()
 			|| GeometryMaskSize.IsSet()
 			|| GeometryMaskCornerRadii.IsSet()
@@ -258,30 +285,108 @@ struct FUMGEffectData
 	}
 };
 
+// One static paint; object opacity belongs to the owning native widget.
+struct FUMGSurfacePaint
+{
+	FLinearColor Color = FLinearColor::White;
+	FUMGVisualBrushData::FGradientData Gradient;
+	FUMGVisualBrushData::FImageData Image;
+
+	void WriteSignature(FArchive& Archive) const
+	{
+		auto Tint = Color;
+		auto G = Gradient;
+		auto I = Image;
+		Archive << Tint << G.Type << G.Rotation << G.StartPoint << G.EndPoint << G.Center << G.Size;
+		bool HasMesh = G.Mesh.IsSet();
+		Archive << HasMesh;
+		if (HasMesh) G.Mesh->WriteSignature(Archive);
+		int32 Count = G.Stops.Num();
+		Archive << Count;
+		for (auto& Stop : G.Stops) Archive << Stop.Position << Stop.Color;
+		Archive << I.TexturePath << I.Mode << I.CropFitMode;
+		bool HasTransform = I.Transform.IsSet();
+		Archive << HasTransform;
+		if (HasTransform)
+		{
+			auto T = I.Transform.GetValue();
+			Archive << T.A << T.B << T.TX << T.C << T.D << T.TY;
+		}
+	}
+};
+
+struct FUMGSourcePaintGeometry
+{
+	FDesignPaintGeometry Geometry;
+	FString StrokeAlignment = TEXT("center");
+	TOptional<TArray<FUMGSurfacePaint>> FillPaints;
+	TOptional<FUMGSurfacePaint> StrokePaint;
+
+	friend FArchive& operator<<(FArchive& Archive, FUMGSourcePaintGeometry& Source)
+	{
+		Archive << Source.Geometry << Source.StrokeAlignment;
+		bool HasPaints = Source.FillPaints.IsSet();
+		Archive << HasPaints;
+		if (HasPaints)
+		{
+			int32 Count = Source.FillPaints->Num();
+			Archive << Count;
+			for (const auto& Paint : Source.FillPaints.GetValue()) Paint.WriteSignature(Archive);
+		}
+		bool HasStroke = Source.StrokePaint.IsSet();
+		Archive << HasStroke;
+		if (HasStroke) Source.StrokePaint->WriteSignature(Archive);
+		return Archive;
+	}
+};
+
 struct FUMGPathData
 {
+	// Drawing canvas can include ink outside the native widget's layout box.
+	TOptional<FVector2D> CanvasSize;
 	TOptional<FString> Geometry;
+	// Source regions share local coordinates and retain their independent fill rules.
+	TOptional<FUMGSourcePaintGeometry> SourcePaintGeometry;
+	TOptional<FVector4> ViewBox;
+	TOptional<bool> FitGeometryToBounds;
+	// With source context and no Geometry, this is a filled region, not a stroke centerline.
+	TOptional<FString> StrokeGeometry;
+	FUMGVisualBrushData::FGradientData StrokeGradient;
 	TOptional<FString> FillRule;
 	TOptional<FLinearColor> FillColor;
 	TOptional<FLinearColor> StrokeColor;
 	TOptional<float> StrokeThickness;
 	TOptional<FString> StrokeCap;
 	TOptional<FString> StrokeJoin;
+	TOptional<FString> StrokeAlignment;
+
+	bool HasPaintGeometry() const
+	{
+		return Geometry.IsSet() || (SourcePaintGeometry.IsSet() && StrokeGeometry.IsSet());
+	}
 
 	bool HasAny() const
 	{
-		return Geometry.IsSet()
+		return CanvasSize.IsSet()
+			|| Geometry.IsSet()
+			|| SourcePaintGeometry.IsSet()
+			|| ViewBox.IsSet()
+			|| FitGeometryToBounds.IsSet()
+			|| StrokeGeometry.IsSet()
+			|| StrokeGradient.HasAny()
 			|| FillRule.IsSet()
 			|| FillColor.IsSet()
 			|| StrokeColor.IsSet()
 			|| StrokeThickness.IsSet()
 			|| StrokeCap.IsSet()
-			|| StrokeJoin.IsSet();
+			|| StrokeJoin.IsSet()
+			|| StrokeAlignment.IsSet();
 	}
 };
 
 struct FUMGBoxShadowLayerData
 {
+	FString BlendMode;
 	FVector2D Offset = FVector2D::ZeroVector;
 	float Blur = 0.0f;
 	float Spread = 0.0f;
@@ -311,6 +416,9 @@ struct FUMGShadowData
  */
 struct FUMGRenderStyleData
 {
+	TOptional<FString> PaintBlendMode;
+	// Logical pixel outward capture extent, only for an actual background prefix producer.
+	TOptional<FMargin> BackgroundCaptureInsets;
 	TOptional<float> RenderOpacity;
 	TOptional<float> RenderAngle;
 	TOptional<FVector2D> RenderTransformScale;
@@ -320,7 +428,9 @@ struct FUMGRenderStyleData
 
 	bool HasAny() const
 	{
-		return RenderOpacity.IsSet()
+		return BackgroundCaptureInsets.IsSet()
+			|| PaintBlendMode.IsSet()
+			|| RenderOpacity.IsSet()
 			|| RenderAngle.IsSet()
 			|| RenderTransformScale.IsSet()
 			|| RenderTransformPivot.IsSet()

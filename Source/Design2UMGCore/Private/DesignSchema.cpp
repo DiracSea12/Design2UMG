@@ -3,6 +3,7 @@
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGLog.h"
+#include "Misc/Paths.h"
 
 namespace
 {
@@ -10,10 +11,10 @@ namespace
 	const FDesignSourceDocumentData EmptySourceDocumentData;
 	const FDesignParseDiagnostics EmptyParseDiagnostics;
 
-	void IndexReusableNodes(
+	void IndexNodes(
 		const TArray<TSharedPtr<FDesignNode>>& Nodes,
 		TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
-		TSet<FString>& RepeatedIds)
+		TSet<FString>& RepeatedIds, const bool bReusableOnly)
 	{
 		for (const TSharedPtr<FDesignNode>& Node : Nodes)
 		{
@@ -21,7 +22,7 @@ namespace
 			{
 				continue;
 			}
-			if (Node->bReusable)
+			if (!bReusableOnly || Node->bReusable)
 			{
 				if (const TSharedPtr<FDesignNode>* Existing = OutNodesById.Find(Node->Id))
 				{
@@ -32,7 +33,29 @@ namespace
 					OutNodesById.Add(Node->Id, Node);
 				}
 			}
-			IndexReusableNodes(Node->Children, OutNodesById, RepeatedIds);
+			IndexNodes(Node->Children, OutNodesById, RepeatedIds, bReusableOnly);
+		}
+	}
+
+	void BuildDocumentNodeIndex(const FDesignDocument& Document, const bool bReusableOnly,
+		TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById, TArray<FString>* OutWarnings)
+	{
+		OutNodesById.Reset();
+		TSet<FString> RepeatedIds;
+		IndexNodes(Document.Children, OutNodesById, RepeatedIds, bReusableOnly);
+		IndexNodes(Document.SourceDocument().ImportedNodes, OutNodesById, RepeatedIds, bReusableOnly);
+		if (!RepeatedIds.IsEmpty())
+		{
+			// A selected subtree can also contain definitions supplied separately by the import source.
+			// Keep the established document-order lookup; do not confuse repeated definitions with instance identity.
+			TArray<FString> Ids = RepeatedIds.Array();
+			Ids.Sort();
+			const FString Warning = FString::Printf(
+				TEXT("Repeated %s ids [%s]; first occurrence in document order retained"),
+				bReusableOnly ? TEXT("reusable definition") : TEXT("reference target"),
+				*FString::Join(Ids, TEXT(", ")));
+			if (OutWarnings) OutWarnings->Add(Warning);
+			UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
 		}
 	}
 }
@@ -177,6 +200,14 @@ FDesignSourceDocumentData& FDesignDocument::MutableSourceDocument()
 	return *SourceDocumentData;
 }
 
+const FString& FDesignDocument::RecordSourceFilePath(const FString& FilePath)
+{
+	FString& SourceFilePath = MutableSourceDocument().SourceFilePath;
+	SourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
+	Metadata.Add(TEXT("design.sourceFilePath"), SourceFilePath);
+	return SourceFilePath;
+}
+
 bool FDesignDocument::HasParseDiagnostics() const
 {
 	return ParseDiagnosticsData != nullptr;
@@ -207,19 +238,11 @@ TSharedPtr<FDesignNode> FDesignDocument::FindReusableNode(const FString& Id) con
 void FDesignDocument::BuildReusableNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
 	TArray<FString>* OutWarnings) const
 {
-	OutNodesById.Reset();
-	TSet<FString> RepeatedIds;
-	IndexReusableNodes(Children, OutNodesById, RepeatedIds);
-	if (!RepeatedIds.IsEmpty())
-	{
-		// A selected subtree can also contain definitions supplied separately by the import source.
-		// Keep the established document-order lookup; do not confuse repeated definitions with instance identity.
-		TArray<FString> Ids = RepeatedIds.Array();
-		Ids.Sort();
-		const FString Warning = FString::Printf(
-			TEXT("Repeated reusable definition ids [%s]; first occurrence in document order retained"),
-			*FString::Join(Ids, TEXT(", ")));
-		if (OutWarnings) OutWarnings->Add(Warning);
-		UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Warning);
-	}
+	BuildDocumentNodeIndex(*this, true, OutNodesById, OutWarnings);
+}
+
+void FDesignDocument::BuildReferenceNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
+	TArray<FString>* OutWarnings) const
+{
+	BuildDocumentNodeIndex(*this, false, OutNodesById, OutWarnings);
 }

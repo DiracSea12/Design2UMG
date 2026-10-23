@@ -6,6 +6,7 @@
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 #include "ParserSharedSemantics.h"
+#include "DesignSchemaSourceExtensions.h"
 
 namespace PenParser
 {
@@ -37,6 +38,9 @@ void ApplyNodeBoxProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode&
 
 void ApplyNodeLayoutProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& OutNode, const FDesignVariableResolver& Resolver)
 {
+	FString LayoutPosition;
+	if (JsonObj->TryGetStringField(TEXT("layoutPosition"), LayoutPosition))
+		OutNode.LayoutData.bAbsoluteLayoutPositioning = LayoutPosition == TEXT("absolute");
 	if (JsonObj->HasField(TEXT("opacity")))
 	{
 		if (TryGetResolvedNumberField(JsonObj, TEXT("opacity"), Resolver, OutNode.Transform.Opacity))
@@ -85,8 +89,9 @@ void ApplyNodeTextStyleProperties(const TSharedPtr<FJsonObject>& JsonObj, FDesig
 		OutNode.Text.FontFamily = Resolver.ResolveString(FontFamily);
 	JsonObj->TryGetStringField(TEXT("fontPostScriptName"), OutNode.Text.FontPostScriptName);
 	TryGetResolvedNumberField(JsonObj, TEXT("fontSize"), Resolver, OutNode.Text.FontSize);
-	JsonObj->TryGetStringField(TEXT("fontWeight"), OutNode.Text.FontWeight);
-	JsonObj->TryGetStringField(TEXT("fontStyle"), OutNode.Text.FontStyle);
+	FString FontWeight, FontStyle;
+	if (JsonObj->TryGetStringField(TEXT("fontWeight"), FontWeight)) OutNode.Text.FontWeight = Resolver.ResolveString(FontWeight);
+	if (JsonObj->TryGetStringField(TEXT("fontStyle"), FontStyle)) OutNode.Text.FontStyle = Resolver.ResolveString(FontStyle);
 	float LetterSpacing = 0.0f;
 	if (TryGetResolvedNumberField(JsonObj, TEXT("letterSpacing"), Resolver, LetterSpacing))
 	{
@@ -103,15 +108,26 @@ namespace PenParser
 FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const FDesignNode& Node, const FDesignVariableResolver& Resolver)
 {
 	FDesignNodePatch Patch;
+	Patch.PencilProperties = Node.Source().Pencil.Properties;
+	for (const auto& Pair : Node.Descendants) Patch.Descendants.Add(Pair.Key, MakeShared<FDesignNodeOverride>(Pair.Value));
+	if (JsonObj->HasField(TEXT("ref"))) Patch.Ref = Node.Ref;
+	if (JsonObj->HasField(TEXT("reusable"))) Patch.Reusable = Node.bReusable;
+	if (JsonObj->HasField(TEXT("theme"))) Patch.Theme = Node.Theme;
+	if (JsonObj->HasField(TEXT("layoutPosition"))) Patch.AbsoluteLayoutPositioning = Node.LayoutData.bAbsoluteLayoutPositioning;
+	if (JsonObj->HasField(TEXT("context"))) Patch.SourceContext = Node.Source().Pencil.Context;
+	if (JsonObj->HasField(TEXT("model"))) Patch.SourceModel = Node.Source().Pencil.Model;
+	if (JsonObj->HasField(TEXT("metadata"))) Patch.SourceMetadataJson = Node.Source().Pencil.MetadataJson;
+	if (JsonObj->HasField(TEXT("slot"))) Patch.SourceSlotRecommendations.Emplace(Node.Source().Pencil.SlotRecommendations);
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("name"))) Patch.Name = Node.Name;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontFamily"))) Patch.FontFamily = Node.Text.FontFamily;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontPostScriptName"))) Patch.FontPostScriptName = Node.Text.FontPostScriptName;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontWeight"))) Patch.FontWeight = Node.Text.FontWeight;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fontStyle"))) Patch.FontStyle = Node.Text.FontStyle;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("href"))) Patch.Href = Node.Text.Href;
-	if (JsonObj->HasTypedField<EJson::String>(TEXT("icon"))) Patch.IconFontName = Node.Text.IconFontName;
-	if (JsonObj->HasTypedField<EJson::String>(TEXT("library"))) Patch.IconFontFamily = Node.Text.IconFontFamily;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("icon")) || JsonObj->HasTypedField<EJson::String>(TEXT("iconFontName"))) Patch.IconFontName = Node.Text.IconFontName;
+	if (JsonObj->HasTypedField<EJson::String>(TEXT("library")) || JsonObj->HasTypedField<EJson::String>(TEXT("iconFontFamily"))) Patch.IconFontFamily = Node.Text.IconFontFamily;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("geometry"))) Patch.Geometry = Node.Shape.Geometry;
+	if (JsonObj->HasField(TEXT("viewBox"))) Patch.ViewBox = Node.Shape.ViewBox;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("fillRule"))) Patch.FillRule = Node.Shape.FillRule;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("layout"))) Patch.Layout = Node.LayoutData.Layout;
 	if (JsonObj->HasTypedField<EJson::String>(TEXT("justifyContent"))) Patch.JustifyContent = Node.LayoutData.JustifyContent;
@@ -178,13 +194,13 @@ FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const 
 		bool Value = false;
 		if (TryGetResolvedBoolField(JsonObj, TEXT("strikethrough"), Resolver, Value)) Patch.Strikethrough = Value;
 	}
-	Patch.X = Node.Transform.ExplicitX;
-	Patch.Y = Node.Transform.ExplicitY;
-	Patch.Opacity = Node.Transform.ExplicitOpacity;
-	if (Node.Transform.bHasWidth) Patch.Width = Node.Transform.Width;
-	if (Node.Transform.bHasHeight) Patch.Height = Node.Transform.Height;
-	Patch.Gap = Node.LayoutData.ExplicitGap;
-	Patch.Padding = Node.LayoutData.ExplicitPadding;
+	if (JsonObj->HasField(TEXT("x"))) Patch.X = Node.Transform.ExplicitX;
+	if (JsonObj->HasField(TEXT("y"))) Patch.Y = Node.Transform.ExplicitY;
+	if (JsonObj->HasField(TEXT("opacity"))) Patch.Opacity = Node.Transform.ExplicitOpacity;
+	if (JsonObj->HasField(TEXT("width")) || JsonObj->HasField(TEXT("size"))) Patch.Width = Node.Transform.Width;
+	if (JsonObj->HasField(TEXT("height")) || JsonObj->HasField(TEXT("size"))) Patch.Height = Node.Transform.Height;
+	if (JsonObj->HasField(TEXT("gap"))) Patch.Gap = Node.LayoutData.ExplicitGap;
+	if (JsonObj->HasField(TEXT("padding"))) Patch.Padding = Node.LayoutData.ExplicitPadding;
 	// New children without baked coordinates need the inherited inset at runtime.
 	// Child coordinates alone cannot revoke ownership of padding authored by another layer.
 	if (Patch.Padding.IsSet() || (JsonObj->HasTypedField<EJson::Array>(TEXT("children"))
@@ -192,11 +208,11 @@ FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const 
 	{
 		Patch.PaddingRequiresRuntimeWrap = Node.LayoutData.PaddingRequiresRuntimeWrap;
 	}
-	Patch.Clip = Node.LayoutData.ExplicitClip;
-	Patch.LetterSpacing = Node.Text.LetterSpacing;
-	if (Node.Visual.Stroke.Fill.IsSet()) Patch.StrokeFill.Emplace(Node.Visual.Stroke.Fill.GetValue());
+	if (JsonObj->HasField(TEXT("clip"))) Patch.Clip = Node.LayoutData.ExplicitClip;
+	if (JsonObj->HasField(TEXT("letterSpacing"))) Patch.LetterSpacing = Node.Text.LetterSpacing;
+	if (JsonObj->HasField(TEXT("stroke")) && Node.Visual.Stroke.Fill.IsSet()) Patch.StrokeFill.Emplace(Node.Visual.Stroke.Fill.GetValue());
 	// Pencil no-fill removes implicit stroke paint unless the fragment authors stroke paint too.
-	else if (Node.Visual.bFillExplicitClear) Patch.StrokeFill.Emplace();
+	else if (JsonObj->HasField(TEXT("fill")) && Node.Visual.bFillExplicitClear) Patch.StrokeFill.Emplace();
 	if (JsonObj->HasField(TEXT("strokeWidth"))) Patch.StrokeThickness = Node.Visual.Stroke.Thickness;
 	if (JsonObj->HasField(TEXT("cornerRadius"))) Patch.CornerRadius = Node.Visual.CornerRadius;
 	if (JsonObj->HasField(TEXT("fill"))) Patch.Fills = Node.Visual.Fills;
@@ -211,7 +227,7 @@ FDesignNodePatch CaptureNodePatch(const TSharedPtr<FJsonObject>& JsonObj, const 
 		Patch.TextRuns = Node.Text.TextRuns;
 	}
 	if (JsonObj->HasTypedField<EJson::Array>(TEXT("children"))) Patch.Children = Node.Children;
-	if (JsonObj->HasField(TEXT("placeholder")) || JsonObj->HasTypedField<EJson::Array>(TEXT("slot")))
+	if (JsonObj->HasField(TEXT("placeholder")) || JsonObj->HasField(TEXT("slot")))
 	{
 		Patch.SemanticPlaceholderSurface = Node.LayoutData.bSemanticPlaceholderSurface;
 	}

@@ -31,6 +31,7 @@ FUMGWidgetNode::FUMGWidgetNode(const FUMGWidgetNode& Other)
 	, Render(Other.Render)
 	, WidgetState(Other.WidgetState)
 	, ScrollBox(Other.ScrollBox)
+	, Browser(Other.Browser)
 	, Children(Other.Children)
 	, bSyntheticJustifySpacer(Other.bSyntheticJustifySpacer)
 {
@@ -62,6 +63,7 @@ FUMGWidgetNode& FUMGWidgetNode::operator=(const FUMGWidgetNode& Other)
 	Render = Other.Render;
 	WidgetState = Other.WidgetState;
 	ScrollBox = Other.ScrollBox;
+	Browser = Other.Browser;
 	Children = Other.Children;
 	bSyntheticJustifySpacer = Other.bSyntheticJustifySpacer;
 	SourceData = Other.SourceData ? MakeUnique<FUMGSourceNodeData>(*Other.SourceData) : nullptr;
@@ -112,6 +114,7 @@ FUMGWidgetData& FUMGWidgetData::operator=(FUMGWidgetData&& Other) noexcept = def
 FUMGWidgetData::FUMGWidgetData(const FUMGWidgetData& Other)
 	: WidgetName(Other.WidgetName)
 	, RootWidget(Other.RootWidget)
+	, ExportBounds(Other.ExportBounds)
 	, Warnings(Other.Warnings)
 	, ConversionError(Other.ConversionError)
 	, IconFontMappingChanges(Other.IconFontMappingChanges)
@@ -136,6 +139,7 @@ FUMGWidgetData& FUMGWidgetData::operator=(const FUMGWidgetData& Other)
 
 	WidgetName = Other.WidgetName;
 	RootWidget = Other.RootWidget;
+	ExportBounds = Other.ExportBounds;
 	Warnings = Other.Warnings;
 	ConversionError = Other.ConversionError;
 	IconFontMappingChanges = Other.IconFontMappingChanges;

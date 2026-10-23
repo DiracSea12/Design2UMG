@@ -7,8 +7,7 @@
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
 
-// Shared helpers used by the PenParser*.cpp translation units.
-// Not part of the public API; include only from PenParser*.cpp files.
+// Internal Pencil parsing helpers; reference re-theming reuses the same property parser.
 
 namespace FlexibleFieldParsing
 {
@@ -129,6 +128,7 @@ namespace PenParser
 	EDesignTextGrowth ParseTextGrowth(const FString& Token);
 
 	// PenParserStyling.cpp
+	FDesignShaderData ParseShader(const TSharedPtr<FJsonObject>& Object, const FDesignVariableResolver& Resolver);
 	FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 	FDesignPadding ParsePadding(const TSharedPtr<FJsonValue>& Value, const FDesignVariableResolver& Resolver);
 
@@ -141,6 +141,7 @@ namespace PenParser
 	// PenParser.cpp
 	void ParseNodeProperties(const TSharedPtr<FJsonObject>& JsonObj, TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 	FDesignSize ParseSize(const TSharedPtr<FJsonValue>& Value, EDesignNodeType NodeType, const FDesignVariableResolver& Resolver);
+	bool ParseGeneratedNodes(const TArray<TSharedPtr<FJsonValue>>& Values, const FString& SourcePath, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& Out, FString& Error);
 	TSharedPtr<FDesignNode> ParseNode(const TSharedPtr<FJsonObject>& JsonObj, const FDesignVariableResolver& Resolver);
 	void AppendParsedChildren(const TSharedPtr<FJsonValue>& ChildrenField, const FDesignVariableResolver& Resolver, TArray<TSharedPtr<FDesignNode>>& OutChildren);
 	void ParseNodeFillProperties(const TSharedPtr<FJsonValue>& Value, FDesignNode& OutNode, const FDesignVariableResolver& Resolver);

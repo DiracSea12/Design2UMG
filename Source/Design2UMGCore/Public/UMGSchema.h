@@ -84,6 +84,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	/** Typed ScrollBox configuration. */
 	FUMGScrollBoxData ScrollBox;
 
+	/** Native browser page and source viewport settings. */
+	FUMGBrowserData Browser;
+
 	/** Child widgets. Not serialized because recursive USTRUCT trees are unsupported by UHT. */
 	TArray<FUMGWidgetNode> Children;
 
@@ -128,6 +131,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetData
 	/** Root widget node. */
 	UPROPERTY()
 	FUMGWidgetNode RootWidget;
+
+	/** Source paint bounds relative to the root layout origin, including unclipped effects. */
+	TOptional<FBox2D> ExportBounds;
 
 	/** Degradation warnings produced during conversion, e.g. Ellipse -> Border. */
 	TArray<FString> Warnings;

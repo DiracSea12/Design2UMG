@@ -12,7 +12,7 @@ namespace RefExpander
 {
 	FDesignReferenceExpansionResult ExpandRef(
 		const TSharedPtr<FDesignNode>& RefNode,
-		const TMap<FString, TSharedPtr<FDesignNode>>& ReusableNodesById);
+		const TMap<FString, TSharedPtr<FDesignNode>>& ReferenceTargetsById);
 
 	void ReThemeNode(TSharedPtr<FDesignNode>& Node, const FDesignVariableResolver& Resolver);
 	void ApplyDescendantOverride(TSharedPtr<FDesignNode>& Node, const FString& Path, const FDesignNodeOverride& Override);
