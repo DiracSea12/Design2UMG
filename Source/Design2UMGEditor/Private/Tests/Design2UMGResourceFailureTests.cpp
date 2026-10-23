@@ -624,7 +624,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureUnproducedRequiredTextureIsFail
 bool FResourceFailureUnproducedRequiredTextureIsFailureTest::RunTest(const FString& Parameters)
 {
 	// A declared affine crop is a required resource: the plan is established, but the
-	// source texture cannot be loaded, so the creator returns null without an error.
+	// source texture cannot be loaded, so creation fails with a source-load diagnostic.
 	// That is an identified failure, not a "no request" skip.
 	const FString SourcePath = TEXT("/Game/Design2UMG/ResourceFailure_Missing/T_ResourceFailure_Absent.T_ResourceFailure_Absent");
 
@@ -654,7 +654,9 @@ bool FResourceFailureUnproducedRequiredTextureIsFailureTest::RunTest(const FStri
 		Root, TEXT("/Game/Design2UMG/ResourceFailure"), TEXT("ResourceFailure"), &Error);
 
 	TestFalse(TEXT("An unproduced required generated texture is reported as a failure"), bNormalized);
-	TestTrue(TEXT("Failure names the missing generated texture"), Error.Contains(TEXT("was not produced")));
+	TestTrue(TEXT("Failure identifies the image-transform source-load failure"),
+		Error.Contains(TEXT("Could not load source texture for image transform: ")));
+	TestTrue(TEXT("Failure includes the missing source texture path"), Error.Contains(SourcePath));
 	TestTrue(TEXT("Failure names the offending node"), Error.Contains(TEXT("ResourceFailure_AffineCrop")));
 	TestTrue(TEXT("The failed node's texture path is left untouched"),
 		Root.Children.Num() == 1 && Root.Children[0].Brush.Image.TexturePath.Get(FString()) == SourcePath);

@@ -498,8 +498,11 @@ bool FPreviewPathBudgetErrorIsVisibleTest::RunTest(const FString&)
 		MakePathImageNode(TEXT("GeneratedTextureBudget_PathA"), TEXT("M0 0 L10 0 L10 10 L0 10 Z"), 0.0f),
 		MakePathImageNode(TEXT("GeneratedTextureBudget_PathB"), TEXT("M0 0 L12 0 L12 10 L0 10 Z"), 200.0f)
 	};
+	const FString ExpectedReason = TEXT("设计稿太大，导入时的图片资源占用超过处理上限。请拆分画板或减少大图片后再导入。\n")
+		TEXT("Total decoded image data exceeds the operation limit (1048576 bytes); already used 640000 bytes, requested 540800 bytes");
 	AddExpectedError(
-		TEXT("Preview materialization rejected: Total decoded image data exceeds the operation limit"),
+		FString(TEXT("Preview materialization rejected: "))
+			+ ExpectedReason.Replace(TEXT("("), TEXT("\\(")).Replace(TEXT(")"), TEXT("\\)")),
 		EAutomationExpectedErrorFlags::Contains,
 		1);
 
@@ -508,8 +511,8 @@ bool FPreviewPathBudgetErrorIsVisibleTest::RunTest(const FString&)
 	TestFalse(TEXT("Two distinct path rasters exceed the preview's configured one-MiB budget"),
 		Service.MaterializePreview(MakeRequest(MakeSnapshot(TEXT("WBP_GeneratedTextureBudget_PathBudget"), Root)), Result));
 	TestFalse(TEXT("The refused path preview reports no materialized success"), Result.bSucceeded);
-	TestTrue(TEXT("The path allocation refusal is visible in the preview result"),
-		Result.ErrorMessage.Contains(TEXT("operation limit")));
+	TestEqual(TEXT("The preview result preserves the complete budget reason and actionable explanation"),
+		Result.ErrorMessage, ExpectedReason);
 	TestNull(TEXT("A refused path preview does not retain a partial widget"),
 		Service.GetMaterializedPreviewWidget());
 	return true;

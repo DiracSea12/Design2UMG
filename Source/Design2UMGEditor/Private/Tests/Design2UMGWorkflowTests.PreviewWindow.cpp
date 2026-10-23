@@ -1140,13 +1140,20 @@ bool FPreviewWindowBudgetFailureMessageTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	Harness.MaterializationSpy->ForcedErrorMessage = TEXT("Node 'LargePath': Total decoded image data exceeds the operation limit (536870912 bytes)");
+	TestNotNull(TEXT("The initial preview has a widget to release"), Harness.MaterializationSpy->GetMaterializedPreviewWidget());
+	const FString FailureDetails = TEXT("设计稿太大，导入时的图片资源占用超过处理上限。请拆分画板或减少大图片后再导入。\n")
+		TEXT("Node 'LargePath': Total decoded image data exceeds the operation limit (536870912 bytes)");
+	Harness.MaterializationSpy->ForcedErrorMessage = FailureDetails;
 	Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Over limit")));
-	const FText ExpectedMessage = FText::Format(NSLOCTEXT("SDesign2UMGPreviewWindow", "PreviewResourceLimit",
-		"Preview stopped because image resources exceed the limit.\n{0}\n\nReduce image sizes or preview fewer nodes, then try again."),
-		FText::FromString(Harness.MaterializationSpy->ForcedErrorMessage));
-	TestTrue(TEXT("Failure details remain visible after the dialog closes"),
-		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage.ToString()));
+	const FString ExpectedMessage = FString::Printf(
+		TEXT("Design2UMG：导入未完成。\n根节点：%s (), CanvasPanel, 420 × 220\n原因：%s"),
+		PreviewHarnessAnalyzerRootName, *FailureDetails);
+	TestEqual(TEXT("The failure status matches the complete independent failure message"),
+		FDesign2UMGPreviewWindowTestAccess::Status(*Harness.PreviewWindow), ExpectedMessage);
+	TestTrue(TEXT("The complete failure status remains visible after the dialog closes"),
+		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage));
+	TestTrue(TEXT("The visible failure preserves the complete budget reason and actionable explanation"),
+		WidgetTreeContainsTextFragment(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), FailureDetails));
 	TestFalse(TEXT("Failed preview cannot be confirmed"),
 		FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
 	TestNull(TEXT("Failed preview releases the old widget"), Harness.MaterializationSpy->GetMaterializedPreviewWidget());
@@ -1154,8 +1161,11 @@ bool FPreviewWindowBudgetFailureMessageTest::RunTest(const FString& Parameters)
 	Harness.RequestRefresh(MakePreviewHarnessJson(TEXT("Within limit")));
 	TestTrue(TEXT("Corrected preview can be confirmed"),
 		FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
+	TestNotNull(TEXT("Corrected preview restores a materialized widget"), Harness.MaterializationSpy->GetMaterializedPreviewWidget());
 	TestFalse(TEXT("Corrected preview removes the failure message"),
-		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage.ToString()));
+		WidgetTreeContainsText(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), ExpectedMessage));
+	TestFalse(TEXT("Corrected preview removes the budget reason and actionable explanation"),
+		WidgetTreeContainsTextFragment(FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow).ToSharedRef(), FailureDetails));
 	return true;
 }
 
