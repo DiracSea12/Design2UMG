@@ -317,9 +317,8 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 				ReadNumber(TEXT("scrollX"), Browser.ScrollX);
 				ReadNumber(TEXT("scrollY"), Browser.ScrollY);
 			}
-			if (!Browser.DeviceId.IsEmpty()
-				|| Browser.ScrollX.Get(0.0f) != 0.0f || Browser.ScrollY.Get(0.0f) != 0.0f)
-				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': deviceId/scroll retained as source data; native device emulation and scroll restoration are not generated."), *Node->Id));
+			if (!Browser.DeviceId.IsEmpty())
+				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': deviceId retained as source data; native device emulation is not generated."), *Node->Id));
 			if (Browser.InitialURL.StartsWith(TEXT("/")) || Browser.InitialURL.StartsWith(TEXT("file:"))
 				|| (Browser.InitialURL.Len() > 2 && Browser.InitialURL[1] == ':' && Browser.InitialURL[2] == '/'))
 				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': local HTML keeps source-relative resources; relocation and cooked packaging are not generated."), *Node->Id));

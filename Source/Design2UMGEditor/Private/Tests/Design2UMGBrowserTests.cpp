@@ -67,7 +67,7 @@ bool FBrowserDataFlowTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Zoom preserved"), Browser->Browser.Zoom.GetValue(), 1.25f);
 	TestEqual(TEXT("Scroll X preserved"), Browser->Browser.ScrollX.GetValue(), 12.0f);
 	TestEqual(TEXT("Scroll Y preserved"), Browser->Browser.ScrollY.GetValue(), 34.0f);
-	TestTrue(TEXT("Device and scrolling gaps remain explicit"), Data.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("deviceId/scroll")); }));
+	TestTrue(TEXT("Device emulation gap remains explicit"), Data.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("deviceId retained as source data; native device emulation is not generated")); }));
 	TestEqual(TEXT("Browser viewport uses inverse zoom stretch anchors"), Browser->Slot.Anchors.Max.X, 0.8f);
 	TestEqual(TEXT("Browser viewport stretches vertically with its parent"), Browser->Slot.Anchors.Max.Y, 0.8f);
 	TestEqual(TEXT("Browser viewport has no fixed-width offset"), Browser->Slot.Offsets.Right, 0.0f);
