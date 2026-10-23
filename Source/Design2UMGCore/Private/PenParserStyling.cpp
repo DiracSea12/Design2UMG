@@ -506,7 +506,7 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 				Result.Gradient.GradientType = EDesignGradientType::Angular;
 		}
 		// Convert Pencil linear-gradient rotation R to the IR's y-down angle: theta = -R - 90.
-		// Radial and angular rotations pass through unchanged.
+		// Radial rotation is retained; angular rotation is folded into its basis below.
 		float PencilGradientRotation = 0.0f;
 		if (Result.Gradient.GradientType == EDesignGradientType::Linear
 			&& TryGetResolvedNumberField(Obj, TEXT("rotation"), Resolver, PencilGradientRotation))
@@ -542,6 +542,18 @@ FDesignFill ParseFill(const TSharedPtr<FJsonValue>& Value, const FDesignVariable
 			{
 				Result.Gradient.Size = Size;
 			}
+		}
+
+		if (Result.Gradient.GradientType == EDesignGradientType::Angular)
+		{
+			const FVector2D Size = Result.Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+			const double HalfWidth = Size.X == 0.0 ? 1.0e-6 : Size.X * 0.5;
+			const double HalfHeight = Size.Y == 0.0 ? 1.0e-6 : Size.Y * 0.5;
+			const double Angle = FMath::DegreesToRadians(-Result.Gradient.Rotation);
+			const double Cos = FMath::Cos(Angle), Sin = FMath::Sin(Angle);
+			Result.Gradient.AngularBasis = FVector4(Sin * HalfHeight, -Cos * HalfHeight, Cos * HalfWidth, Sin * HalfWidth);
+			Result.Gradient.Size.Reset();
+			Result.Gradient.Rotation = 0.0f;
 		}
 
 		const TSharedPtr<FJsonValue>& ColorsField = Obj->TryGetField(TEXT("colors"));

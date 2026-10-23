@@ -197,6 +197,8 @@ struct FDesignGradient
 	UPROPERTY()
 	TArray<FDesignGradientStop> Colors;
 
+	// Columns of the angular gradient basis in normalized paint coordinates.
+	TOptional<FVector4> AngularBasis;
 	TOptional<FDesignMeshGradient> Mesh;
 	bool HasColors() const { return Colors.Num() > 0 || (Mesh.IsSet() && Mesh->IsValid()); }
 };

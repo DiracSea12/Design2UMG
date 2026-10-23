@@ -503,6 +503,7 @@ namespace
 			AddOptionalVector2D(Gradient, TEXT("EndPoint"), Brush.Gradient.EndPoint);
 			AddOptionalVector2D(Gradient, TEXT("Center"), Brush.Gradient.Center);
 			AddOptionalVector2D(Gradient, TEXT("Size"), Brush.Gradient.Size);
+			AddOptionalVector4(Gradient, TEXT("AngularBasis"), Brush.Gradient.AngularBasis);
 			Gradient.Add(FJsonField(
 				TEXT("Stops"),
 				RenderObjectArray<FUMGVisualBrushData::FGradientStopData>(

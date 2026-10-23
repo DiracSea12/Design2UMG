@@ -15,6 +15,7 @@ namespace UMGJsonKeys
 	inline constexpr const TCHAR* Rotation = TEXT("Rotation");
 	inline constexpr const TCHAR* StartPoint = TEXT("StartPoint");
 	inline constexpr const TCHAR* EndPoint = TEXT("EndPoint");
+	inline constexpr const TCHAR* AngularBasis = TEXT("AngularBasis");
 	inline constexpr const TCHAR* Center = TEXT("Center");
 	inline constexpr const TCHAR* Size = TEXT("Size");
 	inline constexpr const TCHAR* Stops = TEXT("Stops");

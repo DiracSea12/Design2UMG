@@ -725,6 +725,24 @@ bool FPathCacheRequestIdentityTest::RunTest(const FString&)
 	TestTrue(TEXT("Swapping input order preserves both shapes"), BA[0] == B[0] && BA[1] == A[0]);
 	TestTrue(TEXT("Different shapes with the same node name get distinct assets"), PathsAB[0] != PathsAB[1]);
 	TestEqual(TEXT("Identical requests still reuse their asset"), PathsAA[0], PathsAA[1]);
+	FUMGWidgetNode Angular = Absolute;
+	Angular.Brush.Gradient.Type = TEXT("Angular");
+	Angular.Brush.Gradient.AngularBasis = FVector4(0.5, 0, 0, 0.5);
+	Angular.Brush.Gradient.Stops = {{FLinearColor::Red, 0.0f}, {FLinearColor::Blue, 1.0f}};
+	FUMGWidgetNode OtherBasis = Angular;
+	OtherBasis.Brush.Gradient.AngularBasis = FVector4(0, -0.5, 0.5, 0);
+	FDesignPathRasterRequest AngularRequest, OtherRequest;
+	if (!TestTrue(TEXT("Angular path request exists"), FDesignPathRasterizer::TryBuildRequest(Angular, AngularRequest))
+		|| !TestTrue(TEXT("Distinct angular basis request exists"), FDesignPathRasterizer::TryBuildRequest(OtherBasis, OtherRequest))) return false;
+	UTexture2D* AngularTexture = FDesignPathRasterizer::Rasterize(AngularRequest);
+	UTexture2D* OtherTexture = FDesignPathRasterizer::Rasterize(OtherRequest);
+	if (!TestNotNull(TEXT("Angular basis rasterizes"), AngularTexture) || !TestNotNull(TEXT("Other basis rasterizes"), OtherTexture)) return false;
+	TestTrue(TEXT("Raster cache distinguishes angular bases"), AngularTexture != OtherTexture);
+	TArray<TArray64<uint8>> AngularPixels;
+	TArray<FString> AngularPaths;
+	if (!Materialize({Angular, OtherBasis}, TEXT("Angular"), AngularPixels, AngularPaths)) return false;
+	TestTrue(TEXT("Persisted raster identity includes angular basis"), AngularPaths[0] != AngularPaths[1]);
+
 	// Distinct geometry consumes separate raster allocations, even when string hashes collide.
 	// A budget with room for one raster rejects the second distinct allocation.
 	Absolute.WidgetStyle.WidthOverride = Absolute.WidgetStyle.HeightOverride = 2048;

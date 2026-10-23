@@ -195,13 +195,24 @@ struct FUMGVisualBrushData
 		TOptional<FVector2D> EndPoint;
 		TOptional<FVector2D> Center;
 		TOptional<FVector2D> Size;
+		// Packed columns (Ux, Uy, Vx, Vy), normalized to the current paint box.
+		TOptional<FVector4> AngularBasis;
+
+		void TransformAngularPaintSpace(const FVector2D& Scale, const FVector2D& Translation)
+		{
+			if (!AngularBasis.IsSet()) return;
+			Center = Center.Get(FVector2D(0.5, 0.5)) * Scale + Translation;
+			const FVector4 Basis = AngularBasis.GetValue();
+			AngularBasis = FVector4(Basis.X * Scale.X, Basis.Y * Scale.Y, Basis.Z * Scale.X, Basis.W * Scale.Y);
+		}
+
 		TArray<FGradientStopData> Stops;
 		TOptional<FDesignMeshGradient> Mesh;
 
 		bool HasAny() const
 		{
 			return Type.IsSet() || Rotation.IsSet() || StartPoint.IsSet() || EndPoint.IsSet()
-				|| Center.IsSet() || Size.IsSet() || Stops.Num() > 0 || (Mesh.IsSet() && Mesh->IsValid());
+				|| Center.IsSet() || Size.IsSet() || AngularBasis.IsSet() || Stops.Num() > 0 || (Mesh.IsSet() && Mesh->IsValid());
 		}
 	};
 
@@ -297,7 +308,7 @@ struct FUMGSurfacePaint
 		auto Tint = Color;
 		auto G = Gradient;
 		auto I = Image;
-		Archive << Tint << G.Type << G.Rotation << G.StartPoint << G.EndPoint << G.Center << G.Size;
+		Archive << Tint << G.Type << G.Rotation << G.StartPoint << G.EndPoint << G.Center << G.Size << G.AngularBasis;
 		bool HasMesh = G.Mesh.IsSet();
 		Archive << HasMesh;
 		if (HasMesh) G.Mesh->WriteSignature(Archive);

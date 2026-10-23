@@ -89,7 +89,7 @@ namespace
 		for (const auto* Paint : {&Node.Brush.Gradient, &Node.Path.StrokeGradient})
 		{
 			auto Gradient = *Paint;
-			Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size;
+			Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size << Gradient.AngularBasis;
 			bool bHasMesh = Gradient.Mesh.IsSet();
 			Writer << bHasMesh;
 			if (bHasMesh) Gradient.Mesh->WriteSignature(Writer);
@@ -128,7 +128,7 @@ namespace
 		}
 		auto& Gradient = Request.Gradient;
 		Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint
-			<< Gradient.Center << Gradient.Size;
+			<< Gradient.Center << Gradient.Size << Gradient.AngularBasis;
 		bool bHasMesh = Gradient.Mesh.IsSet();
 		Writer << bHasMesh;
 		if (bHasMesh) Gradient.Mesh->WriteSignature(Writer);

@@ -442,6 +442,7 @@ namespace VisualMapperFillTransfer
 			Brush.Gradient.Size = Gradient.Size.GetValue();
 		}
 		Brush.Gradient.Stops.Reset();
+		Brush.Gradient.AngularBasis = Gradient.AngularBasis;
 		for (const FDesignGradientStop& Stop : Gradient.Colors)
 		{
 			FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
@@ -899,6 +900,13 @@ namespace VisualMapperFillTransfer
                 Size *= LayoutSize / PaintSize;
                 Layer.Brush.Gradient.Center = Center;
                 Layer.Brush.Gradient.Size = Size;
+            }
+            if (Layer.Brush.Gradient.AngularBasis.IsSet())
+            {
+                const FVector2D SourceSize =
+                    bLine ? LayoutSize : FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
+                const FVector2D Origin = bLine ? (PaintSize - LayoutSize) * 0.5f : -PaintOffset;
+                Layer.Brush.Gradient.TransformAngularPaintSpace(SourceSize / PaintSize, Origin / PaintSize);
             }
             ApplyLineCanvas(Layer);
             Overlay.Children.Add(MoveTemp(Layer));

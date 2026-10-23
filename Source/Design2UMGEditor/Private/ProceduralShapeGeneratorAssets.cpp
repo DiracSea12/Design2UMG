@@ -722,20 +722,25 @@ namespace ProceduralShapeGeneratorAssets
 		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
+	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const FVector2D& PixelCenter, const FVector4& PixelBasis, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
 			return nullptr;
 		}
 
-		const float CenterX = (Width - 1) / 2.0f;
-		const float CenterY = (Height - 1) / 2.0f;
+		const float CenterX = PixelCenter.X;
+		const float CenterY = PixelCenter.Y;
 		const float StartRad = FMath::DegreesToRadians(StartAngleDeg);
+		const double Determinant = PixelBasis.X * PixelBasis.W - PixelBasis.Y * PixelBasis.Z;
+		if (!FMath::IsFinite(Determinant) || Determinant == 0.0) return nullptr;
 
-		return GenerateShapeTexture(Width, Height, Outer, Budget, [CenterX, CenterY, StartRad, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [CenterX, CenterY, PixelBasis, Determinant, StartRad, &Stops](int32 X, int32 Y)
 		{
-			const float Angle = FMath::Atan2(Y - CenterY, X - CenterX) - StartRad;
+			const double DX = X - CenterX, DY = Y - CenterY;
+			const double U = (PixelBasis.W * DX - PixelBasis.Z * DY) / Determinant;
+			const double V = (-PixelBasis.Y * DX + PixelBasis.X * DY) / Determinant;
+			const float Angle = FMath::Atan2(static_cast<float>(V), static_cast<float>(U)) - StartRad;
 			float T = Angle / (2.0f * PI);
 			T -= FMath::FloorToFloat(T);
 			return SampleGradientStops(Stops, T).ToFColor(true);

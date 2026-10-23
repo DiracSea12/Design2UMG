@@ -288,6 +288,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeGradientPayload(const FUMGV
 		GradientObject->SetStringField(UMGJsonKeys::Center, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Center.GetValue()));
 	if (Gradient.Size.IsSet())
 		GradientObject->SetStringField(UMGJsonKeys::Size, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Size.GetValue()));
+	if (Gradient.AngularBasis.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::AngularBasis, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Gradient.AngularBasis.GetValue(), 9));
 	if (Gradient.Mesh.IsSet())
 		GradientObject->SetObjectField(TEXT("Mesh"), DesignMeshGradientJson::Serialize(Gradient.Mesh.GetValue()));
 	if (Gradient.Stops.Num() > 0)

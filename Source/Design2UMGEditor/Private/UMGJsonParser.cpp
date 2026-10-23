@@ -654,6 +654,13 @@ void FUMGJsonParser::ParseGradientPayload(const TSharedPtr<FJsonObject>& Gradien
 	{
 		Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
 	}
+	if (const TSharedPtr<FJsonValue> BasisValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::AngularBasis); BasisValue.IsValid())
+	{
+		FVector4 Basis(0, 0, 0, 0);
+		if (BasisValue->Type != EJson::String || !TryParseVector4(BasisValue->AsString(), Basis))
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid AngularBasis; expected four finite numbers."));
+		Gradient.AngularBasis = Basis;
+	}
 	const TSharedPtr<FJsonObject>* MeshObject = nullptr;
 	if (GradientObject->TryGetObjectField(TEXT("Mesh"), MeshObject))
 	{

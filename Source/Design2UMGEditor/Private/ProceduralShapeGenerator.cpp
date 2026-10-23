@@ -377,6 +377,7 @@ namespace
 		bool bHasLinearEndY = false;
 		FVector2D RadialCenter = FVector2D(0.5f, 0.5f);
 		FVector2D RadialSize = FVector2D(1.0f, 1.0f);
+		TOptional<FVector4> AngularBasis;
 	};
 
 	// Values above 1 are percentages; values at or below 1 are normalized fractions.
@@ -402,6 +403,7 @@ namespace
 		P.ColorStart = Color(Gradient.Stops[0].Color);
 		P.ColorEnd = Color(Gradient.Stops.Last().Color);
 		P.RotationDeg = Coordinate(Gradient.Rotation.Get(0.0f));
+		P.AngularBasis = Gradient.AngularBasis;
 		const bool bLinear = !Gradient.Type.IsSet() || Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
 		if (bLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet())
 		{
@@ -409,7 +411,7 @@ namespace
 			P.LinearEnd = FVector2D(Coordinate(Gradient.EndPoint.GetValue().X), Coordinate(Gradient.EndPoint.GetValue().Y));
 			P.bHasLinearStartX = P.bHasLinearStartY = P.bHasLinearEndX = P.bHasLinearEndY = true;
 		}
-		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+		if (Gradient.Type.IsSet() && (Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase) || Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase)))
 		{
 			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
 			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
@@ -718,7 +720,17 @@ namespace
 				P.MultiStops.Add({0.0f, P.ColorStart});
 				P.MultiStops.Add({1.0f, P.ColorEnd});
 			}
-			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget, RasterRegion);
+			FVector4 PixelBasis(1, 0, 0, 1);
+			FVector2D PixelCenter((Width - 1) * P.RadialCenter.X, (Height - 1) * P.RadialCenter.Y);
+			if (P.AngularBasis.IsSet())
+			{
+				const FVector4 Basis = P.AngularBasis.GetValue();
+				// A one-pixel axis still has a finite normalized paint span.
+				const FVector2D Span(FMath::Max(Width - 1, 1), FMath::Max(Height - 1, 1));
+				PixelBasis = FVector4(Basis.X * Span.X, Basis.Y * Span.Y, Basis.Z * Span.X, Basis.W * Span.Y);
+				PixelCenter = P.RadialCenter * Span;
+			}
+			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.AngularBasis.IsSet() ? 0.0f : P.RotationDeg, PixelCenter, PixelBasis, P.MultiStops, Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::BoxShadow
 			|| ShapeKind == EProceduralShapeKind::EllipseShadow)

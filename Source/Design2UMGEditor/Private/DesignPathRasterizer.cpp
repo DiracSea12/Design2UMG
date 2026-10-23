@@ -103,7 +103,7 @@ namespace
 				auto SourceHeight = Paint->HeightOverride;
 				Writer << SourceWidth << SourceHeight;
 				auto Gradient = Paint->Gradient;
-				Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size;
+				Writer << Gradient.Type << Gradient.Rotation << Gradient.StartPoint << Gradient.EndPoint << Gradient.Center << Gradient.Size << Gradient.AngularBasis;
 				bool bHasMesh = Gradient.Mesh.IsSet();
 				Writer << bHasMesh;
 				if (bHasMesh) Gradient.Mesh->WriteSignature(Writer);
