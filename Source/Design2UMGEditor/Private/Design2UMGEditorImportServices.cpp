@@ -86,9 +86,9 @@ namespace Design2UMGEditorImportServices
 		Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("Connecting", "Design2UMG: Fetching design from Pencil..."), SNotificationItem::CS_Pending);
 
 		Connector->GetClient().CallToolAsync(
-			TEXT("execute"),
-			Design2UMGEditorImportRequestSetup::MakePencilReadDocumentArgs(),
-			[this, FetchGeneration](const bool bReadOk, const FString& Response)
+			TEXT("get_app_state"),
+			MakeShared<FJsonObject>(),
+			[this, FetchGeneration](const bool bStateOk, const FString& StateResponse)
 			{
 				if (!IsGenerationCurrent(FetchGeneration))
 				{
@@ -96,17 +96,35 @@ namespace Design2UMGEditorImportServices
 					return;
 				}
 
-				FString NodesJson, VarsJson;
-				if (!bReadOk || !Design2UMGEditorMcpImportPayload::ParseReadDocumentResponse(Response, NodesJson, VarsJson))
+				// A native path anchors relative resources; it is not the node source.
+				FString SourceFilePath;
+				if (bStateOk)
 				{
-					UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to read the active document via execute: %s"), *Response);
-					Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("PencilReadFailed", "Design2UMG: Failed to read the active Pencil document"), SNotificationItem::CS_Fail);
-					ReleaseFetchSlot();
-					return;
+					Design2UMGEditorMcpImportPayload::ParseActiveDocumentPath(StateResponse, SourceFilePath);
 				}
+				Connector->GetClient().CallToolAsync(
+					TEXT("execute"),
+					Design2UMGEditorImportRequestSetup::MakePencilReadDocumentArgs(),
+					[this, FetchGeneration, SourceFilePath](const bool bReadOk, const FString& Response)
+					{
+						if (!IsGenerationCurrent(FetchGeneration))
+						{
+							ReleaseFetchSlot();
+							return;
+						}
 
-				Design2UMGEditorMcpImportPayload::HandleMCPDataReady(NodesJson, VarsJson);
-				ReleaseFetchSlot();
+						FString NodesJson, VarsJson;
+						if (!bReadOk || !Design2UMGEditorMcpImportPayload::ParseReadDocumentResponse(Response, NodesJson, VarsJson))
+						{
+							UE_LOG(LogDesign2UMG, Error, TEXT("ConnectToPencil: Failed to read the active document via execute: %s"), *Response);
+							Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("PencilReadFailed", "Design2UMG: Failed to read the active Pencil document"), SNotificationItem::CS_Fail);
+							ReleaseFetchSlot();
+							return;
+						}
+
+						Design2UMGEditorMcpImportPayload::HandleMCPDataReady(NodesJson, VarsJson, SourceFilePath);
+						ReleaseFetchSlot();
+					});
 			});
 	}
 

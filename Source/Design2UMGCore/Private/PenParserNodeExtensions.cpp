@@ -3,6 +3,7 @@
 #include "PenParserNodeExtensions.h"
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "ParserSharedSemantics.h"
 #include "PenParserInternal.h"
 
@@ -57,13 +58,7 @@ namespace
 			return;
 		}
 
-		// Preserve source slot keys for source truth (same key family as the Figma parser); only source.slot.empty is the supplementary explicit-empty hint.
-		Node.Metadata.Add(ParserSharedSemantics::SourceSlotPresentMetadataKey, TEXT("true"));
-		Node.Metadata.Add(ParserSharedSemantics::SourceSlotCountMetadataKey, FString::FromInt(SlotMetadata.SlotNodeCount));
-		if (SlotMetadata.SlotNodeCount == 0)
-		{
-			Node.Metadata.Add(ParserSharedSemantics::SourceSlotEmptyMetadataKey, TEXT("true"));
-		}
+		ParserSharedSemantics::AddSourceSlotMetadata(Node, SlotMetadata.SlotNodeCount);
 	}
 
 	void ApplySemanticHints(FDesignNode& Node, const bool bPenPlaceholder, const FPenSlotMetadata& SlotMetadata)
@@ -116,8 +111,9 @@ namespace
 		{
 			OutRun.FontSize = FontSize;
 		}
-		StyleObj->TryGetStringField(TEXT("fontWeight"), OutRun.FontWeight);
-		StyleObj->TryGetStringField(TEXT("fontStyle"), OutRun.FontStyle);
+		FString FontWeight, FontStyle;
+		if (StyleObj->TryGetStringField(TEXT("fontWeight"), FontWeight)) OutRun.FontWeight = Resolver.ResolveString(FontWeight);
+		if (StyleObj->TryGetStringField(TEXT("fontStyle"), FontStyle)) OutRun.FontStyle = Resolver.ResolveString(FontStyle);
 
 		float LineHeight = 0.0f;
 		if (TryGetResolvedNumberField(StyleObj, TEXT("lineHeight"), Resolver, LineHeight))
@@ -216,10 +212,12 @@ namespace
 		TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
 		JsonObj->TryGetStringField(TEXT("name"), Node->Name);
 		PenParser::ParseNodeProperties(JsonObj, Node, Resolver);
-		PenParser::AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), Resolver, Node->Children);
+		FDesignVariableResolver ChildResolver = Resolver;
+		ChildResolver.PushThemeOverride(Node->Theme);
+		PenParser::AppendParsedChildren(JsonObj->TryGetField(TEXT("children")), ChildResolver, Node->Children);
 		PenParserNodeExtensions::FinalizePenPaddingRuntimeWrapPolicy(Node);
-		PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, Resolver);
-		return PenParser::CaptureNodePatch(JsonObj, *Node, Resolver);
+		PenParserNodeExtensions::ParsePenSemanticMetadata(JsonObj, *Node, ChildResolver);
+		return PenParser::CaptureNodePatch(JsonObj, *Node, ChildResolver);
 	}
 
 	void ParseDescendants(
@@ -292,12 +290,45 @@ void PenParserNodeExtensions::ParsePenSemanticMetadata(
 	FDesignNode& Node,
 	const FDesignVariableResolver& Resolver)
 {
-	bool bPenPlaceholder = false;
-	FlexibleFieldParsing::TryGetResolvedBoolField(JsonObj, TEXT("placeholder"), Resolver, bPenPlaceholder);
+	auto& Source = Node.MutableSource().Pencil;
+	Source.Properties = MakeShared<FJsonObject>();
+	for (const auto& Pair : JsonObj->Values)
+	{
+		if (Pair.Key != TEXT("children") && Pair.Key != TEXT("descendants") && Pair.Key != TEXT("id") && Pair.Key != TEXT("type"))
+			Source.Properties->SetField(Pair.Key, Pair.Value);
+	}
+	JsonObj->TryGetStringField(TEXT("context"), Source.Context);
+	FString Model;
+	if (JsonObj->TryGetStringField(TEXT("model"), Model)) Source.Model = Resolver.ResolveString(Model);
+	const TSharedPtr<FJsonValue> Metadata = JsonObj->TryGetField(TEXT("metadata"));
+	if (Metadata.IsValid()) Source.MetadataJson = DesignJsonUtils::ToPrettyString(Metadata);
+	Source.SlotRecommendations.Reset();
+	const TArray<TSharedPtr<FJsonValue>>* Slots = nullptr;
+	if (JsonObj->TryGetArrayField(TEXT("slot"), Slots))
+	{
+		TArray<FString> Recommendations;
+		for (const auto& Value : *Slots)
+		{
+			FString Id;
+			if (Value.IsValid() && Value->TryGetString(Id)) Recommendations.Add(MoveTemp(Id));
+		}
+		Source.SlotRecommendations = MoveTemp(Recommendations);
+	}
+	RefreshPenSemanticMetadata(Node);
+}
 
-	const FPenSlotMetadata SlotMetadata = ParseSlotMetadata(JsonObj);
-	ApplySlotMetadata(Node, SlotMetadata);
-	ApplySemanticHints(Node, bPenPlaceholder, SlotMetadata);
+void PenParserNodeExtensions::RefreshPenSemanticMetadata(FDesignNode& Node)
+{
+	const auto& Properties = Node.Source().Pencil.Properties;
+	if (!Properties.IsValid()) return;
+	bool bPlaceholder = false;
+	Properties->TryGetBoolField(TEXT("placeholder"), bPlaceholder);
+	Node.Metadata.Remove(ParserSharedSemantics::SourceSlotPresentMetadataKey);
+	Node.Metadata.Remove(ParserSharedSemantics::SourceSlotCountMetadataKey);
+	Node.Metadata.Remove(ParserSharedSemantics::SourceSlotEmptyMetadataKey);
+	const FPenSlotMetadata Slot = ParseSlotMetadata(Properties);
+	ApplySlotMetadata(Node, Slot);
+	ApplySemanticHints(Node, bPlaceholder, Slot);
 }
 
 void PenParserNodeExtensions::ParseNodeExtended(
@@ -361,11 +392,22 @@ void PenParserNodeExtensions::ParseNodeExtended(
 			Node->Text.IconFontFamily = Resolver.ResolveString(RawIconFontFamily);
 		}
 	}
+	if (Node->Type == EDesignNodeType::IconFont) Node->Text.IconWeight = 200;
 	TryGetResolvedNumberField(JsonObj, TEXT("weight"), Resolver, Node->Text.IconWeight);
 	TryGetResolvedNumberField(JsonObj, TEXT("innerRadius"), Resolver, Node->Shape.InnerRadius);
 	TryGetResolvedNumberField(JsonObj, TEXT("startAngle"), Resolver, Node->Shape.StartAngle);
 	TryGetResolvedNumberField(JsonObj, TEXT("sweepAngle"), Resolver, Node->Shape.SweepAngle);
 	TryGetResolvedNumberField(JsonObj, TEXT("polygonCount"), Resolver, Node->Shape.PolygonCount);
+	const TArray<TSharedPtr<FJsonValue>>* ViewBox = nullptr;
+	if (JsonObj->TryGetArrayField(TEXT("viewBox"), ViewBox) && ViewBox->Num() == 4)
+	{
+		double Values[4];
+		bool bValid = true;
+		for (int32 Index = 0; Index < 4; ++Index)
+			bValid &= (*ViewBox)[Index]->TryGetNumber(Values[Index]) && FMath::IsFinite(Values[Index]);
+		if (bValid && Values[2] > 0 && Values[3] > 0)
+			Node->Shape.ViewBox = FVector4(Values[0], Values[1], Values[2], Values[3]);
+	}
 	JsonObj->TryGetStringField(TEXT("geometry"), Node->Shape.Geometry);
 	JsonObj->TryGetStringField(TEXT("fillRule"), Node->Shape.FillRule);
 
@@ -405,6 +447,11 @@ void PenParserNodeExtensions::ParseNodeExtended(
 			else if (TypeStr == TEXT("background_blur"))
 			{
 				Effect.Type = EDesignEffectType::BackgroundBlur;
+			}
+			else if (TypeStr == TEXT("shader"))
+			{
+				Effect.Type=EDesignEffectType::Shader;
+				Effect.Shader=PenParser::ParseShader(EffectObj,Resolver);
 			}
 			else if (TypeStr == TEXT("shadow"))
 			{

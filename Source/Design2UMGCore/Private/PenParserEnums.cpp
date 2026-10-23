@@ -21,6 +21,8 @@ EDesignNodeType ParseNodeType(const FString& Token)
 	if (Token == TEXT("note")) return EDesignNodeType::Note;
 	if (Token == TEXT("prompt")) return EDesignNodeType::Prompt;
 	if (Token == TEXT("context")) return EDesignNodeType::Context;
+	if (Token == TEXT("script")) return EDesignNodeType::Script;
+	if (Token == TEXT("browser")) return EDesignNodeType::Browser;
 	return EDesignNodeType::Unknown;
 }
 

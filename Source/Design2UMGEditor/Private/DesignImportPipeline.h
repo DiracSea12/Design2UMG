@@ -155,5 +155,6 @@ namespace DesignImportPipeline
 	 */
 	void AnchorRelativeImageFillUrls(FDesignDocument& Document, const FString& PenFilePath);
 	FDesignImportExecutionResult ExecutePenFile(const FString& FilePath, const FString& TargetNodeId, const FDesignImportRequest& Request);
-	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames);
+	/** Unknown source roots omitted beside selectable frames are returned as warnings; empty lists use OutError. */
+	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames, FString* OutError = nullptr, FString* OutWarnings = nullptr);
 }

@@ -347,8 +347,8 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	Root.Shadow.ShadowOffset = FVector2D(2.0f, -3.0f);
 	Root.Shadow.ShadowBlur = 12.5f;
 	Root.Shadow.BoxShadows = {
-		{ FVector2D(4.25f, -6.5f), 12.0f, -3.0f, FLinearColor(0.0f, 0.0f, 0.0f, 1.0f) },
-		{ FVector2D(1.5f, 2.25f), 0.0f, 5.0f, FLinearColor(1.0f, 0.0f, 0.0f, 1.0f), true },
+		{ FString(), FVector2D(4.25f, -6.5f), 12.0f, -3.0f, FLinearColor(0.0f, 0.0f, 0.0f, 1.0f) },
+		{ FString(), FVector2D(1.5f, 2.25f), 0.0f, 5.0f, FLinearColor(1.0f, 0.0f, 0.0f, 1.0f), true },
 	};
 	Root.Render.RenderOpacity = 0.875f;
 	Root.Render.RenderTransformScale = FVector2D(1.25f, 0.75f);

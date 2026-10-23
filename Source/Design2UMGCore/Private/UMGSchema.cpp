@@ -31,6 +31,7 @@ FUMGWidgetNode::FUMGWidgetNode(const FUMGWidgetNode& Other)
 	, Render(Other.Render)
 	, WidgetState(Other.WidgetState)
 	, ScrollBox(Other.ScrollBox)
+	, Browser(Other.Browser)
 	, Children(Other.Children)
 	, bSyntheticJustifySpacer(Other.bSyntheticJustifySpacer)
 {
@@ -62,6 +63,7 @@ FUMGWidgetNode& FUMGWidgetNode::operator=(const FUMGWidgetNode& Other)
 	Render = Other.Render;
 	WidgetState = Other.WidgetState;
 	ScrollBox = Other.ScrollBox;
+	Browser = Other.Browser;
 	Children = Other.Children;
 	bSyntheticJustifySpacer = Other.bSyntheticJustifySpacer;
 	SourceData = Other.SourceData ? MakeUnique<FUMGSourceNodeData>(*Other.SourceData) : nullptr;

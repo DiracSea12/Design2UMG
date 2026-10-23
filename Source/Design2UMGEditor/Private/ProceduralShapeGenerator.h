@@ -23,8 +23,9 @@ class FProceduralShapeGenerator
 public:
 	/** True only for material refs implemented by the CPU procedural generator. */
 	static bool IsSupportedMaterialRef(const FString& MaterialRef);
-	static UTexture2D* GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer = nullptr, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
-	static UTexture2D* ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr);
+	// Gradient raster windows use original paint-pixel coordinates without rescaling paint parameters.
+	static UTexture2D* GenerateFromMaterialRef(const FUMGProceduralResourceRequest& Request, UObject* Outer = nullptr, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FIntRect* RasterRegion = nullptr);
+	static UTexture2D* ApplyAffineCrop(UTexture2D* Source, float A, float B, float TX, float C, float D, float TY, int32 OutW, int32 OutH, FString* OutError = nullptr, DesignImageResources::FImageOperationBudget* Budget = nullptr, const FString& FitMode = FString(), const FIntRect* RasterRegion = nullptr);
 	static void ReleaseTransientTextures();
 	static void ReleaseTransientTexture(UTexture2D* Texture);
 	static void FlushPendingTextureUpdates();

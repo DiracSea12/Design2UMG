@@ -16,6 +16,7 @@
 #include "DesignJsonUtils.h"
 #include "DesignSchema.h"
 #include "FigmaParser.h"
+#include "PenParser.h"
 #include "ExternalServices/PenMCPBridge.h"
 #include "UMGSchema.h"
 #include "UMGWidgetRenderer.h"
@@ -213,6 +214,19 @@ namespace
 		Root->SetStringField(TEXT("error_message"), Result.ErrorMessage);
 		Root->SetNumberField(TEXT("render_width"), Result.RenderSize.X);
 		Root->SetNumberField(TEXT("render_height"), Result.RenderSize.Y);
+		Root->SetNumberField(TEXT("render_export_max_pixels"), FUMGWidgetRenderer::MaxExportPixels);
+		Root->SetNumberField(TEXT("render_target_max_pixels"), FUMGWidgetRenderer::MaxExportPixels);
+		Root->SetNumberField(TEXT("render_target_max_dimension"), GetMax2DTextureDimension());
+		FUMGWidgetExportPlan ExportPlan;
+		if (FUMGWidgetRenderer::BuildExportPlan(Result.RenderSize, static_cast<int32>(GetMax2DTextureDimension()), ExportPlan))
+		{
+			Root->SetBoolField(TEXT("render_tiled"), ExportPlan.TileCount.X * ExportPlan.TileCount.Y > 1);
+			Root->SetNumberField(TEXT("render_tile_width"), ExportPlan.TileSize.X);
+			Root->SetNumberField(TEXT("render_tile_height"), ExportPlan.TileSize.Y);
+			Root->SetNumberField(TEXT("render_tile_columns"), ExportPlan.TileCount.X);
+			Root->SetNumberField(TEXT("render_tile_rows"), ExportPlan.TileCount.Y);
+		}
+
 		Root->SetNumberField(TEXT("design_time_width"), Result.DesignTimeSize.X);
 		Root->SetNumberField(TEXT("design_time_height"), Result.DesignTimeSize.Y);
 		Root->SetNumberField(TEXT("source_export_width"), Result.SourceExportSize.X);
@@ -302,7 +316,7 @@ namespace
 		}
 
 		TSharedPtr<FJsonObject> RootObject;
-		if (!DesignJsonUtils::TryParseObject(PenJson, RootObject))
+		if (!FPenParser::ParseSourceObject(PenJson, RootObject))
 		{
 			OutError = FString::Printf(TEXT("Failed to parse .pen JSON: %s"), *PenFilePath);
 			return false;

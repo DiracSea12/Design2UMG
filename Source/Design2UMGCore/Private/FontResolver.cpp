@@ -3,6 +3,7 @@
 #include "FontResolver.h"
 #include "FontResolverInternal.h"
 #include "Design2UMGFontAccess.h"
+#include "DesignTypeMapper.h"
 #include "Design2UMGLog.h"
 #include "Design2UMGNotification.h"
 #include "Design2UMGSettings.h"
@@ -499,6 +500,86 @@ bool HasExplicitFontMappingKey(const FString& Key, const FDesign2UMGFontMappings
 }
 }
 
+FString FFontResolver::MakeFontDeclarationKey(const FString& FontFamily, const FString& PostScriptName,
+	const FString& FontWeight, const FString& FontStyle)
+{
+	return FString::Printf(TEXT("%d:%s%d:%s|%d|%d"), FontFamily.Len(), *FontFamily, PostScriptName.Len(), *PostScriptName,
+		ParseWeightValue(FontWeight), FontStyle.Contains(TEXT("italic")) || FontStyle.Contains(TEXT("oblique")));
+}
+
+TextFontResolution::FResolvedFontSelection FFontResolver::ResolveFontSelection(
+	const FString& FontFamily,
+	const FString& FontPostScriptName,
+	const FString& FontWeight,
+	const FString& FontStyle,
+	const FDesign2UMGFontMappings* FontMappings,
+	const FDesignPreparedFont* PreparedFont)
+{
+	TextFontResolution::FResolvedFontSelection Result;
+	Result.bRequiresResolvedFontAsset = FFontResolver::HasInvalidProjectFontAsset(FontFamily);
+
+	const bool bExplicitMapping = FFontResolver::HasExplicitFontMapping(FontFamily, FontPostScriptName, FontMappings);
+	const FString EffectiveWeight = FontWeight.IsEmpty() ? TEXT("normal") : FontWeight;
+	const FString CandidateAssetPath = FFontResolver::FindFontAssetPath(FontFamily, FontPostScriptName, FontMappings);
+	// Explicit mappings retain their exact-style contract; only this declaration's prepared document face applies.
+	if (!bExplicitMapping && PreparedFont && !PreparedFont->DeclarationKey.IsEmpty()
+		&& PreparedFont->DeclarationKey == MakeFontDeclarationKey(FontFamily, FontPostScriptName, FontWeight, FontStyle)
+		&& PreparedFont->SourceAssetPath == CandidateAssetPath)
+	{
+		Result.FontAssetPath = CandidateAssetPath;
+		Result.TypefaceName = PreparedFont->TypefaceName.ToString();
+		return Result;
+	}
+	const FString ItalicTypefaceName = (FontStyle.Contains(TEXT("italic")) && !FontWeight.IsEmpty())
+		? FFontResolver::FindItalicTypefaceForAssetPath(CandidateAssetPath, EffectiveWeight, FontFamily)
+		: FString();
+	if (bExplicitMapping)
+	{
+		if (FontWeight.IsEmpty())
+		{
+			Result.FontAssetPath = CandidateAssetPath;
+			return Result;
+		}
+
+		if (!ItalicTypefaceName.IsEmpty())
+		{
+			Result.FontAssetPath = CandidateAssetPath;
+			Result.TypefaceName = ItalicTypefaceName;
+			return Result;
+		}
+
+		const FString ExactTypefaceName =
+			FFontResolver::FindExactTypefaceForAssetPath(CandidateAssetPath, EffectiveWeight);
+		if (!ExactTypefaceName.IsEmpty())
+		{
+			Result.FontAssetPath = CandidateAssetPath;
+			Result.TypefaceName = ExactTypefaceName;
+		}
+		return Result;
+	}
+
+	Result.FontAssetPath = CandidateAssetPath;
+	if (FontWeight.IsEmpty())
+	{
+		return Result;
+	}
+	if (!ItalicTypefaceName.IsEmpty())
+	{
+		Result.TypefaceName = ItalicTypefaceName;
+		return Result;
+	}
+	Result.TypefaceName = FFontResolver::FindBestTypefaceForAssetPath(Result.FontAssetPath, EffectiveWeight);
+	if (Result.TypefaceName.IsEmpty())
+	{
+		Result.TypefaceName = FFontResolver::FindBestTypefaceForAssetPath(FFontResolver::FindFontAssetPath(FontFamily, FString(), FontMappings), EffectiveWeight);
+	}
+	if (Result.TypefaceName.IsEmpty())
+	{
+		Result.TypefaceName = DesignTypeMapper::MapFontWeight(EffectiveWeight).ToString();
+	}
+	return Result;
+}
+
 FString FFontResolver::MakeImportedFamilyPackageName(const FString& FontFamily)
 {
 	FString Name = FontFamily;
@@ -727,6 +808,26 @@ int32 WeightFromTypefaceName(const FString& Name)
 
 }
 
+FString FFontResolver::TypefaceNameForExactWeight(int32 WeightValue)
+{
+	return WeightValue % 100 == 0 ? TypefaceNameForWeightValue(WeightValue) : FString::FromInt(WeightValue);
+}
+
+FString FFontResolver::FindBestIconTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight)
+{
+	const int32 Weight = RequestedWeight.IsNumeric() ? FCString::Atoi(*RequestedWeight) : ParseWeightValue(RequestedWeight);
+	const FString ExactName = TypefaceNameForExactWeight(Weight);
+	if (IsProjectFontAssetPath(FontAssetPath) || IsEngineFontAssetPath(FontAssetPath))
+	{
+		UFont* Font = LoadObject<UFont>(nullptr, *FontAssetPath);
+		const FCompositeFont* Composite = Font ? Font->GetCompositeFont() : nullptr;
+		if (Composite)
+			for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
+				if (Entry.Name.ToString().Equals(ExactName, ESearchCase::IgnoreCase)) return Entry.Name.ToString();
+	}
+	return FindBestTypefaceForAssetPath(FontAssetPath, RequestedWeight);
+}
+
 FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString& RequestedWeight)
 {
 	const FString AssetPath = FindFontAssetPath(FontFamily);
@@ -739,7 +840,7 @@ FString FFontResolver::FindBestTypeface(const FString& FontFamily, const FString
 FString FFontResolver::FindBestTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight)
 {
 	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
-	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	if (!FPackageName::IsValidObjectPath(AssetPath))
 	{
 		return FString();
 	}
@@ -752,16 +853,20 @@ FString FFontResolver::FindBestTypefaceForAssetPath(const FString& FontAssetPath
 	int32 TargetWeight = ParseWeightValue(RequestedWeight);
 	int32 BestDist = INT_MAX;
 	FString BestName;
+	bool bBestIsItalic = true;
 
 	for (const FTypefaceEntry& Entry : Composite->DefaultTypeface.Fonts)
 	{
 		FString EntryName = Entry.Name.ToString();
 		int32 EntryWeight = WeightFromTypefaceName(EntryName);
 		int32 Dist = FMath::Abs(EntryWeight - TargetWeight);
-		if (Dist < BestDist)
+		const bool bIsItalic = EntryName.Contains(TEXT("Italic"));
+		// Italic requests have a dedicated path; ordinary text prefers a roman face.
+		if ((bBestIsItalic && !bIsItalic) || (bBestIsItalic == bIsItalic && Dist < BestDist))
 		{
 			BestDist = Dist;
 			BestName = EntryName;
+			bBestIsItalic = bIsItalic;
 		}
 	}
 
@@ -773,7 +878,7 @@ FString FFontResolver::FindBestTypefaceForAssetPath(const FString& FontAssetPath
 FString FFontResolver::FindExactTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight)
 {
 	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
-	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	if (!FPackageName::IsValidObjectPath(AssetPath))
 	{
 		return FString();
 	}
@@ -800,7 +905,7 @@ FString FFontResolver::FindExactTypefaceForAssetPath(const FString& FontAssetPat
 FString FFontResolver::FindItalicTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight, const FString& FontFamily)
 {
 	const FString AssetPath = FontAssetPath.TrimStartAndEnd();
-	if (!IsProjectFontAssetPath(AssetPath) && !IsEngineFontAssetPath(AssetPath))
+	if (!FPackageName::IsValidObjectPath(AssetPath))
 	{
 		return FString();
 	}
@@ -835,16 +940,9 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 {
 	TSet<FString> UsedFamilies;
 
-	// Collect from Document.Fonts[]
-	for (const FDesignFont& Font : Document.Fonts)
-	{
-		if (!Font.Name.IsEmpty())
-			UsedFamilies.Add(Font.Name);
-	}
-
 	// Collect from node tree
 	CollectFontFamilies(Document.Children, UsedFamilies);
-	CollectFontFamilies(Document.SourceDocument().ImportedReusableNodes, UsedFamilies);
+	CollectFontFamilies(Document.SourceDocument().ImportedNodes, UsedFamilies);
 
 	if (UsedFamilies.Num() == 0)
 		return {};

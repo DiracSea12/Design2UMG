@@ -3,12 +3,20 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DesignImageResourceLimits.h"
 #include "UObject/StrongObjectPtr.h"
 
 class UUserWidget;
 class UWidgetBlueprint;
 class UWidgetTree;
 class SWidget;
+
+struct FUMGWidgetExportPlan
+{
+	FIntPoint Size = FIntPoint::ZeroValue;
+	FIntPoint TileSize = FIntPoint::ZeroValue;
+	FIntPoint TileCount = FIntPoint::ZeroValue;
+};
 
 /**
  * Renders widget blueprints and trees to PNG data, plus the render-adjacent
@@ -17,6 +25,10 @@ class SWidget;
 class FUMGWidgetRenderer
 {
 public:
+	// Screenshot output and hardware-compatible targets; input-image resource limits are separate.
+	static constexpr int64 MaxExportPixels = DesignImageResources::RenderExportMaxPixels;
+	static bool BuildExportPlan(const FIntPoint& Size, int32 MaxTextureDimension, FUMGWidgetExportPlan& OutPlan, FString* OutError = nullptr);
+
 	/**
 	 * Single shared reader for a widget blueprint's UUserWidget CDO DesignTimeSize:
 	 * returns the raw size when both axes are positive, unset otherwise. Callers keep

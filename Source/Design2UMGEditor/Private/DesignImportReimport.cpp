@@ -4,6 +4,7 @@
 #include "GeneratedAssetLifecycle.h"
 #include "DesignImageResourceLimits.h"
 #include "PreBuildResourceNormalizer.h"
+#include "RetainerCaptureBounds.h"
 #include "Design2UMGEffectMaterialBuilder.h"
 
 #include "Design2UMGPrototypeGraphWiring.h"
@@ -126,12 +127,7 @@ namespace DesignImportPipeline
 			return MoveTemp(*Early);
 		}
 
-		// Build the update plan and validate the immutable prepared tree.
 		const FUMGWidgetNode& PreparedScopeRoot = *ScopeRoot;
-		FReimportTreeIndex TreeIndex;
-		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*> InstancesById;
-		TArray<FReimportPlanEntry> Plan;
-		TSet<FString> AliveInstanceWidgetNames;
 		TransactionIndex = INDEX_NONE;
 		TSet<UObject*> ExistingObjects;
 		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
@@ -180,18 +176,19 @@ namespace DesignImportPipeline
 			return Result;
 		};
 		FString PrepareFailureReason;
-		if (!BuildReimportUpdatePlan(
-			Manifest, PreparedScopeRoot, TreeIndex, MappingBuildState, InstancesById, Plan, AliveInstanceWidgetNames,
-			PrepareFailureReason))
-		{
-			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
-			return FailApply();
-		}
 		FIntPoint DesignSize = FIntPoint::ZeroValue;
-		if (TOptional<FDesignReimportResult> Early = CheckReimportStructureViability(
-			Session, WBP, Manifest, PreparedScopeRoot, TreeIndex, Result, DesignSize))
 		{
-			return MoveTemp(*Early);
+			FReimportTreeIndex ValidationIndex;
+			if (!ValidateReimportSource(Manifest, PreparedScopeRoot, ValidationIndex, MappingBuildState, PrepareFailureReason))
+			{
+				AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
+				return FailApply();
+			}
+			if (TOptional<FDesignReimportResult> Early = CheckReimportStructureViability(
+				Session, WBP, Manifest, PreparedScopeRoot, ValidationIndex, Result, DesignSize))
+			{
+				return MoveTemp(*Early);
+			}
 		}
 
 		// Prepare persistent resources before mutating the old tree. Nested builds share this budget.
@@ -199,10 +196,24 @@ namespace DesignImportPipeline
 		const FString AssetName = WBP->GetName();
 		TArray<TStrongObjectPtr<UMaterialInterface>> PreparedMaterials;
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(PreparedRoot, PrepareFailureReason)
+			|| !RetainerCaptureBounds::Prepare(PreparedRoot, PrepareFailureReason)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(PreparedRoot, PrepareFailureReason)
 			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(PreparedRoot, PreparedMaterials, PrepareFailureReason)
 			|| !FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 				PreparedRoot, PackagePath, AssetName, PrepareFailureReason, Budget))
+		{
+			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
+			return FailApply();
+		}
+
+		// Preparation may replace child arrays and add wrappers. Bind the plan to the final IR only.
+		FReimportTreeIndex TreeIndex;
+		TMap<FString, const FDesign2UMGGenerationManifestSidecar::FInstanceRecord*> InstancesById;
+		TArray<FReimportPlanEntry> Plan;
+		TSet<FString> AliveInstanceWidgetNames;
+		if (!BuildReimportUpdatePlan(
+			Manifest, PreparedScopeRoot, TreeIndex, MappingBuildState, InstancesById, Plan, AliveInstanceWidgetNames,
+			PrepareFailureReason))
 		{
 			AddReimportDiagnostic(Result.Diagnostics, ReimportDiagnosticKinds::PrepareFailed, PrepareFailureReason);
 			return FailApply();

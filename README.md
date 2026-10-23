@@ -25,11 +25,13 @@ Design2UMG 是一个**纯编辑器插件**：读取设计工具导出的结构�
 | 当前打开的 Pencil 设计稿（MCP 实时读取） | 菜单 **Design2UMG > Connect to Pencil...** | 🧪 桥接/调试，不作正式承诺 |
 | MCP JSON 文件 | `Design2UMG.PenConvert` | 🧪 桥接/调试，不作正式承诺 |
 
+> **Pencil 描边限制：** 当前不支持 Pencil 2.6–2.11 历史描边格式转换。旧稿描边可能缺失或显示不正确，这部分尚未完整支持或验收；完整支持 Pencil 仍是长期目标。
+
 ## 主要功能
 
 - **布局还原**：把设计侧的 flex / auto-layout 投影为 UMG slot、anchor 和 offset，以节点 bounds 为唯一事实来源。
 - **视觉映射**：fill、stroke、圆角、阴影、模糊近似、线性/径向渐变、SVG path 光栅化。
-- **设计尺寸导出**：布局保留设计尺寸，PNG 边界另计阴影及未裁剪内容；支持单轴 1 像素和既有总像素预算内的分块导出，参考图尺寸不参与生成。
+- **设计尺寸导出**：布局保留设计尺寸，PNG 边界另计阴影及未裁剪内容；支持单轴 1 像素和独立的 256 × 1024 × 1024 像素截图导出预算内的分块导出，参考图尺寸不参与生成。
 - **变量与组件**：解析设计变量和主题，展开 ref / 组件实例。
 - **预览后生成**：导入前可查看预览图和可编辑的中间 JSON。
 - **安全重导入**：设计更新后原地刷新插件生成的部分，保留你手工添加的控件、绑定和蓝图逻辑（目前支持 Figma 来源）。
@@ -301,7 +303,7 @@ python Tools/design2umg_auto_verify.py local-figma --source <FigmaExportRoot>\de
   → UMGGenerator
 ```
 
-核心原则：**布局投影以 bounds 为准**。模块边界和设计规则见 [架构文档](Docs/Architecture.zh-CN.md)，属性映射见 [PropertyMapping](Docs/PropertyMapping.md)。
+核心原则：**布局投影以 bounds 为准**。布局尺寸与 PNG 导出边界分别计算；导出边界还包含源设计定义的外部阴影和未裁剪内容。参考 PNG 尺寸不决定这两者。单轴 1 像素有效；超过 GPU 纹理尺寸的导出以分块方式渲染，受独立的 256 × 1024 × 1024 像素截图导出预算限制。模块边界和设计规则见 [架构文档](Docs/Architecture.zh-CN.md)，属性映射见 [PropertyMapping](Docs/PropertyMapping.md)。
 
 ## 常见问题
 

@@ -52,6 +52,7 @@ def resolve_admissible_best_manifest(
     *,
     expected_case_names: set[str],
     output_path: Path | None = None,
+    cache_path: Path | None = None,
 ) -> tuple[Path, dict, str]:
     """Build the dynamic history view for the currently discovered case set."""
     expected_names = set(expected_case_names)
@@ -61,7 +62,7 @@ def resolve_admissible_best_manifest(
         raise ValueError(f"Historical validation requires an accepted baseline anchor: {automation_root}")
 
     output_path = output_path or (automation_root / "_admissible_best_latest.json")
-    manifest = rebuild_historical_best_manifest(automation_root)
+    manifest = rebuild_historical_best_manifest(automation_root, cache_path=cache_path)
     historical_names = set(manifest.get("cases") or {})
     manifest["scope_case_count"] = len(expected_names)
     manifest["formal_scope_case_count"] = len(expected_names)
@@ -565,28 +566,19 @@ def collect_best_cases(automation_root: Path, cache_payload: dict) -> tuple[
     )
 
 
-def rebuild_historical_best_manifest(automation_root: Path) -> dict:
-    """Rebuild the admissible historical-best manifest from all admissible runs.
+def rebuild_historical_best_manifest(automation_root: Path, *, cache_path: Path | None = None) -> dict:
+    """Rebuild historical-best data using the existing admissible-run rules.
 
-    **Contract**: Writes a deterministic manifest to
-    ``automation_root / "_admissible_best_latest.json"`` containing the best
-    metrics (lowest ``stable_changed_ratio`` / ``changed_ratio``) found across all
-    admissible runs, plus a local cache to ``automation_root / CACHE_FILENAME``
-    for fast incremental rebuilds.
+    Admissible runs have formal_admissible_candidate in run_scope.json and pass
+    classify_summary_admissibility, including no blocked cases, no-regression
+    failures or historical-best regressions.
 
-    An *admissible* run is one whose ``run_scope.json`` carries
-    ``formal_admissible_candidate: true`` and whose summary passes
-    ``classify_summary_admissibility()`` (no blocked cases, no no-regression
-    failures, no historical-best regressions).
-
-    Args:
-        automation_root: Directory containing per-run subdirectories with
-            ``summary.json`` files.
-
-    Returns:
-        The manifest dict (same content as the written JSON file).
+    automation_root supplies the accepted baseline and per-run evidence. The
+    scan cache is read and written at cache_path when supplied, otherwise at
+    automation_root / CACHE_FILENAME. The caller writes the returned manifest
+    to its selected destination.
     """
-    cache_path = automation_root / CACHE_FILENAME
+    cache_path = cache_path if cache_path is not None else automation_root / CACHE_FILENAME
     cache_payload = load_cache(cache_path)
     (
         best_cases,

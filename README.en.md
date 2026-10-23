@@ -25,11 +25,13 @@ Design2UMG is an **editor-only plugin**. It reads structured data exported by de
 | Active Pencil document (live MCP read) | Menu **Design2UMG > Connect to Pencil...** | 🧪 Bridge/debug, not a release promise |
 | MCP JSON files | `Design2UMG.PenConvert` | 🧪 Bridge/debug, not a release promise |
 
+> **Pencil stroke limitation:** Conversion of the historical stroke format used by Pencil 2.6–2.11 is currently unsupported. Strokes in older documents may be missing or display incorrectly; this part is not fully supported or validated. Full Pencil support remains the long-term goal.
+
 ## Features
 
 - **Layout conversion**: projects design-side flex / auto-layout onto UMG slots, anchors and offsets, with node bounds as the single source of truth.
 - **Visual mapping**: fill, stroke, corner radius, shadows, blur approximation, linear/radial gradients, SVG path rasterization.
-- **Source-sized exports**: keep the design layout size and calculate PNG bounds separately for shadows and unclipped content. One-pixel axes and tiled exports within the existing total-pixel budget are supported; reference dimensions never resize generation.
+- **Source-sized exports**: keep the design layout size and calculate PNG bounds separately for shadows and unclipped content. One-pixel axes and tiled exports within the independent 256 × 1024 × 1024 pixel screenshot export budget are supported; reference dimensions never resize generation.
 - **Variables and components**: resolves design variables and themes, expands refs and component instances.
 - **Preview before generating**: inspect a preview image and editable intermediate JSON before import.
 - **Safe Reimport**: refreshes plugin-owned parts in place after a design update, keeping the widgets, bindings and Blueprint logic you added (Figma sources for now).
@@ -301,7 +303,7 @@ Release steps: [release candidate checklist](Tools/Release/ReleaseCandidateCheck
   → UMGGenerator
 ```
 
-Key principle: **bounds are the source of truth** for layout projection. See [Architecture](Docs/Architecture.md) for module boundaries and rules, and [PropertyMapping](Docs/PropertyMapping.md) for property mapping.
+Key principle: **bounds are the source of truth** for layout projection. Layout dimensions remain separate from the PNG export bounds, which also contain source-defined outer shadows and unclipped content. Reference PNG dimensions never set either size. One-pixel dimensions are valid; exports above the GPU texture dimension are rendered in tiles, within the independent 256 × 1024 × 1024 pixel screenshot export budget. See [Architecture](Docs/Architecture.md) for module boundaries and rules, and [PropertyMapping](Docs/PropertyMapping.md) for property mapping.
 
 ## FAQ
 

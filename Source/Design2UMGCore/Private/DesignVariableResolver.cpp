@@ -124,15 +124,26 @@ TMap<FString, FString> FDesignVariableResolver::BuildDocumentTheme(const TMap<FS
 
 FString FDesignVariableResolver::ResolveString(const FString& Value) const
 {
-	if (!IsVariableRef(Value))
-		return Value;
-
-	FString VarName = Value.Mid(1);
-	if (const FDesignVariable* Var = GetVariable(VarName))
-		return ResolveThemedValue(*Var);
-
-	UE_LOG(LogDesign2UMG, Warning, TEXT("DesignVariableResolver: Variable not found: %s"), *VarName);
-	return Value;
+	FString Current = Value;
+	TSet<FString> Active;
+	while (IsVariableRef(Current))
+	{
+		const FString Name = Current.Mid(1);
+		if (Active.Contains(Name))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignVariableResolver: Circular variable alias: %s"), *Name);
+			return Value;
+		}
+		Active.Add(Name);
+		const FDesignVariable* Var = GetVariable(Name);
+		if (!Var)
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("DesignVariableResolver: Variable not found: %s"), *Name);
+			return Value;
+		}
+		Current = ResolveThemedValue(*Var);
+	}
+	return Current;
 }
 
 float FDesignVariableResolver::ResolveNumber(const FString& Value) const

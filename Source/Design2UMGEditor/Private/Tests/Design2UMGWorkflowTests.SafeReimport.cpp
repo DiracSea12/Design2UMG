@@ -390,7 +390,8 @@ bool FSafeReimportStructureTest::RunTest(const FString&)
 	TestTrue(TEXT("Move diagnosed"), CountReimportDiagnostics(Result, TEXT("reimport_moved")) >= 1);
 
 	// The card's inner text is refreshed as well.
-	if (UTextBlock* Caption = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption"))))
+	UTextBlock* Caption = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Caption")));
+	if (TestNotNull(TEXT("Moved subtree Caption still present"), Caption))
 	{
 		TestEqual(TEXT("Moved subtree text refreshed"), Caption->GetText().ToString(), TEXT("Card v2"));
 	}
@@ -783,7 +784,8 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 
 	// Scenario 2: manifest missing -> full conflict; after the explicit choice a sibling copy is generated (the original asset and state untouched).
 	IFileManager::Get().Delete(*Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage), false, true);
-	const int64 OriginalSize = IFileManager::Get().FileSize(*OriginalAssetFile);
+	const FString OriginalHash = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("Original asset readable before resolution copy"), OriginalHash.IsEmpty());
 
 	Result = ReimportFromJson(V2, nullptr, TargetPackage);
 	TestTrue(TEXT("Missing manifest reported as full conflict"), Result.bFullConflict);
@@ -800,8 +802,9 @@ bool FSafeReimportResolutionCopyTest::RunTest(const FString&)
 	TestTrue(TEXT("Resolution copy has its own manifest"),
 		LoadManifestSidecar(CopyPackage, CopySidecar));
 	TestTrue(TEXT("Original asset untouched"), FPaths::FileExists(OriginalAssetFile));
-	TestEqual(TEXT("Original asset bytes unchanged"),
-		IFileManager::Get().FileSize(*OriginalAssetFile), OriginalSize);
+	const FString OriginalHashAfter = Design2UMGGenerationManifest::ComputeSavedAssetHash(TargetPackage);
+	TestFalse(TEXT("Original asset readable after resolution copy"), OriginalHashAfter.IsEmpty());
+	TestEqual(TEXT("Original asset bytes unchanged"), OriginalHashAfter, OriginalHash);
 	TestFalse(TEXT("Original still has no manifest"),
 		FPaths::FileExists(Design2UMGGenerationManifest::BuildSidecarPathForAsset(TargetPackage)));
 

@@ -3,6 +3,7 @@
 #include "ProceduralShapeGenerator.h"
 
 #include "ProceduralShapeGeneratorAssets.h"
+#include "UMGImageCropUtils.h"
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGLog.h"
 #include "UMGValueParsing.h"
@@ -69,6 +70,7 @@ namespace
 		Ring,
 		RoundedRect,
 		GradientLinear,
+		MeshGradient,
 		GradientH,
 		GradientV,
 		RadialGradient,
@@ -87,6 +89,7 @@ namespace
 		if (MaterialRef.Equals(TEXT("ring"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::Ring;
 		if (MaterialRef.Equals(TEXT("roundedrect"), ESearchCase::IgnoreCase)
 			|| MaterialRef.Equals(TEXT("polygon"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::RoundedRect;
+		if (MaterialRef.Equals(TEXT("meshgradient"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::MeshGradient;
 		if (MaterialRef.Equals(TEXT("gradientlinear"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientLinear;
 		if (MaterialRef.Equals(TEXT("gradienth"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientH;
 		if (MaterialRef.Equals(TEXT("gradientv"), ESearchCase::IgnoreCase)) return EProceduralShapeKind::GradientV;
@@ -215,7 +218,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	float TY,
 	int32 OutW,
 	int32 OutH,
-	FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
+	FString* OutError, DesignImageResources::FImageOperationBudget* Budget, const FString& FitMode, const FIntRect* RasterRegion)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -227,6 +230,12 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 		const FString Error = TEXT("Invalid or excessive affine crop dimensions or transform");
 		if (OutError) *OutError = Error;
 		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
+		return nullptr;
+	}
+	const FIntRect Region = RasterRegion ? *RasterRegion : FIntRect(0, 0, OutW, OutH);
+	if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Region.Width(), Region.Height()))
+	{
+		if (OutError) *OutError = TEXT("Invalid or excessive image raster region");
 		return nullptr;
 	}
 	if (!Source)
@@ -241,8 +250,17 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	{
 		return nullptr;
 	}
+	UMGImageCropUtils::FImageSamplingPlan Sampling;
+	FUMGVisualBrushData::FImageTransformData Transform;
+	Transform.A = A; Transform.B = B; Transform.TX = TX;
+	Transform.C = C; Transform.D = D; Transform.TY = TY;
+	if (!UMGImageCropUtils::TryBuildSamplingPlan(Transform, FitMode, FVector2D(SrcW, SrcH), FVector2D(OutW, OutH), Sampling))
+	{
+		if (OutError) *OutError = TEXT("Invalid image crop sizing");
+		return nullptr;
+	}
 
-	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(OutW, OutH, nullptr, Budget);
+	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(Region.Width(), Region.Height(), nullptr, Budget);
 	if (!Result)
 	{
 		if (OutError)
@@ -261,23 +279,35 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 
 	const FColor* SrcData = SourcePixels.GetData();
 	TArray<FColor> Pixels;
-	Pixels.SetNumUninitialized(OutW * OutH);
+	Pixels.SetNumUninitialized(Region.Width() * Region.Height());
 
-	for (int32 Y = 0; Y < OutH; ++Y)
+	for (int32 Y = 0; Y < Region.Height(); ++Y)
 	{
-		const float NY = static_cast<float>(Y) / FMath::Max(1, OutH - 1);
-		for (int32 X = 0; X < OutW; ++X)
+		const float NY = static_cast<float>(Y + Region.Min.Y) / FMath::Max(1, OutH - 1);
+		for (int32 X = 0; X < Region.Width(); ++X)
 		{
-			const float NX = static_cast<float>(X) / FMath::Max(1, OutW - 1);
-			// Figma imageTransform maps destination-normalized coordinates to source UVs.
-			const float SU = A * NX + B * NY + TX;
-			const float SV = C * NX + D * NY + TY;
+			if (X + Region.Min.X < 0 || X + Region.Min.X >= OutW || Y + Region.Min.Y < 0 || Y + Region.Min.Y >= OutH)
+			{
+				Pixels[Y * Region.Width() + X] = FColor::Transparent;
+				continue;
+			}
+			const float NX = static_cast<float>(X + Region.Min.X) / FMath::Max(1, OutW - 1);
+			const float U = static_cast<float>((NX - 0.5) * Sampling.CropScale.X + 0.5);
+			const float V = static_cast<float>((NY - 0.5) * Sampling.CropScale.Y + 0.5);
+			if (Sampling.bClipToCrop && (U < 0.0f || U > 1.0f || V < 0.0f || V > 1.0f))
+			{
+				Pixels[Y * Region.Width() + X] = FColor(0, 0, 0, 0);
+				continue;
+			}
+			const auto& Map = Sampling.Transform;
+			const float SU = Map.A * U + Map.B * V + Map.TX;
+			const float SV = Map.C * U + Map.D * V + Map.TY;
 			const float SX = SU * (SrcW - 1);
 			const float SY = SV * (SrcH - 1);
 
 			if (SX < -0.5f || SX >= SrcW || SY < -0.5f || SY >= SrcH)
 			{
-				Pixels[Y * OutW + X] = FColor(0, 0, 0, 0);
+				Pixels[Y * Region.Width() + X] = FColor(0, 0, 0, 0);
 				continue;
 			}
 
@@ -304,7 +334,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 				return LerpChannel(Top, Bottom, FY);
 			};
 
-			FColor& OutPixel = Pixels[Y * OutW + X];
+			FColor& OutPixel = Pixels[Y * Region.Width() + X];
 			OutPixel.R = BilinearChannel(C00.R, C10.R, C01.R, C11.R);
 			OutPixel.G = BilinearChannel(C00.G, C10.G, C01.G, C11.G);
 			OutPixel.B = BilinearChannel(C00.B, C10.B, C01.B, C11.B);
@@ -347,6 +377,7 @@ namespace
 		bool bHasLinearEndY = false;
 		FVector2D RadialCenter = FVector2D(0.5f, 0.5f);
 		FVector2D RadialSize = FVector2D(1.0f, 1.0f);
+		TOptional<FVector4> AngularBasis;
 	};
 
 	// Values above 1 are percentages; values at or below 1 are normalized fractions.
@@ -372,6 +403,7 @@ namespace
 		P.ColorStart = Color(Gradient.Stops[0].Color);
 		P.ColorEnd = Color(Gradient.Stops.Last().Color);
 		P.RotationDeg = Coordinate(Gradient.Rotation.Get(0.0f));
+		P.AngularBasis = Gradient.AngularBasis;
 		const bool bLinear = !Gradient.Type.IsSet() || Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
 		if (bLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet())
 		{
@@ -379,7 +411,7 @@ namespace
 			P.LinearEnd = FVector2D(Coordinate(Gradient.EndPoint.GetValue().X), Coordinate(Gradient.EndPoint.GetValue().Y));
 			P.bHasLinearStartX = P.bHasLinearStartY = P.bHasLinearEndX = P.bHasLinearEndY = true;
 		}
-		if (Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+		if (Gradient.Type.IsSet() && (Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase) || Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase)))
 		{
 			const FVector2D Center = Gradient.Center.Get(FVector2D(0.5f, 0.5f));
 			const FVector2D Size = Gradient.Size.Get(FVector2D(1.0f, 1.0f));
@@ -564,11 +596,24 @@ namespace
 		const int32 Width,
 		const int32 Height,
 		UObject* Outer,
-		bool& bRecognized, DesignImageResources::FImageOperationBudget* Budget)
+		bool& bRecognized, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		const EProceduralShapeKind ShapeKind = ResolveMaterialRefShape(Request.MaterialRef);
 		bRecognized = ShapeKind != EProceduralShapeKind::Unknown;
 		if (!bRecognized) return nullptr;
+
+		if (ShapeKind == EProceduralShapeKind::MeshGradient)
+		{
+            FDesignMeshGradient ExternalMesh;
+            const FDesignMeshGradient* Mesh = Request.Gradient.Mesh.IsSet() ? &Request.Gradient.Mesh.GetValue() : nullptr;
+            if (!Mesh && Request.MaterialParams.IsSet())
+            {
+                TSharedPtr<FJsonObject> Object;
+                if (DesignJsonUtils::TryParseObject(Request.MaterialParams.GetValue(), Object)
+                    && DesignMeshGradientJson::Parse(Object, ExternalMesh)) Mesh = &ExternalMesh;
+            }
+            return Mesh ? ProceduralShapeGeneratorAssets::GenerateMeshGradient(Width, Height, *Mesh, Outer, Budget, RasterRegion) : nullptr;
+		}
 
 		if (ShapeKind == EProceduralShapeKind::HorizontalStroke)
 		{
@@ -630,21 +675,21 @@ namespace
 					P.LinearStart,
 					P.LinearEnd,
 					P.MultiStops,
-					Outer, Budget);
+					Outer, Budget, RasterRegion);
 			}
-			return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget);
+			return ProceduralShapeGeneratorAssets::GenerateGradientAngled(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::GradientH)
 		{
 			return P.MultiStops.Num() >= 2
-				? ProceduralShapeGeneratorAssets::GenerateGradientHMultiStop(Width, Height, P.MultiStops, Outer, Budget)
-				: ProceduralShapeGeneratorAssets::GenerateGradientH(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget);
+				? ProceduralShapeGeneratorAssets::GenerateGradientHMultiStop(Width, Height, P.MultiStops, Outer, Budget, RasterRegion)
+				: ProceduralShapeGeneratorAssets::GenerateGradientH(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::GradientV)
 		{
 			return P.MultiStops.Num() >= 2
-				? ProceduralShapeGeneratorAssets::GenerateGradientVMultiStop(Width, Height, P.MultiStops, Outer, Budget)
-				: ProceduralShapeGeneratorAssets::GenerateGradientV(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget);
+				? ProceduralShapeGeneratorAssets::GenerateGradientVMultiStop(Width, Height, P.MultiStops, Outer, Budget, RasterRegion)
+				: ProceduralShapeGeneratorAssets::GenerateGradientV(Width, Height, P.ColorStart, P.ColorEnd, Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::RadialGradient)
 		{
@@ -656,7 +701,7 @@ namespace
 					P.RadialCenter,
 					P.RadialSize,
 					P.RotationDeg,
-					Outer, Budget)
+					Outer, Budget, RasterRegion)
 				: ProceduralShapeGeneratorAssets::GenerateRadialGradient(
 					Width,
 					Height,
@@ -665,7 +710,7 @@ namespace
 					P.RadialCenter,
 					P.RadialSize,
 					P.RotationDeg,
-					Outer, Budget);
+					Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::AngularGradient)
 		{
@@ -675,7 +720,17 @@ namespace
 				P.MultiStops.Add({0.0f, P.ColorStart});
 				P.MultiStops.Add({1.0f, P.ColorEnd});
 			}
-			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.RotationDeg, P.MultiStops, Outer, Budget);
+			FVector4 PixelBasis(1, 0, 0, 1);
+			FVector2D PixelCenter((Width - 1) * P.RadialCenter.X, (Height - 1) * P.RadialCenter.Y);
+			if (P.AngularBasis.IsSet())
+			{
+				const FVector4 Basis = P.AngularBasis.GetValue();
+				// A one-pixel axis still has a finite normalized paint span.
+				const FVector2D Span(FMath::Max(Width - 1, 1), FMath::Max(Height - 1, 1));
+				PixelBasis = FVector4(Basis.X * Span.X, Basis.Y * Span.Y, Basis.Z * Span.X, Basis.W * Span.Y);
+				PixelCenter = P.RadialCenter * Span;
+			}
+			return ProceduralShapeGeneratorAssets::GenerateAngularGradient(Width, Height, P.AngularBasis.IsSet() ? 0.0f : P.RotationDeg, PixelCenter, PixelBasis, P.MultiStops, Outer, Budget, RasterRegion);
 		}
 		if (ShapeKind == EProceduralShapeKind::BoxShadow
 			|| ShapeKind == EProceduralShapeKind::EllipseShadow)
@@ -735,7 +790,7 @@ namespace
 }
 
 UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
-	const FUMGProceduralResourceRequest& Request, UObject* Outer, FString* OutError, DesignImageResources::FImageOperationBudget* Budget)
+	const FUMGProceduralResourceRequest& Request, UObject* Outer, FString* OutError, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -749,13 +804,18 @@ UTexture2D* FProceduralShapeGenerator::GenerateFromMaterialRef(
 		else UE_LOG(LogDesign2UMG, Warning, TEXT("%s"), *Error);
 		return nullptr;
 	}
+	if (RasterRegion && !Limits.AllowsDimensions(RasterRegion->Width(), RasterRegion->Height()))
+	{
+		if (OutError) *OutError = TEXT("Invalid or excessive gradient raster region");
+		return nullptr;
+	}
 	FMaterialRefParams P;
 	if (Request.Gradient.HasAny()) ApplyGradientParams(Request.Gradient, P);
 	else if (Request.Shape.IsSet()) ApplyShapeParams(Request.Shape.GetValue(), P);
 	else ParseMaterialRefParams(Request, P);
 
 	bool bRecognized = false;
-	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized, Budget);
+	UTexture2D* Texture = DispatchMaterialRefShape(Request, P, Size.X, Size.Y, Outer, bRecognized, Budget, RasterRegion);
 	if (!Texture && bRecognized)
 	{
 		const FString& Refusal = Budget->GetRefusalError();

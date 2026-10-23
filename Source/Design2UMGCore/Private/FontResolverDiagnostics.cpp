@@ -342,6 +342,11 @@ namespace
 	}
 }
 
+bool FFontResolver::HasAmbiguousProjectFontAssets(const FString& FontFamily)
+{
+	return CountProjectFontAssetCandidates(FontFamily) > 1;
+}
+
 FFontResolutionDiagnostic FFontResolver::ResolveFontDiagnostic(
 	const FString& FontFamily,
 	const FString& PostScriptName,

@@ -26,6 +26,7 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<const FUMGWidgetData>, OriginalData)
 		SLATE_ARGUMENT(FDesignImageImportResult, InitialImageResult)
 		SLATE_ARGUMENT(FString, OutputPath)
+		SLATE_ARGUMENT(FString, SourceFilePath)
 		SLATE_ARGUMENT(TArray<FString>, Warnings)
 		SLATE_ARGUMENT(TOptional<FDesignPreviewMaterializationSettingsSnapshot>, InitialMaterializationSettingsSnapshot)
 		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewRefreshAnalyzer>, PreviewRefreshAnalyzer)
@@ -54,6 +55,7 @@ private:
 	TOptional<FDesignImageImportResult> CurrentImageResult;
 	FText GenerationStatus;
 	FString CurrentOutputPath;
+	FString SourceFilePath;
 	TArray<FString> ConversionWarnings;
 	uint64 NextRefreshRequestId = 1;
 	uint64 LatestRequestedRefreshId = 0;
@@ -65,6 +67,7 @@ private:
 	FOnPreviewCancelled OnCancelled;
 
 	FReply OnGenerateClicked();
+	FString FormatPreviewFailure(const FString& ErrorMessage) const;
 	FReply OnCancelClicked();
 	FReply OnFormatJsonClicked();
 

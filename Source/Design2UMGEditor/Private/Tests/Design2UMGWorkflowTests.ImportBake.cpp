@@ -5,6 +5,11 @@
 #include "DesignSchema.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
+#include "DesignImportDialogs.h"
+#include "Design2UMGConverter.h"
+#include "PenParser.h"
+#include "DesignPreviewMaterializationService.h"
+#include "UMGSchemaSourceExtensions.h"
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
 #include "Design2UMGTestUtils.h"
@@ -13,6 +18,7 @@
 #include "IImageWrapperModule.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -92,8 +98,8 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	const FString FixtureJsonPath = GetFixturePath(TEXT("FigmaComplex.json"));
 	if (FixtureJsonPath.IsEmpty() || !FPaths::FileExists(FixtureJsonPath))
 	{
-		AddWarning(FString::Printf(TEXT("Figma fixture not found, skipping: %s"), *FixtureJsonPath));
-		return true;
+		AddError(FString::Printf(TEXT("Required Figma fixture not found: %s"), *FixtureJsonPath));
+		return false;
 	}
 
 	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaTargetNode"));
@@ -620,6 +626,121 @@ bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Blur bake should not reuse original source path"), !FPaths::IsSamePath(FPaths::ConvertRelativePathToFull(Avatar->Visual.Fills[0].Image.Url), FPaths::ConvertRelativePathToFull(SourcePngPath)));
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignImportFailureDetailsTest,
+	"Design2UMG.Workflow.Import.FailureDetails",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDesignImportFailureDetailsTest::RunTest(const FString& Parameters)
+{
+	FUMGWidgetData Data;
+	Data.MutableSourceDocument().SourceFilePath = TEXT("/Designs/source.pen");
+	Data.RootWidget.MutableSource().SourceNodeId = TEXT("root");
+	Data.RootWidget.MutableSource().SourceNodeName = TEXT("Settings");
+	Data.RootWidget.MutableSource().SourceNodeType = TEXT("modal");
+	Data.Warnings.Add(TEXT("Reference expansion skipped node 'instance': target 'missing' not found."));
+	const FString Error = TEXT("missing valid DesignTimeSize");
+	const FString Message = DesignImportDialogs::FormatImportResult(Data, Error, false);
+	TestTrue(TEXT("Keep original failure"), Message.Contains(Error));
+	TestTrue(TEXT("Show source file"), Message.Contains(TEXT("/Designs/source.pen")));
+	TestTrue(TEXT("Show source node and actual type"), Message.Contains(TEXT("Settings (root), modal")));
+	TestTrue(TEXT("Show zero source bounds without changing them"), Message.Contains(TEXT("0 × 0")));
+	TestTrue(TEXT("Keep unresolved reference target"), Message.Contains(TEXT("target 'missing'")));
+	TestEqual(TEXT("Formatting does not alter warnings"), Data.Warnings.Num(), 1);
+	FDesignDocument UnsupportedDocument;
+	if (!TestTrue(TEXT("Parse source with an unsupported authored type"), FPenParser::ParseDocument(
+		TEXT(R"({"version":"1","children":[{"id":"unsupported-root","name":"Custom dialog","type":"modal"}]})"), UnsupportedDocument)))
+	{
+		return false;
+	}
+	const FUMGWidgetData UnsupportedData = FDesign2UMGConverter::Convert(
+		UnsupportedDocument, FDesign2UMGConversionSettings::Defaults());
+	const FString UnsupportedMessage = DesignImportDialogs::FormatImportResult(UnsupportedData, Error, false);
+	TestTrue(TEXT("Unknown type reason reaches final failure details"),
+		UnsupportedMessage.Contains(TEXT("unsupported source type 'modal'")));
+	TestTrue(TEXT("Unknown type details retain source name and id"),
+		UnsupportedMessage.Contains(TEXT("Custom dialog")) && UnsupportedMessage.Contains(TEXT("unsupported-root")));
+	TestTrue(TEXT("Unknown type warning preserves original failure"), UnsupportedMessage.Contains(Error));
+	const FString WarningMessage = DesignImportDialogs::FormatImportResult(Data, FString(), true);
+	TestTrue(TEXT("Successful import remains described as completed"), WarningMessage.Contains(TEXT("导入已完成")));
+	FDesignImageImportResult Images;
+	FDesignImageDiagnostic Diagnostic;
+	Diagnostic.Outcome = EDesignImageDiagnosticOutcome::Failed;
+	Diagnostic.NodeId = TEXT("image-node");
+	Diagnostic.Resource = TEXT("/Designs/texture.png");
+	Diagnostic.Reason = TEXT("operation limit: 536870912 bytes");
+	Images.AddDiagnostic(Diagnostic);
+	const FString ImageMessage = DesignImportDialogs::FormatImageIssues(Images);
+	TestTrue(TEXT("Show failed resource node"), ImageMessage.Contains(Diagnostic.NodeId));
+	TestTrue(TEXT("Show failed resource path and exact reason"),
+		ImageMessage.Contains(Diagnostic.Resource) && ImageMessage.Contains(Diagnostic.Reason));
+
+	FDesignPreviewMaterializationRequest PreviewRequest;
+	PreviewRequest.ApprovedSnapshot.Data = Data;
+	PreviewRequest.ApprovedSnapshot.Data.RootWidget.Bounds = FDesignPixelBounds{0.0f, 0.0f, 1440.0f, 0.0f};
+	FDesignPreviewMaterializationResult PreviewResult;
+	FDesignPreviewMaterializationService PreviewService;
+	AddExpectedError(TEXT("Preview design size is unavailable"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Invalid preview dimensions still fail"), PreviewService.MaterializePreview(PreviewRequest, PreviewResult));
+	TestTrue(TEXT("Preview failure retains actual dimensions"), PreviewResult.ErrorMessage.Contains(TEXT("1440.000 × 0.000")));
+	TestEqual(TEXT("Reporting does not fill missing height"), PreviewRequest.ApprovedSnapshot.Data.RootWidget.Bounds.H, 0.0f);
+
+	const FString RootFixturePath = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("RootSelection"), TEXT(".pen"));
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*RootFixturePath); };
+	const FString KnownRoots = TEXT(R"({"id":"fit-frame","name":"Fit frame","type":"frame","width":"fit_content","height":"fit_content"},{"id":"fixed-frame","name":"Fixed frame","type":"frame","width":40,"height":20},{"id":"known-rectangle","name":"Known rectangle","type":"rectangle","width":10,"height":10})");
+	const FString UnknownRoot = TEXT(R"({"id":"custom-input","name":"Search box","type":"input"})");
+	TArray<FDesignFrameInfo> KnownFrames;
+	FString RootError;
+	FString RootWarnings = TEXT("stale warning");
+	if (!TestTrue(TEXT("Write known roots fixture"), FFileHelper::SaveStringToFile(
+		TEXT("{\"version\":\"1\",\"children\":[") + KnownRoots + TEXT("]}"), *RootFixturePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+	{
+		return false;
+	}
+	if (!TestTrue(TEXT("Load known roots"), DesignImportPipeline::LoadPenFrames(RootFixturePath, KnownFrames, &RootError, &RootWarnings))
+		|| !TestEqual(TEXT("Only frames enter selection"), KnownFrames.Num(), 2))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Known non-frame roots do not warn and stale warnings reset"), RootWarnings.IsEmpty());
+	TestEqual(TEXT("Keep first frame order"), KnownFrames[0].Id, FString(TEXT("fit-frame")));
+	TestEqual(TEXT("Keep unresolved frame width"), KnownFrames[0].Width, 0.0f);
+	TestEqual(TEXT("Keep unresolved frame height"), KnownFrames[0].Height, 0.0f);
+	TestEqual(TEXT("Keep second frame order"), KnownFrames[1].Id, FString(TEXT("fixed-frame")));
+	TestEqual(TEXT("Keep fixed frame width"), KnownFrames[1].Width, 40.0f);
+	TestEqual(TEXT("Keep fixed frame height"), KnownFrames[1].Height, 20.0f);
+	if (!TestTrue(TEXT("Write mixed roots fixture"), FFileHelper::SaveStringToFile(
+		TEXT("{\"version\":\"1\",\"children\":[") + KnownRoots + TEXT(",") + UnknownRoot + TEXT("]}"), *RootFixturePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+	{
+		return false;
+	}
+	TArray<FDesignFrameInfo> MixedFrames;
+	if (!TestTrue(TEXT("Load mixed roots"), DesignImportPipeline::LoadPenFrames(RootFixturePath, MixedFrames, &RootError, &RootWarnings))
+		|| !TestEqual(TEXT("Unknown root does not change selection count"), MixedFrames.Num(), KnownFrames.Num()))
+	{
+		return false;
+	}
+	for (int32 Index = 0; Index < KnownFrames.Num(); ++Index)
+	{
+		TestEqual(TEXT("Mixed roots preserve frame id and order"), MixedFrames[Index].Id, KnownFrames[Index].Id);
+		TestEqual(TEXT("Mixed roots preserve frame name"), MixedFrames[Index].Name, KnownFrames[Index].Name);
+		TestEqual(TEXT("Mixed roots preserve frame width"), MixedFrames[Index].Width, KnownFrames[Index].Width);
+		TestEqual(TEXT("Mixed roots preserve frame height"), MixedFrames[Index].Height, KnownFrames[Index].Height);
+	}
+	TestTrue(TEXT("Omitted unknown root shows actual name, id and type"), RootWarnings.Contains(TEXT("Search box (custom-input), input")));
+	TestFalse(TEXT("Known rectangle is not described as unsupported"), RootWarnings.Contains(TEXT("known-rectangle")));
+	if (!TestTrue(TEXT("Write roots without frames fixture"), FFileHelper::SaveStringToFile(
+		TEXT("{\"version\":\"1\",\"children\":[") + UnknownRoot + TEXT("]}"), *RootFixturePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Parsed document without frames keeps load success"), DesignImportPipeline::LoadPenFrames(RootFixturePath, MixedFrames, &RootError, &RootWarnings));
+	TestTrue(TEXT("Document without frames keeps empty selection"), MixedFrames.IsEmpty());
+	TestTrue(TEXT("Document without frames keeps original source details"), RootError.Contains(TEXT("Search box (custom-input), input")));
+	TestTrue(TEXT("Document without frames does not add a second warning"), RootWarnings.IsEmpty());
+
 	return true;
 }
 

@@ -315,8 +315,18 @@ bool FRefExplicitEffectClearTest::RunTest(const FString& Parameters)
 		]
 	})JSON");
 	FDesignDocument Doc;
-	TestTrue(TEXT("Effect-clear fixture parses"), FPenParser::ParseDocument(Json, Doc));
+	if (!TestTrue(TEXT("Effect-clear fixture parses"), FPenParser::ParseDocument(Json, Doc)))
+		return false;
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	if (!TestEqual(TEXT("Effect-clear conversion has no error"), Data.ConversionError, FString()))
+		return false;
+	const FUMGWidgetNode* Instance = FindWidgetById(Data.RootWidget, TEXT("inactiveInstance"));
+	if (!TestNotNull(TEXT("Effect-cleared ref instance remains"), Instance))
+		return false;
+	TArray<FString> TextValues;
+	CollectTextValues(*Instance, TextValues);
+	if (!TestTrue(TEXT("Effect-cleared ref retains inherited Tab text"), TextValues.Contains(TEXT("Tab"))))
+		return false;
 	TestNull(TEXT("Explicit effect clear should remove inherited box shadow widget"),
 		FindWidgetById(Data.RootWidget, TEXT("inactiveInstance_shadow0")));
 	return true;

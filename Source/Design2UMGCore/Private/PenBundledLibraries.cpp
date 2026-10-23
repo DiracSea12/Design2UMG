@@ -6,50 +6,31 @@ namespace PenBundledLibraries
 {
 	namespace
 	{
-		// Library name -> serialized "variables" JSON. Registration and lookup both run on
-		// the game thread (import pipeline entry points), so no locking is needed.
-		TMap<FString, FString>& GetVariableTables()
+		// Registration and lookup run on the game thread through the import pipeline.
+		struct FLibraryDocument
 		{
-			static TMap<FString, FString> Registry;
-			return Registry;
-		}
+			FString Json;
+			FString SourceFilePath;
+		};
 
-		TMap<FString, FString>& GetDocuments()
+		TMap<FString, FLibraryDocument>& GetDocuments()
 		{
-			static TMap<FString, FString> Documents;
+			static TMap<FString, FLibraryDocument> Documents;
 			return Documents;
 		}
 	}
 
-	void RegisterLibraryDocument(const FString& LibraryName, const FString& DocumentJson)
+	void RegisterLibraryDocument(const FString& LibraryName, const FString& DocumentJson, const FString& SourceFilePath)
 	{
-		GetDocuments().Add(LibraryName, DocumentJson);
+		GetDocuments().Add(LibraryName, {DocumentJson, SourceFilePath});
 	}
 
-	bool TryGetDocumentJson(const FString& LibraryName, FString& OutJson)
+	bool TryGetDocumentJson(const FString& LibraryName, FString& OutJson, FString* OutSourceFilePath)
 	{
-		if (const FString* Json = GetDocuments().Find(LibraryName))
+		if (const FLibraryDocument* Document = GetDocuments().Find(LibraryName))
 		{
-			OutJson = *Json;
-			return true;
-		}
-		return false;
-	}
-
-	void RegisterLibraryVariables(const FString& LibraryName, const FString& VariablesJson)
-	{
-		if (LibraryName.IsEmpty() || VariablesJson.IsEmpty())
-		{
-			return;
-		}
-		GetVariableTables().Add(LibraryName, VariablesJson);
-	}
-
-	bool TryGetVariablesJson(const FString& LibraryName, FString& OutJson)
-	{
-		if (const FString* Json = GetVariableTables().Find(LibraryName))
-		{
-			OutJson = *Json;
+			OutJson = Document->Json;
+			if (OutSourceFilePath) *OutSourceFilePath = Document->SourceFilePath;
 			return true;
 		}
 		return false;

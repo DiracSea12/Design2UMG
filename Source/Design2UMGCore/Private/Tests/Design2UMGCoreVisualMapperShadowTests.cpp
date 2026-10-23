@@ -6,6 +6,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
+#include "DesignSourceExportBounds.h"
 #include "UMGSchema.h"
 #include "VisualMapper.h"
 #include "Design2UMGCoreTestHelpers.h"
@@ -419,6 +420,28 @@ bool FVisualMapperSubtreePaintBoundsTest::RunTest(const FString&)
 	// The parent shadow is displaced entirely rightwards, so it adds no left gutter.
 	TestEqual(TEXT("Rotation moves descendant overflow to the left"), CapturePadding().Left, -20.0f);
 	Middle->Transform.Rotation = 0;
+	Middle->Transform.TransformOrigin = FVector2D::ZeroVector;
+	Middle->Transform.bFlipX = true;
+	const auto ExportBounds = [&]()
+	{
+		return DesignSourceExportBounds::Calculate(Root, [](const TSharedPtr<FDesignNode>& Node) { return Node; });
+	};
+	TestEqual(TEXT("Local-zero flip paints left of the original slot"), CapturePadding().Left, -20.0f);
+	TestTrue(TEXT("Source export shares the local-zero flip origin"), ExportBounds().Min.Equals(FVector2D(-20, 0)));
+	Middle->Transform.Rotation = 45;
+	FUMGWidgetNode Transformed;
+	VisualMapper::ApplyRenderTransformProperties(Transformed, Middle);
+	TestTrue(TEXT("Flip and rotation use the declared native pivot"), Transformed.Render.RenderTransformPivot.Get(FVector2D(0.5, 0.5)).IsNearlyZero());
+	TestTrue(TEXT("Source export composes rotation after local-zero flip"), ExportBounds().Min.Equals(FVector2D(-43, -15)));
+	const FMargin TransformedPadding = CapturePadding();
+	TestEqual(TEXT("Left capture retains the rotated descendant overflow"), TransformedPadding.Left, -43.0f);
+	TestEqual(TEXT("Top capture includes root-shadow filter support"), TransformedPadding.Top, -16.0f);
+	Middle->Transform.Rotation = 0;
+	Middle->Transform.bFlipX = false;
+	FUMGWidgetNode Untransformed;
+	VisualMapper::ApplyRenderTransformProperties(Untransformed, Middle);
+	TestFalse(TEXT("Identity source transform needs no explicit native pivot"), Untransformed.Render.RenderTransformPivot.IsSet());
+	Middle->Transform.TransformOrigin = FVector2D(0.5, 0.5);
 	TestEqual(TEXT("Contained absolute children need no extra bottom padding"), CapturePadding().Bottom, -1.0f);
 	Root->LayoutData.Layout = EDesignLayout::Horizontal;
 	TestEqual(TEXT("Flow children reserve outsets at their eventual layout edge"), CapturePadding().Bottom, -21.0f);
@@ -427,6 +450,47 @@ bool FVisualMapperSubtreePaintBoundsTest::RunTest(const FString&)
 	Root->Visual.Stroke.Thickness.Uniform = 6;
 	TestEqual(TEXT("Outside stroke remains inside the capture"), CapturePadding().Left, -6.0f);
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperShaderCaptureTest,
+    "Design2UMG.VisualMapper.ShaderCaptureBounds",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FVisualMapperShaderCaptureTest::RunTest(const FString&)
+{
+    auto Node=MakeFixedNode(EDesignNodeType::Rectangle,100,80);
+    Node->Visual.Stroke.Align=EDesignStrokeAlign::Outside;Node->Visual.Stroke.Thickness.Uniform=6;
+    auto Child=MakeFixedNode(EDesignNodeType::Rectangle,20,30);Child->Transform.SetPosition(90,70);Node->Children.Add(Child);
+    FDesignShaderData Shader;Shader.Url=TEXT("capture.glsl");
+    const auto Wrap=[&]()
+    {
+        FUMGWidgetNode Widget;Widget.Type=TEXT("Image");Widget.Name=TEXT("Capture");Widget.Id=TEXT("capture");
+        Widget.Bounds.W=100;Widget.Bounds.H=80;Widget.Slot.Padding=FMargin(3);
+        Widget.Render.RenderAngle=20;Widget.Render.Clipping=TEXT("ClipToBounds");
+        return VisualMapper::WrapWithShaderEffect(MoveTemp(Widget),Node,Shader);
+    };
+    auto Result=Wrap();
+    TestEqual(TEXT("Outer capture preserves source layout"),Result.Bounds.W,100.f);
+    TestEqual(TEXT("Outer capture preserves parent slot"),Result.Slot.Padding.Left,3.f);
+    if(!TestEqual(TEXT("Outset capture has one native retainer"),Result.Children.Num(),1))return false;
+    const auto& Retainer=Result.Children[0];
+    TestTrue(TEXT("Retainer carries shader and actual logical capture insets"),Retainer.Effect.Shader.IsSet());
+    TestEqual(TEXT("Outer stroke reserves left capture"),Retainer.Slot.Padding.Left,-6.f);
+    TestEqual(TEXT("Overflow child reserves bottom capture"),Retainer.Slot.Padding.Bottom,-20.f);
+    TestEqual(TEXT("Source transform belongs to the layout-preserving outer shell"),Result.Render.RenderAngle.Get(0),20.f);
+    TestFalse(TEXT("Node content clipping does not clip expanded final shader"),Result.Render.Clipping.IsSet());
+    const auto& Content=Retainer.Children[0].Children[0];
+    TestEqual(TEXT("Content keeps its own clip inside capture"),Content.Render.Clipping.Get(FString()),FString(TEXT("ClipToBounds")));
+    Node->LayoutData.SetClipValue(true);Result=Wrap();
+    TestEqual(TEXT("Source clip excludes overflow descendant from capture"),Result.Children[0].Slot.Padding.Bottom,-6.f);
+    Node->Visual.Stroke.Thickness.Uniform=0;Node->Children.Reset();Result=Wrap();
+    TestTrue(TEXT("No-outset source stays a direct retainer without added layout shell"),Result.Effect.Shader.IsSet());
+    FDesignEffect Shadow;Shadow.Type=EDesignEffectType::Shadow;Shadow.Shadow.OffsetY=8;Shadow.Shadow.Blur=4;
+    Node->Visual.Effects.Add(Shadow);Result=Wrap();
+    TestEqual(TEXT("Outer shadow is included in shader capture"),Result.Children[0].Slot.Padding.Bottom,-14.f);
+    Result=VisualMapper::WrapWithShaderEffect(MoveTemp(Result),Node,Shader);
+    TestEqual(TEXT("Nested shader retains the same source layout width"),Result.Bounds.W,100.f);
+    TestEqual(TEXT("Nested shader does not double the capture outset"),Result.Children[0].Slot.Padding.Bottom,-14.f);
+    return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

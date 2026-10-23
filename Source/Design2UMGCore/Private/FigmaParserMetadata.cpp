@@ -262,14 +262,7 @@ namespace FigmaParserMetadata
 
 		if (SlotField.IsValid() && SlotField->Type == EJson::Array)
 		{
-			const int32 SlotCount = SlotField->AsArray().Num();
-			// Preserve source slot keys for source truth; only *.slot.empty is a supplementary explicit-empty hint.
-			Node.Metadata.Add(ParserSharedSemantics::SourceSlotPresentMetadataKey, TEXT("true"));
-			Node.Metadata.Add(ParserSharedSemantics::SourceSlotCountMetadataKey, FString::FromInt(SlotCount));
-			if (SlotCount == 0)
-			{
-				Node.Metadata.Add(ParserSharedSemantics::SourceSlotEmptyMetadataKey, TEXT("true"));
-			}
+			ParserSharedSemantics::AddSourceSlotMetadata(Node, SlotField->AsArray().Num());
 		}
 
 		const bool bExplicitPlaceholder = ReadSemanticSignalField(PlaceholderField);

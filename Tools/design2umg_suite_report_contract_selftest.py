@@ -38,6 +38,52 @@ def main() -> None:
         {"type": "rectangle", "width": 1, "height": 8, "x": 0, "y": 0}]}), (1, 8))
     with TemporaryDirectory() as directory:
         root = Path(directory)
+        generated = root / "generated.png"
+        suite_verify.verify.Image.new("RGBA", (20, 10), (12, 34, 56, 255)).save(generated)
+        with patch.object(suite_verify.verify.Image, "MAX_IMAGE_PIXELS", 64):
+            try:
+                suite_verify.verify.load_rgba(generated)
+            except suite_verify.verify.Image.DecompressionBombError:
+                pass
+            else:
+                raise AssertionError("Default reference-image guard must remain active")
+            with suite_verify.verify.load_generated_rgba(generated, max_pixels=256) as output:
+                assert_equal(output.size, (20, 10))
+            assert_equal(suite_verify.verify.Image.MAX_IMAGE_PIXELS, 64)
+            try:
+                suite_verify.verify.load_generated_rgba(generated, max_pixels=199)
+            except suite_verify.verify.Image.DecompressionBombError:
+                pass
+            else:
+                raise AssertionError("Generated output must obey its explicit bounded budget")
+        reference = root / "reference.png"
+        suite_verify.verify.Image.new("RGBA", (2, 2)).save(reference)
+        original_load_rgba = suite_verify.verify.load_rgba
+        def detached_rgba(path):
+            with original_load_rgba(path) as image:
+                return image.copy()
+        # Stop before scoring: this checks the report entry's input routing only.
+        with patch.object(suite_verify.verify.Image, "MAX_IMAGE_PIXELS", 64), \
+                patch.object(suite_verify.verify, "load_rgba", side_effect=detached_rgba), \
+                patch.object(suite_verify.verify, "build_visual_comparison", side_effect=RuntimeError("image-load-contract-observed")):
+            assert_raises_runtime_error(lambda: suite_verify.verify.compare_and_report(
+                SimpleNamespace(pixel_tolerance=0), root, reference, generated,
+                {"render_export_max_pixels": 256}, 0, {}, {}), "image-load-contract-observed")
+            try:
+                suite_verify.verify.compare_and_report(
+                    SimpleNamespace(pixel_tolerance=0), root, reference, generated, {}, 0, {}, {})
+            except suite_verify.verify.Image.DecompressionBombError:
+                pass
+            else:
+                raise AssertionError("Missing UE output budget must preserve the default candidate guard")
+            try:
+                suite_verify.verify.compare_and_report(
+                    SimpleNamespace(pixel_tolerance=0), root, generated, reference,
+                    {"render_export_max_pixels": 256}, 0, {}, {})
+            except suite_verify.verify.Image.DecompressionBombError:
+                pass
+            else:
+                raise AssertionError("UE output budget must not relax the reference-image guard")
         pen = root / "design.pen"
         pen.write_text(json.dumps({"children": [{"type": "frame", "id": "divider", "width": 1, "height": 8}]}), encoding="utf-8")
         assert_equal([case["node"] for case in suite_verify.suite_discovery.discover_pen_cases(root, "", "")], ["divider"])

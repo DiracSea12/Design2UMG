@@ -2,6 +2,7 @@
 #include "UMGBrushPropertyApplier.h"
 #include "Design2UMGWidgetPropertyAccess.h"
 #include "DesignImageResourceLimits.h"
+#include "DesignPathRasterizer.h"
 
 #include "Design2UMGEffectMaterialBuilder.h"
 #include "DesignResourceResolver.h"
@@ -16,6 +17,7 @@
 #include "Components/Image.h"
 #include "Components/RetainerBox.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
@@ -125,16 +127,29 @@ namespace UMGBrushPropertyApplier
 		UBorder* Border = CastChecked<UBorder>(Widget);
 		Border->SetPadding(FMargin(0.0f));
 		FSlateBrush Brush = Border->Background;
+        if(Node.Brush.Shader.IsSet())
+        {
+            if(auto Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString())))
+            {Brush.SetResourceObject(Material);Brush.DrawAs=ESlateBrushDrawType::Image;Brush.ImageSize=Node.Brush.Shader->Size;Border->SetBrush(Brush);}
+            return;
+        }
 		bool bBrushChanged = false;
 
 		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
 		UTexture2D* GeneratedTexture = nullptr;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap)
+		FDesignPathRasterRequest PathRequest;
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap, &PathRequest)
 			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
 		{
 			Brush.SetResourceObject(GeneratedTexture);
 			Brush.DrawAs = ESlateBrushDrawType::Image;
 			Brush.ImageSize = FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY());
+			if (Node.Path.HasPaintGeometry())
+			{
+				const auto UV = PathRequest.GetCanvasUVTransform();
+				Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
+				Brush.ImageSize = FVector2D(PathRequest.CanvasBounds.Size());
+			}
 			bBrushChanged = true;
 		}
 		else
@@ -235,7 +250,7 @@ namespace UMGBrushPropertyApplier
 			}
 		}
 
-		if (!Node.Path.Geometry.IsSet())
+		if (!Node.Path.HasPaintGeometry())
 		{
 			bBrushChanged = ApplyImageModeToSlateBrush(Brush, Node, [&Brush](UTexture2D* Cropped)
 			{

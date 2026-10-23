@@ -6,6 +6,7 @@
 #include "FontResolver.h"
 
 struct FDesignNode;
+struct FDesignPreparedFont;
 
 struct FResolvedTextLayoutForUMG
 {
@@ -38,7 +39,8 @@ namespace RuntimeProbe
 		const FString& FontWeight,
 		const FString& FontStyle = FString(),
 		int32 LetterSpacing = 0,
-		const FDesign2UMGFontMappings* FontMappings = nullptr);
+		const FDesign2UMGFontMappings* FontMappings = nullptr,
+		const FDesignPreparedFont* PreparedFont = nullptr);
 	FVector2D MeasureUMGTextBlockDesiredSize(
 		const TSharedPtr<FDesignNode>& Node,
 		float FontSize,

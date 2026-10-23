@@ -62,7 +62,7 @@ namespace
 		{
 			ChildFingerprints.Add(BuildNodeFingerprint(Child));
 		}
-		for (const TSharedPtr<FDesignNode>& Imported : Doc.SourceDocument().ImportedReusableNodes)
+		for (const TSharedPtr<FDesignNode>& Imported : Doc.SourceDocument().ImportedNodes)
 		{
 			ChildFingerprints.Add(BuildNodeFingerprint(Imported));
 		}
@@ -484,7 +484,7 @@ bool FDesignStructureSnapshotDoesNotMutateSourceDocumentTest::RunTest(const FStr
 	ImportedLabel->Type = EDesignNodeType::Text;
 	ImportedLabel->Text.Content = TEXT("Imported Snapshot Probe");
 	ImportedComponent->Children.Add(ImportedLabel);
-	Document.MutableSourceDocument().ImportedReusableNodes.Add(ImportedComponent);
+	Document.MutableSourceDocument().ImportedNodes.Add(ImportedComponent);
 	TSharedPtr<FDesignNode> ImportedInstance = MakeShared<FDesignNode>();
 	ImportedInstance->Id = TEXT("imported_instance");
 	ImportedInstance->Name = TEXT("ImportedInstance");

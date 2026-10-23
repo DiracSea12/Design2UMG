@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonSerializer.h"
+#include "DesignBrowserWidget.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGJsonKeys.h"
 #include "UMGPropertyKeys.h"
@@ -126,6 +127,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 		J->SetObjectField(TEXT("WidgetState"), WidgetStateObject);
 	if (TSharedPtr<FJsonObject> ScrollBoxObject = SerializeScrollBoxPayload(Node.ScrollBox))
 		J->SetObjectField(TEXT("ScrollBox"), ScrollBoxObject);
+	if (TSharedPtr<FJsonObject> BrowserObject = DesignBrowserWidget::Serialize(Node.Browser))
+		J->SetObjectField(TEXT("Browser"), BrowserObject);
 
 	if (Node.Children.Num() > 0)
 	{
@@ -285,6 +288,10 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeGradientPayload(const FUMGV
 		GradientObject->SetStringField(UMGJsonKeys::Center, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Center.GetValue()));
 	if (Gradient.Size.IsSet())
 		GradientObject->SetStringField(UMGJsonKeys::Size, Design2UMGWidgetNodeAccess::SerializeWidgetVector2D(Gradient.Size.GetValue()));
+	if (Gradient.AngularBasis.IsSet())
+		GradientObject->SetStringField(UMGJsonKeys::AngularBasis, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Gradient.AngularBasis.GetValue(), 9));
+	if (Gradient.Mesh.IsSet())
+		GradientObject->SetObjectField(TEXT("Mesh"), DesignMeshGradientJson::Serialize(Gradient.Mesh.GetValue()));
 	if (Gradient.Stops.Num() > 0)
 	{
 		TArray<TSharedPtr<FJsonValue>> StopArray;
@@ -306,7 +313,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 	// Brush (v2.4)
 	const FUMGVisualBrushData& B = Brush;
 	TSharedRef<FJsonObject> BJ = MakeShared<FJsonObject>();
-	bool bHasAny = false;
+	if(Brush.Shader.IsSet()) BJ->SetObjectField(TEXT("Shader"),DesignShaderJson::Serialize(Brush.Shader.GetValue()));
+	bool bHasAny = B.Shader.IsSet();
 	if (B.OutlineCornerRadius.IsSet())   { BJ->SetNumberField(UMGPropertyKeys::OutlineCornerRadius, B.OutlineCornerRadius.GetValue()); bHasAny = true; }
 	if (B.CornerRadii.IsSet())           { BJ->SetStringField(UMGPropertyKeys::CornerRadii, Design2UMGWidgetNodeAccess::SerializeWidgetVector4(B.CornerRadii.GetValue(), 2)); bHasAny = true; }
 	if (B.OutlineThickness.IsSet())    { BJ->SetNumberField(UMGPropertyKeys::OutlineThickness, B.OutlineThickness.GetValue()); bHasAny = true; }
@@ -346,6 +354,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeBrushPayload(const FUMGVisu
 			ImageObject->SetStringField(UMGJsonKeys::Mode, B.Image.Mode.GetValue());
 		if (B.Image.Transform.IsSet())
 			ImageObject->SetStringField(UMGJsonKeys::Transform, Design2UMGWidgetNodeAccess::SerializeImageTransform(B.Image.Transform.GetValue()));
+		if (B.Image.CropFitMode.IsSet())
+			ImageObject->SetStringField(UMGJsonKeys::CropFitMode, B.Image.CropFitMode.GetValue());
 		BJ->SetObjectField(TEXT("Image"), ImageObject);
 		bHasAny = true;
 	}
@@ -370,6 +380,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 	}
 
 	TSharedRef<FJsonObject> EJ = MakeShared<FJsonObject>();
+	if(E.Shader.IsSet()) EJ->SetObjectField(TEXT("Shader"),DesignShaderJson::Serialize(E.Shader.GetValue()));
 	if (E.BlurStrength.IsSet())
 		EJ->SetNumberField(UMGPropertyKeys::BlurStrength, E.BlurStrength.GetValue());
 	if (E.bRetainRendering.IsSet())
@@ -386,6 +397,8 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 	}
 	if (E.EffectColor.IsSet())
 		EJ->SetStringField(UMGPropertyKeys::EffectColor, Design2UMGWidgetNodeAccess::SerializeWidgetColor(E.EffectColor.GetValue()));
+	if (E.InnerShadowBlendMode.IsSet())
+		EJ->SetStringField(UMGJsonKeys::InnerShadowBlendMode, E.InnerShadowBlendMode.GetValue());
 	if (E.EffectOffset.IsSet())
 	{
 		EJ->SetStringField(
@@ -443,8 +456,49 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializePathPayload(const FUMGPathD
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeCap, Path.StrokeCap.GetValue());
 	if (Path.StrokeJoin.IsSet())
 		PathObject->SetStringField(UMGPropertyKeys::PathStrokeJoin, Path.StrokeJoin.GetValue());
+	if (Path.StrokeAlignment.IsSet()) PathObject->SetStringField(TEXT("StrokeAlignment"), Path.StrokeAlignment.GetValue());
 	if (Path.CanvasSize.IsSet()) PathObject->SetStringField(TEXT("CanvasSize"), Design2UMGWidgetNodeAccess::SerializeWidgetCompactVector2D(Path.CanvasSize.GetValue()));
+	if (Path.ViewBox.IsSet()) PathObject->SetStringField(TEXT("ViewBox"), Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Path.ViewBox.GetValue(), 6));
+	if (Path.FitGeometryToBounds.IsSet()) PathObject->SetBoolField(TEXT("FitGeometryToBounds"), Path.FitGeometryToBounds.GetValue());
 	if (Path.StrokeGeometry.IsSet()) PathObject->SetStringField(TEXT("StrokeGeometry"), Path.StrokeGeometry.GetValue());
+	if (Path.SourcePaintGeometry.IsSet())
+    {
+        const auto& Source = Path.SourcePaintGeometry.GetValue();
+        TSharedRef<FJsonObject> SourceObject = MakeShared<FJsonObject>();
+        const auto WritePaths = [&](const TCHAR* Key, const TOptional<TArray<FDesignGeometryPath>>& Paths)
+        {
+            if (!Paths.IsSet()) return;
+            TArray<TSharedPtr<FJsonValue>> Values;
+            for (const auto& Geometry : Paths.GetValue())
+            {
+                TSharedRef<FJsonObject> Value = MakeShared<FJsonObject>();
+                Value->SetStringField(TEXT("Path"), Geometry.Path);
+                Value->SetStringField(TEXT("FillRule"), Geometry.FillRule);
+                Values.Add(MakeShared<FJsonValueObject>(Value));
+            }
+            SourceObject->SetArrayField(Key, Values);
+        };
+        WritePaths(TEXT("FillPaths"), Source.Geometry.FillPaths);
+        WritePaths(TEXT("StrokePaths"), Source.Geometry.StrokePaths);
+        SourceObject->SetStringField(TEXT("StrokeAlignment"), Source.StrokeAlignment);
+        const auto WritePaint = [](const FUMGSurfacePaint& Paint)
+        {
+            FUMGVisualBrushData Brush;
+            Brush.BrushColor = Paint.Color;
+            Brush.Gradient = Paint.Gradient;
+            Brush.Image = Paint.Image;
+            return SerializeBrushPayload(Brush);
+        };
+        if (Source.FillPaints.IsSet())
+        {
+            TArray<TSharedPtr<FJsonValue>> Paints;
+            for (const auto& Paint : Source.FillPaints.GetValue()) Paints.Add(MakeShared<FJsonValueObject>(WritePaint(Paint)));
+            SourceObject->SetArrayField(TEXT("FillPaints"), Paints);
+        }
+        if (Source.StrokePaint.IsSet()) SourceObject->SetObjectField(TEXT("StrokePaint"), WritePaint(Source.StrokePaint.GetValue()));
+
+        PathObject->SetObjectField(TEXT("SourcePaintGeometry"), SourceObject);
+    }
 	if (TSharedPtr<FJsonObject> Gradient = SerializeGradientPayload(Path.StrokeGradient)) PathObject->SetObjectField(TEXT("StrokeGradient"), Gradient);
 	return PathObject;
 }
@@ -474,6 +528,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeShadowPayload(const FUMGSha
 			LayerObject->SetNumberField(UMGJsonKeys::Blur, Layer.Blur);
 			LayerObject->SetNumberField(UMGJsonKeys::Spread, Layer.Spread);
 			LayerObject->SetBoolField(UMGJsonKeys::ShowShadowBehindNode, Layer.bShowShadowBehindNode);
+			if (!Layer.BlendMode.IsEmpty()) LayerObject->SetStringField(UMGJsonKeys::BlendMode, Layer.BlendMode);
 			LayerObject->SetStringField(UMGPropertyKeys::Color, Design2UMGWidgetNodeAccess::SerializeWidgetColor(Layer.Color));
 			BoxShadowArray.Add(MakeShared<FJsonValueObject>(LayerObject));
 		}
@@ -491,6 +546,9 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeRenderPayload(const FUMGRen
 	}
 
 	TSharedRef<FJsonObject> RenderObject = MakeShared<FJsonObject>();
+	if (Render.PaintBlendMode.IsSet()) RenderObject->SetStringField(UMGJsonKeys::PaintBlendMode, Render.PaintBlendMode.GetValue());
+	if (Render.BackgroundCaptureInsets.IsSet()) RenderObject->SetStringField(UMGJsonKeys::BackgroundCaptureInsets,
+		Design2UMGWidgetNodeAccess::SerializeWidgetMargin(Render.BackgroundCaptureInsets.GetValue(), 9));
 	if (Render.Clipping.IsSet())
 	{
 		RenderObject->SetStringField(UMGPropertyKeys::Clipping, Render.Clipping.GetValue());

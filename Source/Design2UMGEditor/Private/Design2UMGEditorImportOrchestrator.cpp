@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEditorImportOrchestrator.h"
+#include "DesignImportDialogs.h"
 #include "DesignImportPlanning.h"
 
 #include "Design2UMGEditorImportFrameSelection.h"
@@ -31,6 +32,7 @@ namespace
 	bool ConvertRegisteredSource(
 		const FName SourceId,
 		const FString& JsonContents,
+		const FString& SourceFilePath,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
 		FUMGWidgetData& OutData)
 	{
@@ -39,7 +41,7 @@ namespace
 		{
 			PencilExtensionResources::EnsureIconGlyphsRegistered();
 			PencilExtensionResources::EnsureBundledLibrariesRegistered();
-			if (!FPenParser::ParseDocument(JsonContents, Document))
+			if (!FPenParser::ParseDocument(JsonContents, Document, SourceFilePath))
 			{
 				return false;
 			}
@@ -56,10 +58,7 @@ namespace
 			return false;
 		}
 
-		FImportAnalysisInput AnalysisInput;
-		AnalysisInput.bResolveImages = false;
-		AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
+		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeConversion(Document, SettingsSnapshot);
 		if (!Analysis.ErrorMessage.IsEmpty()) return false;
 		OutData = Analysis.Data;
 		return true;
@@ -70,16 +69,22 @@ namespace
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
 	{
 		TArray<FDesignFrameInfo> Frames;
-		if (!DesignImportPipeline::LoadPenFrames(Request.FilePath, Frames))
+		FString LoadError;
+		FString LoadWarnings;
+		if (!DesignImportPipeline::LoadPenFrames(Request.FilePath, Frames, &LoadError, &LoadWarnings))
 		{
+			DesignImportDialogs::ShowImportProblem(LoadError);
 			return;
 		}
 
 		if (Frames.Num() == 0)
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("Design2UMG.Import: No frames found in %s"), *Request.FilePath);
+			DesignImportDialogs::ShowImportProblem(LoadError);
 			return;
 		}
+
+		if (!LoadWarnings.IsEmpty()) DesignImportDialogs::ShowImportProblem(LoadWarnings);
 
 		Design2UMGEditorImportFrameSelection::ExecuteFrameImport(
 			Frames,
@@ -148,6 +153,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!FPaths::FileExists(Request.FilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.FilePath);
+			DesignImportDialogs::ShowImportProblem(TEXT("找不到设计稿文件：") + Request.FilePath);
 			bOk = false;
 		}
 		else if (FApp::IsUnattended() && Request.TargetNodeId.IsEmpty())
@@ -202,6 +208,7 @@ namespace Design2UMGEditorImportOrchestrator
 			if (!ConvertRegisteredSource(
 				Request.SourceId,
 				JsonContents,
+				Request.JsonPath,
 				SettingsSnapshot,
 				Data))
 			{
@@ -250,6 +257,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!FPaths::FileExists(Request.JsonFilePath))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("File not found: %s"), *Request.JsonFilePath);
+			DesignImportDialogs::ShowImportProblem(TEXT("找不到设计稿文件：") + Request.JsonFilePath);
 			bOk = false;
 		}
 
@@ -259,6 +267,7 @@ namespace Design2UMGEditorImportOrchestrator
 		{
 			Design2UMGEditorImportSupport::ShowNotification(LOCTEXT("LocalFigmaImportFailed", "Design2UMG: Failed to import local Figma export"), SNotificationItem::CS_Fail);
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
+			DesignImportDialogs::ShowImportProblem(ErrorMessage);
 			bOk = false;
 		}
 
@@ -299,6 +308,7 @@ namespace Design2UMGEditorImportOrchestrator
 		if (!Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(JsonFilePath, Document, ErrorMessage))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *ErrorMessage);
+			DesignImportDialogs::ShowImportProblem(ErrorMessage);
 		}
 		else
 		{

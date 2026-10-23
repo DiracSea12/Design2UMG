@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetTreeBuilder.h"
+#include "DesignBrowserWidget.h"
+#include "WebBrowser.h"
 #include "DesignImageResourceLimits.h"
 #include "Design2UMGComponentBlueprints.h"
 #include "Design2UMGGenerationSettingsSnapshot.h"
@@ -19,9 +21,11 @@
 
 #include "WidgetBlueprint.h"
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Editor.h"
 #include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Misc/EngineVersionComparison.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -171,6 +175,7 @@ namespace
 			REG(TextBlock); REG(RichTextBlock); REG(EditableTextBox); REG(MultiLineEditableTextBox);
 			// Display widgets.
 			REG(Image); REG(ProgressBar); REG(Throbber); REG(CircularThrobber); REG(Spacer);
+			REG(WebBrowser);
 			// List widgets.
 			REG(ListView); REG(TileView); REG(TreeView);
 			// Other widgets.
@@ -206,6 +211,45 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 		{
 			FName Candidate = FName(*FString::Printf(TEXT("%s_%d"), *WidgetName.ToString(), Suffix));
 			if (!FindObject<UObject>(WidgetTree, *Candidate.ToString()))
+			{
+				WidgetName = Candidate;
+				break;
+			}
+		}
+	}
+
+	// Keep inherited members and Blueprint graphs out of the widget-variable namespace.
+	// Parent lookup also covers generation before a skeleton class is available.
+	UWidgetBlueprint* Blueprint = WidgetTree->GetTypedOuter<UWidgetBlueprint>();
+	UClass* ParentClass = Blueprint && Blueprint->ParentClass ? Blueprint->ParentClass.Get() : UUserWidget::StaticClass();
+	TSet<FName> ClassVariables, ReservedMembers;
+	UWidgetTree* PreviousGeneratedTree = nullptr;
+	if (Blueprint)
+	{
+		FBlueprintEditorUtils::GetClassVariableList(Blueprint, ClassVariables, true);
+		FBlueprintEditorUtils::GetFunctionNameList(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetAllGraphNames(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetSCSVariableNameList(Blueprint, ReservedMembers);
+		FBlueprintEditorUtils::GetImplementingBlueprintsFunctionNameList(Blueprint, ReservedMembers);
+		for (const auto& Variable : Blueprint->NewVariables) ReservedMembers.Add(Variable.VarName);
+		if (const auto* GeneratedClass = Cast<UWidgetBlueprintGeneratedClass>(Blueprint->GeneratedClass))
+			PreviousGeneratedTree = GeneratedClass->GetWidgetTreeArchetype();
+	}
+	const auto HasMemberName = [&](const FName& Candidate)
+	{
+		// The previous compiled tree proves which variables belong to generated widgets.
+		// Declared variables, functions and graphs remain reserved even at the same name.
+		const bool bPreviousWidget = PreviousGeneratedTree && PreviousGeneratedTree->FindWidget(Candidate);
+		return ParentClass->FindPropertyByName(Candidate) || ParentClass->FindFunctionByName(Candidate)
+			|| ReservedMembers.Contains(Candidate) || (ClassVariables.Contains(Candidate) && !bPreviousWidget);
+	};
+	if (HasMemberName(WidgetName))
+	{
+		const FName CollidingName = WidgetName;
+		for (int32 Suffix = 1; ; ++Suffix)
+		{
+			const FName Candidate(*FString::Printf(TEXT("%s_w%d"), *CollidingName.ToString(), Suffix));
+			if (!HasMemberName(Candidate) && !FindObject<UObject>(WidgetTree, *Candidate.ToString()))
 			{
 				WidgetName = Candidate;
 				break;
@@ -264,27 +308,6 @@ UWidget* FUMGWidgetTreeBuilder::BuildWidgetTree(UWidgetTree* WidgetTree, const F
 		if (UClass* Override = GenerationSettings->FindClassOverride(Node.Name, ClassOverrideCache))
 		{
 			WidgetClass = Override;
-		}
-	}
-
-	// Avoid case-insensitive UWidget property collisions before creating Blueprint variables.
-	// Use _wN for property collisions and _N for sibling duplicates so reimport can rank both.
-	const FName CollidingName = WidgetName;
-	const auto IsNameFree = [&WidgetTree](const FName& Candidate)
-	{
-		return !UWidget::StaticClass()->FindPropertyByName(Candidate)
-			&& !FindObject<UObject>(WidgetTree, *Candidate.ToString());
-	};
-	if (WidgetClass && UWidget::StaticClass()->FindPropertyByName(WidgetName))
-	{
-		for (int32 Suffix = 1; ; ++Suffix)
-		{
-			const FName Candidate = FName(*FString::Printf(TEXT("%s_w%d"), *CollidingName.ToString(), Suffix));
-			if (IsNameFree(Candidate))
-			{
-				WidgetName = Candidate;
-				break;
-			}
 		}
 	}
 
@@ -379,6 +402,14 @@ UWidget* FUMGWidgetTreeBuilder::CreateWidgetRecursive(UWidgetTree* WidgetTree, c
 	// The child blueprint root (or its instance override) owns source visuals. Applying them
 	// again to the UserWidget wrapper would multiply opacity and repeat render transforms.
 	if (!AutomaticComponent) ApplyWidgetProperties(NewWidget, Node, TextureMap, Budget);
+	if (UWebBrowser* Browser = Cast<UWebBrowser>(NewWidget))
+	{
+		if (!DesignBrowserWidget::ApplyTemplate(*Browser, Node.Browser))
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("Browser '%s': initial scroll graph generation failed"), *Browser->GetName());
+			return nullptr;
+		}
+	}
 	if (!Budget->GetRefusalError().IsEmpty()) return nullptr;
 
 	// mapped instances: explicit design-facing inputs are written after generic properties (declared values win over design defaults).

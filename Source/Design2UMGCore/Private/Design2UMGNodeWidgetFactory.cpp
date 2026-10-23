@@ -4,6 +4,8 @@
 
 #include "Design2UMGLog.h"
 #include "Design2UMGSourceMetadata.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "Dom/JsonObject.h"
 #include "Design2UMGTextWidgetBuilder.h"
 #include "DesignTypeMapper.h"
 #include "PathWidgetBuilder.h"
@@ -244,6 +246,8 @@ namespace
 
 	FUMGWidgetNode CreateEllipseWidget(const TSharedPtr<FDesignNode>& Node)
 	{
+		if (Node->Shape.InnerRadius > 0.0001f || FMath::Abs(Node->Shape.SweepAngle) < 359.9999f)
+			return PathWidgetBuilder::CreatePathWidget(Node);
 		const float Width = Node->Transform.Width.IsFixed() ? Node->Transform.Width.Value : 0.0f;
 		const float Height = Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f;
 		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
@@ -290,6 +294,58 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 
 	switch (Node->Type)
 	{
+	case EDesignNodeType::Script:
+		Result.Widget.Type = UMGWidgetTypes::CanvasPanel;
+		return Result;
+
+	case EDesignNodeType::Browser:
+		{
+			Result.Widget.Type = UMGWidgetTypes::WebBrowser;
+			FUMGBrowserData& Browser = Result.Widget.Browser;
+			const TSharedPtr<FJsonObject>& Properties = Node->Source().Pencil.Properties;
+			if (Properties.IsValid())
+			{
+				Properties->TryGetStringField(TEXT("url"), Browser.InitialURL);
+				Properties->TryGetStringField(TEXT("deviceId"), Browser.DeviceId);
+				auto ReadNumber = [&Properties](const TCHAR* Key, TOptional<float>& Out)
+				{
+					double Value;
+					if (Properties->TryGetNumberField(Key, Value) && FMath::IsFinite(Value)
+						&& FMath::Abs(Value) <= MAX_flt) Out = static_cast<float>(Value);
+				};
+				ReadNumber(TEXT("zoom"), Browser.Zoom);
+				ReadNumber(TEXT("scrollX"), Browser.ScrollX);
+				ReadNumber(TEXT("scrollY"), Browser.ScrollY);
+			}
+			if (!Browser.DeviceId.IsEmpty())
+				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': deviceId retained as source data; native device emulation is not generated."), *Node->Id));
+			if (Browser.InitialURL.StartsWith(TEXT("/")) || Browser.InitialURL.StartsWith(TEXT("file:"))
+				|| (Browser.InitialURL.Len() > 2 && Browser.InitialURL[1] == ':' && Browser.InitialURL[2] == '/'))
+				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': local HTML keeps source-relative resources; relocation and cooked packaging are not generated."), *Node->Id));
+			const float Zoom = Browser.Zoom.Get(1.0f);
+			if (Zoom <= 0.0f)
+				Result.Warnings.Add(FString::Printf(TEXT("Browser '%s': non-positive zoom retained as source data; viewport zoom is not generated."), *Node->Id));
+			else if (Zoom != 1.0f)
+			{
+				FUMGWidgetNode Viewport = MoveTemp(Result.Widget);
+				Viewport.Id = Node->Id + TEXT("__browser_viewport");
+				Viewport.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + TEXT("_BrowserViewport");
+				Viewport.Bounds.W = Node->Transform.Width.Value / Zoom;
+				Viewport.Bounds.H = Node->Transform.Height.Value / Zoom;
+				// Inverse stretch anchors keep the CSS viewport proportional to its live parent size.
+				// Render scaling magnifies the page without entering WebBrowserViewport's layout scale.
+				Viewport.Slot.Anchors.Max.X = Viewport.Slot.Anchors.Max.Y = 1.0f / Zoom;
+				Viewport.Slot.Offsets.Right = Viewport.Slot.Offsets.Bottom = 0.0f;
+				Viewport.Render.RenderTransformScale = FVector2D(Zoom);
+				Viewport.Render.RenderTransformPivot = FVector2D::ZeroVector;
+				Result.Widget = FUMGWidgetNode();
+				Result.Widget.Type = UMGWidgetTypes::CanvasPanel;
+				Result.Widget.Render.Clipping = TEXT("ClipToBounds");
+				Result.Widget.Children.Add(MoveTemp(Viewport));
+			}
+			return Result;
+		}
+
 	case EDesignNodeType::Text:
 		{
 			Result.Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node, Args.FontMappings);
@@ -340,15 +396,7 @@ Design2UMGNodeWidgetFactory::FBuildResult Design2UMGNodeWidgetFactory::CreateWid
 		return Result;
 
 	case EDesignNodeType::Polygon:
-		if (!Node->Shape.Geometry.IsEmpty())
-		{
-			Result.Widget = PathWidgetBuilder::CreatePathWidget(Node);
-			return Result;
-		}
-
-		UE_LOG(LogDesign2UMG, Warning, TEXT("Polygon '%s' has no PathGeometry; falling back to Border."), *Node->Name);
-		Result.Warnings.Add(FString::Printf(TEXT("Polygon '%s' -> Border (missing PathGeometry)"), *Node->Name));
-		Result.Widget = CreateContainerWidget(Node);
+		Result.Widget = PathWidgetBuilder::CreatePathWidget(Node);
 		return Result;
 
 	case EDesignNodeType::Path:

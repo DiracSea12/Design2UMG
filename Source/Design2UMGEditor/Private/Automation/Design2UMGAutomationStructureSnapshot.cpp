@@ -228,9 +228,9 @@ namespace Design2UMGAutomationStructureSnapshot
 			{
 				SnapshotDocument.Children.Add(RefExpander::DeepCopyNode(Child));
 			}
-			for (const TSharedPtr<FDesignNode>& Imported : SourceDocument.SourceDocument().ImportedReusableNodes)
+			for (const TSharedPtr<FDesignNode>& Imported : SourceDocument.SourceDocument().ImportedNodes)
 			{
-				SnapshotDocument.MutableSourceDocument().ImportedReusableNodes.Add(RefExpander::DeepCopyNode(Imported));
+				SnapshotDocument.MutableSourceDocument().ImportedNodes.Add(RefExpander::DeepCopyNode(Imported));
 			}
 
 			return SnapshotDocument;

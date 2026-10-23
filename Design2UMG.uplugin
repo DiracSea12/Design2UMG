@@ -13,6 +13,17 @@
 	"EnabledByDefault": false,
 	"CanContainContent": false,
 	"IsBetaVersion": false,
+	"PreBuildSteps": {
+		"Win64": [
+			"powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(PluginDir)/Tools/BuildPencilScriptWorker.ps1\" -PluginDir \"$(PluginDir)\""
+		]
+	},
+	"Plugins": [
+		{
+			"Name": "WebBrowserWidget",
+			"Enabled": true
+		}
+	],
 	"Modules": [
 		{
 			"Name": "Design2UMGCore",

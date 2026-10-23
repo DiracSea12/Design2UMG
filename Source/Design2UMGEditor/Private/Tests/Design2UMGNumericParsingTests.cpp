@@ -5,7 +5,9 @@
 #include "Misc/AutomationTest.h"
 #include "Algo/Count.h"
 #include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
 #include "UMGImageCropUtils.h"
+#include "DesignPathRasterizer.h"
 #include "UMGSchema.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetNodeAccess.h"
@@ -315,6 +317,34 @@ bool FNumericJsonFiniteScalarTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Radius remains finite"), FMath::IsFinite(Data.RootWidget.Brush.OutlineCornerRadius.Get(0.0f)));
 		TestTrue(TEXT("Angle remains finite"), FMath::IsFinite(Data.RootWidget.Render.RenderAngle.Get(0.0f)));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageCropSizingTest,
+	"Design2UMG.NumericParsing.CropSizing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImageCropSizingTest::RunTest(const FString&)
+{
+	FUMGWidgetData Data;
+	if (!TestTrue(TEXT("Crop sizing payload parses"), FUMGJsonParser::ParseJson(TEXT(R"({"RootWidget":{"Type":"Image","Name":"Crop","Bounds":{"W":200,"H":100},"Brush":{"Image":{"Mode":"Crop","CropFitMode":"Fit","Transform":".5,0,.5,0,1,0"}}}})"), Data))) return false;
+	FUMGWidgetData RoundTrip;
+	if (!TestTrue(TEXT("Crop sizing round trips"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), RoundTrip))) return false;
+	UMGImageCropUtils::FImageCropRequest Request;
+	if (!TestTrue(TEXT("Crop sizing reaches the request"), UMGImageCropUtils::TryBuildCropRequest(RoundTrip.RootWidget, Request))) return false;
+	TestEqual(TEXT("Contain survives serialization"), Request.FitMode, FString(TEXT("Fit")));
+	TestEqual(TEXT("Resolved width is used without a layout override"), Request.OutputWidth, 200);
+	TestEqual(TEXT("Resolved height is used without a layout override"), Request.OutputHeight, 100);
+	RoundTrip.RootWidget.Path.Geometry = TEXT("M0,0 L200,0 L200,100 L0,100 Z");
+	FDesignPathRasterRequest PathRequest;
+	if (!TestTrue(TEXT("An image path uses the same resolved extent"), FDesignPathRasterizer::TryBuildRequest(RoundTrip.RootWidget, PathRequest))) return false;
+	TestEqual(TEXT("A path without an explicit canvas keeps the measured image size"), PathRequest.Size, FIntPoint(200, 100));
+	TestFalse(TEXT("Sizing requires source dimensions, not raw UV-region assignment"), UMGImageCropUtils::CanUseUvRegion(Request));
+	UMGImageCropUtils::FImageSamplingPlan Plan;
+	if (!TestTrue(TEXT("Contain plan builds"), UMGImageCropUtils::TryBuildSamplingPlan(Request.Transform, Request.FitMode, FVector2D(200, 100), FVector2D(200, 100), Plan))) return false;
+	TestEqual(TEXT("Contain preserves the square crop and adds horizontal margins"), Plan.CropScale, FVector2D(2, 1));
+	TestTrue(TEXT("Contain clips margins before sampling the source image"), Plan.bClipToCrop);
+	if (!TestTrue(TEXT("Cover plan builds"), UMGImageCropUtils::TryBuildSamplingPlan(Request.Transform, TEXT("Fill"), FVector2D(200, 100), FVector2D(200, 100), Plan))) return false;
+	TestEqual(TEXT("Cover preserves aspect while cropping vertically"), Plan.CropScale, FVector2D(1, 0.5));
 	return true;
 }
 

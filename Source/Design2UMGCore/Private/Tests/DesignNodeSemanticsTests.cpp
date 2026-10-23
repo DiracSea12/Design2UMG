@@ -653,7 +653,8 @@ bool FReusableNodeIndexScopeTest::RunTest(const FString&)
 	Document.Children = {Container, Duplicate};
 	TMap<FString, TSharedPtr<FDesignNode>> Index;
 	TArray<FString> Warnings;
-	AddExpectedError(TEXT("Repeated reusable definition ids"), EAutomationExpectedErrorFlags::Contains, 3);
+	AddExpectedError(TEXT("Repeated reusable definition ids"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("Repeated reference target ids"), EAutomationExpectedErrorFlags::Contains, 2);
 	Document.BuildReusableNodeIndex(Index, &Warnings);
 	TestTrue(TEXT("lookup retains the nested first definition in DFS order"), Index.FindRef(TEXT("definition")) == Definition);
 	TestEqual(TEXT("repeated definition diagnosed once per index build"), Warnings.Num(), 1);
@@ -683,7 +684,7 @@ bool FReusableNodeIndexScopeTest::RunTest(const FString&)
 	TestTrue(TEXT("the same definition object at two positions is not a conflicting definition"), Warnings.IsEmpty());
 	const FUMGWidgetData Converted = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("definition warning reaches conversion diagnostics"), Converted.Warnings.ContainsByPredicate(
-		[](const FString& Warning) { return Warning.Contains(TEXT("Repeated reusable definition ids [definition]")); }));
+		[](const FString& Warning) { return Warning.Contains(TEXT("Repeated reference target ids [definition]")); }));
 	return true;
 }
 

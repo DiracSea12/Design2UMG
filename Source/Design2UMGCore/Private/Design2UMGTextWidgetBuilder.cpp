@@ -76,13 +76,13 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle, FontMappings);
+			Node->Text.FontStyle, FontMappings, &Node->Text.PreparedFont);
 		if (!ResolvedFont.FontAssetPath.IsEmpty())
 		{
 			Widget.Text.FontFamily = ResolvedFont.FontAssetPath;
 		}
 
-		if (!Node->Text.FontWeight.IsEmpty() && !ResolvedFont.TypefaceName.IsEmpty())
+		if (!ResolvedFont.TypefaceName.IsEmpty())
 		{
 			Widget.Text.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -238,17 +238,21 @@ namespace
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
 		Result.Content = Run ? Run->Content : InNode->Text.Content;
 
-		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty())
+		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty()
+			|| !Run->PreparedFont.AssetPath.IsEmpty() || !InNode->Text.PreparedFont.AssetPath.IsEmpty()
+			|| !Run->PreparedFont.DeclarationKey.IsEmpty() || !InNode->Text.PreparedFont.DeclarationKey.IsEmpty())
 		{
 			const FString EffectiveFontFamily =
 				(Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
-			const FString EffectivePostScriptName = Run ? Run->FontPostScriptName : InNode->Text.FontPostScriptName;
+			const FString EffectivePostScriptName = (Run && (!Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty()))
+				? Run->FontPostScriptName : InNode->Text.FontPostScriptName;
 			const FString EffectiveFontWeight =
 				(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
 			const FString EffectiveFontStyle =
 				(Run && !Run->FontStyle.IsEmpty()) ? Run->FontStyle : InNode->Text.FontStyle;
 			const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
-				EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight, EffectiveFontStyle, FontMappings);
+				EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight, EffectiveFontStyle, FontMappings,
+				Run ? &Run->PreparedFont : &InNode->Text.PreparedFont);
 			Result.Style.FontFamily = ResolvedFont.FontAssetPath;
 			Result.Style.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -540,7 +544,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		}
 		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
 		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
-		FString Typeface = FFontResolver::FindBestTypefaceForAssetPath(
+		FString Typeface = FFontResolver::FindBestIconTypefaceForAssetPath(
 			FFontResolver::FindFontAssetPath(Node->Text.IconFontFamily, FString(), Args.FontMappings), WeightToken);
 		if (Typeface.IsEmpty())
 		{

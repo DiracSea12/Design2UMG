@@ -4,6 +4,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Design2UMGConverter.h"
 #include "Design2UMGConverterVisualSupport.h"
 #include "Misc/AutomationTest.h"
 #include "DesignSchema.h"
@@ -28,37 +29,6 @@ namespace
 		Node->Visual.Stroke.Thickness.Uniform = 2.0f;
 		Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#112233FF"));
 		return Node;
-	}
-
-// Mirrors the converter wrapping predicate to check explicit-empty property presence.
-
-	bool ShouldWrapChildWithSizeBoxCurrentTruth(
-		const TSharedPtr<FDesignNode>& ParentNode,
-		const TSharedPtr<FDesignNode>& ChildNode,
-		const FUMGWidgetNode& ChildWidget)
-	{
-		const bool bHasFixedSize = ChildNode->Transform.Width.IsFixed() || ChildNode->Transform.Height.IsFixed();
-		const bool bHasMinSize = (ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Width.Value > 0)
-			|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Height.Value > 0);
-		const bool bCanvasMixedAxis = ParentNode->LayoutData.Layout == EDesignLayout::None
-			&& ((ChildNode->Transform.Width.IsFit() && ChildNode->Transform.Height.IsFixed())
-				|| (ChildNode->Transform.Height.IsFit() && ChildNode->Transform.Width.IsFixed()));
-		const bool bWrapOrGridMeasuredFill =
-			(ParentNode->LayoutData.Layout == EDesignLayout::Wrap || ParentNode->LayoutData.Layout == EDesignLayout::Grid)
-			&& ((ChildNode->Transform.Width.IsFill() && ChildNode->Transform.Width.Value > 0.0f)
-				|| (ChildNode->Transform.Height.IsFill() && ChildNode->Transform.Height.Value > 0.0f));
-		const bool bWidgetOwnsDesiredSize =
-			ParentNode->LayoutData.Layout != EDesignLayout::None
-			&& ChildWidget.Type == TEXT("Image")
-			&& ChildNode->Children.Num() == 0
-			&& (HasWidgetProperty(ChildWidget, UMGPropertyKeys::WidthOverride)
-				|| HasWidgetProperty(ChildWidget, UMGPropertyKeys::HeightOverride))
-			&& (HasWidgetProperty(ChildWidget, UMGPropertyKeys::MaterialRef)
-				|| HasWidgetProperty(ChildWidget, UMGPropertyKeys::TexturePath)
-				|| HasWidgetProperty(ChildWidget, UMGPropertyKeys::PathGeometry));
-		return ParentNode->LayoutData.Layout == EDesignLayout::None
-			? bCanvasMixedAxis
-			: (bHasFixedSize || bHasMinSize || bWrapOrGridMeasuredFill) && !bWidgetOwnsDesiredSize;
 	}
 
 	FDesignFill MakeRadialMultiStopGradientFill()
@@ -88,22 +58,56 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConverterExplicitEmptyBrushPresenceSizeBoxElis
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FConverterExplicitEmptyBrushPresenceSizeBoxElisionTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FDesignNode> ParentNode = MakeFixedNode(EDesignNodeType::Frame, 256.0f, 128.0f);
+	TSharedPtr<FDesignNode> ParentNode = MakeNode(TEXT("parent"), EDesignNodeType::Frame,
+		FDesignSize::Fixed(256.0f), FDesignSize::Fixed(128.0f));
 	ParentNode->LayoutData.Layout = EDesignLayout::Horizontal;
-	TSharedPtr<FDesignNode> ChildNode = MakeFixedNode(EDesignNodeType::Path, 24.0f, 24.0f);
+	TSharedPtr<FDesignNode> SolidNode = MakeNode(TEXT("solid"), EDesignNodeType::Rectangle,
+		FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
+	SolidNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	TSharedPtr<FDesignNode> TextureNode = MakeNode(TEXT("texture"), EDesignNodeType::Path,
+		FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
+	FDesignFill ImageFill;
+	ImageFill.Type = EDesignFillType::Image;
+	ImageFill.Image.Url = TEXT("/Game/UI/T_Test.T_Test");
+	TextureNode->Visual.Fills.Add(ImageFill);
+	TSharedPtr<FDesignNode> PathNode = MakeNode(TEXT("path"), EDesignNodeType::Path,
+		FDesignSize::Fixed(24.0f), FDesignSize::Fixed(24.0f));
+	PathNode->Shape.Geometry = TEXT("M0 0 L24 0 L24 24 Z");
+	PathNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#112233FF")));
+	ParentNode->Children = {SolidNode, TextureNode, PathNode};
+	FDesignDocument Document;
+	Document.Children.Add(ParentNode);
+	const FUMGWidgetData Converted = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	if (!TestTrue(TEXT("SizeBox fixture converts without errors"), Converted.ConversionError.IsEmpty())) return false;
+	const FUMGWidgetNode& Parent = Converted.RootWidget;
+	TestEqual(TEXT("Conversion preserves the horizontal parent"), Parent.Type, FString(TEXT("HorizontalBox")));
+	if (!TestEqual(TEXT("Conversion retains all three child slots"), Parent.Children.Num(), 3)) return false;
+	const FUMGWidgetNode& SizedSolid = Parent.Children[0];
+	TestEqual(TEXT("Fixed native border gets a SizeBox"), SizedSolid.Type, FString(TEXT("SizeBox")));
+	TestTrue(TEXT("SizeBox carries the authored width and height"),
+		SizedSolid.WidgetStyle.WidthOverride.Get(0.0f) == 24.0f && SizedSolid.WidgetStyle.HeightOverride.Get(0.0f) == 24.0f);
+	if (!TestEqual(TEXT("SizeBox retains its single source child"), SizedSolid.Children.Num(), 1)) return false;
+	TestEqual(TEXT("Wrapped content is the native border"), SizedSolid.Children[0].Type, FString(TEXT("Border")));
+	TestEqual(TEXT("Wrapped content retains source identity"), SizedSolid.Children[0].Id, SolidNode->Id);
+	const FUMGWidgetNode& TextureImage = Parent.Children[1];
+	TestEqual(TEXT("Texture-backed image elides SizeBox in real conversion"), TextureImage.Type, FString(TEXT("Image")));
+	TestEqual(TEXT("Texture image retains its source identity"), TextureImage.Id, TextureNode->Id);
+	TestEqual(TEXT("Texture image retains its authored resource"), TextureImage.Brush.Image.TexturePath.Get(FString()), ImageFill.Image.Url);
+	TestTrue(TEXT("Texture image owns its fixed desired size"),
+		TextureImage.WidgetStyle.WidthOverride.Get(0.0f) == 24.0f && TextureImage.WidgetStyle.HeightOverride.Get(0.0f) == 24.0f);
+	const FUMGWidgetNode& PathImage = Parent.Children[2];
+	TestEqual(TEXT("Path-backed image elides SizeBox in real conversion"), PathImage.Type, FString(TEXT("Image")));
+	TestEqual(TEXT("Path image retains its source identity"), PathImage.Id, PathNode->Id);
+	TestEqual(TEXT("Path image retains its authored geometry"), PathImage.Path.Geometry.Get(FString()), PathNode->Shape.Geometry);
+	TestTrue(TEXT("Path image owns its fixed desired size"),
+		PathImage.WidgetStyle.WidthOverride.Get(0.0f) == 24.0f && PathImage.WidgetStyle.HeightOverride.Get(0.0f) == 24.0f);
 
+	// Explicit-empty typed fields have a presence contract independent of converter wrapping.
 	FUMGWidgetNode BaseImageWidget;
 	BaseImageWidget.Type = TEXT("Image");
-	BaseImageWidget.WidgetStyle.WidthOverride = 24.0f;
-	BaseImageWidget.WidgetStyle.HeightOverride = 24.0f;
 
-	TestTrue(TEXT("Size-constrained image without authored brush or path data still wraps"),
-		ShouldWrapChildWithSizeBoxCurrentTruth(ParentNode, ChildNode, BaseImageWidget));
-
-	FUMGWidgetNode NonEmptyMaterialWidget = BaseImageWidget;
-	NonEmptyMaterialWidget.Brush.MaterialRef = TEXT("roundedrect");
-	TestFalse(TEXT("Non-empty material ref elides the SizeBox wrapper"),
-		ShouldWrapChildWithSizeBoxCurrentTruth(ParentNode, ChildNode, NonEmptyMaterialWidget));
+	TestFalse(TEXT("Absent material ref stays absent"), HasWidgetProperty(BaseImageWidget, UMGPropertyKeys::MaterialRef));
+	TestFalse(TEXT("Absent texture path stays absent"), HasWidgetProperty(BaseImageWidget, UMGPropertyKeys::TexturePath));
 
 	FUMGWidgetNode ExplicitEmptyMaterialWidget = BaseImageWidget;
 	ExplicitEmptyMaterialWidget.Brush.MaterialRef = TEXT("");
@@ -111,13 +115,6 @@ bool FConverterExplicitEmptyBrushPresenceSizeBoxElisionTest::RunTest(const FStri
 		HasWidgetProperty(ExplicitEmptyMaterialWidget, UMGPropertyKeys::MaterialRef));
 	TestTrue(TEXT("Explicit empty material ref stays empty"),
 		GetWidgetProperty(ExplicitEmptyMaterialWidget, UMGPropertyKeys::MaterialRef).IsEmpty());
-	TestFalse(TEXT("Explicit empty material ref follows the same SizeBox elision path"),
-		ShouldWrapChildWithSizeBoxCurrentTruth(ParentNode, ChildNode, ExplicitEmptyMaterialWidget));
-
-	FUMGWidgetNode NonEmptyTextureWidget = BaseImageWidget;
-	NonEmptyTextureWidget.Brush.Image.TexturePath = TEXT("/Game/UI/T_Test.T_Test");
-	TestFalse(TEXT("Non-empty texture path elides the SizeBox wrapper"),
-		ShouldWrapChildWithSizeBoxCurrentTruth(ParentNode, ChildNode, NonEmptyTextureWidget));
 
 	FUMGWidgetNode ExplicitEmptyTextureWidget = BaseImageWidget;
 	ExplicitEmptyTextureWidget.Brush.Image.TexturePath = TEXT("");
@@ -125,8 +122,6 @@ bool FConverterExplicitEmptyBrushPresenceSizeBoxElisionTest::RunTest(const FStri
 		HasWidgetProperty(ExplicitEmptyTextureWidget, UMGPropertyKeys::TexturePath));
 	TestTrue(TEXT("Explicit empty texture path stays empty"),
 		GetWidgetProperty(ExplicitEmptyTextureWidget, UMGPropertyKeys::TexturePath).IsEmpty());
-	TestFalse(TEXT("Explicit empty texture path follows the same SizeBox elision path"),
-		ShouldWrapChildWithSizeBoxCurrentTruth(ParentNode, ChildNode, ExplicitEmptyTextureWidget));
 
 	return true;
 }

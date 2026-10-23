@@ -16,6 +16,8 @@
 #include "Misc/EngineVersionComparison.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeLock.h"
+#include "Misc/ScopeExit.h"
+#include "Misc/Paths.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Modules/ModuleManager.h"
 #include "SslModule.h"
@@ -43,11 +45,109 @@ THIRD_PARTY_INCLUDES_END
 #include "curl/curl.h"
 #endif
 
+#if WITH_FREEIMAGE_LIB
+#include <cstdio>
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#endif
+THIRD_PARTY_INCLUDES_START
+#include "FreeImage.h"
+THIRD_PARTY_INCLUDES_END
+#if PLATFORM_WINDOWS
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
+#endif
+
 namespace DesignRemoteImageImporterInternal
 {
 	namespace
 	{
-		constexpr int64 Bgra8BytesPerPixel = 4;
+		constexpr int64 Bgra8BytesPerPixel = sizeof(FColor);
+
+#if WITH_FREEIMAGE_LIB
+		struct FFreeImageLibrary
+		{
+			void* Handle = nullptr;
+
+			FFreeImageLibrary()
+			{
+				check(IsInGameThread());
+				const FString LibraryPath = FPaths::EngineDir() / TEXT("Binaries/ThirdParty/FreeImage")
+					/ FPlatformProcess::GetBinariesSubdirectory() / TEXT(FREEIMAGE_LIB_FILENAME);
+				Handle = FPlatformProcess::GetDllHandle(*LibraryPath);
+				if (Handle) FreeImage_Initialise();
+			}
+
+			~FFreeImageLibrary()
+			{
+				if (Handle)
+				{
+					FreeImage_DeInitialise();
+					FPlatformProcess::FreeDllHandle(Handle);
+				}
+			}
+		};
+
+		bool DecodeWebPToBGRA8(const TArray<uint8>& CompressedData,
+			const DesignImageResources::FImageResourceLimits& Limits,
+			int32& OutWidth, int32& OutHeight, TArray64<uint8>& OutRawData, FString& OutError,
+			DesignImageResources::FImageOperationBudget* OperationBudget,
+			EDesignImageDiagnosticCategory* OutFailureCategory)
+		{
+			static FFreeImageLibrary Library;
+			if (!Library.Handle)
+			{
+				OutError = TEXT("The engine FreeImage library could not be loaded for WebP decoding");
+				return false;
+			}
+			// The native memory-stream API takes writable storage; preserve the caller's bytes.
+			TArray<uint8> MemoryData = CompressedData;
+			FIMEMORY* Stream = FreeImage_OpenMemory(MemoryData.GetData(), MemoryData.Num());
+			if (!Stream)
+			{
+				OutError = TEXT("Could not open WebP image data");
+				return false;
+			}
+			ON_SCOPE_EXIT { FreeImage_CloseMemory(Stream); };
+			FIBITMAP* Header = FreeImage_LoadFromMemory(FIF_WEBP, Stream, FIF_LOAD_NOPIXELS);
+			if (!Header)
+			{
+				OutError = TEXT("Failed to parse WebP image header");
+				return false;
+			}
+			OutWidth = FreeImage_GetWidth(Header);
+			OutHeight = FreeImage_GetHeight(Header);
+			FreeImage_Unload(Header);
+			if (!FImagePayloadIO::ValidateDimensions(OutWidth, OutHeight, Limits, OutError)
+				|| (OperationBudget && !OperationBudget->ConsumeDecodedPixels(static_cast<int64>(OutWidth) * OutHeight, OutError)))
+			{
+				if (OutFailureCategory) *OutFailureCategory = EDesignImageDiagnosticCategory::Budget;
+				return false;
+			}
+			FreeImage_SeekMemory(Stream, 0, SEEK_SET);
+			FIBITMAP* Image = FreeImage_LoadFromMemory(FIF_WEBP, Stream, 0);
+			if (!Image)
+			{
+				OutError = TEXT("Failed to decode WebP image pixels");
+				return false;
+			}
+			ON_SCOPE_EXIT { FreeImage_Unload(Image); };
+			FIBITMAP* Converted = FreeImage_GetBPP(Image) == 32 ? nullptr : FreeImage_ConvertTo32Bits(Image);
+			ON_SCOPE_EXIT { if (Converted) FreeImage_Unload(Converted); };
+			FIBITMAP* Pixels = Converted ? Converted : Image;
+			if (FreeImage_GetBPP(Pixels) != 32)
+			{
+				OutError = TEXT("Could not convert WebP pixels to BGRA8");
+				return false;
+			}
+			const int64 RowBytes = static_cast<int64>(OutWidth) * Bgra8BytesPerPixel;
+			OutRawData.SetNumUninitialized(RowBytes * OutHeight);
+			for (int32 Y = 0; Y < OutHeight; ++Y)
+				FMemory::Memcpy(OutRawData.GetData() + Y * RowBytes, FreeImage_GetScanLine(Pixels, OutHeight - 1 - Y), RowBytes);
+			return true;
+		}
+#endif
+
 		constexpr float HttpWaitTickSeconds = 0.01f;
 		// Cap individual diagnostic lines to bound resource-resolution reports.
 
@@ -188,12 +288,13 @@ namespace DesignRemoteImageImporterInternal
 		FString& OutError)
 	{
 		OutError.Reset();
-		if (Width <= 0 || Height <= 0)
+		const auto DimensionError = Limits.GetDimensionError(Width, Height);
+		if (DimensionError == DesignImageResources::EImageDimensionError::NonPositive)
 		{
 			OutError = TEXT("Invalid image dimensions");
 			return false;
 		}
-		if (Width > Limits.MaxDimension || Height > Limits.MaxDimension)
+		if (DimensionError == DesignImageResources::EImageDimensionError::SideLimitExceeded)
 		{
 			OutError = FString::Printf(
 				TEXT("Image dimensions exceed the limit (%dx%d, maximum side %d)"),
@@ -203,9 +304,8 @@ namespace DesignRemoteImageImporterInternal
 			return false;
 		}
 		const int64 MaxBgraPixels = TNumericLimits<int64>::Max() / Bgra8BytesPerPixel;
-		const int64 EffectiveMaxPixels = FMath::Min(Limits.MaxPixels, MaxBgraPixels);
-		if (EffectiveMaxPixels < 1
-			|| static_cast<int64>(Width) > EffectiveMaxPixels / static_cast<int64>(Height))
+		if (DimensionError == DesignImageResources::EImageDimensionError::PixelLimitExceeded
+			|| static_cast<int64>(Width) > MaxBgraPixels / static_cast<int64>(Height))
 		{
 			OutError = FString::Printf(
 				TEXT("Image pixel count exceeds the limit (%dx%d, limit %lld)"),
@@ -1056,6 +1156,12 @@ namespace DesignRemoteImageImporterInternal
 		const EImageFormat Format = ImageWrapperModule.DetectImageFormat(CompressedData.GetData(), CompressedData.Num());
 		if (Format == EImageFormat::Invalid)
 		{
+#if WITH_FREEIMAGE_LIB
+			if (CompressedData.Num() >= 12 && FMemory::Memcmp(CompressedData.GetData(), "RIFF", 4) == 0
+				&& FMemory::Memcmp(CompressedData.GetData() + 8, "WEBP", 4) == 0)
+				return DecodeWebPToBGRA8(CompressedData, Limits, OutWidth, OutHeight, OutRawData,
+					OutError, OperationBudget, OutFailureCategory);
+#endif
 			OutError = TEXT("Unsupported image format");
 			return false;
 		}

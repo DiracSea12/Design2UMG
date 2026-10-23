@@ -5,6 +5,7 @@
 #include "DesignSchemaFoundation.h"
 
 struct FDesignNode;
+struct FDesignNodeOverride;
 
 /**
  * Authored partial state: unset preserves the base; present empty strings/arrays clear it.
@@ -66,9 +67,20 @@ struct FDesignNodePatch
 	TOptional<float> SweepAngle;
 	TOptional<int32> PolygonCount;
 	TOptional<FString> Geometry;
+	TOptional<FVector4> ViewBox;
 	TOptional<FString> FillRule;
 	TOptional<TArray<TSharedPtr<FDesignNode>>> Children;
 	TMap<FString, FString> Metadata;
+	TMap<FString, TSharedPtr<FDesignNodeOverride>> Descendants;
+	TOptional<FString> Ref;
+	TOptional<bool> Reusable;
+	TOptional<TMap<FString, FString>> Theme;
+	TOptional<bool> AbsoluteLayoutPositioning;
+	TSharedPtr<class FJsonObject> PencilProperties;
+	TOptional<FString> SourceContext;
+	TOptional<FString> SourceModel;
+	TOptional<FString> SourceMetadataJson;
+	TOptional<TOptional<TArray<FString>>> SourceSlotRecommendations;
 };
 
 /** A typed descendant replaces the node; subsequent property patches still apply to that replacement. */

@@ -33,7 +33,8 @@ namespace Design2UMGCore::DesignNodeSemantics
 			return false;
 		}
 
-		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+		if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont
+			|| Node->Type == EDesignNodeType::Browser || Node->Type == EDesignNodeType::Script)
 		{
 			return true;
 		}

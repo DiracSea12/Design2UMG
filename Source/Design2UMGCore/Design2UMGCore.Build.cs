@@ -24,13 +24,14 @@ public class Design2UMGCore : ModuleRules
 		{
 			"AssetRegistry",
 			"Slate",
+			"Projects",
 		});
 
 		AddEngineThirdPartyPrivateStaticDependencies(Target, "HarfBuzz", "ICU");
 
-		if (Target.bBuildDeveloperTools)
+		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{
-			PrivateDependencyModuleNames.Add("Projects");
+			PublicSystemLibraries.Add("bcrypt.lib");
 		}
 	}
 }

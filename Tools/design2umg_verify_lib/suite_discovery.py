@@ -113,7 +113,7 @@ def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern:
     used_names: set[str] = set()
 
     for pen_path in sorted(design_root.rglob("*.pen")):
-        document = verify.helper_load_json(pen_path)
+        document = verify.helper_load_pencil_json(pen_path)
         nodes = document.get("children", [])
         if not isinstance(nodes, list):
             continue

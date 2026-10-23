@@ -84,6 +84,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	/** Typed ScrollBox configuration. */
 	FUMGScrollBoxData ScrollBox;
 
+	/** Native browser page and source viewport settings. */
+	FUMGBrowserData Browser;
+
 	/** Child widgets. Not serialized because recursive USTRUCT trees are unsupported by UHT. */
 	TArray<FUMGWidgetNode> Children;
 

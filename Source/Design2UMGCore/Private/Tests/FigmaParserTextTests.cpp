@@ -172,6 +172,27 @@ bool FFigmaParserTextItalicTypefaceTest::RunTest(const FString&)
 		TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight).TypefaceName,
 		TEXT("SemiBold"));
 
+	// Imported faces can arrive in either order, independent of the source text order.
+	auto& Entries = Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts;
+	TestEqual(TEXT("Roman-first automatic selection keeps the roman face"),
+		FFontResolver::FindBestTypefaceForAssetPath(Font->GetPathName(), TEXT("600")), FString(TEXT("SemiBold")));
+	Entries.Swap(0, 1);
+	TestEqual(TEXT("Italic-first automatic selection still keeps the roman face"),
+		FFontResolver::FindBestTypefaceForAssetPath(Font->GetPathName(), TEXT("600")), FString(TEXT("SemiBold")));
+	TestEqual(TEXT("Explicit italic selection remains independent of entry order"),
+		TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle).TypefaceName,
+		FString(TEXT("SemiBold Italic")));
+	Entries[1].Name = FName(TEXT("Bold"));
+	TestEqual(TEXT("Roman preference precedes nearest-weight comparison"),
+		FFontResolver::FindBestTypefaceForAssetPath(Font->GetPathName(), TEXT("600")), FString(TEXT("Bold")));
+	const FTypefaceEntry RomanEntry = Entries[1];
+	Entries.RemoveAt(1);
+	TestEqual(TEXT("An italic-only asset remains usable"),
+		FFontResolver::FindBestTypefaceForAssetPath(Font->GetPathName(), TEXT("700")), FString(TEXT("SemiBold Italic")));
+	Entries.Add(RomanEntry);
+	Entries[1].Name = FName(TEXT("SemiBold"));
+	Entries.Swap(0, 1);
+
 	Settings->ExplicitFontMappings = SavedMappings;
 	FFontResolver::ClearCache();
 	return true;

@@ -42,7 +42,7 @@ bool FSingleChildSizeBoxRuntimeTest::RunTest(const FString&)
 			}
 			if (!TestTrue(TEXT("Parse single-child sizing fixture"), FPenParser::ParseDocument(Json, Document))) return false;
 			const FUMGWidgetData Compact = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-			FUMGWidgetData Oracle = Compact;
+			FUMGWidgetData Expanded = Compact;
 			bool bFound = false;
 			TFunction<void(FUMGWidgetNode&)> Expand = [&](FUMGWidgetNode& Node)
 			{
@@ -75,14 +75,16 @@ bool FSingleChildSizeBoxRuntimeTest::RunTest(const FString&)
 				Flow.Children.Add(MoveTemp(Node.Children[0]));
 				Node.Children[0] = MoveTemp(Flow);
 			};
-			Expand(Oracle.RootWidget);
+			Expand(Expanded.RootWidget);
 			if (!TestTrue(TEXT("Find sized source frame"), bFound)) return false;
 			TArray<FImage> Images;
 			TArray<TArray<FColor>> SmallImages;
-			const FUMGWidgetData* Variants[] = {&Compact, &Oracle};
-			for (const FUMGWidgetData* Data : Variants)
+			// Non-fill modes retain their flow panel; render that structure once.
+			const FUMGWidgetData* Variants[] = {&Compact, &Expanded};
+			const int32 VariantCount = bFill ? 2 : 1;
+			for (int32 VariantIndex = 0; VariantIndex < VariantCount; ++VariantIndex)
 			{
-				UWidgetBlueprint* BP = FUMGGenerator::BuildWidgetBlueprint(*Data,
+				UWidgetBlueprint* BP = FUMGGenerator::BuildWidgetBlueprint(*Variants[VariantIndex],
 					TEXT("/Game/Design2UMG/Automation/SingleChildSize/WBP_") + FGuid::NewGuid().ToString(EGuidFormats::Digits));
 				if (!TestNotNull(TEXT("Build single-child sizing blueprint"), BP)) return false;
 				FKismetEditorUtilities::CompileBlueprint(BP);
@@ -102,9 +104,12 @@ bool FSingleChildSizeBoxRuntimeTest::RunTest(const FString&)
 				if (!TestTrue(TEXT("Read undersized rendering"), Target->GameThread_GetRenderTargetResource()->ReadPixels(SmallImages.AddDefaulted_GetRef()))) return false;
 				Instance->ReleaseSlateResources(true);
 			}
-			TestTrue(TEXT("Sizing and inherited opacity match the independent flow panel"),
-				Images[0].SizeX == Images[1].SizeX && Images[0].SizeY == Images[1].SizeY && Images[0].RawData == Images[1].RawData);
-			TestTrue(TEXT("Actual undersized allocation preserves overflow pixels"), SmallImages[0] == SmallImages[1]);
+			if (bFill)
+			{
+				TestTrue(TEXT("Fill sizing and inherited opacity match the expanded flow panel"),
+					Images[0].SizeX == Images[1].SizeX && Images[0].SizeY == Images[1].SizeY && Images[0].RawData == Images[1].RawData);
+				TestTrue(TEXT("Fill undersized allocation preserves overflow pixels"), SmallImages[0] == SmallImages[1]);
+			}
 		}
 	}
 	return true;

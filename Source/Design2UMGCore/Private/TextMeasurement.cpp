@@ -143,7 +143,7 @@ FVector2D TextMeasurement::MeasureTextNodeSize(const TSharedPtr<FDesignNode>& No
 		&& !TextMeasurement::IsWrappingTextMode(Node)
 		&& (Node->Transform.Width.IsFit() || !Node->Transform.bSourceHasWidth))
 	{
-		const auto Font = TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, FontMappings);
+		const auto Font = TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, FontMappings, &Node->Text.PreparedFont);
 		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 		Request.Text = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
 		Request.FontSize = AppliedFontSize;

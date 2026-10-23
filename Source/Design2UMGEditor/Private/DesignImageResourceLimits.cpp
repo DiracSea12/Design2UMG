@@ -14,7 +14,7 @@ namespace DesignImageResources
 
 	namespace
 	{
-		constexpr uint64 Bgra8BytesPerPixel = 4;
+		constexpr uint64 Bgra8BytesPerPixel = sizeof(FColor);
 		bool TryAddWithinLimit(const uint64 Current, const uint64 Increment, const uint64 Limit, uint64& OutTotal)
 		{
 			if (Increment > Limit || Current > Limit - Increment)
@@ -25,6 +25,14 @@ namespace DesignImageResources
 			return true;
 		}
 
+	}
+
+	EImageDimensionError FImageResourceLimits::GetDimensionError(int64 Width, int64 Height) const
+	{
+		if (Width <= 0 || Height <= 0) return EImageDimensionError::NonPositive;
+		if (Width > MaxDimension || Height > MaxDimension) return EImageDimensionError::SideLimitExceeded;
+		if (Width * Height > MaxPixels) return EImageDimensionError::PixelLimitExceeded;
+		return EImageDimensionError::None;
 	}
 
 	bool FImageResourceLimits::TryGetPixelSize(float Width, float Height, FIntPoint& OutSize) const
@@ -69,8 +77,10 @@ namespace DesignImageResources
 		if (!TryAddWithinLimit(TotalDecodedBytes, DecodedBytes, Limits.MaxTotalDecodedBytes, NewTotal))
 		{
 			OutError = FString::Printf(
-				TEXT("Total decoded image data exceeds the operation limit (%llu bytes)"),
-				static_cast<unsigned long long>(Limits.MaxTotalDecodedBytes));
+				TEXT("设计稿太大，导入时的图片资源占用超过处理上限。请拆分画板或减少大图片后再导入。\nTotal decoded image data exceeds the operation limit (%llu bytes); already used %llu bytes, requested %llu bytes"),
+				static_cast<unsigned long long>(Limits.MaxTotalDecodedBytes),
+				static_cast<unsigned long long>(TotalDecodedBytes),
+				static_cast<unsigned long long>(DecodedBytes));
 			if (RefusalError.IsEmpty()) RefusalError = OutError;
 			return false;
 		}

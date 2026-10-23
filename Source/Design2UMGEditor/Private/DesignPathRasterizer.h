@@ -8,15 +8,32 @@
 #include "DesignImageResourceLimits.h"
 
 class UTexture2D;
-// Owns all paint descriptions; the optional source texture is borrowed for the synchronous call.
+// Owns paint descriptions; texture pointers are borrowed for the synchronous call.
 struct FDesignPathRasterRequest
 {
 	FUMGPathData Path;
 	FIntPoint Size = FIntPoint::ZeroValue;
+	// Authored paint coordinates stay fixed while the raster stores only ink.
+	FIntPoint PaintSize = FIntPoint::ZeroValue;
+	FIntPoint PaintOffset = FIntPoint::ZeroValue;
+	// Original drawing quad, including supported stroke outsets, in paint pixels.
+	FIntRect CanvasBounds = FIntRect(0, 0, 0, 0);
 	TOptional<FUMGProceduralResourceRequest> FillPaint;
 	TOptional<FUMGProceduralResourceRequest> StrokePaint;
 	TOptional<FUMGVisualBrushData::FImageData> FillImage;
 	UTexture2D* FillTexture = nullptr;
+	TMap<FString, UTexture2D*> SurfaceTextures;
+
+	bool HasExpandedCanvas() const { return PaintSize.X > 0 && PaintSize.Y > 0 && CanvasBounds != FIntRect(FIntPoint::ZeroValue, PaintSize); }
+	FUMGVisualBrushData::FImageTransformData GetCanvasUVTransform() const
+	{
+		FUMGVisualBrushData::FImageTransformData Transform;
+		Transform.A = float(CanvasBounds.Width()) / Size.X;
+		Transform.D = float(CanvasBounds.Height()) / Size.Y;
+		Transform.TX = float(CanvasBounds.Min.X + PaintOffset.X) / Size.X;
+		Transform.TY = float(CanvasBounds.Min.Y + PaintOffset.Y) / Size.Y;
+		return Transform;
+	}
 
 	FDesignPathRasterRequest() = default;
 	FDesignPathRasterRequest(FString Geometry, FIntPoint RasterSize, TOptional<FLinearColor> FillColor)
@@ -37,6 +54,7 @@ public:
 	static bool TryGetRasterSize(float Width, float Height, FIntPoint& OutSize);
 	static bool TryBuildRequest(const FUMGWidgetNode& Node, FDesignPathRasterRequest& OutRequest,
 		const TMap<FString, UTexture2D*>* TextureMap = nullptr);
+	static void ApplyCanvasTransform(FUMGWidgetNode& Node, const FDesignPathRasterRequest& Request);
 	static UTexture2D* Rasterize(const FDesignPathRasterRequest& Request, FString* OutError = nullptr,
 		DesignImageResources::FImageOperationBudget* Budget = nullptr);
 	static void FlushPendingTextureUpdates();

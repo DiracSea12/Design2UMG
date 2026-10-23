@@ -374,16 +374,25 @@ def make_quarantine_manifest(
     return manifest_path
 
 
-def assert_one_off_best_can_be_quarantined() -> None:
+def assert_one_off_best_diagnostic_preserves_regressions() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         automation_root = Path(temp_dir)
         manifest_path = make_quarantine_manifest(automation_root)
         current_run = make_current_validation_run(automation_root, "_formal_current", 0.10)
 
         validation = validate_run.validate_run(current_run, admissible_best_path=manifest_path)
-        assert not validation["blocked"], validation
-        assert validation["historical_best_status"] == "pass_with_quarantined_one_off_best", validation
-        assert "historical_best_regression" not in validation["blocked_reasons"], validation
+        assert validation["blocked"], validation
+        assert validation["historical_best_status"] == "blocked", validation
+        assert "historical_best_regression" in validation["blocked_reasons"], validation
+        assert len(validation["historical_best_regressions"]) == 1, validation
+        regressed_case = validation["historical_best_regressions"][0]
+        assert regressed_case["case"] == "case_a", validation
+        regressions = regressed_case["regressions"]
+        assert {item["metric"] for item in regressions} == {"stable_changed_ratio", "changed_ratio"}, validation
+        for regression in regressions:
+            assert regression["historical_best"] == 0.09, regression
+            assert regression["current"] == 0.10, regression
+            assert regression["delta"] == 0.10 - 0.09, regression
         quarantined = validation["historical_best_quarantined_one_off_sources"]
         assert quarantined, validation
         assert quarantined[0]["case"] == "case_a", validation
@@ -666,7 +675,7 @@ def main() -> None:
     assert_validate_run_pixel_quantum_epsilon()
     assert_validate_run_reason_details()
     assert_normal_historical_best_blocks_worse_current()
-    assert_one_off_best_can_be_quarantined()
+    assert_one_off_best_diagnostic_preserves_regressions()
     assert_repeatable_or_binary_bound_best_blocks_quarantine()
     assert_quarantine_denied_when_current_is_worse_than_next_best()
     assert_missing_binary_binding_does_not_auto_pass()

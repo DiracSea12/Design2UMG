@@ -9,6 +9,7 @@ namespace PenParserNodeExtensions
 {
 	void FinalizePenPaddingRuntimeWrapPolicy(const TSharedPtr<FDesignNode>& Node);
 	void ParsePenSemanticMetadata(const TSharedPtr<FJsonObject>& JsonObj, FDesignNode& Node, const FDesignVariableResolver& Resolver);
+	void RefreshPenSemanticMetadata(FDesignNode& Node);
 	void ParseNodeExtended(
 		const TSharedPtr<FJsonObject>& JsonObj,
 		TSharedPtr<FDesignNode>& Node,

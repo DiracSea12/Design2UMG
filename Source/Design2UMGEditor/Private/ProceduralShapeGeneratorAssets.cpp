@@ -2,6 +2,7 @@
 
 #include "ProceduralShapeGeneratorAssets.h"
 #include "DesignImageResourceLimits.h"
+#include "DesignMeshGradient.h"
 #include "Math/VectorRegister.h"
 
 #include "Design2UMGLog.h"
@@ -11,8 +12,6 @@
 
 namespace
 {
-	constexpr int64 MaxShadowFilterOperations = 1ll << 30;
-
 	// Editor-main-thread-only state: generated gradient/shape textures are rooted
 	// (AddToRoot) here until their owning assets are saved, then released in one
 	// flush. Weak pointers keep the ledger from resurrecting GC'd textures.
@@ -185,7 +184,7 @@ namespace
 		}
 
 		// Keep the scalar accumulation order; four lanes only process independent pixels.
-		const bool bVectorized = static_cast<int64>(Width) * Height * (2ll * KernelRadius + 1) * 2 > MaxShadowFilterOperations;
+		const bool bVectorized = static_cast<int64>(Width) * Height * (2ll * KernelRadius + 1) * 2 > DesignImageResources::ShadowFilterMaxOperations;
 		TArray<float> Temp;
 		Temp.SetNumUninitialized(Width * Height);
 		for (int32 Y = 0; Y < Height; ++Y)
@@ -348,8 +347,10 @@ namespace ProceduralShapeGeneratorAssets
 		int32 Height,
 		UObject* Outer,
 		DesignImageResources::FImageOperationBudget* Budget,
-		TFunctionRef<FColor(int32 X, int32 Y)> PixelColorAt)
+		TFunctionRef<FColor(int32 X, int32 Y)> PixelColorAt, const FIntRect* RasterRegion = nullptr)
 	{
+		const FIntRect Region = RasterRegion ? *RasterRegion : FIntRect(0, 0, Width, Height);
+		Width = Region.Width(); Height = Region.Height();
 		UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
 		if (!Texture)
 		{
@@ -362,7 +363,7 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			for (int32 X = 0; X < Width; ++X)
 			{
-				Pixels[Y * Width + X] = PixelColorAt(X, Y);
+				Pixels[Y * Width + X] = PixelColorAt(X + Region.Min.X, Y + Region.Min.Y);
 			}
 		}
 
@@ -509,16 +510,120 @@ namespace ProceduralShapeGeneratorAssets
 		});
 	}
 
-	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+    UTexture2D* GenerateMeshGradient(int32 Width, int32 Height, const FDesignMeshGradient& Mesh,
+        UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
+    {
+        if (!Mesh.IsValid()) return nullptr;
+        const FVector2D PaintSize(Width, Height);
+        const FIntRect Region = RasterRegion ? *RasterRegion : FIntRect(0, 0, Width, Height);
+        Width = Region.Width(); Height = Region.Height();
+        UTexture2D* Texture = CreateTransientTexture(Width, Height, Outer, Budget);
+        if (!Texture) return nullptr;
+        TArray<FColor> Pixels;
+        Pixels.Init(FColor::Transparent, Width * Height);
+        struct FVertex { FVector2D Position; FColor Color; };
+        // Pencil tessellates each bicubic cell into a fixed 32 by 32 grid.
+        constexpr int32 Segments = 32;
+        constexpr int32 Side = Segments + 1;
+        TArray<FVertex> Cell;
+        Cell.SetNumUninitialized(Side * Side);
+        auto Cubic = [](const FVector2D* P, double T)
+        {
+            const double S = 1 - T;
+            return P[0]*(S*S*S) + P[1]*(3*S*S*T) + P[2]*(3*S*T*T) + P[3]*(T*T*T);
+        };
+        auto Edge = [](const FVector2D& A, const FVector2D& B, const FVector2D& P)
+        {
+            return (B.X-A.X)*(P.Y-A.Y) - (B.Y-A.Y)*(P.X-A.X);
+        };
+        auto TopLeft = [](const FVector2D& A, const FVector2D& B)
+        {
+            return B.Y < A.Y || (B.Y == A.Y && B.X > A.X);
+        };
+        auto DrawTriangle = [&](FVertex A, FVertex B, FVertex C)
+        {
+            double Area = Edge(A.Position, B.Position, C.Position);
+            if (Area == 0) return;
+            if (Area < 0) { Swap(B, C); Area = -Area; }
+            const int32 MinX = FMath::Clamp(FMath::CeilToInt(FMath::Min3(A.Position.X, B.Position.X, C.Position.X)-0.5), 0, Width-1);
+            const int32 MaxX = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Position.X, B.Position.X, C.Position.X)-0.5), 0, Width-1);
+            const int32 MinY = FMath::Clamp(FMath::CeilToInt(FMath::Min3(A.Position.Y, B.Position.Y, C.Position.Y)-0.5), 0, Height-1);
+            const int32 MaxY = FMath::Clamp(FMath::FloorToInt(FMath::Max3(A.Position.Y, B.Position.Y, C.Position.Y)-0.5), 0, Height-1);
+            const bool AB = TopLeft(A.Position, B.Position), BC = TopLeft(B.Position, C.Position), CA = TopLeft(C.Position, A.Position);
+            for (int32 Y = MinY; Y <= MaxY; ++Y)
+            for (int32 X = MinX; X <= MaxX; ++X)
+            {
+                const FVector2D P(X+0.5, Y+0.5);
+                const double E0 = Edge(B.Position, C.Position, P), E1 = Edge(C.Position, A.Position, P), E2 = Edge(A.Position, B.Position, P);
+                if (E0 < 0 || (E0 == 0 && !BC) || E1 < 0 || (E1 == 0 && !CA) || E2 < 0 || (E2 == 0 && !AB)) continue;
+                const double U = E0 / Area, V = E1 / Area, W = E2 / Area;
+                const double Alpha = (U*A.Color.A + V*B.Color.A + W*C.Color.A) / 255;
+                FColor& Dest = Pixels[Y*Width+X];
+                const double DestWeight = Dest.A / 255.0 * (1-Alpha);
+                const double OutAlpha = Alpha + DestWeight;
+                if (OutAlpha == 0) continue;
+                auto Channel = [&](uint8 R, uint8 S, uint8 T, uint8 D)
+                {
+                    return uint8(FMath::Clamp(FMath::RoundToInt(((U*R+V*S+W*T)*Alpha + D*DestWeight) / OutAlpha), 0, 255));
+                };
+                Dest = FColor(Channel(A.Color.R,B.Color.R,C.Color.R,Dest.R),
+                    Channel(A.Color.G,B.Color.G,C.Color.G,Dest.G), Channel(A.Color.B,B.Color.B,C.Color.B,Dest.B),
+                    uint8(FMath::Clamp(FMath::RoundToInt(OutAlpha*255),0,255)));
+            }
+        };
+        for (int32 Row = 0; Row < Mesh.Rows-1; ++Row)
+        for (int32 Column = 0; Column < Mesh.Columns-1; ++Column)
+        {
+            const auto& A = Mesh.Vertices[Row*Mesh.Columns+Column];
+            const auto& B = Mesh.Vertices[Row*Mesh.Columns+Column+1];
+            const auto& C = Mesh.Vertices[(Row+1)*Mesh.Columns+Column];
+            const auto& D = Mesh.Vertices[(Row+1)*Mesh.Columns+Column+1];
+            const FVector2D Net[4][4] = {
+                {A.Position, A.Position+A.RightHandle, B.Position+B.LeftHandle, B.Position},
+                {A.Position+A.BottomHandle, A.Position+A.RightHandle+A.BottomHandle, B.Position+B.LeftHandle+B.BottomHandle, B.Position+B.BottomHandle},
+                {C.Position+C.TopHandle, C.Position+C.RightHandle+C.TopHandle, D.Position+D.LeftHandle+D.TopHandle, D.Position+D.TopHandle},
+                {C.Position, C.Position+C.RightHandle, D.Position+D.LeftHandle, D.Position}};
+            for (int32 Y = 0; Y <= Segments; ++Y)
+            for (int32 X = 0; X <= Segments; ++X)
+            {
+                const double U = double(X)/Segments, V = double(Y)/Segments;
+                FVector2D Vertical[4];
+                for (int32 I=0; I<4; ++I) Vertical[I] = Cubic(Net[I], U);
+                FVertex& Vertex = Cell[Y*Side+X];
+                const FVector2D Position = Cubic(Vertical,V);
+                Vertex.Position = Position * PaintSize - FVector2D(Region.Min);
+                const double SU = U*U*(3-2*U), SV = V*V*(3-2*V);
+                auto Mix = [&](uint8 TL, uint8 TR, uint8 BL, uint8 BR)
+                {
+                    // The source packs smoothstep-interpolated channels into RGBA bytes.
+                    return uint8(FMath::Clamp(FMath::Lerp(FMath::Lerp(double(TL),double(TR),SU), FMath::Lerp(double(BL),double(BR),SU),SV),0.0,255.0));
+                };
+                Vertex.Color = FColor(Mix(A.Color.R,B.Color.R,C.Color.R,D.Color.R), Mix(A.Color.G,B.Color.G,C.Color.G,D.Color.G),
+                    Mix(A.Color.B,B.Color.B,C.Color.B,D.Color.B), Mix(A.Color.A,B.Color.A,C.Color.A,D.Color.A));
+            }
+            for (int32 Y=0; Y<Segments; ++Y)
+            for (int32 X=0; X<Segments; ++X)
+            {
+                DrawTriangle(Cell[Y*Side+X], Cell[(Y+1)*Side+X], Cell[Y*Side+X+1]);
+                DrawTriangle(Cell[Y*Side+X+1], Cell[(Y+1)*Side+X], Cell[(Y+1)*Side+X+1]);
+            }
+        }
+        // Paint opacity belongs to the composited mesh layer, not its individual triangles.
+        for (FColor& Pixel : Pixels) Pixel.A = uint8(FMath::Clamp(FMath::RoundToInt(Pixel.A * Mesh.Opacity),0,255));
+        FillTextureData(Texture, Pixels);
+        return Texture;
+    }
+
+	UTexture2D* GenerateGradientH(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientHMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -529,19 +634,19 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientV(int32 Width, int32 Height, FLinearColor ColorStart, FLinearColor ColorEnd, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientVMultiStop(int32 Width, int32 Height, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -552,7 +657,7 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateGradientLinear(
@@ -561,7 +666,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& StartNormalized,
 		const FVector2D& EndNormalized,
 		const TArray<FGradientStop>& Stops,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -586,10 +691,10 @@ namespace ProceduralShapeGeneratorAssets
 				0.0f,
 				1.0f);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateGradientAngled(int32 Width, int32 Height, float RotationDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -614,27 +719,32 @@ namespace ProceduralShapeGeneratorAssets
 			float T = NX * DirX + NY * DirY - TMin;
 			T = TRange > KINDA_SMALL_NUMBER ? FMath::Clamp(T / TRange, 0.0f, 1.0f) : 0.0f;
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
-	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+	UTexture2D* GenerateAngularGradient(int32 Width, int32 Height, float StartAngleDeg, const FVector2D& PixelCenter, const FVector4& PixelBasis, const TArray<FGradientStop>& Stops, UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
 			return nullptr;
 		}
 
-		const float CenterX = (Width - 1) / 2.0f;
-		const float CenterY = (Height - 1) / 2.0f;
+		const float CenterX = PixelCenter.X;
+		const float CenterY = PixelCenter.Y;
 		const float StartRad = FMath::DegreesToRadians(StartAngleDeg);
+		const double Determinant = PixelBasis.X * PixelBasis.W - PixelBasis.Y * PixelBasis.Z;
+		if (!FMath::IsFinite(Determinant) || Determinant == 0.0) return nullptr;
 
-		return GenerateShapeTexture(Width, Height, Outer, Budget, [CenterX, CenterY, StartRad, &Stops](int32 X, int32 Y)
+		return GenerateShapeTexture(Width, Height, Outer, Budget, [CenterX, CenterY, PixelBasis, Determinant, StartRad, &Stops](int32 X, int32 Y)
 		{
-			const float Angle = FMath::Atan2(Y - CenterY, X - CenterX) - StartRad;
+			const double DX = X - CenterX, DY = Y - CenterY;
+			const double U = (PixelBasis.W * DX - PixelBasis.Z * DY) / Determinant;
+			const double V = (-PixelBasis.Y * DX + PixelBasis.X * DY) / Determinant;
+			const float Angle = FMath::Atan2(static_cast<float>(V), static_cast<float>(U)) - StartRad;
 			float T = Angle / (2.0f * PI);
 			T -= FMath::FloorToFloat(T);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateRadialGradient(
@@ -645,13 +755,13 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, ColorCenter, ColorEdge](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return FMath::Lerp(ColorCenter, ColorEdge, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	UTexture2D* GenerateRadialGradientMultiStop(
@@ -661,7 +771,7 @@ namespace ProceduralShapeGeneratorAssets
 		const FVector2D& CenterNormalized,
 		const FVector2D& SizeScale,
 		float RotationDeg,
-		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget)
+		UObject* Outer, DesignImageResources::FImageOperationBudget* Budget, const FIntRect* RasterRegion)
 	{
 		if (Stops.Num() < 2)
 		{
@@ -672,31 +782,30 @@ namespace ProceduralShapeGeneratorAssets
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
 			return SampleGradientStops(Stops, T).ToFColor(true);
-		});
+		}, RasterRegion);
 	}
 
 	bool TryGetShadowKernelRadius(int32 Width, int32 Height, float BlurRadius, int32& OutRadius)
 	{
 		OutRadius = 0;
-		constexpr int32 MaxKernelRadius = 4095; // 8191 float coefficients, under 32 KiB.
 		if (!DesignImageResources::FImageResourceLimits().AllowsDimensions(Width, Height)
 			|| !FMath::IsFinite(BlurRadius) || BlurRadius < 0.0f) return false;
 		const float Sigma = BlurRadius * 0.5f;
 		if (Sigma < 0.5f) return true;
 		// Reject before ceil-to-int, coefficient allocation, or the two raster sweeps.
-		if (Sigma > MaxKernelRadius / 3.0f) return false;
+		if (Sigma > DesignImageResources::ShadowFilterMaxKernelRadius / 3.0f) return false;
 		const int32 Radius = FMath::CeilToInt(Sigma * 3.0f);
 		const int64 SamplesPerPixel = 2ll * (2ll * Radius + 1);
-		if (static_cast<int64>(Width) * Height > MaxShadowFilterOperations / SamplesPerPixel)
+		if (static_cast<int64>(Width) * Height > DesignImageResources::ShadowFilterMaxOperations / SamplesPerPixel)
 		{
 			// Two float masks and the texture coexist during filtering.
 			constexpr uint64 WorkingBytesPerPixel = 2 * sizeof(float) + sizeof(FColor);
-			if (static_cast<uint64>(Width) * Height > DesignImageResources::FImageResourceLimits::DefaultMaxTotalDecodedBytes / WorkingBytesPerPixel) return false;
+			if (static_cast<uint64>(Width) * Height > DesignImageResources::ShadowFilterMaxWorkingBytes / WorkingBytesPerPixel) return false;
 			const int64 VectorBlocks = FMath::Max(0, Width - 2 * Radius) / 4;
 			const int64 HorizontalGroups = Width - VectorBlocks * 3;
 			const int64 VerticalGroups = Width / 4 + Width % 4;
 			const int64 FilterOperations = (HorizontalGroups + VerticalGroups) * Height * (2ll * Radius + 1);
-			if (FilterOperations > MaxShadowFilterOperations) return false;
+			if (FilterOperations > DesignImageResources::ShadowFilterMaxOperations) return false;
 		}
 		OutRadius = Radius;
 		return true;

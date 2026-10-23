@@ -55,7 +55,7 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle, FontMappings);
+			Node->Text.FontStyle, FontMappings, &Node->Text.PreparedFont);
 		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
 		Request.FontAssetPath = ResolvedFont.FontAssetPath;
 		Request.TypefaceName = ResolvedFont.TypefaceName;
@@ -114,7 +114,7 @@ FResolvedTextLayoutForUMG ResolveTextLayoutForUMGInternal(
 			SingleLineText.ReplaceInline(TEXT("\n"), TEXT(" "));
 			// Baselines use font ascent/descent, not UTextBlock's shadow-expanded desired size.
 			const float NaturalFontHeight = RuntimeProbe::MeasureTextSize(SingleLineText, Result.FontSize,
-				Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, 0, FontMappings).Y;
+				Node->Text.FontFamily, Node->Text.FontPostScriptName, Node->Text.FontWeight, Node->Text.FontStyle, 0, FontMappings, &Node->Text.PreparedFont).Y;
 			// Align Slate's natural-ascent baseline to the source editor's half-leading baseline.
 			// Shift upward by (NaturalLineHeight - SourceLineHeight + hheaLineGap) / 2.
 			// Keep subpixel precision to preserve half-leading placement.

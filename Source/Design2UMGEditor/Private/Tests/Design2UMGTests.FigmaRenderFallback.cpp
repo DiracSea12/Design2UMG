@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Figma render-fallback coverage: vector raster fallback, metadata round trip, leaf/structured fallback widgets, child-tree preservation.
+// Figma render-fallback coverage: vector raster fallback, metadata parsing and image-reference remapping, leaf/structured fallback widgets, child-tree preservation.
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
@@ -62,10 +62,10 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataSerializationCycleTest,
-	"Design2UMG.FigmaParser.RenderFallbackMetadataSerializationCycle",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest,
+	"Design2UMG.FigmaParser.RenderFallbackMetadataParsingAndImageRefRemapping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaRenderFallbackMetadataSerializationCycleTest::RunTest(const FString& Parameters)
+bool FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,

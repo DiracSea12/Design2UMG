@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "engine": "QuickJS-NG",
+  "version": "0.17.0",
+  "commit": "6d46d07d04041b40f4f49eaa7fdebe44c314c699",
+  "source_sha256": "2e3cf3a1b12648856d8c8dd6ac069b0ada4f966d49a9d9c9e1111ed79d1a9e69",
+  "binary_sha256": "1cd73470c8a3805ffc5ab9dcc47a5110f6b165cb5eb2e4454a07c692d0517a12"
+}

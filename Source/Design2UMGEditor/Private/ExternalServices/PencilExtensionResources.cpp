@@ -8,13 +8,14 @@
 #include "DesignSchema.h"
 #include "FontResolver.h"
 #include "PenBundledLibraries.h"
+#include "PenParser.h"
 
 #include "Dom/JsonObject.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "HAL/FileManager.h"
+#include "Internationalization/Regex.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "Serialization/JsonSerializer.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "PencilExtensionResources"
@@ -48,6 +49,7 @@ namespace
 		 * drains the resolver caches (it runs whenever a project font asset changes during imports). */
 		TMap<FString, TMap<FString, FString>> GlyphsByFamily;
 		TMap<FString, TMap<FString, FString>> NamesByFamily;
+		TArray<PencilExtensionResources::FFontStyle> FontStyles;
 	};
 
 	FPencilResourceState& GetResourceState()
@@ -148,10 +150,140 @@ namespace PencilExtensionResources
 	void GetIconIndexRelativeCandidates(TArray<FString>& OutRelativePaths)
 	{
 		OutRelativePaths = {
-			TEXT("node_modules/@ha/pencil-editor/src/managers/data/icon-index.json"),
+			TEXT("out/editor/assets/index.js"),
 		};
 	}
 
+	bool ExtractIconIndexJson(const FString& Bundle, FString& OutJson, FString& OutError)
+	{
+		OutJson.Reset();
+		OutError.Reset();
+		// The packaged registry is strict JSON in an unescaped single-quoted literal,
+		// not an object expression. Select its schema without evaluating surrounding code.
+		const FRegexPattern Pattern(TEXT("JSON\\.parse\\(\\s*'([^'\\\\]*)'\\s*\\)"));
+		FRegexMatcher Matcher(Pattern, Bundle);
+		while (Matcher.FindNext())
+		{
+			FString Candidate = TEXT("{\"sets\":") + Matcher.GetCaptureGroup(1) + TEXT("}");
+			TSharedPtr<FJsonObject> Root;
+			if (!DesignJsonUtils::TryParseObject(Candidate, Root))
+				continue;
+			const TArray<TSharedPtr<FJsonValue>>* Sets = nullptr;
+			if (!Root->TryGetArrayField(TEXT("sets"), Sets) || Sets->IsEmpty())
+				continue;
+			const bool bHasNonIconSet = Sets->ContainsByPredicate([](const TSharedPtr<FJsonValue>& Set) {
+				return !Set.IsValid() || Set->Type != EJson::Object ||
+				       !Set->AsObject()->HasTypedField<EJson::Array>(TEXT("families")) ||
+				       !Set->AsObject()->HasTypedField<EJson::Array>(TEXT("icons"));
+			});
+			if (bHasNonIconSet)
+				continue;
+			OutJson = MoveTemp(Candidate);
+			return true;
+		}
+		OutError = TEXT("Editor bundle contains no static JSON icon registry.");
+		return false;
+	}
+
+	int32 FFontStyle::ResolveWeight(int32 RequestedWeight) const
+	{
+		return WeightRange.IsSet()
+			? FMath::Clamp(RequestedWeight, FMath::CeilToInt32(WeightRange->X), FMath::FloorToInt32(WeightRange->Y))
+			: Weight;
+	}
+
+	bool ExtractFontStyles(const FString& Bundle, const TSet<FString>& Families,
+		TArray<FFontStyle>& OutStyles, FString& OutError)
+	{
+		OutStyles.Reset();
+		OutError.Reset();
+		const FRegexPattern StartPattern(TEXT(R"(\{name:("(?:[^"\\]|\\.)*"),styles:\[)"));
+		const FRegexPattern KeyPattern(TEXT(R"("(?:[^"\\]|\\.)*"|\b(name|styles|url|weight|italic|axes|tag|start|end)\s*:|(!0|!1))"));
+		FRegexMatcher Starts(StartPattern, Bundle);
+		while (Starts.FindNext())
+		{
+			TSharedPtr<FJsonObject> Name;
+			if (!DesignJsonUtils::TryParseObject(TEXT("{\"name\":") + Starts.GetCaptureGroup(1) + TEXT("}"), Name)
+				|| Name->GetStringField(TEXT("name")).IsEmpty()
+				|| (!Families.IsEmpty() && !Families.Contains(Name->GetStringField(TEXT("name")))))
+				continue;
+
+			int32 Depth = 0;
+			int32 End = Starts.GetMatchBeginning();
+			bool bString = false;
+			bool bEscape = false;
+			for (; End < Bundle.Len(); ++End)
+			{
+				const TCHAR C = Bundle[End];
+				if (bString)
+				{
+					if (bEscape) bEscape = false;
+					else if (C == TEXT('\\')) bEscape = true;
+					else if (C == TEXT('"')) bString = false;
+				}
+				else if (C == TEXT('"')) bString = true;
+				else if (C == TEXT('{')) ++Depth;
+				else if (C == TEXT('}') && --Depth == 0) break;
+			}
+			const FString Literal = Bundle.Mid(Starts.GetMatchBeginning(), End - Starts.GetMatchBeginning() + 1);
+			FRegexMatcher Keys(KeyPattern, Literal);
+			FString Json;
+			int32 Position = 0;
+			while (Keys.FindNext())
+			{
+				Json += Literal.Mid(Position, Keys.GetMatchBeginning() - Position);
+				const FString Key = Keys.GetCaptureGroup(1);
+				const FString Boolean = Keys.GetCaptureGroup(2);
+				Json += !Key.IsEmpty() ? TEXT("\"") + Key + TEXT("\":")
+					: !Boolean.IsEmpty() ? (Boolean == TEXT("!0") ? TEXT("true") : TEXT("false"))
+					: Keys.GetCaptureGroup(0);
+				Position = Keys.GetMatchEnding();
+			}
+			Json += Literal.Mid(Position);
+			TSharedPtr<FJsonObject> Font;
+			if (!DesignJsonUtils::TryParseObject(Json, Font))
+			{
+				OutError = TEXT("Invalid Pencil font description: ") + Name->GetStringField(TEXT("name"));
+				OutStyles.Reset();
+				return false;
+			}
+			for (const auto& Value : Font->GetArrayField(TEXT("styles")))
+			{
+				const auto Style = Value->AsObject();
+				FFontStyle Parsed;
+				Parsed.Family = Font->GetStringField(TEXT("name"));
+				Parsed.Url = Style->GetStringField(TEXT("url"));
+				Parsed.Weight = Style->GetIntegerField(TEXT("weight"));
+				Style->TryGetBoolField(TEXT("italic"), Parsed.bItalic);
+				const TArray<TSharedPtr<FJsonValue>>* Axes = nullptr;
+				Parsed.bVariable = Style->TryGetArrayField(TEXT("axes"), Axes) && !Axes->IsEmpty();
+				if (Parsed.bVariable)
+					for (const auto& AxisValue : *Axes)
+					{
+						const auto Axis = AxisValue->AsObject();
+						if (Axis->GetStringField(TEXT("tag")) == TEXT("wght"))
+							Parsed.WeightRange = FVector2D(Axis->GetNumberField(TEXT("start")), Axis->GetNumberField(TEXT("end")));
+					}
+				OutStyles.Add(MoveTemp(Parsed));
+			}
+		}
+		return true;
+	}
+
+	bool FindFontStyle(const FString& Family, int32 Weight, bool bItalic, FFontStyle& OutStyle)
+	{
+		EnsureIconGlyphsRegistered();
+		const FFontStyle* Best = nullptr;
+		for (const FFontStyle& Style : GetResourceState().FontStyles)
+		{
+			if (Style.Family.Equals(Family, ESearchCase::IgnoreCase) && Style.bItalic == bItalic
+				&& (!Best || FMath::Abs(Style.ResolveWeight(Weight) - Weight) < FMath::Abs(Best->ResolveWeight(Weight) - Weight)))
+				Best = &Style;
+		}
+		if (!Best) return false;
+		OutStyle = *Best;
+		return true;
+	}
 	bool ParseIconIndexJson(
 		const FString& Json,
 		TMap<FString, TMap<FString, FString>>& OutGlyphsByFamily,
@@ -287,12 +419,12 @@ namespace PencilExtensionResources
 			}
 			State.LastTriedIconIndexPaths = CandidatePaths;
 
-			FString LoadedJson;
+			FString LoadedBundle;
 			FString LoadedPath;
 			FString LoadedVersion;
 			for (int32 Index = 0; Index < CandidatePaths.Num(); ++Index)
 			{
-				if (FFileHelper::LoadFileToString(LoadedJson, *CandidatePaths[Index]))
+				if (FFileHelper::LoadFileToString(LoadedBundle, *CandidatePaths[Index]))
 				{
 					LoadedPath = CandidatePaths[Index];
 					LoadedVersion = CandidateVersions[Index];
@@ -307,14 +439,16 @@ namespace PencilExtensionResources
 					State.bLoggedMissingIconIndex = true;
 					const FString TriedList = FString::Join(State.LastTriedIconIndexPaths, TEXT("\n  "));
 					UE_LOG(LogDesign2UMG, Error,
-						TEXT("PencilExtensionResources: icon codepoint index (icon-index.json) not found; icon widgets will fall back to icon-name text.\nInstall the Pencil VS Code extension or set the extension directory in the Design2UMG settings. Tried candidates:\n  %s"),
+						TEXT("PencilExtensionResources: editor bundle containing the icon registry not found; icon widgets will fall back to icon-name text.\nInstall the Pencil VS Code extension or set the extension directory in the Design2UMG settings. Tried candidates:\n  %s"),
 						*TriedList);
 				}
 				return;
 			}
 
 			FString ParseError;
-			if (!ParseIconIndexJson(LoadedJson, State.GlyphsByFamily, State.NamesByFamily, ParseError))
+			FString LoadedJson;
+			if (!ExtractIconIndexJson(LoadedBundle, LoadedJson, ParseError)
+				|| !ParseIconIndexJson(LoadedJson, State.GlyphsByFamily, State.NamesByFamily, ParseError))
 			{
 				State.GlyphsByFamily.Reset();
 				State.NamesByFamily.Reset();
@@ -328,6 +462,8 @@ namespace PencilExtensionResources
 				return;
 			}
 
+			if (!ExtractFontStyles(LoadedBundle, TSet<FString>(), State.FontStyles, ParseError))
+				UE_LOG(LogDesign2UMG, Error, TEXT("Pencil font descriptions: %s"), *ParseError);
 			State.bIconIndexLoaded = true;
 			State.IconIndexPath = MoveTemp(LoadedPath);
 			State.ExtensionVersion = MoveTemp(LoadedVersion);
@@ -355,38 +491,9 @@ namespace PencilExtensionResources
 	void GetLibraryPenRelativeCandidates(TArray<FString>& OutRelativeDirs)
 	{
 		OutRelativeDirs = {
+			TEXT("out/data"),
 			TEXT("node_modules/@ha/pencil-editor/data"),
 		};
-	}
-
-	bool ParseLibPenVariables(const FString& LibPenJson, FString& OutVariablesJson, FString& OutError)
-	{
-		OutVariablesJson.Reset();
-		OutError.Reset();
-
-		TSharedPtr<FJsonObject> Root;
-		if (!DesignJsonUtils::TryParseObject(LibPenJson, Root))
-		{
-			OutError = TEXT("lib.pen payload is not valid JSON");
-			return false;
-		}
-
-		const TSharedPtr<FJsonObject>* Variables = nullptr;
-		if (!Root->TryGetObjectField(TEXT("variables"), Variables) || !Variables->IsValid())
-		{
-			OutError = TEXT("lib.pen payload has no variables object");
-			return false;
-		}
-
-		const TSharedRef<FJsonObject> VariablesRef = (*Variables).ToSharedRef();
-		const TSharedRef<TJsonWriter<TCHAR>> Writer = TJsonWriterFactory<TCHAR>::Create(&OutVariablesJson);
-		if (!FJsonSerializer::Serialize(VariablesRef, Writer))
-		{
-			OutVariablesJson.Reset();
-			OutError = TEXT("lib.pen variables object could not be serialized");
-			return false;
-		}
-		return true;
 	}
 
 	bool TryDeriveLibraryNameFromFileName(const FString& FileName, FString& OutLibraryName)
@@ -419,19 +526,19 @@ namespace PencilExtensionResources
 			const FString LibraryPath = DataDir / LibraryFile;
 
 			FString LibPenJson;
-			FString VariablesJson;
-			FString ParseError;
+			TSharedPtr<FJsonObject> Library;
+			const TSharedPtr<FJsonObject>* Variables = nullptr;
 			if (!FFileHelper::LoadFileToString(LibPenJson, *LibraryPath)
-				|| !ParseLibPenVariables(LibPenJson, VariablesJson, ParseError))
+				|| !FPenParser::ParseSourceObject(LibPenJson, Library)
+				|| !Library->TryGetObjectField(TEXT("variables"), Variables) || !Variables->IsValid())
 			{
 				UE_LOG(LogDesign2UMG, Warning,
 					TEXT("PencilExtensionResources: skipping library '%s': %s"), *LibraryPath,
-					ParseError.IsEmpty() ? TEXT("file could not be read") : *ParseError);
+					TEXT("file could not be read, parsed or has no variables object"));
 				continue;
 			}
 
-			PenBundledLibraries::RegisterLibraryVariables(LibraryName, VariablesJson);
-			PenBundledLibraries::RegisterLibraryDocument(LibraryName, LibPenJson);
+			PenBundledLibraries::RegisterLibraryDocument(LibraryName, LibPenJson, LibraryPath);
 			++RegisteredCount;
 		}
 		return RegisteredCount;
@@ -465,7 +572,10 @@ namespace PencilExtensionResources
 		FString DataDir;
 		for (const FString& CandidateDir : CandidateDirs)
 		{
-			if (IFileManager::Get().DirectoryExists(*CandidateDir))
+			TArray<FString> LibraryFiles;
+			IFileManager::Get().FindFiles(LibraryFiles, *(CandidateDir / TEXT("*.lib.pen")), true, false);
+			// Skip empty layouts, but let the loader report unreadable or invalid library files.
+			if (LibraryFiles.Num() > 0)
 			{
 				DataDir = CandidateDir;
 				break;
@@ -479,7 +589,7 @@ namespace PencilExtensionResources
 				State.bLoggedMissingLibraries = true;
 				const FString TriedList = FString::Join(State.LastTriedLibraryDirs, TEXT("\n  "));
 				UE_LOG(LogDesign2UMG, Error,
-					TEXT("PencilExtensionResources: bundled library documents (*.lib.pen) directory not found; imported library variables will not resolve.\nInstall the Pencil VS Code extension or set the extension directory in the Design2UMG settings. Tried candidates:\n  %s"),
+					TEXT("PencilExtensionResources: bundled library documents (*.lib.pen) not found; imported library variables will not resolve.\nInstall the Pencil VS Code extension or set the extension directory in the Design2UMG settings. Tried candidates:\n  %s"),
 					*TriedList);
 			}
 			return;
@@ -500,7 +610,7 @@ namespace PencilExtensionResources
 
 		State.bLibrariesLoaded = true;
 		UE_LOG(LogDesign2UMG, Display,
-			TEXT("PencilExtensionResources: registered %d library variable tables from '%s'"),
+			TEXT("PencilExtensionResources: registered %d library documents from '%s'"),
 			RegisteredCount, *DataDir);
 	}
 

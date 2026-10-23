@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Design2UMGEffectMaterialBuilder.h"
+#include "PencilShaderMaterials.h"
+#include "PencilShaderSdf.h"
 
 #include "Design2UMGMaterialAccess.h"
 #include "Misc/EngineVersionComparison.h"
@@ -162,6 +164,56 @@ namespace
 		Design2UMGMaterialAccess::AddExpression(*Material, *Mask);
 		return Mask;
 	}
+	FString InnerShadowPaintCode(int32 BlendMode, const TCHAR* BaseExpression)
+	{
+	FString Code = TEXT(R"(
+// Cross-shaped 5-tap alpha blur: center 75/255 plus four taps at 45/255 each (sum = 1).
+float2 Step = max(BlurUVStep.rg, float2(0.0, 0.0));
+float2 Offset = InnerShadowOffset.rg;
+float4 Base = )");
+	Code += BaseExpression;
+	Code += TEXT(R"(;
+float2 Taps[5] = { float2(0.0, 0.0), float2(Step.x, 0.0), float2(-Step.x, 0.0), float2(0.0, Step.y), float2(0.0, -Step.y) };
+float ShiftedAlpha = 0.0;
+[unroll] for (int Tap = 0; Tap < 5; ++Tap)
+{
+    float2 SampleUV = UV - Offset + Taps[Tap];
+    // The translated cutout is transparent outside its bounds, not edge-clamped.
+    float Inside = all(SampleUV >= float2(0.0, 0.0)) && all(SampleUV <= float2(1.0, 1.0)) ? 1.0 : 0.0;
+    float Weight = Tap == 0 ? (75.0 / 255.0) : (45.0 / 255.0);
+    ShiftedAlpha += Texture.SampleLevel(TextureSampler, SampleUV, 0).a * Inside * Weight;
+}
+float ShadowMask = saturate(Base.a - ShiftedAlpha) * saturate(InnerShadowStrength);
+)");
+	if (BlendMode == 0)
+		Code += TEXT("float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb * Base.a, ShadowMask);\n");
+	else
+	{
+		// Blend only the inset paint against the original object, retaining its coverage.
+		Code += FString::Printf(TEXT("FD2UBlend blend; float3 ObjectColor=Base.a>0?Base.rgb/Base.a:float3(0,0,0); float3 OutRgb=blend.Mix(float4(InnerShadowColor.rgb*ShadowMask,ShadowMask),float4(ObjectColor,1),%d).rgb*Base.a;\n"), BlendMode);
+	}
+	return Code;
+	}
+
+
+	void AddInnerShadowInputs(UMaterial* Material, UMaterialExpressionCustom* InnerShadowNode)
+	{
+	UMaterialExpressionVectorParameter* BlurStepParam =
+		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("BlurUVStep"));
+	BlurStepParam->DefaultValue = FLinearColor(BlurUVStepFallbackComponent, BlurUVStepFallbackComponent, 0.0f, 0.0f);
+	UMaterialExpressionVectorParameter* ShadowColorParam =
+		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowColor"));
+	ShadowColorParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);
+	UMaterialExpressionVectorParameter* ShadowOffsetParam =
+		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowOffset"));
+	ShadowOffsetParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
+	UMaterialExpressionScalarParameter* ShadowStrengthParam =
+		AddCustomInput<UMaterialExpressionScalarParameter>(Material, InnerShadowNode, TEXT("InnerShadowStrength"));
+	ShadowStrengthParam->DefaultValue = 0.5f;
+
+	}
+
+
 }
 
 Design2UMGEffectMaterialBuilder::FSubtreeShadowKernel Design2UMGEffectMaterialBuilder::MakeSubtreeShadowKernel(float Sigma)
@@ -187,7 +239,20 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		OutError = FString::Printf(TEXT("Subtree shadow '%s' has no valid capture size"), *Root.Name);
 		return false;
 	}
+	int32 PaintMode = 0;
+	if (!PencilShaderMaterials::BlendModeIndex(Root.Render.PaintBlendMode.Get(FString()), PaintMode, OutError)) return false;
+	const bool InnerShadow = Root.Effect.EffectColor.IsSet();
+	int32 InnerMode = 0;
+	if (InnerShadow && !PencilShaderMaterials::BlendModeIndex(Root.Effect.InnerShadowBlendMode.Get(FString()), InnerMode, OutError)) return false;
+	bool Context = PaintMode != 0 || InnerShadow;
+	for (const auto& Layer : Root.Shadow.BoxShadows)
+	{
+		int32 Mode = 0;
+		if (!PencilShaderMaterials::BlendModeIndex(Layer.BlendMode, Mode, OutError)) return false;
+		Context |= Mode != 0;
+	}
 	FString Code = TEXT("// Subtree shadow: all layers sample the original composed alpha.\nfloat4 Base = Texture.SampleLevel(TextureSampler, UV, 0);\nfloat4 Shadow = float4(0,0,0,0);\n");
+	if (Context) Code = PencilShaderMaterials::BlendLibrary() + TEXT("FD2UBlend blend; float4 Base=Texture.SampleLevel(TextureSampler,UV,0); float2 BUV=float2(dot(float3(UV,1),BackgroundU.xyz),dot(float3(UV,1),BackgroundV.xyz)); float4 Destination=all(BUV>=0)&&all(BUV<=1)?D2UBackground.SampleLevel(D2UBackgroundSampler,saturate(BUV),0):float4(0,0,0,0); float4 Shadow=Destination; float PaintAlpha=0;\n");
 	for (int32 Index = Root.Shadow.BoxShadows.Num() - 1; Index >= 0; --Index)
 	{
 		const FUMGBoxShadowLayerData& Layer = Root.Shadow.BoxShadows[Index];
@@ -221,10 +286,27 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 				Radius, Radius, Radius, Radius, GaussianDenominator,
 				Kernel.Step / Root.Bounds.W, Kernel.Step / Root.Bounds.H);
 		}
+		if (Context)
+		{
+			int32 Mode = 0;
+			PencilShaderMaterials::BlendModeIndex(Layer.BlendMode, Mode, OutError);
+			Code += FString::Printf(TEXT("float A=saturate(Alpha*%.9f); Shadow=blend.Mix(float4(float3(%.9f,%.9f,%.9f)*A,A),Shadow,%d); PaintAlpha=A+PaintAlpha*(1-A); }\n"), Layer.Color.A, Layer.Color.R, Layer.Color.G, Layer.Color.B, Mode);
+		}
+		else
 		Code += FString::Printf(TEXT("float A=saturate(Alpha*%.9f); Shadow=float4(float3(%.9f,%.9f,%.9f)*A+Shadow.rgb*(1-A),A+Shadow.a*(1-A)); }\n"),
 			Layer.Color.A, Layer.Color.R, Layer.Color.G, Layer.Color.B);
 	}
-	Code += TEXT("return float4(Base.rgb+Shadow.rgb*(1-Base.a),Base.a+Shadow.a*(1-Base.a));");
+	if (InnerShadow)
+	{
+		Code += FString::Printf(TEXT("float A=Base.a+PaintAlpha*(1-Base.a); float4 Composed=blend.Mix(Base,Shadow,%d); float4 Fill=float4(Composed.rgb-Shadow.rgb*(1-Base.a),Base.a);\n{\n"), PaintMode);
+		Code += InnerShadowPaintCode(InnerMode, TEXT("Fill"));
+		Code += TEXT("Composed.rgb+=OutRgb-Base.rgb;\n}\nreturn float4(Composed.rgb-Destination.rgb*(1-A),A);");
+	}
+	else if (PaintMode != 0)
+		Code += FString::Printf(TEXT("float A=Base.a+PaintAlpha*(1-Base.a); float4 Composed=blend.Mix(Base,Shadow,%d); return float4(Composed.rgb-Destination.rgb*(1-A),A);"), PaintMode);
+	else
+		Code += Context ? TEXT("float A=Base.a+PaintAlpha*(1-Base.a); return float4(Base.rgb+Shadow.rgb*(1-Base.a)-Destination.rgb*(1-A),A);")
+		: TEXT("return float4(Base.rgb+Shadow.rgb*(1-Base.a),Base.a+Shadow.a*(1-Base.a));");
 	const FString Name = TEXT("D2U_SubtreeShadow_") + FMD5::HashAnsiString(*Code);
 	const FString PackageName = TEXT("/Game/Design2UMG/GeneratedMaterials/") + Name;
 	const FString ObjectPath = PackageName + TEXT(".") + Name;
@@ -274,6 +356,18 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		Design2UMGMaterialAccess::AddExpression(*Material, *Shader);
 		AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("Texture"));
 		AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, Shader, TEXT("UV"));
+		if (InnerShadow) AddInnerShadowInputs(Material, Shader);
+		if (Context)
+		{
+			auto* Background = AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("D2UBackground"));
+			Background->Texture = PencilShaderSdf::SamplerDefault(OutError);
+			if (!Background->Texture) return false;
+			Background->SamplerType = SAMPLERTYPE_LinearColor;
+			auto* U = AddCustomInput<UMaterialExpressionVectorParameter>(Material, Shader, TEXT("BackgroundU"));
+			U->ParameterName = TEXT("D2UBackgroundU"); U->DefaultValue = FLinearColor(1,0,0,0);
+			auto* V = AddCustomInput<UMaterialExpressionVectorParameter>(Material, Shader, TEXT("BackgroundV"));
+			V->ParameterName = TEXT("D2UBackgroundV"); V->DefaultValue = FLinearColor(0,1,0,0);
+		}
 		Material->GetExpressionInputForProperty(MP_EmissiveColor)[0].Expression = AddComponentMask(Material, Shader, true, true, true, false);
 		Material->GetExpressionInputForProperty(MP_Opacity)[0].Expression = AddComponentMask(Material, Shader, false, false, false, true);
 		Material->PreEditChange(nullptr);
@@ -299,6 +393,7 @@ bool Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(FUMGWidgetNo
 		}
 	}
 	Root.Effect.EffectMaterial = ObjectPath;
+	Root.Render.PaintBlendMode.Reset();
 	Root.Shadow.BoxShadows.Reset();
 	return true;
 }
@@ -387,18 +482,23 @@ return Result;
 	return Material;
 }
 
-UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial()
+UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetainerMaterial(int32 BlendMode)
 {
-	if (GInnerShadowRetainerMaterial.IsValid())
+	if (BlendMode == 0 && GInnerShadowRetainerMaterial.IsValid())
 	{
 		return GInnerShadowRetainerMaterial.Get();
 	}
-	constexpr TCHAR MaterialPackageName[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_InsetShadowRetainer");
-	constexpr TCHAR MaterialObjectPath[] = TEXT("/Game/Design2UMG/GeneratedMaterials/D2U_InsetShadowRetainer.D2U_InsetShadowRetainer");
-	if (UMaterial* ExistingMaterial = LoadObject<UMaterial>(nullptr, MaterialObjectPath))
+	FString Code = InnerShadowPaintCode(BlendMode, TEXT("Texture.SampleLevel(TextureSampler, UV, 0)"));
+	Code += TEXT("return float4(OutRgb, Base.a);\n");
+	if (BlendMode != 0) Code = PencilShaderMaterials::BlendLibrary() + Code;
+	const FString MaterialName = BlendMode == 0 ? TEXT("D2U_InsetShadowRetainer")
+		: TEXT("D2U_InsetShadowRetainer_") + FMD5::HashAnsiString(*Code);
+	const FString MaterialPackageName = TEXT("/Game/Design2UMG/GeneratedMaterials/") + MaterialName;
+	const FString MaterialObjectPath = MaterialPackageName + TEXT(".") + MaterialName;
+	if (UMaterial* ExistingMaterial = LoadObject<UMaterial>(nullptr, *MaterialObjectPath))
 	{
 		Design2UMGMaterialAccess::RecompileForRendering(*ExistingMaterial);
-		GInnerShadowRetainerMaterial.Reset(ExistingMaterial);
+		if (BlendMode == 0) GInnerShadowRetainerMaterial.Reset(ExistingMaterial);
 		return ExistingMaterial;
 	}
 
@@ -407,13 +507,13 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 	{
 		return nullptr;
 	}
-	UPackage* MaterialPackage = CreatePackage(MaterialPackageName);
+	UPackage* MaterialPackage = CreatePackage(*MaterialPackageName);
 	if (!MaterialPackage) return nullptr;
 
 	UMaterial* Material = Cast<UMaterial>(MaterialFactory->FactoryCreateNew(
 		UMaterial::StaticClass(),
 		MaterialPackage,
-		TEXT("D2U_InsetShadowRetainer"),
+		FName(*MaterialName),
 		RF_Public | RF_Standalone,
 		nullptr,
 		GWarn));
@@ -428,41 +528,12 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateInnerShadowRetai
 
 	UMaterialExpressionCustom* InnerShadowNode = NewObject<UMaterialExpressionCustom>(Material);
 	InnerShadowNode->OutputType = ECustomMaterialOutputType::CMOT_Float4;
-	InnerShadowNode->Code = TEXT(R"(
-// Cross-shaped 5-tap alpha blur: center 75/255 plus four taps at 45/255 each (sum = 1).
-float2 Step = max(BlurUVStep.rg, float2(0.0, 0.0));
-float2 Offset = InnerShadowOffset.rg;
-float4 Base = Texture.SampleLevel(TextureSampler, UV, 0);
-float2 Taps[5] = { float2(0.0, 0.0), float2(Step.x, 0.0), float2(-Step.x, 0.0), float2(0.0, Step.y), float2(0.0, -Step.y) };
-float ShiftedAlpha = 0.0;
-[unroll] for (int Tap = 0; Tap < 5; ++Tap)
-{
-    float2 SampleUV = UV - Offset + Taps[Tap];
-    // The translated cutout is transparent outside its bounds, not edge-clamped.
-    float Inside = all(SampleUV >= float2(0.0, 0.0)) && all(SampleUV <= float2(1.0, 1.0)) ? 1.0 : 0.0;
-    float Weight = Tap == 0 ? (75.0 / 255.0) : (45.0 / 255.0);
-    ShiftedAlpha += Texture.SampleLevel(TextureSampler, SampleUV, 0).a * Inside * Weight;
-}
-float ShadowMask = saturate(Base.a - ShiftedAlpha) * saturate(InnerShadowStrength);
-float3 OutRgb = lerp(Base.rgb, InnerShadowColor.rgb * Base.a, ShadowMask);
-return float4(OutRgb, Base.a);
-)");
+	InnerShadowNode->Code = MoveTemp(Code);
 	Design2UMGMaterialAccess::AddExpression(*Material, *InnerShadowNode);
 
 	AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, InnerShadowNode, TEXT("Texture"));
 	AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, InnerShadowNode, TEXT("UV"));
-	UMaterialExpressionVectorParameter* BlurStepParam =
-		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("BlurUVStep"));
-	BlurStepParam->DefaultValue = FLinearColor(BlurUVStepFallbackComponent, BlurUVStepFallbackComponent, 0.0f, 0.0f);
-	UMaterialExpressionVectorParameter* ShadowColorParam =
-		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowColor"));
-	ShadowColorParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.5f);
-	UMaterialExpressionVectorParameter* ShadowOffsetParam =
-		AddCustomInput<UMaterialExpressionVectorParameter>(Material, InnerShadowNode, TEXT("InnerShadowOffset"));
-	ShadowOffsetParam->DefaultValue = FLinearColor(0.0f, 0.0f, 0.0f, 0.0f);
-	UMaterialExpressionScalarParameter* ShadowStrengthParam =
-		AddCustomInput<UMaterialExpressionScalarParameter>(Material, InnerShadowNode, TEXT("InnerShadowStrength"));
-	ShadowStrengthParam->DefaultValue = 0.5f;
+	AddInnerShadowInputs(Material, InnerShadowNode);
 
 	UMaterialExpressionComponentMask* EmissiveMask = AddComponentMask(Material, InnerShadowNode, true, true, true, false);
 	UMaterialExpressionComponentMask* OpacityMask = AddComponentMask(Material, InnerShadowNode, false, false, false, true);
@@ -482,7 +553,7 @@ return float4(OutRgb, Base.a);
 		return nullptr;
 	}
 
-	GInnerShadowRetainerMaterial.Reset(Material);
+	if (BlendMode == 0) GInnerShadowRetainerMaterial.Reset(Material);
 	return Material;
 }
 
@@ -685,7 +756,16 @@ UMaterialInterface* Design2UMGEffectMaterialBuilder::GetOrCreateRetainerEffectMa
 		if (Reference == UMGPropertyKeys::RetainerForegroundBlurEffectRef)
 			Parent = GetOrCreateForegroundBlurRetainerMaterial();
 		else if (Reference == UMGPropertyKeys::RetainerInnerShadowEffectRef)
-			Parent = GetOrCreateInnerShadowRetainerMaterial();
+		{
+			int32 BlendMode = 0;
+			FString Error;
+			if (!PencilShaderMaterials::BlendModeIndex(Effect.InnerShadowBlendMode.Get(FString()), BlendMode, Error))
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
+				return nullptr;
+			}
+			Parent = GetOrCreateInnerShadowRetainerMaterial(BlendMode);
+		}
 		else if (Reference == UMGPropertyKeys::RetainerGeometryMaskEffectRef)
 		{
 			Parent = Effect.GeometryMaskShape.IsSet() && Effect.GeometryMaskSize.IsSet()

@@ -5,6 +5,13 @@
 #include "Misc/AutomationTest.h"
 #include "PenBundledLibraries.h"
 #include "PenParser.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "FigmaParser.h"
+#include "Design2UMGNodeWidgetFactory.h"
+#include "DesignVariableResolver.h"
+#include "ImageFillUtils.h"
+#include "VisualMapperFillTransfer.h"
+#include "VisualMapper.h"
 #include "DesignImportTypes.h"
 #include "RefExpander.h"
 #include "DesignSchema.h"
@@ -13,6 +20,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 
 namespace
 {
@@ -60,6 +68,28 @@ namespace
 
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserSourceCommentsTest,
+	"Design2UMG.Unit.PenParser.SourceComments",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserSourceCommentsTest::RunTest(const FString&)
+{
+	const FString Json = TEXT(R"JSON(// document
+		{"version":"2.21", /* nodes */ "children":[{"id":"text","type":"text",
+		"content":"https://host/a//b/*c*/\"quoted\\tail"}]})JSON");
+	TSharedPtr<FJsonObject> Source;
+	if (!TestTrue(TEXT("Pencil source comments parse"), FPenParser::ParseSourceObject(Json, Source))) return false;
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Production document accepts source comments"), FPenParser::ParseDocument(Json, Document))) return false;
+	if (!TestEqual(TEXT("Commented document retains its node"), Document.Children.Num(), 1)) return false;
+	TestEqual(TEXT("String delimiters and escapes remain literal"), Document.Children[0]->Text.Content,
+		FString(TEXT(R"(https://host/a//b/*c*/"quoted\tail)")));
+	TestFalse(TEXT("Pencil source still rejects trailing commas"),
+		FPenParser::ParseSourceObject(TEXT("{/* comment */\"children\":[],}"), Source));
+	TestFalse(TEXT("Pencil source rejects array trailing commas"),
+		FPenParser::ParseSourceObject(TEXT("{\"children\":[{},/* comment */]}"), Source));
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Basic node parsing: frame / text / rectangle
 // ---------------------------------------------------------------------------
@@ -88,6 +118,9 @@ bool FPenParserBasicNodesTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode>& RectNode = Frame->Children[1];
 	TestTrue(TEXT("Rect valid"), RectNode.IsValid());
 	TestEqual(TEXT("Rect type"), RectNode->Type, EDesignNodeType::Rectangle);
+	TestTrue(TEXT("Pencil frame transform origin is its local zero"), Frame->Transform.TransformOrigin.IsNearlyZero());
+	TestTrue(TEXT("Pencil child preserves local-zero transform origin"), RectNode->Transform.TransformOrigin.IsNearlyZero());
+	TestTrue(TEXT("Shared transform origin retains the centered default"), FDesignTransformNodeData().TransformOrigin.Equals(FVector2D(0.5, 0.5)));
 
 	return true;
 }
@@ -194,6 +227,7 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
   "version": "2.13",
   "variables": {
     "icon-name": {"type": "string", "value": "search"},
+    "icon-weight": {"type": "number", "value": 700},
     "icon-family": {"type": "string", "value": "lucide"}
   },
   "children": [
@@ -212,6 +246,7 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
       "type": "icon_font",
       "iconFontName": "$icon-name",
       "iconFontFamily": "$icon-family",
+      "weight": "$icon-weight",
       "reusable": true,
       "width": 16,
       "height": 16
@@ -236,11 +271,14 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
 	TestEqual(TEXT("Current icon type"), CurrentIcon->Type, EDesignNodeType::IconFont);
 	TestEqual(TEXT("Current icon name"), CurrentIcon->Text.IconFontName, FString(TEXT("search")));
 	TestEqual(TEXT("Current icon family"), CurrentIcon->Text.IconFontFamily, FString(TEXT("lucide")));
+	TestEqual(TEXT("Pencil omitted icon weight uses its source default"), CurrentIcon->Text.IconWeight, 200);
+	TestEqual(TEXT("Shared node default is unchanged"), FDesignNode().Text.IconWeight, 400);
 	const TSharedPtr<FDesignNode>& LibraryIcon = Doc.Children[1];
 	if (!TestTrue(TEXT("Library icon valid"), LibraryIcon.IsValid())) return false;
 	TestEqual(TEXT("Library icon type"), LibraryIcon->Type, EDesignNodeType::IconFont);
 	TestEqual(TEXT("Library icon name resolves variables"), LibraryIcon->Text.IconFontName, FString(TEXT("search")));
 	TestEqual(TEXT("Library icon family resolves variables"), LibraryIcon->Text.IconFontFamily, FString(TEXT("lucide")));
+	TestEqual(TEXT("Explicit icon weight resolves its variable"), LibraryIcon->Text.IconWeight, 700);
 	TestEqual(TEXT("Library icon width"), LibraryIcon->Transform.Width.Value, 16.0f);
 	TestEqual(TEXT("Library icon height"), LibraryIcon->Transform.Height.Value, 16.0f);
 
@@ -249,6 +287,7 @@ bool FPenParserIconNodeFormatsTest::RunTest(const FString&)
 	const TSharedPtr<FDesignNode>& Instance = Expansion.ExpandedNode;
 	if (!TestTrue(TEXT("Icon instance valid"), Instance.IsValid())) return false;
 	TestEqual(TEXT("Icon instance type"), Instance->Type, EDesignNodeType::IconFont);
+	TestEqual(TEXT("Name-only instance patch preserves the base weight"), Instance->Text.IconWeight, 700);
 	TestEqual(TEXT("Icon instance name override"), Instance->Text.IconFontName, FString(TEXT("plus")));
 	TestEqual(TEXT("Icon instance family override"), Instance->Text.IconFontFamily, FString(TEXT("feather")));
 	return true;
@@ -441,13 +480,41 @@ bool FPenParserErrorInputTest::RunTest(const FString&)
 		TestEqual(TEXT("No children"), Doc.Children.Num(), 0);
 	}
 
-	// Missing required field on child node: parser keeps the document but drops the bad child.
+	// Omitted Entity identities are stable within the same source structure.
 	{
-		AddExpectedError(TEXT("without id"), EAutomationExpectedErrorFlags::Contains, 1);
-		FDesignDocument Doc;
-		const bool bResult = FPenParser::ParseDocument(TEXT("{\"version\":\"1.0\",\"children\":[{\"type\":\"frame\",\"name\":\"MissingId\"}]}"), Doc);
-		TestTrue(TEXT("Missing-id child does not fail whole document"), bResult);
-		TestEqual(TEXT("Missing-id child skipped"), Doc.Children.Num(), 0);
+		const FString Json = TEXT(R"({"version":"2.21","children":[
+			{"id":"authored:root","type":"frame","children":[
+				{"type":"frame","children":[{"type":"text","content":"Nested"}]},
+				{"type":"rectangle"},{"id":"authored-child","type":"rectangle"}],
+			 "descendants":{"target":{"type":"frame","children":[{"type":"text","content":"Replacement"}]}}},
+			{"type":"frame"}]})");
+		FDesignDocument Doc, Reimport;
+		if (!TestTrue(TEXT("Missing-id document parses"), FPenParser::ParseDocument(Json, Doc))) return false;
+		if (!TestTrue(TEXT("The same document reimports"), FPenParser::ParseDocument(Json, Reimport))) return false;
+		if (!TestEqual(TEXT("Anonymous roots survive"), Doc.Children.Num(), 2)) return false;
+		const auto Root = Doc.Children[0];
+		TestEqual(TEXT("Explicit root identity is unchanged"), Root->Id, FString(TEXT("authored:root")));
+		if (!TestEqual(TEXT("Anonymous siblings survive"), Root->Children.Num(), 3)) return false;
+		if (!TestTrue(TEXT("Reimport preserves the anonymous subtree"), Reimport.Children.Num() == 2
+			&& Reimport.Children[0]->Children.Num() == 3 && Reimport.Children[0]->Children[0]->Children.Num() == 1)) return false;
+		TestEqual(TEXT("Explicit child identity is unchanged"), Root->Children[2]->Id, FString(TEXT("authored-child")));
+		TestTrue(TEXT("Anonymous identity is legal and stable"),
+			!Root->Children[0]->Id.IsEmpty() && !Root->Children[0]->Id.Contains(TEXT("/"))
+			&& Root->Children[0]->Id == Reimport.Children[0]->Children[0]->Id);
+		TestNotEqual(TEXT("Anonymous siblings have distinct identities"), Root->Children[0]->Id, Root->Children[1]->Id);
+		if (!TestEqual(TEXT("Nested anonymous children survive"), Root->Children[0]->Children.Num(), 1)) return false;
+		TestEqual(TEXT("Nested identities reimport unchanged"), Root->Children[0]->Children[0]->Id, Reimport.Children[0]->Children[0]->Children[0]->Id);
+		TestEqual(TEXT("Anonymous root identity reimports unchanged"), Doc.Children[1]->Id, Reimport.Children[1]->Id);
+		const auto* Override = Root->Descendants.Find(TEXT("target"));
+		if (!TestTrue(TEXT("Anonymous structural replacement survives"), Override && Override->Replacement.IsValid())) return false;
+		TestEqual(TEXT("Replacement anonymous child survives"), Override->Replacement->Children.Num(), 1);
+		auto SourceNode = MakeShared<FJsonObject>();
+		SourceNode->SetStringField(TEXT("type"), TEXT("frame"));
+		auto SourceDocument = MakeShared<FJsonObject>();
+		SourceDocument->SetStringField(TEXT("version"), TEXT("2.21"));
+		SourceDocument->SetArrayField(TEXT("children"), {MakeShared<FJsonValueObject>(SourceNode)});
+		TestTrue(TEXT("Caller-owned document parses"), FPenParser::ParseDocumentObject(SourceDocument, Doc));
+		TestFalse(TEXT("Identity normalization leaves caller-owned DOM unchanged"), SourceNode->HasField(TEXT("id")));
 	}
 
 	// Circular ref is rejected by ref expansion instead of crashing conversion.
@@ -825,7 +892,7 @@ bool FPenParserGradientFillsTest::RunTest(const FString&)
 // ---------------------------------------------------------------------------
 // Imported library variables: "$Y:--token" refs through the imports map with
 // node-level theme overrides (values verified against Pencil-rendered
-// references). The library table is registered from a fixture the same way the
+// references). The library document is registered from a fixture the same way the
 // editor-side loader registers real extension libraries.
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -841,6 +908,7 @@ bool FPenParserImportedVariablesTest::RunTest(const FString&)
 	// Library variables come from the runtime registry (normally filled from the
 	// Pencil extension's *.lib.pen files); register the fixture library that the
 	// document's imports map references before parsing.
+	FString DocumentJson;
 	{
 		const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(PluginName);
 		if (!Plugin.IsValid())
@@ -855,12 +923,20 @@ bool FPenParserImportedVariablesTest::RunTest(const FString&)
 			AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *LibraryPath));
 			return false;
 		}
-		PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), LibraryVariablesJson);
+		PenBundledLibraries::RegisterLibraryDocument(TEXT("imported-variables-fixture"),
+			TEXT("{\"version\":\"2.8\",\"children\":[],\"variables\":") + LibraryVariablesJson + TEXT("}"), LibraryPath);
+		const FString DocumentPath = FPaths::Combine(Plugin->GetBaseDir(), FixtureBase, TEXT("imported_variables.json"));
+		if (!FFileHelper::LoadFileToString(DocumentJson, *DocumentPath))
+		{
+			AddError(FString::Printf(TEXT("Failed to load fixture: %s"), *DocumentPath));
+			return false;
+		}
 	}
 
 	FDesignDocument Doc;
-	if (!LoadPenFixture(*this, TEXT("imported_variables.json"), Doc))
-		return false;
+	// This test owns its library key, independently of extension-library scans.
+	DocumentJson.ReplaceInline(TEXT("pencil:sample.lib.pen"), TEXT("pencil:imported-variables-fixture.lib.pen"));
+	if (!FPenParser::ParseDocument(DocumentJson, Doc)) return false;
 
 	TestTrue(TEXT("Imported variable is namespaced under its alias"), Doc.Variables.Contains(TEXT("Y:--primary")));
 
@@ -1310,11 +1386,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserReusedOutputTest,
 bool FPenParserReusedOutputTest::RunTest(const FString&)
 {
 	FDesignDocument Document;
-	if (!TestTrue(TEXT("First document parses"), FPenParser::ParseDocument(TEXT(R"({"version":"1","fonts":[{"name":"First"}],"variables":{"old":{"type":"string","value":"old"}},"children":[{"id":"first","type":"frame"}]})"), Document))) return false;
+	const FString SourcePath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("ReusedOutput.pen"));
+	if (!TestTrue(TEXT("First document parses"), FPenParser::ParseDocument(TEXT(R"({"version":"1","fonts":[{"name":"First"}],"variables":{"old":{"type":"string","value":"old"}},"children":[{"id":"first","type":"frame"}]})"), Document, SourcePath))) return false;
+	TestEqual(TEXT("Source path is normalized once in document state"), Document.SourceDocument().SourceFilePath, FPaths::ConvertRelativePathToFull(SourcePath));
+	TestEqual(TEXT("Source metadata retains the same path"), Document.Metadata.FindRef(TEXT("design.sourceFilePath")), Document.SourceDocument().SourceFilePath);
 	if (!TestTrue(TEXT("Second document parses"), FPenParser::ParseDocument(TEXT(R"({"version":"1","children":[{"id":"second","type":"frame"}]})"), Document))) return false;
 	TestEqual(TEXT("Second parse replaces children"), Document.Children.Num(), 1);
 	TestEqual(TEXT("Second parse removes old fonts"), Document.Fonts.Num(), 0);
 	TestEqual(TEXT("Second parse removes old variables"), Document.Variables.Num(), 0);
+	TestTrue(TEXT("A new pathless source clears both path records"), Document.SourceDocument().SourceFilePath.IsEmpty() && !Document.Metadata.Contains(TEXT("design.sourceFilePath")));
 	if (Document.Children.Num() == 1) TestEqual(TEXT("Only the second node remains"), Document.Children[0]->Id, FString(TEXT("second")));
 	AddExpectedError(TEXT("Invalid design file format"), EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Malformed source fails"), FPenParser::ParseDocument(TEXT("not json"), Document));
@@ -1328,14 +1408,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserImportedComponentsTest,
 
 bool FPenParserImportedComponentsTest::RunTest(const FString&)
 {
-	PenBundledLibraries::RegisterLibraryVariables(TEXT("component-fixture"),
-		TEXT(R"({"--surface":{"type":"color","value":"#123456"},"space":{"type":"number","value":6},"radius":{"type":"number","value":4}})"));
 	PenBundledLibraries::RegisterLibraryDocument(TEXT("component-fixture"), TEXT(R"({
 		"version":"2.8","variables":{"--surface":{"type":"color","value":"#123456"},"space":{"type":"number","value":6},"radius":{"type":"number","value":4}},"children":[{"id":"catalog","type":"frame","children":[
 			{"id":"card","type":"frame","reusable":true,"width":80,"height":24,"fill":"$--surface","padding":["$space","$space"],"cornerRadius":["$radius","$radius"],
-				"children":[{"id":"label","type":"text","content":"Library label"}]}]}]})"));
+				"children":[{"id":"label","type":"text","content":"Library label"}]},
+			{"id":"ordinary-card","type":"frame","width":48,"height":16,"fill":"$--surface"},
+			{"id":"script-component","type":"script","reusable":true,"width":16,"height":8,"scriptUri":"example.js",
+				"inputs":{"id":"source-id","ref":"source-ref","color":"$--surface","shape":{"type":"frame"}}},
+			{"id":"card-ref","type":"ref","reusable":true,"ref":"card","descendants":{"label":{"content":"Library override"}}},
+			{"id":"anonymous-parent","type":"frame","reusable":true,"children":[{"type":"rectangle"}]}]}]})"));
 	FDesignDocument Doc;
-	const FString Json = TEXT(R"({"version":"2.8","imports":{"a":"pencil:component-fixture.lib.pen"},"variables":{"space":{"type":"number","value":99},"radius":{"type":"number","value":99}},
+	const FString Json = TEXT(R"({"version":"2.8","imports":{"a":"pencil:component-fixture.lib.pen","b":"pencil:component-fixture.lib.pen"},"variables":{"space":{"type":"number","value":99},"radius":{"type":"number","value":99}},
 		"children":[{"id":"instance","type":"ref","ref":"a:card",
 			"descendants":{"a:label":{"content":"Instance label"}}},
 			{"id":"authored-component","type":"frame","reusable":true,"width":80,"height":24}]})");
@@ -1351,10 +1434,318 @@ bool FPenParserImportedComponentsTest::RunTest(const FString&)
 	if (!TestEqual(TEXT("Library children are expanded"), Result.ExpandedNode->Children.Num(), 1)) return false;
 	TestEqual(TEXT("Qualified descendant overrides apply"), Result.ExpandedNode->Children[0]->Text.Content, FString(TEXT("Instance label")));
 	TestFalse(TEXT("The non-reusable catalog is not a component definition"), Doc.FindReusableNode(TEXT("a:catalog")).IsValid());
+	TMap<FString, TSharedPtr<FDesignNode>> ReferenceTargets;
+	Doc.BuildReferenceNodeIndex(ReferenceTargets);
+	TestTrue(TEXT("Imported catalog roots are retained as reference targets"),
+	         ReferenceTargets.Contains(TEXT("a:catalog")));
+	auto OrdinaryRef = MakeShared<FDesignNode>();
+	OrdinaryRef->Type = EDesignNodeType::Ref;
+	OrdinaryRef->Id = TEXT("ordinary-library-instance");
+	OrdinaryRef->Ref = TEXT("a:ordinary-card");
+	const auto OrdinaryResult = RefExpander::ExpandRef(OrdinaryRef, Doc);
+	if (!TestTrue(TEXT("Non-reusable library sibling remains available to references"), OrdinaryResult.IsSuccess()))
+		return false;
+	TestEqual(TEXT("Ordinary imported target uses its own library variables"),
+	          OrdinaryResult.ExpandedNode->Visual.TopmostFill().SolidColor, FString(TEXT("#123456")));
+	TestFalse(TEXT("Ordinary imported target remains outside the component index"),
+	          Doc.FindReusableNode(TEXT("a:ordinary-card")).IsValid());
+	const auto ScriptComponent = Doc.FindReusableNode(TEXT("a:script-component"));
+	if (!TestTrue(TEXT("Imported script keeps its qualified node identity"), ScriptComponent.IsValid())) return false;
+	const auto Inputs = ScriptComponent->Source().Pencil.Properties->GetObjectField(TEXT("inputs"));
+	TestEqual(TEXT("Ordinary script id input is not a node identity"), Inputs->GetStringField(TEXT("id")), FString(TEXT("source-id")));
+	TestEqual(TEXT("Ordinary script ref input is not a node identity"), Inputs->GetStringField(TEXT("ref")), FString(TEXT("source-ref")));
+	TestEqual(TEXT("Script input variable references still use the import alias"), Inputs->GetStringField(TEXT("color")), FString(TEXT("$a:--surface")));
+	TestFalse(TEXT("Entity-shaped script data is not assigned a node identity"), Inputs->GetObjectField(TEXT("shape"))->HasField(TEXT("id")));
+	const auto LibraryRef = Doc.FindReusableNode(TEXT("a:card-ref"));
+	if (!TestTrue(TEXT("Imported reusable ref is present"), LibraryRef.IsValid())) return false;
+	TestEqual(TEXT("Actual node ref still uses the import alias"), LibraryRef->Ref, FString(TEXT("a:card")));
+	TestTrue(TEXT("Actual descendant override identities are still qualified"), LibraryRef->Descendants.Contains(TEXT("a:label")));
+	const auto AnonymousParent = Doc.FindReusableNode(TEXT("a:anonymous-parent"));
+	if (!TestTrue(TEXT("Imported anonymous subtree retains its component"), AnonymousParent.IsValid())) return false;
+	if (!TestEqual(TEXT("Imported anonymous child survives"), AnonymousParent->Children.Num(), 1)) return false;
+	TestTrue(TEXT("Generated library identity is qualified after normalization"), AnonymousParent->Children[0]->Id.StartsWith(TEXT("a:pen_")));
+	const auto OtherAliasParent = Doc.FindReusableNode(TEXT("b:anonymous-parent"));
+	if (!TestTrue(TEXT("The second library alias retains its anonymous subtree"), OtherAliasParent.IsValid() && OtherAliasParent->Children.Num() == 1)) return false;
+	TestEqual(TEXT("Aliases qualify the same source-local anonymous identity"), AnonymousParent->Children[0]->Id.RightChop(2), OtherAliasParent->Children[0]->Id.RightChop(2));
+	FDesignDocument Reimport;
+	if (!TestTrue(TEXT("Library reimport succeeds"), FPenParser::ParseDocument(Json, Reimport))) return false;
+	const auto ReimportedParent = Reimport.FindReusableNode(TEXT("a:anonymous-parent"));
+	if (!TestTrue(TEXT("Library reimport preserves anonymous subtree"), ReimportedParent.IsValid() && ReimportedParent->Children.Num() == 1)) return false;
+	TestEqual(TEXT("Library anonymous identity is stable"), AnonymousParent->Children[0]->Id, ReimportedParent->Children[0]->Id);
+
 	const TArray<FDesignFrameInfo> Frames = ExtractTopFrames(Doc);
 	if (!TestEqual(TEXT("Frame selection contains only source frames"), Frames.Num(), 1)) return false;
 	TestEqual(TEXT("Authored reusable roots remain selectable"), Frames[0].Id, FString(TEXT("authored-component")));
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserImageFillSchemaTest,
+	"Design2UMG.Unit.PenParser.ImageFillSchema",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserImageFillSchemaTest::RunTest(const FString&)
+{
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Current image fills parse"), FPenParser::ParseDocument(TEXT(R"JSON({"version":"2.21","children":[
+		{"id":"default","type":"rectangle","reusable":true,"fill":{"type":"image","url":"./image.png"}},
+		{"id":"cover","type":"rectangle","fill":{"type":"image","mode":"cover","transform":[3,1,2,1,-1,0.75]}},
+		{"id":"contain","type":"rectangle","fill":{"type":"image","mode":"contain"}},
+		{"id":"stretch","type":"rectangle","fill":{"type":"image","mode":"stretch"}},
+		{"id":"instance","type":"ref","ref":"default","fill":{"type":"image","mode":"contain","transform":[2,0,0,1,-1,0]}}
+	]})JSON"), Document))) return false;
+	if (!TestEqual(TEXT("All image nodes survive"), Document.Children.Num(), 5)) return false;
+	TestEqual(TEXT("The schema version is preserved"), Document.Version, FString(TEXT("2.21")));
+	TestEqual(TEXT("Omitted mode covers the node"), Document.Children[0]->Visual.TopmostFill().Image.Mode, EDesignImageMode::Fill);
+	const FDesignImageFill& Cover = Document.Children[1]->Visual.TopmostFill().Image;
+	TestEqual(TEXT("Cover maps to fill"), Cover.Mode, EDesignImageMode::Fill);
+	TestEqual(TEXT("Inverse affine a"), Cover.Transform.A, 1.0f);
+	TestEqual(TEXT("Inverse affine b"), Cover.Transform.B, -2.0f);
+	TestEqual(TEXT("Inverse affine c"), Cover.Transform.C, -1.0f);
+	TestEqual(TEXT("Inverse affine d"), Cover.Transform.D, 3.0f);
+	TestEqual(TEXT("Inverse affine tx"), Cover.Transform.TX, 2.5f);
+	TestEqual(TEXT("Inverse affine ty"), Cover.Transform.TY, -3.25f);
+	TestEqual(TEXT("Contain maps to fit"), Document.Children[2]->Visual.TopmostFill().Image.Mode, EDesignImageMode::Fit);
+	TestEqual(TEXT("Stretch stays stretch"), Document.Children[3]->Visual.TopmostFill().Image.Mode, EDesignImageMode::Stretch);
+	const auto Expanded = RefExpander::ExpandRef(Document.Children[4], Document);
+	if (!TestTrue(TEXT("An image override expands"), Expanded.ExpandedNode.IsValid())) return false;
+	TestEqual(TEXT("Instance mode survives expansion"), Expanded.ExpandedNode->Visual.TopmostFill().Image.Mode, EDesignImageMode::Fit);
+	TestEqual(TEXT("Instance crop samples the right half"), Expanded.ExpandedNode->Visual.TopmostFill().Image.Transform.A, 0.5f);
+	TestEqual(TEXT("Instance crop starts at the image midpoint"), Expanded.ExpandedNode->Visual.TopmostFill().Image.Transform.TX, 0.5f);
+	FUMGWidgetNode ImageWidget;
+	ImageFillUtils::ApplyImageFillProperties(ImageWidget, Expanded.ExpandedNode->Visual.TopmostFill().Image);
+	TestEqual(TEXT("Crop sizing survives design-to-widget transfer"), ImageWidget.Brush.Image.CropFitMode.Get(FString()), FString(TEXT("Fit")));
+	if (!TestTrue(TEXT("The transferred crop has a sampling matrix"), ImageWidget.Brush.Image.Transform.IsSet())) return false;
+	TestEqual(TEXT("The crop remains available to materialization"), ImageWidget.Brush.Image.Transform.GetValue().TX, 0.5f);
+	FDesignImageFill FinalSampling;
+	FinalSampling.Transform.A = 0.5f;
+	ImageWidget = FUMGWidgetNode();
+	ImageFillUtils::ApplyImageFillProperties(ImageWidget, FinalSampling);
+	TestFalse(TEXT("Final sampling matrices do not acquire a crop sizing stage"), ImageWidget.Brush.Image.CropFitMode.IsSet());
+	auto MeasuredImage = MakeShared<FDesignNode>(*Document.Children[0]);
+	MeasuredImage->Transform.Width = FDesignSize::Fill(200);
+	MeasuredImage->Transform.Height = FDesignSize::Fit(100);
+	ImageWidget = FUMGWidgetNode();
+	VisualMapperFillTransfer::ApplyFillProperties(ImageWidget, MeasuredImage);
+	TestEqual(TEXT("Resolved fill width reaches image bounds"), ImageWidget.Bounds.W, 200.0f);
+	TestEqual(TEXT("Resolved fit height reaches image bounds"), ImageWidget.Bounds.H, 100.0f);
+	TestFalse(TEXT("Raster sizing does not force a layout width"), ImageWidget.WidgetStyle.WidthOverride.IsSet());
+	TestFalse(TEXT("Raster sizing does not force a layout height"), ImageWidget.WidgetStyle.HeightOverride.IsSet());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserVariableAndInstanceThemeTest,
+	"Design2UMG.Unit.PenParser.VariableAndInstanceTheme",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserVariableAndInstanceThemeTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	const FString Json = TEXT(R"JSON({"version":"2.21","themes":{"mode":["small","large"]},"variables":{
+		"size":{"type":"number","value":[{"value":12},{"value":28,"theme":{"mode":"large"}}]},
+		"sizeAlias":{"type":"number","value":"$size"},"weight":{"type":"string","value":"700"},
+		"style":{"type":"string","value":"italic"},"label":{"type":"string","value":"Ready"}},"children":[
+		{"id":"component","type":"frame","reusable":true,"layout":"none","width":"$sizeAlias","children":[
+			{"id":"text","type":"text","content":"$label","fontSize":"$sizeAlias","fontWeight":"$weight","fontStyle":"$style"}]},
+		{"id":"instance","type":"ref","ref":"component","theme":{"mode":"large"},"descendants":{"text":{"content":"Authored"}}},
+		{"id":"absolute","type":"rectangle","layoutPosition":"absolute","width":10,"height":10}]})JSON");
+	if (!TestTrue(TEXT("Semantic fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
+	if (!TestEqual(TEXT("Fixture roots survive"), Doc.Children.Num(), 3)) return false;
+	TestEqual(TEXT("Numeric aliases resolve"), Doc.Children[0]->Transform.Width.Value, 12.0f);
+	TestEqual(TEXT("Weight variables resolve"), Doc.Children[0]->Children[0]->Text.FontWeight, FString(TEXT("700")));
+	TestEqual(TEXT("Style variables resolve"), Doc.Children[0]->Children[0]->Text.FontStyle, FString(TEXT("italic")));
+	TestTrue(TEXT("Absolute layout is preserved"), Doc.Children[2]->LayoutData.bAbsoluteLayoutPositioning);
+	auto Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc).ExpandedNode;
+	if (!TestTrue(TEXT("Instance expands"), Expanded.IsValid())) return false;
+	FDesignVariableResolver Resolver(Doc.Variables);
+	Resolver.SetThemeContext(FDesignVariableResolver::BuildDocumentTheme(Doc.Themes));
+	RefExpander::ReThemeNode(Expanded, Resolver);
+	TestEqual(TEXT("Instance theme updates dimensions"), Expanded->Transform.Width.Value, 28.0f);
+	TestEqual(TEXT("Instance theme updates text size"), Expanded->Children[0]->Text.FontSize, 28.0f);
+	TestEqual(TEXT("An authored override stays authored"), Expanded->Children[0]->Text.Content, FString(TEXT("Authored")));
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserRelativeLibrariesTest,
+	"Design2UMG.Unit.PenParser.RelativeLibraries",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserRelativeLibrariesTest::RunTest(const FString&)
+{
+	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG/Parser"), FGuid::NewGuid().ToString());
+	const FString LibraryDirectory = FPaths::Combine(Directory, TEXT("lib"));
+	IFileManager::Get().MakeDirectory(*LibraryDirectory, true);
+	const FString MainPath = FPaths::Combine(Directory, TEXT("main.pen"));
+	const FString LibraryPath = FPaths::Combine(LibraryDirectory, TEXT(" design.pen"));
+	const FString NestedPath = FPaths::Combine(LibraryDirectory, TEXT("nested.pen"));
+	const FString Main = TEXT(R"JSON(// Main document
+/* source metadata */ {"version":"2.21","imports":{"K":"lib/%20design.pen","B":"pencil:relative-library-fixture.lib.pen"},"children":[
+		{"id":"instance","type":"ref","ref":"K:card","theme":{"K:mode":"large"},"descendants":{
+			"K:label":{"content":"Literal","metadata":{"type":"label","value":7},"context":"description"},
+			"K:holder":{"slot":false},"K:nested":{"ref":"K:N:other","descendants":{"K:N:body":{"content":"Overridden"}}}}}]})JSON");
+	const FString Library = TEXT(R"JSON(// Library document
+/* source metadata */ {"version":"2.21","imports":{"N":"nested.pen"},"themes":{"mode":["small","large"]},
+		"variables":{"size":{"type":"number","value":[{"value":14},{"value":30,"theme":{"mode":"large"}}]},"alias":{"type":"number","value":"$size"}},"children":[
+		{"id":"card","type":"frame","reusable":true,"width":"$alias","children":[
+			{"id":"label","type":"text","fontSize":"$alias","content":"Text"},
+			{"id":"holder","type":"frame","slot":["N:other"]},
+			{"id":"nested","type":"ref","ref":"N:leaf"},
+			{"id":"image","type":"rectangle","fill":{"type":"image","url":"../picture%20one.png"}}]}]})JSON");
+	const FString Nested = TEXT(R"JSON(// Nested document
+/* source metadata */ {"version":"2.21","children":[
+		{"id":"leaf","type":"text","reusable":true,"content":"Leaf"},
+		{"id":"other","type":"frame","reusable":true,"children":[{"id":"body","type":"text","content":"Other"}]}]})JSON");
+	PenBundledLibraries::RegisterLibraryDocument(TEXT("relative-library-fixture"), Library, LibraryPath);
+	const bool Written = FFileHelper::SaveStringToFile(Main, *MainPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
+		&& FFileHelper::SaveStringToFile(Library, *LibraryPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)
+		&& FFileHelper::SaveStringToFile(Nested, *NestedPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+	FDesignDocument Doc;
+	const bool Parsed = Written && FPenParser::ParseDocumentFile(MainPath, Doc);
+	// These are test-owned temporary inputs, not corpus design files.
+	for (const FString& Path : {MainPath, LibraryPath, NestedPath}) IFileManager::Get().Delete(*Path);
+	IFileManager::Get().DeleteDirectory(*LibraryDirectory);
+	IFileManager::Get().DeleteDirectory(*Directory);
+	if (!TestTrue(TEXT("Relative URI libraries load through the production file entry"), Parsed)) return false;
+	TestTrue(TEXT("A local variable alias is namespaced"), Doc.Variables.Contains(TEXT("K:alias")));
+	TMap<FString, TSharedPtr<FDesignNode>> Definitions;
+	Doc.BuildReusableNodeIndex(Definitions);
+	if (!TestTrue(TEXT("Library component is indexed"), Definitions.Contains(TEXT("K:card")))) return false;
+	const auto& Card = Definitions[TEXT("K:card")];
+	TestEqual(TEXT("Recommended slots keep namespaced IDs"), Card->Children[1]->Source().Pencil.SlotRecommendations.GetValue()[0], FString(TEXT("K:N:other")));
+	FString ImagePath = FPaths::ConvertRelativePathToFull(FPaths::Combine(Directory, TEXT("picture one.png")));
+	FPaths::NormalizeFilename(ImagePath);
+	TestEqual(TEXT("Images use the importing library directory"), Card->Children[3]->Visual.TopmostFill().Image.Url, ImagePath);
+	if (!TestTrue(TEXT("Registered library component is indexed"), Definitions.Contains(TEXT("B:card")))) return false;
+	TestEqual(TEXT("Registered libraries retain their own resource directory"), Definitions[TEXT("B:card")]->Children[3]->Visual.TopmostFill().Image.Url, ImagePath);
+	auto Expanded = RefExpander::ExpandRef(Doc.Children[0], Doc).ExpandedNode;
+	if (!TestTrue(TEXT("Imported instance expands"), Expanded.IsValid())) return false;
+	FDesignVariableResolver Resolver(Doc.Variables);
+	RefExpander::ReThemeNode(Expanded, Resolver);
+	TestEqual(TEXT("Namespaced theme reaches numeric aliases"), Expanded->Transform.Width.Value, 30.0f);
+	TestEqual(TEXT("Namespaced theme reaches text dimensions"), Expanded->Children[0]->Text.FontSize, 30.0f);
+	TestEqual(TEXT("Literal descendant overrides remain literal"), Expanded->Children[0]->Text.Content, FString(TEXT("Literal")));
+	TestEqual(TEXT("Context survives descendant expansion"), Expanded->Children[0]->Source().Pencil.Context, FString(TEXT("description")));
+	TestTrue(TEXT("Metadata survives descendant expansion"), Expanded->Children[0]->Source().Pencil.MetadataJson.Contains(TEXT("label")));
+	TestFalse(TEXT("slot false removes the recommendation"), Expanded->Children[1]->Source().Pencil.SlotRecommendations.IsSet());
+	TestFalse(TEXT("slot false clears placeholder semantics"), Expanded->Children[1]->LayoutData.bSemanticPlaceholderSurface);
+	const auto NestedInstance = RefExpander::ExpandRef(Expanded->Children[2], Doc).ExpandedNode;
+	if (!TestTrue(TEXT("A ref target can be overridden"), NestedInstance.IsValid())) return false;
+	TestEqual(TEXT("The nested instance uses the new target"), NestedInstance->Children[0]->Text.Content, FString(TEXT("Overridden")));
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserPrimitiveGeometryTest,
+	"Design2UMG.Unit.PenParser.PrimitiveGeometry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserPrimitiveGeometryTest::RunTest(const FString&)
+{
+	FDesignDocument Doc;
+	const FString Json = TEXT(R"JSON({"version":"2.21","children":[
+		{"id":"polygon","type":"polygon","width":120,"height":80,"polygonCount":7,"cornerRadius":4,"fill":["#ffffff","#ff0000"]},
+		{"id":"arc","type":"ellipse","width":100,"height":60,"innerRadius":0.5,"startAngle":90,"sweepAngle":-270,"fill":"#ffffff"},
+		{"id":"path","type":"path","reusable":true,"width":80,"height":40,"geometry":"M10 20L30 20L30 40Z","viewBox":[0,0,80,40],"fill":{"type":"image","url":"image.png"}},
+		{"id":"pathInstance","type":"ref","ref":"path","viewBox":[10,20,40,20]},
+		{"id":"gradientStroke","type":"path","width":80,"height":40,"geometry":"M10 20L30 20L30 30Z","strokeWidth":2,
+		 "stroke":{"type":"gradient","gradientType":"linear","colors":[{"color":"#ffffff","position":0},{"color":"#000000","position":1}]}}]})JSON");
+	if (!TestTrue(TEXT("Primitive geometry fixture parses"), FPenParser::ParseDocument(Json, Doc))) return false;
+	if (!TestEqual(TEXT("All source shapes survive"), Doc.Children.Num(), 5)) return false;
+	auto Polygon = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Doc.Children[0]);
+	TestTrue(TEXT("A native polygon has actual path geometry"), Polygon.Widget.Path.Geometry.IsSet());
+	TestTrue(TEXT("Polygon radius is rendered as arcs"), Polygon.Widget.Path.Geometry.Get(FString()).Contains(TEXT("A")));
+	TestTrue(TEXT("A valid radius is retained on a non-square polygon"), Polygon.Widget.Path.Geometry.Get(FString()).Contains(TEXT("A 4.000000 4.000000")));
+	TestTrue(TEXT("A supported polygon emits no downgrade warning"), Polygon.Warnings.IsEmpty());
+	VisualMapper::ApplyVisualProperties(Polygon.Widget, Doc.Children[0]);
+	TestFalse(TEXT("Baked corners are not replaced by a rounded rectangle brush"), Polygon.Widget.Brush.DrawAs.IsSet());
+	const auto Layered = VisualMapper::WrapWithMultiFill(MoveTemp(Polygon.Widget), Doc.Children[0], FVisualMapperOptions());
+	if (!TestEqual(TEXT("Every fill is drawn exactly once"), Layered.Children.Num(), 2)) return false;
+	TestTrue(TEXT("Every fill keeps the polygon mask"), Layered.Children[0].Path.Geometry.IsSet() && Layered.Children[1].Path.Geometry.IsSet());
+	const auto Arc = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Doc.Children[1]);
+	TestTrue(TEXT("A partial ring uses a real path"), Arc.Widget.Path.Geometry.IsSet());
+	TestTrue(TEXT("The arc remains in the whole ellipse box"), Arc.Widget.Path.CanvasSize.IsSet());
+	const auto ImagePath = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Doc.Children[2]);
+	TestTrue(TEXT("An image-filled path keeps its geometry mask"), ImagePath.Widget.Path.Geometry.IsSet());
+	TestTrue(TEXT("The source viewBox reaches the native path"), ImagePath.Widget.Path.ViewBox.IsSet() && ImagePath.Widget.Path.ViewBox.GetValue().Equals(FVector4(0, 0, 80, 40)));
+	const auto Expanded = RefExpander::ExpandRef(Doc.Children[3], Doc).ExpandedNode;
+	TestTrue(TEXT("An instance overrides the viewBox"), Expanded.IsValid() && Expanded->Shape.ViewBox.IsSet() && Expanded->Shape.ViewBox.GetValue().Equals(FVector4(10, 20, 40, 20)));
+	const auto Stroked = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Doc.Children[4]);
+	TestTrue(TEXT("Raw SVG defaults to independent tight-bounds mapping"), Stroked.Widget.Path.FitGeometryToBounds.Get(false));
+	TestTrue(TEXT("A native gradient stroke has a drawing path and paint"), Stroked.Widget.Path.Geometry.IsSet() && Stroked.Widget.Path.StrokeGradient.Stops.Num() == 2);
+	FDesignDocument ExportedDocument;
+	const FString FigmaJson = TEXT(R"JSON({"document":{"id":"doc","type":"DOCUMENT","children":[{"id":"canvas","type":"CANVAS","children":[
+		{"id":"vector","type":"VECTOR","absoluteBoundingBox":{"x":0,"y":0,"width":80,"height":40},
+		 "fills":[{"type":"SOLID","color":{"r":1,"g":1,"b":1,"a":1}}],"fillGeometry":[{"path":"M10 20L30 20L30 30Z","windingRule":"NONZERO"}]}]}]}})JSON");
+	if (!TestTrue(TEXT("Exported node-local geometry parses"), FFigmaParser::ParseDocument(FigmaJson, ExportedDocument))) return false;
+	if (!TestEqual(TEXT("The exported vector survives"), ExportedDocument.Children.Num(), 1)) return false;
+	const auto Exported = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(ExportedDocument.Children[0]);
+	TestFalse(TEXT("Exported node-local geometry does not inherit raw SVG fitting"), Exported.Widget.Path.FitGeometryToBounds.Get(false));
+	TestTrue(TEXT("Geometry generation does not mutate the parsed polygon"), Doc.Children[0]->Shape.Geometry.IsEmpty());
+	FDesignDocument RoundedPolygonDocument;
+	if (!TestTrue(TEXT("An oversized polygon radius parses"), FPenParser::ParseDocument(
+		TEXT(R"JSON({"version":"2.21","children":[{"id":"roundedPolygon","type":"polygon","width":100,"height":100,"polygonCount":3,"cornerRadius":30,"fill":"#ffffff"}]})JSON"), RoundedPolygonDocument))) return false;
+	const auto RoundedPolygon = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RoundedPolygonDocument.Children[0]);
+	TArray<FString> RoundedPathTokens;
+	RoundedPolygon.Widget.Path.Geometry.Get(FString()).ParseIntoArrayWS(RoundedPathTokens);
+	if (!TestEqual(TEXT("A clamped triangle retains three circular arcs and a closed path"), RoundedPathTokens.Num(), 34)) return false;
+	TestTrue(TEXT("The radius is limited by adjacent tangent distances, not half the edge"),
+		FMath::IsNearlyEqual(FCString::Atod(*RoundedPathTokens[4]), 25.0, 0.0001));
+	TestTrue(TEXT("Adjacent arcs meet without a reversed connecting edge"),
+		FVector2D(FCString::Atod(*RoundedPathTokens[9]), FCString::Atod(*RoundedPathTokens[10])).Equals(
+			FVector2D(FCString::Atod(*RoundedPathTokens[12]), FCString::Atod(*RoundedPathTokens[13])), 0.0001));
+	FDesignDocument ShaderStrokeDocument;
+	if (!TestTrue(TEXT("A shader stroke uses the normal Pencil paint parser"), FPenParser::ParseDocument(
+		TEXT(R"JSON({"version":"2.21","children":[{"id":"shape","type":"path","width":16,"height":16,
+		"geometry":"M0 0L16 0L16 16L0 16Z","viewBox":[0,0,16,16],"strokeWidth":4,"strokeAlignment":"outer",
+		"stroke":{"type":"shader","url":"stroke.glsl"}}]})JSON"), ShaderStrokeDocument))) return false;
+	const auto ShaderSource = ShaderStrokeDocument.Children[0];
+	auto ShaderSurface = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(ShaderSource).Widget;
+	const auto ShaderStroke = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ShaderSurface), ShaderSource);
+	TestTrue(TEXT("The shader stroke owns its original contour and clipping contract"),
+		ShaderStroke.Path.Geometry.IsSet() && ShaderStroke.Path.StrokeColor.IsSet() &&
+		!ShaderStroke.Path.FillColor.IsSet() && ShaderStroke.Path.StrokeAlignment.Get(FString()) == TEXT("outer"));
+	TestTrue(TEXT("A shader stroke is an independent native paint with the original shader resolution"),
+		ShaderStroke.Type == TEXT("Image") && ShaderStroke.Brush.Shader.IsSet() &&
+		ShaderStroke.Brush.Shader->Url == TEXT("stroke.glsl") && ShaderStroke.Brush.Shader->Size.Equals(FVector2D(16,16)));
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPenParserMeshGradientTest,
+    "Design2UMG.Unit.PenParser.MeshGradient",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPenParserMeshGradientTest::RunTest(const FString&)
+{
+    FDesignDocument Doc;
+    const FString Json = TEXT(R"JSON({"version":"2.21","themes":{"mode":["light","dark"]},"variables":{
+        "ink":{"type":"color","value":[{"value":"#ff000080"},{"value":"#00ff00ff","theme":{"mode":"dark"}}]}},"children":[
+        {"id":"mesh","type":"rectangle","reusable":true,"width":32,"height":16,"fill":{"type":"mesh_gradient","columns":2,"rows":2,"opacity":0.5,
+        "colors":["$ink","#0000ff","#ffffff","#000000"],"points":[[0,0],{"position":[1,0],"leftHandle":[-0.1,0.05]},[0,1],[1,1]]}},
+        {"id":"instance","type":"ref","ref":"mesh","theme":{"mode":"dark"}}]})JSON");
+    if (!TestTrue(TEXT("Mesh document parses"), FPenParser::ParseDocument(Json, Doc))) return false;
+    const auto& Fill = Doc.Children[0]->Visual.TopmostFill();
+    if (!TestTrue(TEXT("Mesh remains a two-dimensional gradient"), Fill.Gradient.Mesh.IsSet())) return false;
+    const auto& Mesh = Fill.Gradient.Mesh.GetValue();
+    TestEqual(TEXT("Mesh retains four grid vertices, not stops"), Mesh.Vertices.Num(), 4);
+    TestTrue(TEXT("Mesh does not acquire linear stops"), Fill.Gradient.Colors.IsEmpty());
+    TestEqual(TEXT("RGBA bytes are independent of paint opacity"), Mesh.Vertices[0].Color, FColor(255, 0, 0, 128));
+    TestEqual(TEXT("Layer opacity survives"), Mesh.Opacity, 0.5f);
+    auto Mapped = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(Doc.Children[0]);
+    VisualMapper::ApplyVisualProperties(Mapped.Widget, Doc.Children[0]);
+    TestTrue(TEXT("Mapping keeps the mesh payload"), Mapped.Widget.Brush.Gradient.Mesh.IsSet());
+    TestTrue(TEXT("Omitted handles follow the fixed grid spacing"), Mesh.Vertices[0].RightHandle.Equals(FVector2D(0.25, 0)));
+    TestTrue(TEXT("Explicit relative handle survives"), Mesh.Vertices[1].LeftHandle.Equals(FVector2D(-0.1, 0.05)));
+    auto Expanded = RefExpander::ExpandRef(Doc.Children[1], Doc).ExpandedNode;
+    FDesignVariableResolver Resolver(Doc.Variables);
+    Resolver.SetThemeContext(FDesignVariableResolver::BuildDocumentTheme(Doc.Themes));
+    RefExpander::ReThemeNode(Expanded, Resolver);
+    TestEqual(TEXT("Instance theme resolves mesh vertex colors"), Expanded->Visual.TopmostFill().Gradient.Mesh.GetValue().Vertices[0].Color, FColor::Green);
+    TSharedPtr<FDesignNode> LayeredSource = MakeShared<FDesignNode>(*Doc.Children[0]);
+    FDesignFill Solid;
+    Solid.Type = EDesignFillType::Color;
+    Solid.SolidColor = TEXT("#ffffff");
+    LayeredSource->Visual.Fills.Add(Solid);
+    auto Content = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(LayeredSource);
+    const auto Layered = VisualMapper::WrapWithMultiFill(MoveTemp(Content.Widget), LayeredSource, FVisualMapperOptions());
+    TestTrue(TEXT("A mesh survives as its own multi-fill layer"), Layered.Children.Num() == 2 && Layered.Children[0].Brush.Gradient.Mesh.IsSet());
+    return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Typed text payload application and parity for the text widget family (TextBlock, editable text family, rich text, letter spacing, JSON round trips).
+// Typed text payload application for the text widget family (TextBlock, editable text family, rich text, letter spacing, JSON round trips).
 
 #include "Design2UMGWidgetPropertyAccess.h"
 #include "UObject/Package.h"
@@ -79,7 +79,7 @@ namespace
 		return bHeightIncreased;
 	}
 
-	// UTextLayoutWidget reflected layout properties shared by the parity/serialization tests.
+	// UTextLayoutWidget reflected layout properties shared by the application/serialization tests.
 	// UEditableText/UEditableTextBox shadow the base-class Justification with their own property,
 	// so only the multi-line family reads justification through this reflection set; the
 	// single-line family keeps its getter-based reads (see the state readers below).
@@ -134,7 +134,7 @@ namespace
 		float FontSize = 0.0f;
 		FString TypefaceFontName;
 		float LetterSpacing = 0.0f;
-		FString FontObjectPath;
+		bool bHasValidFont = false;
 		FLinearColor StyleTextColor = FLinearColor::White;
 		FLinearColor ForegroundColor = FLinearColor::White;
 		bool bAutoWrap = false;
@@ -154,7 +154,7 @@ namespace
 		State.FontSize = Design2UMGWidgetPropertyAccess::GetFont(Style).Size;
 		State.TypefaceFontName = Design2UMGWidgetPropertyAccess::GetFont(Style).TypefaceFontName.ToString();
 		State.LetterSpacing = Design2UMGWidgetPropertyAccess::GetFont(Style).LetterSpacing;
-		State.FontObjectPath = Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject->GetPathName() : FString();
+		State.bHasValidFont = Design2UMGWidgetPropertyAccess::GetFont(Style).HasValidFont();
 		State.StyleTextColor = Design2UMGWidgetPropertyAccess::GetTextColor(Style).GetSpecifiedColor();
 		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
 		State.Justification = Design2UMGWidgetPropertyAccess::GetJustification(*Widget);
@@ -171,7 +171,7 @@ namespace
 		State.FontSize = Font.Size;
 		State.TypefaceFontName = Font.TypefaceFontName.ToString();
 		State.LetterSpacing = Font.LetterSpacing;
-		State.FontObjectPath = Font.FontObject ? Font.FontObject->GetPathName() : FString();
+		State.bHasValidFont = Font.HasValidFont();
 		State.StyleTextColor = Widget->WidgetStyle.ColorAndOpacity.GetSpecifiedColor();
 		State.Justification = Design2UMGWidgetPropertyAccess::GetJustification(*Widget);
 		State.Shaping = Widget->ShapedTextOptions;
@@ -190,7 +190,7 @@ namespace
 		State.FontSize = Design2UMGWidgetPropertyAccess::GetFont(Style).Size;
 		State.TypefaceFontName = Design2UMGWidgetPropertyAccess::GetFont(Style).TypefaceFontName.ToString();
 		State.LetterSpacing = Design2UMGWidgetPropertyAccess::GetFont(Style).LetterSpacing;
-		State.FontObjectPath = Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(Style).FontObject->GetPathName() : FString();
+		State.bHasValidFont = Design2UMGWidgetPropertyAccess::GetFont(Style).HasValidFont();
 		State.StyleTextColor = Design2UMGWidgetPropertyAccess::GetTextColor(Style).GetSpecifiedColor();
 		State.ForegroundColor = Style.ForegroundColor.GetSpecifiedColor();
 		State.bAutoWrap = Widget->GetAutoWrapText();
@@ -208,7 +208,7 @@ namespace
 		State.FontSize = Font.Size;
 		State.TypefaceFontName = Font.TypefaceFontName.ToString();
 		State.LetterSpacing = Font.LetterSpacing;
-		State.FontObjectPath = Font.FontObject ? Font.FontObject->GetPathName() : FString();
+		State.bHasValidFont = Font.HasValidFont();
 		State.StyleTextColor = Widget->WidgetStyle.ColorAndOpacity.GetSpecifiedColor();
 		State.bAutoWrap = Widget->GetAutoWrapText();
 		State.WrapTextAt = Widget->GetWrapTextAt();
@@ -216,62 +216,51 @@ namespace
 		return State;
 	}
 
-	// Compare typed and serialized properties for the editable-text family.
-	// Profile flags select text-box colors and multiline layout assertions.
-	void AssertTextFamilyParity(
+	// Check authored values on the editable-text family. Profile flags select
+	// text-box colors and multiline layout assertions.
+	void AssertTextFamilyProperties(
 		FAutomationTestBase& Test,
 		const TCHAR* WidgetLabel,
 		bool bTextBoxStyle,
 		bool bWrapLayout,
 		const FTextFamilyWidgetState& Typed,
-		const FTextFamilyWidgetState& Serialized,
+		const FUMGWidgetNode& Node,
+		ETextJustify::Type ExpectedJustification,
+		int32 ExpectedTracking,
 		const FLinearColor& ExpectedTextColor)
 	{
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized text match"), WidgetLabel), Typed.Text, Serialized.Text);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized hint match"), WidgetLabel), Typed.Hint, Serialized.Hint);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized font size match"), WidgetLabel), Typed.FontSize, Serialized.FontSize);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized typeface match"), WidgetLabel), Typed.TypefaceFontName, Serialized.TypefaceFontName);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized letter spacing match"), WidgetLabel), Typed.LetterSpacing, Serialized.LetterSpacing);
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized font object path match"), WidgetLabel), Typed.FontObjectPath, Serialized.FontObjectPath);
+		Test.TestEqual(FString::Printf(TEXT("%s text applied"), WidgetLabel), Typed.Text, Node.Text.Text.GetValue());
+		Test.TestEqual(FString::Printf(TEXT("%s hint applied"), WidgetLabel), Typed.Hint, Node.Text.HintText.GetValue());
+		Test.TestEqual(FString::Printf(TEXT("%s font size applied"), WidgetLabel), Typed.FontSize, Node.TextStyle.FontSize);
+		Test.TestEqual(FString::Printf(TEXT("%s typeface applied"), WidgetLabel), Typed.TypefaceFontName, Node.Text.TypefaceFontName.GetValue());
+		Test.TestEqual(FString::Printf(TEXT("%s letter spacing applied as tracking"), WidgetLabel), Typed.LetterSpacing, static_cast<float>(ExpectedTracking));
+		Test.TestTrue(FString::Printf(TEXT("%s retains a valid Slate font"), WidgetLabel), Typed.bHasValidFont);
+		Test.TestTrue(FString::Printf(TEXT("%s typed text color follows normalized typed node color"), WidgetLabel),
+			Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 		if (bTextBoxStyle)
 		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed text color follows normalized typed node color"), WidgetLabel),
-				Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 			Test.TestTrue(FString::Printf(TEXT("%s typed foreground color follows normalized typed node color"), WidgetLabel),
 				Typed.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
-			Test.TestTrue(FString::Printf(TEXT("Second %s text color follows normalized typed node color"), WidgetLabel),
-				Serialized.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
-			Test.TestTrue(FString::Printf(TEXT("Second %s foreground color follows normalized typed node color"), WidgetLabel),
-				Serialized.ForegroundColor.Equals(ExpectedTextColor, 0.0001f));
-		}
-		else
-		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed color follows normalized typed node color"), WidgetLabel),
-				Typed.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
-			Test.TestTrue(FString::Printf(TEXT("Second %s color follows normalized typed node color"), WidgetLabel),
-				Serialized.StyleTextColor.Equals(ExpectedTextColor, 0.0001f));
 		}
 		if (bWrapLayout)
 		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized auto-wrap match"), WidgetLabel),
-				Typed.bAutoWrap == Serialized.bAutoWrap);
-			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized wrap width match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.WrapTextAt, Serialized.WrapTextAt, 0.001f));
-			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized line height match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.LineHeight, Serialized.LineHeight, 0.001f));
+			Test.TestEqual(FString::Printf(TEXT("%s auto-wrap applied"), WidgetLabel), Typed.bAutoWrap, Node.Text.bAutoWrapText.GetValue());
+			Test.TestTrue(FString::Printf(TEXT("%s wrap width applied"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.WrapTextAt, Node.Text.WrapTextAt.GetValue(), 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s line height applied"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.LineHeight, Node.Text.LineHeightPercentage.GetValue(), 0.001f));
 		}
-		Test.TestEqual(FString::Printf(TEXT("%s typed and serialized justification match"), WidgetLabel),
-			Typed.Justification, Serialized.Justification);
+		Test.TestEqual(FString::Printf(TEXT("%s justification applied"), WidgetLabel), Typed.Justification, ExpectedJustification);
 		if (bWrapLayout)
 		{
-			Test.TestTrue(FString::Printf(TEXT("%s typed and serialized margin match"), WidgetLabel),
-				FMath::IsNearlyEqual(Typed.Margin.Left, Serialized.Margin.Left, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Top, Serialized.Margin.Top, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Right, Serialized.Margin.Right, 0.001f)
-				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Serialized.Margin.Bottom, 0.001f));
+			Test.TestTrue(FString::Printf(TEXT("%s padding applied as internal margin"), WidgetLabel),
+				FMath::IsNearlyEqual(Typed.Margin.Left, Node.WidgetStyle.Padding->Left, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Top, Node.WidgetStyle.Padding->Top, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Right, Node.WidgetStyle.Padding->Right, 0.001f)
+				&& FMath::IsNearlyEqual(Typed.Margin.Bottom, Node.WidgetStyle.Padding->Bottom, 0.001f));
 		}
-		Test.TestTrue(FString::Printf(TEXT("%s typed and serialized icon shaping match"), WidgetLabel),
-			AreShapedTextOptionsEqual(Typed.Shaping, Serialized.Shaping));
+		Test.TestTrue(FString::Printf(TEXT("%s icon uses full shaping"), WidgetLabel),
+			Typed.Shaping.bOverride_TextShapingMethod && Typed.Shaping.TextShapingMethod == ETextShapingMethod::FullShaping);
 	}
 }
 
@@ -295,16 +284,13 @@ bool FTextBlockSourceShadowExtentTest::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadParityTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTextBlockUsesTypedTextPayloadTest,
 	"Design2UMG.PropertyApplier.TextBlockUsesTypedTextPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
+bool FTextBlockUsesTypedTextPayloadTest::RunTest(const FString& Parameters)
 {
-	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackage());
-	UTextBlock* SerializedWidget = NewObject<UTextBlock>(GetTransientPackage());
-	TestTrue(TEXT("Typed TextBlock created"), TypedWidget != nullptr);
-	TestTrue(TEXT("Serialized TextBlock created"), SerializedWidget != nullptr);
-	if (!TypedWidget || !SerializedWidget)
+	UTextBlock* Widget = NewTextFamilyWidget<UTextBlock>(*this, TEXT("TextBlock created"));
+	if (!Widget)
 	{
 		return false;
 	}
@@ -328,69 +314,52 @@ bool FTextBlockUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters
 	Node.Shadow.ShadowOffset = FVector2D(2.0f, 3.0f);
 	Node.Shadow.ShadowColorAndOpacity = FLinearColor(0.9f, 0.1f, 0.2f, 0.5f);
 
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedWidget, Node);
+	const UObject* InitialFontObject = Design2UMGWidgetPropertyAccess::GetFont(*Widget).FontObject;
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Widget, Node);
 
 	FTextLayoutProperties LayoutProperties;
 	if (!FindTextLayoutProperties(*this, LayoutProperties))
 	{
 		return false;
 	}
-	const FStructProperty* MarginProperty = LayoutProperties.Margin;
-	const FFloatProperty* LineHeightProperty = LayoutProperties.LineHeight;
-	const FByteProperty* JustificationProperty = LayoutProperties.Justification;
-	const FStructProperty* ShapedTextOptionsProperty = LayoutProperties.ShapedTextOptions;
+	FMargin Margin;
+	float LineHeight = 0.0f;
+	ETextJustify::Type Justification = ETextJustify::Left;
+	FShapedTextOptions Shaping;
+	ReadTextLayoutState(LayoutProperties, Widget, Margin, LineHeight, Justification, Shaping);
 
-	const FMargin* TypedMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(TypedWidget);
-	const FMargin* SerializedMargin = MarginProperty->ContainerPtrToValuePtr<FMargin>(SerializedWidget);
-	const float TypedLineHeight = LineHeightProperty->GetPropertyValue_InContainer(TypedWidget);
-	const float SerializedLineHeight = LineHeightProperty->GetPropertyValue_InContainer(SerializedWidget);
-	const ETextJustify::Type TypedJustification = static_cast<ETextJustify::Type>(
-		JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(TypedWidget)));
-	const ETextJustify::Type SerializedJustification = static_cast<ETextJustify::Type>(
-		JustificationProperty->GetUnsignedIntPropertyValue(JustificationProperty->ContainerPtrToValuePtr<void>(SerializedWidget)));
-	const FShapedTextOptions* TypedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(TypedWidget);
-	const FShapedTextOptions* SerializedShaping = ShapedTextOptionsProperty->ContainerPtrToValuePtr<FShapedTextOptions>(SerializedWidget);
-
-	TestEqual(TEXT("Typed node path keeps tooltip"), Design2UMGWidgetPropertyAccess::GetToolTipText(*TypedWidget).ToString(), TEXT("Typed tooltip"));
-	TestEqual(TEXT("Typed and serialized text match"), TypedWidget->GetText().ToString(), SerializedWidget->GetText().ToString());
+	TestEqual(TEXT("Typed tooltip applied"), Design2UMGWidgetPropertyAccess::GetToolTipText(*Widget).ToString(), Node.WidgetStyle.ToolTipText.GetValue());
+	TestEqual(TEXT("Typed text applied"), Widget->GetText().ToString(), Node.Text.Text.GetValue());
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 	TestTrue(TEXT("Typed text block color follows normalized typed node color"),
-		Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*TypedWidget).GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestTrue(TEXT("Second text block color follows normalized typed node color"),
-		Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*SerializedWidget).GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
-	TestEqual(TEXT("Typed and serialized font size match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).Size, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).Size);
-	TestEqual(TEXT("Typed and serialized typeface match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).TypefaceFontName, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).TypefaceFontName);
-	TestEqual(TEXT("Typed and serialized letter spacing match"), Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).LetterSpacing, Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).LetterSpacing);
-	TestEqual(TEXT("Typed and serialized font object path match"),
-		Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(*TypedWidget).FontObject->GetPathName() : FString(),
-		Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).FontObject ? Design2UMGWidgetPropertyAccess::GetFont(*SerializedWidget).FontObject->GetPathName() : FString());
-	TestEqual(TEXT("Typed and serialized justification match"), TypedJustification, SerializedJustification);
-	TestTrue(TEXT("Typed and serialized auto-wrap match"), TypedWidget->GetAutoWrapText() == SerializedWidget->GetAutoWrapText());
-	TestTrue(TEXT("Typed and serialized wrap width match"), FMath::IsNearlyEqual(TypedWidget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
-	TestTrue(TEXT("Typed and serialized line height match"), FMath::IsNearlyEqual(TypedLineHeight, SerializedLineHeight, 0.001f));
-	TestTrue(TEXT("Typed and serialized margin match"),
-		TypedMargin
-		&& SerializedMargin
-		&& FMath::IsNearlyEqual(TypedMargin->Left, SerializedMargin->Left, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Top, SerializedMargin->Top, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Right, SerializedMargin->Right, 0.001f)
-		&& FMath::IsNearlyEqual(TypedMargin->Bottom, SerializedMargin->Bottom, 0.001f));
-	TestTrue(TEXT("Typed and serialized shadow offset match"), Design2UMGWidgetPropertyAccess::GetShadowOffset(*TypedWidget).Equals(Design2UMGWidgetPropertyAccess::GetShadowOffset(*SerializedWidget), 0.001f));
-	TestTrue(TEXT("Typed and serialized shadow color match"),
-		Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*TypedWidget).Equals(Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*SerializedWidget), 0.0001f));
-	TestTrue(TEXT("Typed and serialized icon shaping match"),
-		TypedShaping
-		&& SerializedShaping
-		&& TypedShaping->bOverride_TextShapingMethod == SerializedShaping->bOverride_TextShapingMethod
-		&& TypedShaping->TextShapingMethod == SerializedShaping->TextShapingMethod);
+		Design2UMGWidgetPropertyAccess::GetColorAndOpacity(*Widget).GetSpecifiedColor().Equals(ExpectedTextColor, 0.0001f));
+	const FSlateFontInfo Font = Design2UMGWidgetPropertyAccess::GetFont(*Widget);
+	TestEqual(TEXT("Typed font size applied"), static_cast<float>(Font.Size), 18.0f);
+	TestEqual(TEXT("Typed typeface applied"), Font.TypefaceFontName, FName(TEXT("Regular")));
+	TestEqual(TEXT("Typed letter spacing applied as tracking"), Font.LetterSpacing, 84);
+	TestTrue(TEXT("Typed font object retained"), Font.FontObject != nullptr);
+	TestTrue(TEXT("Icon family name preserves the existing font object"), Font.FontObject == InitialFontObject);
+	TestEqual(TEXT("Typed justification applied"), Justification, ETextJustify::Center);
+	TestTrue(TEXT("Typed auto-wrap applied"), Widget->GetAutoWrapText());
+	TestTrue(TEXT("Typed wrap width applied"), FMath::IsNearlyEqual(Widget->GetWrapTextAt(), 144.0f, 0.001f));
+	TestTrue(TEXT("Typed line height applied"), FMath::IsNearlyEqual(LineHeight, 1.35f, 0.001f));
+	TestTrue(TEXT("Typed padding applied as internal margin"),
+		FMath::IsNearlyEqual(Margin.Left, 7.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Margin.Top, 8.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Margin.Right, 9.0f, 0.001f)
+		&& FMath::IsNearlyEqual(Margin.Bottom, 10.0f, 0.001f));
+	TestTrue(TEXT("Typed shadow offset applied"), Design2UMGWidgetPropertyAccess::GetShadowOffset(*Widget).Equals(Node.Shadow.ShadowOffset.GetValue(), 0.001f));
+	TestTrue(TEXT("Typed shadow color applied"),
+		Design2UMGWidgetPropertyAccess::GetShadowColorAndOpacity(*Widget).Equals(Node.Shadow.ShadowColorAndOpacity.GetValue(), 0.0001f));
+	TestTrue(TEXT("Typed icon uses full shaping"),
+		Shaping.bOverride_TextShapingMethod && Shaping.TextShapingMethod == ETextShapingMethod::FullShaping);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditableTextFamilyUsesTypedTextPayloadParityTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditableTextFamilyUsesTypedTextPayloadTest,
 	"Design2UMG.PropertyApplier.EditableTextFamilyUsesTypedTextPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
+bool FEditableTextFamilyUsesTypedTextPayloadTest::RunTest(const FString& Parameters)
 {
 	const FFloatProperty* EditableTextBoxMinimumDesiredWidthProperty = FindFProperty<FFloatProperty>(UEditableTextBox::StaticClass(), TEXT("MinimumDesiredWidth"));
 	const FFloatProperty* EditableTextMinimumDesiredWidthProperty = FindFProperty<FFloatProperty>(UEditableText::StaticClass(), TEXT("MinimumDesiredWidth"));
@@ -415,48 +384,34 @@ bool FEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& P
 	Node.WidgetStyle.MinDesiredWidth = 123.5f;
 
 	UEditableTextBox* TypedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed editable text box created"));
-	UEditableTextBox* SerializedTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Serialized editable text box created"));
-	if (!TypedTextBox || !SerializedTextBox)
+	if (!TypedTextBox)
 	{
 		return false;
 	}
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedTextBox, Node);
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
-	AssertTextFamilyParity(*this, TEXT("EditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/false,
-		ReadEditableTextBoxState(TypedTextBox), ReadEditableTextBoxState(SerializedTextBox), ExpectedTextColor);
+	AssertTextFamilyProperties(*this, TEXT("EditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/false,
+		ReadEditableTextBoxState(TypedTextBox), Node, ETextJustify::Center, 66, ExpectedTextColor);
 
 	UEditableText* TypedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed editable text created"));
-	UEditableText* SerializedEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Serialized editable text created"));
-	if (!TypedEditableText || !SerializedEditableText)
+	if (!TypedEditableText)
 	{
 		return false;
 	}
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedEditableText, Node);
-	AssertTextFamilyParity(*this, TEXT("EditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/false,
-		ReadEditableTextState(TypedEditableText), ReadEditableTextState(SerializedEditableText), ExpectedTextColor);
-
-	UEditableTextBox* TypedBehaviorTextBox = NewTextFamilyWidget<UEditableTextBox>(*this, TEXT("Typed behavior editable text box created"));
-	UEditableText* TypedBehaviorEditableText = NewTextFamilyWidget<UEditableText>(*this, TEXT("Typed behavior editable text created"));
-	if (!TypedBehaviorTextBox || !TypedBehaviorEditableText)
-	{
-		return false;
-	}
-
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedBehaviorTextBox, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedBehaviorEditableText, Node);
+	AssertTextFamilyProperties(*this, TEXT("EditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/false,
+		ReadEditableTextState(TypedEditableText), Node, ETextJustify::Center, 66, ExpectedTextColor);
 
 	TestTrue(TEXT("Typed editable text box applies MinimumDesiredWidth"),
 		FMath::IsNearlyEqual(
-			EditableTextBoxMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedBehaviorTextBox),
+			EditableTextBoxMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedTextBox),
 			123.5f,
 			0.001f));
 	TestTrue(TEXT("Typed editable text applies MinimumDesiredWidth"),
 		FMath::IsNearlyEqual(
-			EditableTextMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedBehaviorEditableText),
+			EditableTextMinimumDesiredWidthProperty->GetPropertyValue_InContainer(TypedEditableText),
 			123.5f,
 			0.001f));
 
@@ -524,10 +479,8 @@ bool FTextTypedPayloadExplicitFalseFormattingFlagsTest::RunTest(const FString& P
 		Node.Text.bStrikethrough.IsSet() && !Node.Text.bStrikethrough.GetValue());
 
 	UTextBlock* TypedWidget = NewObject<UTextBlock>(GetTransientPackage());
-	UTextBlock* PayloadWidget = NewObject<UTextBlock>(GetTransientPackage());
 	TestNotNull(TEXT("Typed text widget created"), TypedWidget);
-	TestNotNull(TEXT("Payload text widget created"), PayloadWidget);
-	if (!TypedWidget || !PayloadWidget)
+	if (!TypedWidget)
 	{
 		return false;
 	}
@@ -535,17 +488,13 @@ bool FTextTypedPayloadExplicitFalseFormattingFlagsTest::RunTest(const FString& P
 	TypedWidget->SetAutoWrapText(true);
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedWidget, Node);
 	TestFalse(TEXT("Typed text widget applies explicit false AutoWrapText"), TypedWidget->GetAutoWrapText());
-
-	PayloadWidget->SetAutoWrapText(true);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PayloadWidget, Node);
-	TestFalse(TEXT("Payload text widget applies explicit false AutoWrapText"), PayloadWidget->GetAutoWrapText());
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest,
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMultiLineEditableTextFamilyUsesTypedTextPayloadTest,
 	"Design2UMG.PropertyApplier.MultiLineEditableTextFamilyUsesTypedTextPayload",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const FString& Parameters)
+bool FMultiLineEditableTextFamilyUsesTypedTextPayloadTest::RunTest(const FString& Parameters)
 {
 	FTextLayoutProperties LayoutProperties;
 	if (!FindTextLayoutProperties(*this, LayoutProperties))
@@ -571,28 +520,24 @@ bool FMultiLineEditableTextFamilyUsesTypedTextPayloadParityTest::RunTest(const F
 	const FLinearColor ExpectedTextColor = UMGTextStyleApplication::NormalizeTypedTextColor(Node.Text.Color.GetValue());
 
 	UMultiLineEditableTextBox* TypedTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Typed multi-line editable text box created"));
-	UMultiLineEditableTextBox* SerializedTextBox = NewTextFamilyWidget<UMultiLineEditableTextBox>(*this, TEXT("Serialized multi-line editable text box created"));
-	if (!TypedTextBox || !SerializedTextBox)
+	if (!TypedTextBox)
 	{
 		return false;
 	}
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedTextBox, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedTextBox, Node);
-	AssertTextFamilyParity(*this, TEXT("MultiLineEditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/true,
-		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), ReadMultiLineTextBoxState(LayoutProperties, SerializedTextBox), ExpectedTextColor);
+	AssertTextFamilyProperties(*this, TEXT("MultiLineEditableTextBox"), /*bTextBoxStyle=*/true, /*bWrapLayout=*/true,
+		ReadMultiLineTextBoxState(LayoutProperties, TypedTextBox), Node, ETextJustify::Right, 45, ExpectedTextColor);
 
 	UMultiLineEditableText* TypedEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Typed multi-line editable text created"));
-	UMultiLineEditableText* SerializedEditableText = NewTextFamilyWidget<UMultiLineEditableText>(*this, TEXT("Serialized multi-line editable text created"));
-	if (!TypedEditableText || !SerializedEditableText)
+	if (!TypedEditableText)
 	{
 		return false;
 	}
 
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(TypedEditableText, Node);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedEditableText, Node);
-	AssertTextFamilyParity(*this, TEXT("MultiLineEditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/true,
-		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), ReadMultiLineEditableTextState(LayoutProperties, SerializedEditableText), ExpectedTextColor);
+	AssertTextFamilyProperties(*this, TEXT("MultiLineEditableText"), /*bTextBoxStyle=*/false, /*bWrapLayout=*/true,
+		ReadMultiLineEditableTextState(LayoutProperties, TypedEditableText), Node, ETextJustify::Right, 45, ExpectedTextColor);
 	return true;
 }
 
@@ -722,62 +667,6 @@ bool FRichTextBlockStyleRowsApplicationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rich text application preserves 0.375 point row sizes"),
 		FMath::IsNearlyEqual(SubpointRow->TextStyle.Font.Size, 0.375f, 0.001f));
 #endif
-
-	URichTextBlock* SerializedWidget = NewObject<URichTextBlock>(GetTransientPackage());
-	TestTrue(TEXT("Serialized RichTextBlock created"), SerializedWidget != nullptr);
-	if (!SerializedWidget)
-	{
-		return false;
-	}
-	SerializedWidget->SetDefaultTextStyle(PreconfiguredStyle);
-	FUMGWidgetTreeBuilder::ApplyWidgetProperties(SerializedWidget, Node);
-
-	TestEqual(TEXT("Typed and serialized rich text markup match"),
-		Widget->GetText().ToString(),
-		SerializedWidget->GetText().ToString());
-	TestEqual(TEXT("Typed and serialized rich text tooltip match"),
-		Design2UMGWidgetPropertyAccess::GetToolTipText(*Widget).ToString(),
-		Design2UMGWidgetPropertyAccess::GetToolTipText(*SerializedWidget).ToString());
-	TestTrue(TEXT("Typed and serialized rich text wrap width match"),
-		FMath::IsNearlyEqual(Widget->GetWrapTextAt(), SerializedWidget->GetWrapTextAt(), 0.001f));
-
-	const FTextBlockStyle& SerializedDefaultStyle = SerializedWidget->GetCurrentDefaultTextStyle();
-	TestEqual(TEXT("Typed and serialized rich text default font size match"),
-		DefaultStyle.Font.Size,
-		SerializedDefaultStyle.Font.Size);
-	TestTrue(TEXT("Typed rich text default color follows normalized typed node color"),
-		DefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
-	TestTrue(TEXT("Second rich text default color follows normalized typed node color"),
-		SerializedDefaultStyle.ColorAndOpacity.GetSpecifiedColor().Equals(ExpectedDefaultColor, 0.0001f));
-	TestTrue(TEXT("Typed and serialized rich text default shadow color match"),
-		DefaultStyle.ShadowColorAndOpacity.Equals(SerializedDefaultStyle.ShadowColorAndOpacity, 0.0001f));
-	TestTrue(TEXT("Typed and serialized rich text default shadow offset match"),
-		DefaultStyle.ShadowOffset == SerializedDefaultStyle.ShadowOffset);
-
-	UDataTable* SerializedStyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*SerializedWidget);
-	TestNotNull(TEXT("Serialized rich text style set exists"), SerializedStyleSet);
-	if (!SerializedStyleSet)
-	{
-		return false;
-	}
-
-	const FRichTextStyleRow* SerializedLinkRow = SerializedStyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), TEXT("RichTextBlockStyleRowsParity"));
-	TestNotNull(TEXT("Serialized link row exists"), SerializedLinkRow);
-	if (!SerializedLinkRow)
-	{
-		return false;
-	}
-
-	TestEqual(TEXT("Typed and serialized rich text row font size match"),
-		LinkRow->TextStyle.Font.Size,
-		SerializedLinkRow->TextStyle.Font.Size);
-	TestTrue(TEXT("Typed and serialized rich text row color match"),
-		LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().Equals(
-			SerializedLinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor(),
-			0.0001f));
-	TestEqual(TEXT("Typed and serialized rich text row underline draw-as match"),
-		LinkRow->TextStyle.UnderlineBrush.DrawAs,
-		SerializedLinkRow->TextStyle.UnderlineBrush.DrawAs);
 	return true;
 }
 
@@ -1180,28 +1069,32 @@ bool FRichTextTypedJsonSerializationCycleTest::RunTest(const FString& Parameters
 		ParsedNode->TextStyle.LetterSpacing.IsSet()
 		&& FMath::IsNearlyEqual(ParsedNode->TextStyle.LetterSpacing.GetValue(), SourceNode.TextStyle.LetterSpacing.GetValue(), 0.001f));
 
-	auto BuildStyleSnapshot = [&](URichTextBlock* Widget, const TCHAR* Context) -> FString
+	auto BuildStyleSnapshot = [&](URichTextBlock* Widget, const TCHAR* Context, FString& OutSnapshot) -> bool
 	{
 		UDataTable* StyleSet = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*Widget);
+		TestNotNull(FString::Printf(TEXT("%s style set exists"), Context), StyleSet);
 		if (!StyleSet)
 		{
-			return FString();
+			return false;
 		}
 
 		const FRichTextStyleRow* BaseRow = StyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_0"), Context);
 		const FRichTextStyleRow* LinkRow = StyleSet->FindRow<FRichTextStyleRow>(TEXT("d2u_run_1"), Context);
+		TestNotNull(FString::Printf(TEXT("%s base row exists"), Context), BaseRow);
+		TestNotNull(FString::Printf(TEXT("%s link row exists"), Context), LinkRow);
 		if (!BaseRow || !LinkRow)
 		{
-			return FString();
+			return false;
 		}
 
-		return FString::Printf(
+		OutSnapshot = FString::Printf(
 			TEXT("base:%.0f:%s|link:%.0f:%s:%d"),
 			BaseRow->TextStyle.Font.Size,
 			*BaseRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().ToFColor(true).ToHex(),
 			LinkRow->TextStyle.Font.Size,
 			*LinkRow->TextStyle.ColorAndOpacity.GetSpecifiedColor().ToFColor(true).ToHex(),
 			static_cast<int32>(LinkRow->TextStyle.UnderlineBrush.DrawAs));
+		return true;
 	};
 
 	URichTextBlock* SourceWidget = NewTextFamilyWidget<URichTextBlock>(*this, TEXT("Source rich text widget created"));
@@ -1220,9 +1113,15 @@ bool FRichTextTypedJsonSerializationCycleTest::RunTest(const FString& Parameters
 
 	TestEqual(TEXT("Serialization rich text markup matches"), ParsedWidget->GetText().ToString(), SourceWidget->GetText().ToString());
 	TestTrue(TEXT("Serialization rich text wrap width matches"), FMath::IsNearlyEqual(ParsedWidget->GetWrapTextAt(), SourceWidget->GetWrapTextAt(), 0.001f));
-	TestEqual(TEXT("Serialization rich text style snapshot matches"),
-		BuildStyleSnapshot(ParsedWidget, TEXT("ParsedRichTextSerializationCycle")),
-		BuildStyleSnapshot(SourceWidget, TEXT("SourceRichTextSerializationCycle")));
+	FString ParsedSnapshot;
+	FString SourceSnapshot;
+	const bool bParsedSnapshot = BuildStyleSnapshot(ParsedWidget, TEXT("ParsedRichTextSerializationCycle"), ParsedSnapshot);
+	const bool bSourceSnapshot = BuildStyleSnapshot(SourceWidget, TEXT("SourceRichTextSerializationCycle"), SourceSnapshot);
+	if (!bParsedSnapshot || !bSourceSnapshot)
+	{
+		return false;
+	}
+	TestEqual(TEXT("Serialization rich text style snapshot matches"), ParsedSnapshot, SourceSnapshot);
 	return true;
 }
 

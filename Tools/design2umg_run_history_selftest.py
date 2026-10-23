@@ -44,6 +44,7 @@ def write_json(path: Path, payload: dict) -> None:
 
 
 def main() -> None:
+    assert_external_history_is_read_only()
     assert_single_run_preserves_global_manifest()
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -103,12 +104,53 @@ def assert_single_run_preserves_global_manifest() -> None:
                 output_root, automation_root, rebuild_best, validator, write_json,
                 expected_case_names={"first"}, publish_global_manifest=False,
             )
-        scan.assert_called_once_with(automation_root)
+        scan.assert_called_once_with(automation_root, cache_path=None)
         assert_equal(global_manifest.read_bytes(), original)
         local_manifest = output_root / "historical_best_manifest.json"
         assert_equal(result["manifest_path"], local_manifest)
         assert_equal(validator.calls, [(output_root, local_manifest)])
         assert_equal(json.loads(local_manifest.read_text(encoding="utf-8"))["scope_case_names"], ["first"])
+
+
+
+def assert_external_history_is_read_only() -> None:
+    import design2umg_rebuild_admissible_best as rebuild_best
+
+    with TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        history_root = root / "automation-root"
+        baseline = history_root / "accepted-run"
+        baseline.mkdir(parents=True)
+        for name in ("_baseline.json", "_admissible_best_latest.json", rebuild_best.CACHE_FILENAME):
+            (history_root / name).write_text('{"unchanged":true}', encoding="utf-8")
+        (baseline / "input.json").write_text('{"accepted":true}', encoding="utf-8")
+        before = {p.relative_to(history_root): (p.read_bytes(), p.stat().st_mtime_ns)
+                  for p in history_root.rglob("*") if p.is_file()}
+        output_root = root / "ci-automation" / "new-run"
+        output_root.mkdir(parents=True)
+        validator = FakeValidateRunModule()
+        with patch.object(rebuild_best, "load_baseline_anchor", return_value=(baseline, 0)), \
+                patch.object(rebuild_best, "collect_best_cases", return_value=({}, [], [], {}, {}, 0, {})):
+            result = write_historical_best_validation(
+                output_root, history_root, rebuild_best, validator, write_json,
+                expected_case_names={"first"}, publish_global_manifest=False,
+            )
+        after = {p.relative_to(history_root): (p.read_bytes(), p.stat().st_mtime_ns)
+                 for p in history_root.rglob("*") if p.is_file()}
+        assert_equal(after, before)
+        assert_equal(result["manifest_path"], output_root / "historical_best_manifest.json")
+        assert_equal(validator.calls, [(output_root, result["manifest_path"])])
+        assert (output_root / rebuild_best.CACHE_FILENAME).is_file()
+        assert (output_root / "validation_against_historical_best.json").is_file()
+        try:
+            write_historical_best_validation(
+                output_root, history_root, rebuild_best, validator, write_json,
+                expected_case_names={"first"}, publish_global_manifest=True,
+            )
+        except ValueError as error:
+            assert "--no-publish-history" in str(error), str(error)
+        else:
+            raise AssertionError("External history must reject global publishing")
 
 
 if __name__ == "__main__":

@@ -13,30 +13,33 @@
 
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 
 namespace
 {
-	UTexture2D* ResolvePathTexture(const FUMGWidgetNode& Node, FIntPoint& Size, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
-	{
-		FDesignPathRasterRequest Request;
-		if (!FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)) return nullptr;
-		Size = Request.Size;
-		return FDesignPathRasterizer::Rasterize(Request, nullptr, Budget);
-	}
-
 	bool BindPathTexture(UImage* Image, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
 	{
-		FIntPoint Size;
-		UTexture2D* Texture = ResolvePathTexture(Node, Size, Budget, TextureMap);
+		FDesignPathRasterRequest Request;
+		if (!FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)) return false;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request, nullptr, Budget);
 		if (!Texture) return false;
 		Image->SetBrushFromTexture(Texture);
 		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
-		Brush.ImageSize = FVector2D(Size.X / DesignPathRasterDefaults::Supersample, Size.Y / DesignPathRasterDefaults::Supersample);
-		if (Node.Path.CanvasSize.IsSet())
+		Brush.ImageSize = FVector2D(Request.PaintSize.X / DesignPathRasterDefaults::Supersample, Request.PaintSize.Y / DesignPathRasterDefaults::Supersample);
+		if (Node.Path.CanvasSize.IsSet() || Node.Path.StrokeAlignment.IsSet())
 			Brush.ImageSize = FVector2D(Node.WidgetStyle.WidthOverride.Get(Brush.ImageSize.X), Node.WidgetStyle.HeightOverride.Get(Brush.ImageSize.Y));
 		Brush.Tiling = ESlateBrushTileType::NoTile;
+		const auto UV = Request.GetCanvasUVTransform();
+		Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
 		Image->SetBrush(Brush);
 		Image->SetDesiredSizeOverride(Brush.ImageSize);
+		FUMGWidgetNode Expanded = Node;
+		FDesignPathRasterizer::ApplyCanvasTransform(Expanded, Request);
+		if (Request.HasExpandedCanvas())
+		{
+			Image->SetRenderScale(Expanded.Render.RenderTransformScale.Get(FVector2D(1, 1)));
+			Image->SetRenderTranslation(Expanded.Render.RenderTranslation.Get(FVector2D::ZeroVector));
+		}
 
 		return true;
 	}
@@ -46,12 +49,15 @@ FWidgetResourceBinder::EProceduralTextureResult FWidgetResourceBinder::TryResolv
 	const FUMGWidgetNode& Node,
 	UObject* Outer,
 	UTexture2D*& OutTexture,
-	FUMGProceduralResourceRequest* OutRequest, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
+	FUMGProceduralResourceRequest* OutRequest, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap,
+	FDesignPathRasterRequest* OutPathRequest)
 {
-	if (Node.Path.Geometry.IsSet())
+	if (Node.Path.HasPaintGeometry())
 	{
-		FIntPoint Size;
-		OutTexture = ResolvePathTexture(Node, Size, Budget, TextureMap);
+		FDesignPathRasterRequest Request;
+		OutTexture = FDesignPathRasterizer::TryBuildRequest(Node, Request, TextureMap)
+			? FDesignPathRasterizer::Rasterize(Request, nullptr, Budget) : nullptr;
+		if (OutTexture && OutPathRequest) *OutPathRequest = MoveTemp(Request);
 		return OutTexture ? EProceduralTextureResult::Resolved : EProceduralTextureResult::UnknownShape;
 	}
 
@@ -79,7 +85,15 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
-	if (Node.Path.Geometry.IsSet()) return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
+    if(Node.Brush.Shader.IsSet())
+    {
+        UMaterialInterface* Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString()));
+        if(!Material)return false;
+        ImageWidget->SetBrushFromMaterial(Material);
+        ImageWidget->SetDesiredSizeOverride(Node.Brush.Shader->Size);
+        return true;
+    }
+	if (Node.Path.HasPaintGeometry()) return BindPathTexture(ImageWidget, Node, Budget, TextureMap);
 	// --- material (procedural shape) path ---
 	UTexture2D* ProceduralTexture = nullptr;
 	FUMGProceduralResourceRequest ResourceRequest;

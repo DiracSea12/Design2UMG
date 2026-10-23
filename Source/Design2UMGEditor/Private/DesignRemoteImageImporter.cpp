@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignRemoteImageImporter.h"
+#include "PencilShaderTextures.h"
 #include "DesignRemoteImageImporterInternal.h"
 
 #include "Design2UMGLog.h"
@@ -691,7 +692,10 @@ namespace
 		return true;
 	}
 
-	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context)
+    // Keep one discovery snapshot while import rewrites the typed uniform values.
+    using FShaderImageValues = TMap<const FDesignShaderData*, TMap<FString, FString>>;
+
+	void ResolveNodeRecursive(FUMGWidgetNode& Node, FResolveContext& Context, const FShaderImageValues& ShaderImages)
 	{
 		FString TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		if (!TexturePath.IsEmpty())
@@ -721,13 +725,44 @@ namespace
 			Node.Brush.Image.TexturePath = ResolvedTexturePath;
 		}
 
+        if (Node.Path.SourcePaintGeometry.IsSet())
+        {
+            auto& Source = Node.Path.SourcePaintGeometry.GetValue();
+            const auto ResolvePaint = [&](FUMGSurfacePaint& Paint)
+            {
+                if (Paint.Image.TexturePath.IsSet()) ResolveTexturePath(Paint.Image.TexturePath.GetValue(), Node.Name, Node.Id, Context);
+            };
+            if (Source.FillPaints.IsSet()) for (auto& Paint : Source.FillPaints.GetValue()) ResolvePaint(Paint);
+            if (Source.StrokePaint.IsSet()) ResolvePaint(Source.StrokePaint.GetValue());
+        }
+        for(auto* Payload:{&Node.Brush.Shader,&Node.Effect.Shader})
+        {
+            if(!Payload->IsSet())continue;
+            auto& Shader=Payload->GetValue();
+            for (const auto& Image : ShaderImages.FindChecked(&Shader))
+            {
+                const FString& Uniform = Image.Key;
+                auto& Effective = Shader.Uniforms.FindOrAdd(Uniform);
+                Effective.Kind = FDesignShaderValue::EKind::String;
+                Effective.String = Image.Value;
+                const FString Source = Effective.String;
+                const int32 FirstDiagnostic=Context.Report.Result.Diagnostics.Num();
+                ResolveTexturePath(Effective.String,Node.Name+TEXT(".")+Uniform,Node.Id,Context);
+                for(int32 Index=FirstDiagnostic;Index<Context.Report.Result.Diagnostics.Num();++Index)
+                {
+                    auto& Diagnostic=Context.Report.Result.Diagnostics[Index];
+                    Diagnostic.NodeId=Node.Id;Diagnostic.NodeName=Node.Name;Diagnostic.Resource=Source.TrimStartAndEnd();
+                    if(IsAssetPath(Effective.String))Diagnostic.ResolvedAssetPath=Effective.String;
+                }
+            }
+        }
 		for (FUMGWidgetNode& Child : Node.Children)
 		{
-			ResolveNodeRecursive(Child, Context);
+			ResolveNodeRecursive(Child, Context, ShaderImages);
 		}
 	}
 
-	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls)
+	void CollectRemoteUrls(const FUMGWidgetNode& Node, TSet<FString>& OutUrls, FShaderImageValues& ShaderImages)
 	{
 		const FString TexturePath = Node.Brush.Image.TexturePath.Get(FString());
 		const FString NormalizedUrl = TryNormalizeRemoteUrl(TexturePath);
@@ -735,9 +770,27 @@ namespace
 		{
 			OutUrls.Add(NormalizedUrl);
 		}
+        if (Node.Path.SourcePaintGeometry.IsSet())
+        {
+            const auto& Source = Node.Path.SourcePaintGeometry.GetValue();
+            const auto CollectPaint = [&](const FUMGSurfacePaint& Paint)
+            {
+                const FString Url = TryNormalizeRemoteUrl(Paint.Image.TexturePath.Get(FString()));
+                if (!Url.IsEmpty()) OutUrls.Add(Url);
+            };
+            if (Source.FillPaints.IsSet()) for (const auto& Paint : Source.FillPaints.GetValue()) CollectPaint(Paint);
+            if (Source.StrokePaint.IsSet()) CollectPaint(Source.StrokePaint.GetValue());
+        }
+        for(const auto* Payload:{&Node.Brush.Shader,&Node.Effect.Shader})
+            if (Payload->IsSet())
+            {
+                const auto& Images = ShaderImages.Add(&Payload->GetValue(), PencilShaderTextures::ImageUniforms(Payload->GetValue()));
+                for (const auto& Image : Images)
+                {const FString Url=TryNormalizeRemoteUrl(Image.Value);if(!Url.IsEmpty())OutUrls.Add(Url);}
+            }
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
-			CollectRemoteUrls(Child, OutUrls);
+			CollectRemoteUrls(Child, OutUrls, ShaderImages);
 		}
 	}
 }
@@ -755,10 +808,9 @@ FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWid
 	const FDesignImageImportSettingsSnapshot& Settings)
 {
 	TSet<FString> RemoteUrls;
-	if (Settings.bEnableRemoteImageImport)
-	{
-		CollectRemoteUrls(InOutData.RootWidget, RemoteUrls);
-	}
+    FShaderImageValues ShaderImages;
+    CollectRemoteUrls(InOutData.RootWidget, RemoteUrls, ShaderImages);
+    if (!Settings.bEnableRemoteImageImport) RemoteUrls.Reset();
 
 	FResolveContext Context;
 	FString LimitError;
@@ -794,7 +846,7 @@ FDesignImageImportResult FDesignRemoteImageImporter::ResolveRemoteImages(FUMGWid
 			Context.UrlDownloads);
 	}
 
-	ResolveNodeRecursive(InOutData.RootWidget, Context);
+	ResolveNodeRecursive(InOutData.RootWidget, Context, ShaderImages);
 	if (Context.bTextureResourceUpdatePending)
 	{
 		FlushRenderingCommands();
@@ -848,7 +900,8 @@ void FDesignRemoteImageImporter::ResolveTransientTextures(const FUMGWidgetNode& 
 	const float Timeout = FMath::Max(1.0f, Settings->RemoteImageTimeoutSeconds);
 
 	TSet<FString> Urls;
-	CollectRemoteUrls(RootNode, Urls);
+	FShaderImageValues ShaderImages;
+	CollectRemoteUrls(RootNode, Urls, ShaderImages);
 	const FImageResourceLimits ImageLimits;
 	DesignImageResources::FImageOperationBudget OperationBudget(ImageLimits);
 	bool bTextureResourceUpdatePending = false;

@@ -71,9 +71,22 @@ class RenderEvidenceIdentityTests(unittest.TestCase):
             for report in ({"rhi_backend": backend}, {"source_input": {"rhi_backend": backend}}):
                 self.assertEqual(evidence_contract.rhi_backend_from_evidence(report), "")
 
-    def test_history_window_must_contain_the_current_run(self):
-        with self.assertRaisesRegex(ValueError, "contain the current run"):
+    def test_external_history_requires_no_publish_history(self):
+        with self.assertRaisesRegex(ValueError, "External historical root requires --no-publish-history"):
             write_historical_best_validation(self.root / "run", self.root / "external", None, None, None, {"case"})
+
+    def test_external_history_validates_without_publishing(self):
+        import design2umg_rebuild_admissible_best_selftest as fixtures
+        self.accepted_anchor()
+        current = fixtures.make_current_validation_run(self.root / "ci", "current", .2)
+        result = write_historical_best_validation(
+            current, self.root, rebuild, validate, fixtures.write_json, {"case_a"},
+            publish_global_manifest=False,
+        )
+        self.assertFalse(result["validation"]["blocked"], result["validation"])
+        self.assertEqual(result["manifest_path"], current / "historical_best_manifest.json")
+        self.assertTrue(result["validation_path"].is_file())
+        self.assertFalse((self.root / "_admissible_best_latest.json").exists())
 
     def test_next_run_recovers_the_previous_runs_best(self):
         import design2umg_rebuild_admissible_best_selftest as fixtures

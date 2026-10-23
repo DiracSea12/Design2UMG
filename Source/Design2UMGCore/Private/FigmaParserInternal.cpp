@@ -422,6 +422,16 @@ static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNod
 		{
 			OutNode.Shape.Geometry = (*Paths)[0].Path;
 			OutNode.Shape.FillRule = (*Paths)[0].FillRule;
+			const TSharedPtr<FJsonObject> Size = GetObject(NodeObj, TEXT("size"));
+			double Width = 0.0;
+			double Height = 0.0;
+			if (Size.IsValid() && Size->TryGetNumberField(TEXT("x"), Width)
+				&& Size->TryGetNumberField(TEXT("y"), Height)
+				&& FMath::IsFinite(Width) && FMath::IsFinite(Height) && Width > 0.0 && Height > 0.0)
+			{
+				// Figma paths use local size, not the transformed absolute bounding box.
+				OutNode.Shape.ViewBox = FVector4(0.0, 0.0, Width, Height);
+			}
 		}
 	}
 }

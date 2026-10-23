@@ -138,7 +138,7 @@ namespace DesignImportPipeline
 		{
 			RemovedNames.Add(RemovedWidget->GetFName().ToString());
 		});
-		EnsureReimportWidgetGuids(WBP);
+		DesignWidgetBlueprintUtils::EnsureWidgetVariableGuids(WBP);
 		DesignWidgetBlueprintUtils::DeleteSubtreeSilently(WBP, SubtreeRoot);
 		for (const FString& RemovedName : RemovedNames)
 		{

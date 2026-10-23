@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "VisualMapper.h"
+#include "VisualMapperFillTransfer.h"
+#include "UMGRetainerCapture.h"
 #include "DesignSchema.h"
 #include "VisualMapperInternal.h"
 #include "VisualMapperStrokeSupport.h"
@@ -25,6 +27,19 @@ namespace
 	constexpr float BlurStrengthToUVStepScale = 0.35f;
 
 	// Bounds relative to the node's layout origin, before its own render transform.
+    FBox2D IncludeOuterShadows(const FDesignNode& Node, const FBox2D& Content)
+    {
+        FBox2D Paint = Content;
+        for (const FDesignEffect& Effect : Node.Visual.Effects)
+        {
+            if (!Effect.bEnabled || Effect.Type != EDesignEffectType::Shadow || Effect.Shadow.bInner) continue;
+            const double Radius = Effect.Shadow.Blur * 1.5 + FMath::Max(0.0f, Effect.Shadow.Spread);
+            const FVector2D Offset(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
+            Paint += FBox2D(Content.Min + Offset - FVector2D(Radius), Content.Max + Offset + FVector2D(Radius));
+        }
+        return Paint;
+    }
+
 	FBox2D SubtreePaintBounds(const FDesignNode& Node, bool bIncludeOwnShadows)
 	{
 		const FVector2D Size(Node.Transform.Width.Value, Node.Transform.Height.Value);
@@ -42,7 +57,7 @@ namespace
 				if (!Child.IsValid() || !Child->Transform.bEnabled) continue;
 				const FBox2D ChildPaint = SubtreePaintBounds(*Child, true);
 				const FVector2D ChildSize(Child->Transform.Width.Value, Child->Transform.Height.Value);
-				const FVector2D Pivot = ChildSize * 0.5;
+				const FVector2D Pivot = ChildSize * Child->Transform.TransformOrigin;
 				FBox2D Transformed(ForceInit);
 				for (int32 Corner = 0; Corner < 4; ++Corner)
 				{
@@ -64,18 +79,7 @@ namespace
 				}
 			}
 		}
-		FBox2D Paint = Content;
-		if (bIncludeOwnShadows)
-		{
-			for (const FDesignEffect& Effect : Node.Visual.Effects)
-			{
-				if (!Effect.bEnabled || Effect.Type != EDesignEffectType::Shadow || Effect.Shadow.bInner) continue;
-				const double Radius = Effect.Shadow.Blur * 1.5 + FMath::Max(0.0f, Effect.Shadow.Spread);
-				const FVector2D Offset(Effect.Shadow.OffsetX, Effect.Shadow.OffsetY);
-				Paint += FBox2D(Content.Min + Offset - FVector2D(Radius), Content.Max + Offset + FVector2D(Radius));
-			}
-		}
-		return Paint;
+		return bIncludeOwnShadows ? IncludeOuterShadows(Node, Content) : Content;
 	}
 
 	FVector2D ComputeForegroundBlurUVStep(const TSharedPtr<FDesignNode>& Node, float BlurStrength)
@@ -166,6 +170,8 @@ namespace
 		Shadow.Brush.MaterialRef = Node->Type == EDesignNodeType::Ellipse
 			? TEXT("ellipseshadow") : ((Blur > 0.0f) ? TEXT("boxshadow") : MatRef_RoundedRect);
 		Shadow.Shadow.ShadowBlur = Blur;
+    if (!ShadowLayer.BlendMode.IsEmpty() && ShadowLayer.BlendMode != TEXT("normal"))
+        Shadow.Render.PaintBlendMode = ShadowLayer.BlendMode;
 
 		float RadiusHalfMin;
 		float RadiusExpansion;
@@ -222,6 +228,33 @@ namespace
 		Shadow.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 		return Shadow;
 	}
+}
+
+FUMGWidgetNode VisualMapper::WrapWithShaderEffect(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, const FDesignShaderData& Shader)
+{
+    const FVector2D Size(Node->Transform.Width.Value,Node->Transform.Height.Value);
+    const FBox2D Paint=SubtreePaintBounds(*Node,true);
+    const FMargin Gutter(FMath::CeilToFloat(FMath::Max(0.0,-Paint.Min.X)),
+        FMath::CeilToFloat(FMath::Max(0.0,-Paint.Min.Y)),
+        FMath::CeilToFloat(FMath::Max(0.0,Paint.Max.X-Size.X)),
+        FMath::CeilToFloat(FMath::Max(0.0,Paint.Max.Y-Size.Y)));
+    FUMGWidgetNode Retainer;
+    Retainer.Type=UMGWidgetTypes::RetainerBox;
+    Retainer.Id=Widget.Id+TEXT("_shaderEffect");Retainer.Name=Widget.Name+TEXT("_shaderEffect");
+    Retainer.Bounds=Widget.Bounds;Retainer.Slot=Widget.Slot;
+    Retainer.Effect.Shader=Shader;Retainer.Effect.Shader->Size=Size;
+    Retainer.Effect.Shader->bFillPaint = false;
+    Retainer.Effect.Shader->CaptureInsets=FVector4(Gutter.Left,Gutter.Top,Gutter.Right,Gutter.Bottom);
+    Retainer.Effect.bRetainRendering=true;
+    // Node clipping applies to captured content. Its transform/opacity apply after the shader.
+    const auto ContentClip=Widget.Render.Clipping;
+    Retainer.Render=MoveTemp(Widget.Render);Widget.Render=FUMGRenderStyleData();
+    Retainer.Render.Clipping.Reset();Widget.Render.Clipping=ContentClip;
+    Widget.Bounds=FDesignPixelBounds();Widget.Slot=FUMGSlotData();
+    Widget.Slot.HorizontalAlignment=EUMGSlotHorizontalAlignment::Fill;
+    Widget.Slot.VerticalAlignment=EUMGSlotVerticalAlignment::Fill;
+    Retainer.Children.Add(MoveTemp(Widget));
+    return UMGRetainerCapture::Wrap(MoveTemp(Retainer),Size,Gutter);
 }
 
 FUMGWidgetNode VisualMapper::WrapWithBackgroundBlur(FUMGWidgetNode&& Widget, float BlurStrength)
@@ -304,6 +337,8 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 		Shadow.Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : Shadow.Color);
 	Retainer.Effect.EffectOffset = ComputeEffectUVOffset(Node, Shadow.OffsetX, Shadow.OffsetY);
 	Retainer.Effect.EffectBlurUVStep = ComputeForegroundBlurUVStep(Node, Shadow.Blur);
+    if (!Shadow.BlendMode.IsEmpty() && VisualMapperFillTransfer::CanonicalPaintBlendMode(Shadow.BlendMode) != TEXT("normal"))
+        Retainer.Effect.InnerShadowBlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(Shadow.BlendMode);
 
 	Widget.Bounds = FDesignPixelBounds();
 	Widget.Slot = FUMGSlotData();
@@ -314,8 +349,15 @@ FUMGWidgetNode VisualMapper::WrapWithInnerShadow(FUMGWidgetNode&& Widget, const 
 FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	FUMGWidgetNode&& Widget,
 	const TSharedPtr<FDesignNode>& Node,
-	const TArray<FUMGBoxShadowLayerData>& ShadowLayers)
+	const TArray<FUMGBoxShadowLayerData>& ShadowLayers,
+    const FDesignShadow* InnerShadow)
 {
+    TOptional<FString> GlyphPaintBlendMode;
+    if (Node->Type == EDesignNodeType::Text || Node->Type == EDesignNodeType::IconFont)
+    {
+        GlyphPaintBlendMode = Widget.Render.PaintBlendMode;
+        Widget.Render.PaintBlendMode.Reset();
+    }
 	FUMGWidgetNode Wrapper;
 	// Keep the wrapper in the parent's established layout flow. It owns the
 	// source render properties so the shadows and content share one render space.
@@ -327,6 +369,7 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	TransferWrapperRenderProperties(Wrapper, Widget, Node);
 
 	if (Node->Type == EDesignNodeType::IconFont
+		|| Node->Type == EDesignNodeType::Text
 		|| (!Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty()))
 	{
 		FMargin Gutter;
@@ -356,6 +399,19 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 		Retainer.Effect.EffectMaterial = UMGPropertyKeys::RetainerSubtreeShadowEffectRef;
 		Retainer.Effect.TextureParameter = TEXT("Texture");
 		Retainer.Shadow.BoxShadows = ShadowLayers;
+        Retainer.Render.PaintBlendMode = GlyphPaintBlendMode;
+        if (InnerShadow)
+        {
+            const float CaptureWidth = FMath::Max(1.0f, static_cast<float>(Retainer.Bounds.W));
+            const float CaptureHeight = FMath::Max(1.0f, static_cast<float>(Retainer.Bounds.H));
+            const float Blur = FMath::Max(0.0f, InnerShadow->Blur) * BlurStrengthToUVStepScale;
+            Retainer.Effect.EffectColor = FUMGValueParser::ParseColor(
+                InnerShadow->Color.IsEmpty() ? DesignColorUtils::DefaultShadowColorHex : InnerShadow->Color);
+            Retainer.Effect.EffectOffset = FVector2D(InnerShadow->OffsetX / CaptureWidth, InnerShadow->OffsetY / CaptureHeight);
+            Retainer.Effect.EffectBlurUVStep = FVector2D(Blur / CaptureWidth, Blur / CaptureHeight);
+            if (!InnerShadow->BlendMode.IsEmpty() && VisualMapperFillTransfer::CanonicalPaintBlendMode(InnerShadow->BlendMode) != TEXT("normal"))
+                Retainer.Effect.InnerShadowBlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(InnerShadow->BlendMode);
+        }
 
 		FUMGWidgetNode Padded;
 		Padded.Type = UMGWidgetTypes::Border;
@@ -392,4 +448,43 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 
 	Wrapper.Children.Add(MoveTemp(Widget));
 	return Wrapper;
+}
+
+FVector4 UMGRetainerCapture::FillInsets(const FDesignNode& Node)
+{
+    const FVector2D Size(Node.Transform.Width.Value, Node.Transform.Height.Value);
+    const FBox2D Paint = IncludeOuterShadows(Node, FBox2D(FVector2D::ZeroVector, Size));
+    return FVector4(FMath::CeilToFloat(FMath::Max(0.0, -Paint.Min.X)),
+                    FMath::CeilToFloat(FMath::Max(0.0, -Paint.Min.Y)),
+                    FMath::CeilToFloat(FMath::Max(0.0, Paint.Max.X - Size.X)),
+                    FMath::CeilToFloat(FMath::Max(0.0, Paint.Max.Y - Size.Y)));
+}
+
+FMargin VisualMapperFillTransfer::BackgroundCaptureInsets(const FDesignNode& Node)
+{
+    const FVector2D Size(Node.Transform.Width.Value, Node.Transform.Height.Value);
+    const FBox2D Paint = SubtreePaintBounds(Node, true);
+    return FMargin(FMath::CeilToFloat(FMath::Max(0.0, -Paint.Min.X)),
+        FMath::CeilToFloat(FMath::Max(0.0, -Paint.Min.Y)),
+        FMath::CeilToFloat(FMath::Max(0.0, Paint.Max.X - Size.X)),
+        FMath::CeilToFloat(FMath::Max(0.0, Paint.Max.Y - Size.Y)));
+}
+
+FUMGWidgetNode UMGRetainerCapture::Wrap(FUMGWidgetNode&& Retainer,const FVector2D& LogicalSize,const FMargin& Gutter)
+{
+    if(Gutter==FMargin(0))return MoveTemp(Retainer);
+    FUMGWidgetNode Content=MoveTemp(Retainer.Children[0]);Retainer.Children.Reset();
+    FUMGWidgetNode Wrapper;
+    Wrapper.Type=UMGWidgetTypes::Overlay;Wrapper.Id=Retainer.Id+TEXT("_capture");Wrapper.Name=Retainer.Name+TEXT("_capture");
+    Wrapper.Bounds=Retainer.Bounds;Wrapper.Slot=Retainer.Slot;Wrapper.Render=MoveTemp(Retainer.Render);
+    Retainer.Render=FUMGRenderStyleData();Retainer.Bounds=FDesignPixelBounds();Retainer.Slot=FUMGSlotData();
+    Retainer.Bounds.W=LogicalSize.X+Gutter.Left+Gutter.Right;Retainer.Bounds.H=LogicalSize.Y+Gutter.Top+Gutter.Bottom;
+    Retainer.Slot.HorizontalAlignment=EUMGSlotHorizontalAlignment::Fill;
+    Retainer.Slot.VerticalAlignment=EUMGSlotVerticalAlignment::Fill;
+    Retainer.Slot.Padding=FMargin(-Gutter.Left,-Gutter.Top,-Gutter.Right,-Gutter.Bottom);
+    FUMGWidgetNode Padded;
+    Padded.Type=UMGWidgetTypes::Border;Padded.Id=Retainer.Id+TEXT("_padding");Padded.Name=Retainer.Name+TEXT("_padding");
+    Padded.Brush.BrushColor=FLinearColor::Transparent;Padded.WidgetStyle.Padding=Gutter;
+    Padded.Children.Add(MoveTemp(Content));Retainer.Children.Add(MoveTemp(Padded));Wrapper.Children.Add(MoveTemp(Retainer));
+    return Wrapper;
 }

@@ -394,9 +394,20 @@ namespace
 				}
 			}
 			TArray<FString> FontWarnings;
-			if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Context.Error, &FontSources))
+			TArray<FSlateFontInfo> GlyphDonors;
+			TMap<FFontData, FString> FontDataHashes;
+			const auto& FontMappings = Effective.ComponentConversionSettings.ExplicitFontMappings;
+			if (!DesignLocalFontImport::Prepare(Document, Effective.ComponentConversionSettings, FontWarnings, Context.Error, &FontSources)
+				|| !DesignLocalFontImport::PrepareGlyphFallbacks(Document, FontMappings, GlyphDonors, FontDataHashes, FontWarnings, Context.Error))
 				return false;
-			Component.Data = FDesign2UMGConverter::Convert(Document, Effective.ComponentConversionSettings);
+			Component.Data = FDesign2UMGConverter::Convert(Document, Effective.ComponentConversionSettings,
+				[&FontSources, &GlyphDonors, &FontDataHashes, &FontMappings, &Effective](const FDesignDocument& Generated, TArray<FString>& Warnings, FString& Error,
+					FDesign2UMGConverter::EFontPreparation Preparation)
+				{
+					if (!DesignLocalFontImport::Prepare(Generated, Effective.ComponentConversionSettings, Warnings, Error, &FontSources,
+						Preparation == FDesign2UMGConverter::EFontPreparation::GlyphCoverage)) return false;
+					return DesignLocalFontImport::PrepareGlyphFallbacks(Generated, FontMappings, GlyphDonors, FontDataHashes, Warnings, Error);
+				});
 			if (!Component.Data.ConversionError.IsEmpty())
 			{
 				Context.Error = Component.Data.ConversionError;
@@ -417,7 +428,7 @@ namespace
 				Component.Data.RootWidget.MutableSource().SourceNodeId = SourceRoot->Id;
 				Component.Data.RootWidget.MutableSource().SourceNodeType = TEXT("COMPONENT");
 			}
-			Component.Data.Warnings.Append(FontWarnings);
+			for (const FString& Warning : FontWarnings) Component.Data.Warnings.AddUnique(Warning);
 			Component.Data.WidgetName = StableName(Context.DocumentScope, Key);
 			Component.Data.MutableSourceDocument().DocumentScope = Context.DocumentScope;
 			Component.PackageFolder = Folder / TEXT("Components");

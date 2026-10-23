@@ -6,6 +6,7 @@
 class UMaterial;
 class UMaterialExpression;
 class UMaterialInterface;
+class UTexture;
 
 namespace Design2UMGMaterialAccess
 {
@@ -13,5 +14,8 @@ namespace Design2UMGMaterialAccess
 	TConstArrayView<TObjectPtr<UMaterialExpression>> GetExpressions(const UMaterial& Material);
 	void CacheShadersForRendering(UMaterialInterface& Material);
 	void WaitForCompilation(UMaterialInterface& Material);
+	// On failure, return final compile errors and the states around caching and completion.
+	bool EnsureReadyForRendering(UMaterial& Material, FString& OutCompileErrors, FString& OutCompileStates);
 	void RecompileForRendering(UMaterialInterface& Material);
+	void GetUsedTextures(const UMaterialInterface& Material, TArray<UTexture*>& OutTextures);
 }

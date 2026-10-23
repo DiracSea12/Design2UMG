@@ -49,7 +49,19 @@ bool FDesign2UMGRenderDimensionLimitTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Tiling keeps GPU targets bounded; the full CPU export still obeys the image pixel budget.
+	FUMGWidgetExportPlan Plan;
+	FString PlanError;
+	TestTrue(TEXT("Hardware-compatible 81M export is accepted"), FUMGWidgetRenderer::BuildExportPlan(FIntPoint(9000, 9000), 16384, Plan, &PlanError));
+	TestEqual(TEXT("Hardware-compatible export uses one original-resolution target"), Plan.TileCount, FIntPoint(1, 1));
+	TestEqual(TEXT("Single-target extent is not scaled"), Plan.TileSize, FIntPoint(9000, 9000));
+	TestTrue(TEXT("228M export retains its full resolution"), FUMGWidgetRenderer::BuildExportPlan(FIntPoint(24000, 9500), 16384, Plan, &PlanError));
+	TestEqual(TEXT("Export extent is not scaled"), Plan.Size, FIntPoint(24000, 9500));
+	TestTrue(TEXT("Large exports require more than one bounded target"), Plan.TileCount.X * Plan.TileCount.Y > 1);
+	TestTrue(TEXT("Hardware-limited tiles retain bounded pixel allocations"), static_cast<int64>(Plan.TileSize.X) * Plan.TileSize.Y <= 64ll * 1024 * 1024);
+	TestTrue(TEXT("Wide one-pixel export respects the hardware edge"), FUMGWidgetRenderer::BuildExportPlan(FIntPoint(19012, 1), 16384, Plan));
+	TestEqual(TEXT("Edge tile is not scaled"), Plan.TileCount, FIntPoint(3, 1));
+
+	// Output budget is independent of the unchanged input-image resource budget.
 	UUserWidget* GeneratedCDO = Cast<UUserWidget>(WidgetBP->GeneratedClass->GetDefaultObject());
 	if (!TestNotNull(TEXT("Generated class default object exists"), GeneratedCDO))
 	{
@@ -57,8 +69,8 @@ bool FDesign2UMGRenderDimensionLimitTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	GeneratedCDO->DesignTimeSize = FVector2D(
-		static_cast<float>(GetMax2DTextureDimension()),
-		static_cast<float>(GetMax2DTextureDimension()) + 1024.0f);
+		32768.0f,
+		32768.0f);
 
 	const FString PngPath = FPaths::CreateTempFilename(*FPaths::ProjectSavedDir(), TEXT("D2URenderLimit"), TEXT(".png"));
 	FIntPoint RenderedSize = FIntPoint::ZeroValue;
@@ -102,6 +114,14 @@ bool FDesign2UMGRenderSinglePixelDimensionTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Widget-tree renderer accepts a one-pixel dimension"),
 		FUMGWidgetRenderer::RenderWidgetTreeToPng(WidgetBP, PngData, Size));
 	TestEqual(TEXT("Tree render retains the authored size"), Size, FIntPoint(320, 1));
+	const FIntPoint WideSize(static_cast<int32>(GetMax2DTextureDimension()) + 1, 1);
+	FUMGWidgetRenderer::SetBlueprintExportBounds(WidgetBP, FBox2D(FVector2D::ZeroVector, FVector2D(WideSize)));
+	TestTrue(TEXT("Native tile replay exports an extent wider than one GPU target"),
+		FUMGWidgetRenderer::RenderWidgetToPng(WidgetBP, PngData, Size, &Error));
+	TestEqual(TEXT("Tiled export keeps every original pixel without scaling"), Size, WideSize);
+	TestEqual(TEXT("Tiling does not change the blueprint layout"),
+		FUMGWidgetRenderer::GetBlueprintDesignTimeSize(WidgetBP).GetValue(), FVector2D(320, 1));
+
 	IFileManager::Get().Delete(*PngPath);
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;

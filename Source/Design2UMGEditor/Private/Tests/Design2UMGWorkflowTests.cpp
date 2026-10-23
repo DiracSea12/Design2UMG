@@ -107,8 +107,8 @@ bool FPenWelcomeWrapFontSizingTest::RunTest(const FString& Parameters)
 	const FString PenFile = GetFixturePath(TEXT("pencil-welcome.pen"));
 	if (PenFile.IsEmpty() || !FPaths::FileExists(PenFile))
 	{
-		AddWarning(FString::Printf(TEXT("Welcome fixture not found, skipping: %s"), *PenFile));
-		return true;
+		AddError(FString::Printf(TEXT("Required welcome fixture not found: %s"), *PenFile));
+		return false;
 	}
 
 	FDesignDocument Document;

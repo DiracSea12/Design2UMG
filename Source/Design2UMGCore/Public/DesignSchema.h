@@ -3,6 +3,7 @@
 #pragma once
 
 #include "DesignNodePatch.h"
+#include "DesignPathGeometry.h"
 
 struct FDesignSourceNodeData;
 struct FDesignSourceDocumentData;
@@ -16,6 +17,8 @@ struct FDesignTextNodeData
 	FString Content;
 	FString FontFamily;
 	FString FontPostScriptName;
+	/** Import-local native composite, prepared before measurement; source declaration stays intact. */
+	FDesignPreparedFont PreparedFont;
 	float FontSize = 16.0f;
 	FString FontWeight = TEXT("normal");
 	FString FontStyle = TEXT("normal");
@@ -134,19 +137,6 @@ struct FDesignVisualNodeData
 	}
 };
 
-struct FDesignGeometryPath
-{
-	FString Path;
-	FString FillRule;
-};
-
-struct FDesignPaintGeometry
-{
-	// Source presence distinguishes known empty geometry from unexported geometry.
-	TOptional<TArray<FDesignGeometryPath>> FillPaths;
-	TOptional<TArray<FDesignGeometryPath>> StrokePaths;
-};
-
 struct FDesignShapeNodeData
 {
 	float InnerRadius = 0.0f;
@@ -154,6 +144,10 @@ struct FDesignShapeNodeData
 	float SweepAngle = 360.0f;
 	int32 PolygonCount = 6;
 	FString Geometry;
+	// Authored SVG coordinate box: x, y, width, height.
+	TOptional<FVector4> ViewBox;
+	// An omitted viewBox uses tight SVG bounds, independent of paint/layout dimensions.
+	bool bFitGeometryToBounds = false;
 	FString FillRule = TEXT("nonzero");
 	FDesignPaintGeometry PaintGeometry;
 };
@@ -181,6 +175,8 @@ struct FDesignTransformNodeData
 	bool bHasHeight = false;
 	bool bSourceHasWidth = false;
 	bool bSourceHasHeight = false;
+	/** Normalized local origin for source rotation and flips. */
+	FVector2D TransformOrigin = FVector2D(0.5, 0.5);
 	float Rotation = 0.0f;
 	bool bEnabled = true;
 	float Opacity = 1.0f;
@@ -315,6 +311,7 @@ struct DESIGN2UMGCORE_API FDesignDocument
 	bool HasSourceDocumentData() const;
 	const FDesignSourceDocumentData& SourceDocument() const;
 	FDesignSourceDocumentData& MutableSourceDocument();
+	const FString& RecordSourceFilePath(const FString& FilePath);
 
 	bool HasParseDiagnostics() const;
 	const FDesignParseDiagnostics& ParseDiagnostics() const;
@@ -323,6 +320,9 @@ struct DESIGN2UMGCORE_API FDesignDocument
 	TSharedPtr<FDesignNode> FindReusableNode(const FString& Id) const;
 	/** Document-local definition lookup. Repeated definitions keep document order and emit a diagnostic. */
 	void BuildReusableNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
+		TArray<FString>* OutWarnings = nullptr) const;
+	/** Reference targets include ordinary nodes without changing their reusable component marker. */
+	void BuildReferenceNodeIndex(TMap<FString, TSharedPtr<FDesignNode>>& OutNodesById,
 		TArray<FString>* OutWarnings = nullptr) const;
 
 private:

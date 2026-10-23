@@ -20,14 +20,26 @@ namespace Design2UMGEditorImportSupport
 		}
 	}
 
-	bool LoadTextFileOrLog(const FString& FilePath, FString& OutContents)
+	bool LoadTextFile(
+		const FString& FilePath, FString& OutContents, const TCHAR* FailureDescription, FString& OutError)
 	{
 		if (FFileHelper::LoadFileToString(OutContents, *FilePath))
 		{
 			return true;
 		}
-
-		UE_LOG(LogDesign2UMG, Error, TEXT("Failed to read file: %s"), *FilePath);
+		OutError = FString::Printf(TEXT("%s: %s"), FailureDescription, *FilePath);
 		return false;
 	}
+
+	bool LoadTextFileOrLog(const FString& FilePath, FString& OutContents)
+	{
+		FString Error;
+		if (LoadTextFile(FilePath, OutContents, TEXT("Failed to read file"), Error))
+		{
+			return true;
+		}
+		UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
+		return false;
+	}
+
 }

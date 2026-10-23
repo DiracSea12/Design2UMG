@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "DesignImportPlanning.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "FigmaParser.h"
 #include "FigmaComponentDependencies.h"
 #include "Design2UMGLocalFigmaImport.h"
@@ -11,7 +12,6 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 #include "FontResolver.h"
 #include "ExternalServices/PenMCPBridge.h"
-#include "ExternalServices/PencilExtensionResources.h"
 #include "PenBundledLibraries.h"
 #include "PenParser.h"
 #include "Design2UMGTestUtils.h"
@@ -78,8 +78,8 @@ bool FPenWelcomeLigatureIconWeightWorkflowTest::RunTest(const FString& Parameter
 	const FString PenFile = GetFixturePath(TEXT("pencil-welcome.pen"));
 	if (PenFile.IsEmpty() || !FPaths::FileExists(PenFile))
 	{
-		AddWarning(FString::Printf(TEXT("Welcome fixture not found, skipping: %s"), *PenFile));
-		return true;
+		AddError(FString::Printf(TEXT("Required welcome fixture not found: %s"), *PenFile));
+		return false;
 	}
 
 	FDesignDocument Document;
@@ -136,8 +136,8 @@ bool FPenMcpImportWorkflowTest::RunTest(const FString& Parameters)
 	const FString PenFile = GetFixturePath(TEXT("pencil-welcome.pen"));
 	if (PenFile.IsEmpty() || !FPaths::FileExists(PenFile))
 	{
-		AddWarning(FString::Printf(TEXT("Pen MCP fixture not found, skipping: %s"), *PenFile));
-		return true;
+		AddError(FString::Printf(TEXT("Required Pen MCP fixture not found: %s"), *PenFile));
+		return false;
 	}
 
 	FString NodesJson;
@@ -175,8 +175,8 @@ bool FFigmaLocalFileImportWorkflowTest::RunTest(const FString& Parameters)
 	const FString JsonPath = GetFixturePath(TEXT("FigmaComplex.json"));
 	if (JsonPath.IsEmpty() || !FPaths::FileExists(JsonPath))
 	{
-		AddWarning(FString::Printf(TEXT("Local Figma fixture not found, skipping: %s"), *JsonPath));
-		return true;
+		AddError(FString::Printf(TEXT("Required local Figma fixture not found: %s"), *JsonPath));
+		return false;
 	}
 
 	FDesignDocument Document;
@@ -219,8 +219,8 @@ bool FFigmaSourceImportWorkflowTest::RunTest(const FString& Parameters)
 	const FString JsonPath = GetFixturePath(TEXT("FigmaComplex.json"));
 	if (JsonPath.IsEmpty() || !FPaths::FileExists(JsonPath))
 	{
-		AddWarning(FString::Printf(TEXT("Figma source fixture not found, skipping: %s"), *JsonPath));
-		return true;
+		AddError(FString::Printf(TEXT("Required Figma source fixture not found: %s"), *JsonPath));
+		return false;
 	}
 
 	FString RawJson;
@@ -270,8 +270,8 @@ bool FPenWelcomeBulkImportTest::RunTest(const FString& Parameters)
 		TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/pencil-welcome.pen"));
 	if (!FPaths::FileExists(PenFile))
 	{
-		AddWarning(FString::Printf(TEXT("Test fixture not found, skipping: %s"), *PenFile));
-		return true;
+		AddError(FString::Printf(TEXT("Required welcome fixture not found: %s"), *PenFile));
+		return false;
 	}
 	const FString OutputPath = TEXT("/Game/Design2UMG/_TestOutput/PencilWelcome");
 	TArray<FString> GeneratedAssetPaths;
@@ -352,9 +352,13 @@ bool FPenReusableTargetImportWorkflowTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Three top-level nodes"), Document.Children.Num(), 3);
 
 	FPenMCPBridge::PromoteSelectedNodeToRenderRoot(Document, TEXT("compA"));
+	if (!TestEqual(TEXT("Only the selected target remains an output root"), Document.Children.Num(), 1)) return false;
 	TestFalse(TEXT("Selected reusable target stops being reusable"), Document.Children[0]->bReusable);
-	TestTrue(TEXT("Other reusable definitions stay reusable"), Document.Children[1]->bReusable);
-	TestFalse(TEXT("Plain frames stay non-reusable"), Document.Children[2]->bReusable);
+	if (!TestEqual(TEXT("Only reusable definitions remain imported"), Document.SourceDocument().ImportedNodes.Num(), 1)) return false;
+	TestTrue(TEXT("Other reusable definitions stay reusable"), Document.SourceDocument().ImportedNodes[0]->bReusable);
+	TMap<FString, TSharedPtr<FDesignNode>> Targets;
+	Document.BuildReferenceNodeIndex(Targets);
+	TestFalse(TEXT("Unrelated plain frames are not imported"), Targets.Contains(TEXT("screen1")));
 
 	FPenMCPBridge::PromoteSelectedNodeToRenderRoot(Document, TEXT("missing-id"));
 	TestFalse(TEXT("Missing target changes nothing"), Document.Children[0]->bReusable);
@@ -369,7 +373,7 @@ bool FPenFilteredDocImportsPassthroughTest::RunTest(const FString&)
 	// Node-filtered pen imports rebuild the document object from the filtered
 	// subtree; the doc-level imports map must survive that rebuild so
 	// alias-qualified refs ("$Y:--primary") resolve against the registered
-	// library variables. The library table is registered from a fixture lib.pen
+	// library variables. The complete library is registered from a fixture lib.pen
 	// the same way EnsureBundledLibrariesRegistered registers real ones.
 	FString LibPenJson;
 	{
@@ -388,37 +392,50 @@ bool FPenFilteredDocImportsPassthroughTest::RunTest(const FString&)
 			return false;
 		}
 	}
-	FString VariablesJson;
-	FString ParseError;
-	if (!PencilExtensionResources::ParseLibPenVariables(LibPenJson, VariablesJson, ParseError))
-	{
-		AddError(FString::Printf(TEXT("Fixture lib.pen parse failed: %s"), *ParseError));
-		return false;
-	}
-	PenBundledLibraries::RegisterLibraryVariables(TEXT("sample"), VariablesJson);
+	PenBundledLibraries::RegisterLibraryDocument(TEXT("sample"), LibPenJson);
 
 	const FString PenJson = TEXT(R"PENJSON({"imports":{"Y":"pencil:sample.lib.pen"},"children":[{"id":"page-1","name":"Page","type":"frame","theme":{"Y:Accent":"Orange"},"children":[{"id":"dot-1","name":"Dot","type":"ellipse","width":8,"height":8,"fill":"$Y:--primary"}]}]})PENJSON");
 
 	TSharedPtr<FJsonObject> RootObject;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(PenJson);
-	TestTrue(TEXT("fixture json parses"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid());
-	if (!RootObject.IsValid())
+	if (!TestTrue(TEXT("fixture json parses"), FJsonSerializer::Deserialize(Reader, RootObject) && RootObject.IsValid()))
 	{
 		return false;
 	}
 
 	TSharedPtr<FJsonObject> Filtered;
-	TestTrue(TEXT("filter succeeds"), FPenMCPBridge::BuildFilteredDocumentObject(RootObject, Filtered, TEXT("page-1")));
-	TestTrue(TEXT("filtered doc keeps imports"), Filtered.IsValid() && Filtered->HasField(TEXT("imports")));
+	if (!TestTrue(TEXT("filter succeeds"), FPenMCPBridge::BuildFilteredDocumentObject(RootObject, Filtered, TEXT("page-1"))))
+	{
+		return false;
+	}
+	if (!TestTrue(TEXT("filtered doc keeps imports"), Filtered.IsValid() && Filtered->HasField(TEXT("imports"))))
+	{
+		return false;
+	}
 
 	FDesignDocument Doc;
-	TestTrue(TEXT("filtered doc parses"), FPenParser::ParseDocumentObject(Filtered, Doc));
-	if (Doc.Children.Num() == 1 && Doc.Children[0]->Children.Num() == 1)
+	if (!TestTrue(TEXT("filtered doc parses"), FPenParser::ParseDocumentObject(Filtered, Doc)))
 	{
-		TestEqual(TEXT("orange primary fill"),
-			Doc.Children[0]->Children[0]->Visual.TopmostFill().SolidColor, FString(TEXT("#EA580C")));
+		return false;
 	}
-	return true;
+	if (!TestEqual(TEXT("filtered doc has one root"), Doc.Children.Num(), 1)
+		|| !TestTrue(TEXT("filtered root is valid"), Doc.Children[0].IsValid()))
+	{
+		return false;
+	}
+	const FDesignNode& Page = *Doc.Children[0];
+	if (!TestEqual(TEXT("filtered root is the requested page"), Page.Id, FString(TEXT("page-1")))
+		|| !TestEqual(TEXT("filtered page has one child"), Page.Children.Num(), 1)
+		|| !TestTrue(TEXT("filtered child is valid"), Page.Children[0].IsValid()))
+	{
+		return false;
+	}
+	const FDesignNode& Dot = *Page.Children[0];
+	if (!TestEqual(TEXT("filtered child is the target dot"), Dot.Id, FString(TEXT("dot-1"))))
+	{
+		return false;
+	}
+	return TestEqual(TEXT("orange primary fill"), Dot.Visual.TopmostFill().SolidColor, FString(TEXT("#EA580C")));
 }
 
 #endif // WITH_AUTOMATION_WORKER

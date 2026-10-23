@@ -81,27 +81,32 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Header justify"), Header->LayoutData.JustifyContent, EDesignJustifyContent::SpaceBetween);
 	TestEqual(TEXT("Header align"), Header->LayoutData.AlignItems, EDesignAlignItems::Center);
 	// Avatar: ELLIPSE + multi-fill (SOLID + IMAGE)
-	if (Header->Children.Num() >= 2)
-	{
-		const auto& Avatar = Header->Children[1];
-		TestEqual(TEXT("Avatar type"), Avatar->Type, EDesignNodeType::Ellipse);
-		TestTrue(TEXT("Avatar has image fill"), Avatar->Visual.TopmostFill().IsImage());
-		TestTrue(TEXT("Avatar multi-fills >= 2"), Avatar->Visual.Fills.Num() >= 2);
-	}
+	if (!TestTrue(TEXT("Header retains Avatar child"), Header->Children.Num() >= 2))
+		return false;
+	const auto& Avatar = Header->Children[1];
+	if (!TestNotNull(TEXT("Avatar exists"), Avatar.Get()))
+		return false;
+	TestEqual(TEXT("Avatar type"), Avatar->Type, EDesignNodeType::Ellipse);
+	TestTrue(TEXT("Avatar has image fill"), Avatar->Visual.TopmostFill().IsImage());
+	TestTrue(TEXT("Avatar multi-fills >= 2"), Avatar->Visual.Fills.Num() >= 2);
 	// StatCard: GRADIENT_LINEAR + DROP_SHADOW
 	const auto& StatsRow = Main->Children[1];
-	if (StatsRow->Children.Num() >= 1)
-	{
-		const auto& Card = StatsRow->Children[0];
-		TestEqual(TEXT("Card fill gradient"), Card->Visual.TopmostFill().Type, EDesignFillType::Gradient);
-		TestEqual(TEXT("Card gradient type"), Card->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Linear);
-		TestTrue(TEXT("Card gradient stops >= 2"), Card->Visual.TopmostFill().Gradient.Colors.Num() >= 2);
-		TestTrue(TEXT("Card has effects"), Card->Visual.Effects.Num() > 0);
-		TestEqual(TEXT("Card shadow type"), Card->Visual.Effects[0].Type, EDesignEffectType::Shadow);
-		TestFalse(TEXT("Card shadow not inner"), Card->Visual.Effects[0].Shadow.bInner);
-	}
+	if (!TestTrue(TEXT("StatsRow retains StatCard child"), StatsRow->Children.Num() >= 1))
+		return false;
+	const auto& Card = StatsRow->Children[0];
+	if (!TestNotNull(TEXT("StatCard exists"), Card.Get()))
+		return false;
+	TestEqual(TEXT("Card fill gradient"), Card->Visual.TopmostFill().Type, EDesignFillType::Gradient);
+	TestEqual(TEXT("Card gradient type"), Card->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Linear);
+	TestTrue(TEXT("Card gradient stops >= 2"), Card->Visual.TopmostFill().Gradient.Colors.Num() >= 2);
+	if (!TestTrue(TEXT("Card has effects"), Card->Visual.Effects.Num() > 0))
+		return false;
+	TestEqual(TEXT("Card shadow type"), Card->Visual.Effects[0].Type, EDesignEffectType::Shadow);
+	TestFalse(TEXT("Card shadow not inner"), Card->Visual.Effects[0].Shadow.bInner);
 	// ChartArea: INNER_SHADOW + BACKGROUND_BLUR + rectangleCornerRadii child
 	const auto& Chart = Main->Children[2];
+	if (!TestNotNull(TEXT("ChartArea exists"), Chart.Get()))
+		return false;
 	TestTrue(TEXT("Chart effects >= 2"), Chart->Visual.Effects.Num() >= 2);
 	bool bFoundInner = false, bFoundBgBlur = false;
 	for (const auto& E : Chart->Visual.Effects)
@@ -112,47 +117,46 @@ bool FFigmaComplexParserTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Chart has inner shadow"), bFoundInner);
 	TestTrue(TEXT("Chart has bg blur"), bFoundBgBlur);
 	// ChartPlaceholder: non-uniform corner radius
-	if (Chart->Children.Num() >= 2)
-	{
-		const auto& Placeholder = Chart->Children[1];
-		TestEqual(TEXT("Placeholder type"), Placeholder->Type, EDesignNodeType::Rectangle);
-		TestFalse(TEXT("Placeholder non-uniform radius"), Placeholder->Visual.CornerRadius.bUniform);
-		TestEqual(TEXT("Placeholder TL"), Placeholder->Visual.CornerRadius.TopLeft, 12.0f);
-		TestEqual(TEXT("Placeholder BL"), Placeholder->Visual.CornerRadius.BottomLeft, 0.0f);
-	}
+	if (!TestTrue(TEXT("Chart retains ChartPlaceholder child"), Chart->Children.Num() >= 2))
+		return false;
+	const auto& Placeholder = Chart->Children[1];
+	if (!TestNotNull(TEXT("ChartPlaceholder exists"), Placeholder.Get()))
+		return false;
+	TestEqual(TEXT("Placeholder type"), Placeholder->Type, EDesignNodeType::Rectangle);
+	TestFalse(TEXT("Placeholder non-uniform radius"), Placeholder->Visual.CornerRadius.bUniform);
+	TestEqual(TEXT("Placeholder TL"), Placeholder->Visual.CornerRadius.TopLeft, 12.0f);
+	TestEqual(TEXT("Placeholder BL"), Placeholder->Visual.CornerRadius.BottomLeft, 0.0f);
 	// GROUP: absolute positioned children
 	const auto& Overlay = Main->Children[3];
 	TestEqual(TEXT("Overlay type"), Overlay->Type, EDesignNodeType::Group);
-	TestTrue(TEXT("Overlay children >= 7"), Overlay->Children.Num() >= 7);
-	if (Overlay->Children.Num() >= 7)
-	{
-		// LAYER_BLUR
-		TestTrue(TEXT("Badge has effects"), Overlay->Children[0]->Visual.Effects.Num() > 0);
-		TestEqual(TEXT("Badge blur type"), Overlay->Children[0]->Visual.Effects[0].Type, EDesignEffectType::Blur);
-		// FlippedIcon: relativeTransform flip detection
-		TestTrue(TEXT("FlippedIcon flipX"), Overlay->Children[1]->Transform.bFlipX);
-		// STAR → Polygon
-		TestEqual(TEXT("Star type"), Overlay->Children[2]->Type, EDesignNodeType::Polygon);
-		// REGULAR_POLYGON → Polygon
-		TestEqual(TEXT("Polygon type"), Overlay->Children[3]->Type, EDesignNodeType::Polygon);
-		// BOOLEAN_OPERATION → Path
-		TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EDesignNodeType::Path);
-		// IMAGE fill with imageTransform + opacity
-		const auto& ImgCard = Overlay->Children[5];
-		TestTrue(TEXT("ImgCard has image fill"), ImgCard->Visual.TopmostFill().IsImage());
-		TestTrue(TEXT("ImgCard opacity < 1"), ImgCard->Transform.Opacity < 1.0f);
-		// GRADIENT_RADIAL
-		const auto& GradBg = Overlay->Children[6];
-		TestEqual(TEXT("GradBg gradient type"), GradBg->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Radial);
-	}
+	if (!TestTrue(TEXT("Overlay retains all 8 children including justified text"), Overlay->Children.Num() >= 8))
+		return false;
+	// LAYER_BLUR
+	if (!TestTrue(TEXT("Badge has effects"), Overlay->Children[0]->Visual.Effects.Num() > 0))
+		return false;
+	TestEqual(TEXT("Badge blur type"), Overlay->Children[0]->Visual.Effects[0].Type, EDesignEffectType::Blur);
+	// FlippedIcon: relativeTransform flip detection
+	TestTrue(TEXT("FlippedIcon flipX"), Overlay->Children[1]->Transform.bFlipX);
+	// STAR → Polygon
+	TestEqual(TEXT("Star type"), Overlay->Children[2]->Type, EDesignNodeType::Polygon);
+	// REGULAR_POLYGON → Polygon
+	TestEqual(TEXT("Polygon type"), Overlay->Children[3]->Type, EDesignNodeType::Polygon);
+	// BOOLEAN_OPERATION → Path
+	TestEqual(TEXT("BoolOp type"), Overlay->Children[4]->Type, EDesignNodeType::Path);
+	// IMAGE fill with imageTransform + opacity
+	const auto& ImgCard = Overlay->Children[5];
+	TestTrue(TEXT("ImgCard has image fill"), ImgCard->Visual.TopmostFill().IsImage());
+	TestTrue(TEXT("ImgCard opacity < 1"), ImgCard->Transform.Opacity < 1.0f);
+	// GRADIENT_RADIAL
+	const auto& GradBg = Overlay->Children[6];
+	TestEqual(TEXT("GradBg gradient type"), GradBg->Visual.TopmostFill().Gradient.GradientType, EDesignGradientType::Radial);
 	// Justified text + textAlignVertical BOTTOM + textAutoResize NONE
-	if (Overlay->Children.Num() >= 8)
-	{
-		const auto& JustText = Overlay->Children[7];
-		TestEqual(TEXT("JustText align"), JustText->Text.TextAlign, EDesignTextAlign::Justify);
-		TestEqual(TEXT("JustText valign"), JustText->Text.TextAlignVertical, EDesignTextAlignVertical::Bottom);
-		TestEqual(TEXT("JustText growth"), JustText->Text.TextGrowth, EDesignTextGrowth::FixedWidthHeight);
-	}
+	const auto& JustText = Overlay->Children[7];
+	if (!TestNotNull(TEXT("Justified text exists"), JustText.Get()))
+		return false;
+	TestEqual(TEXT("JustText align"), JustText->Text.TextAlign, EDesignTextAlign::Justify);
+	TestEqual(TEXT("JustText valign"), JustText->Text.TextAlignVertical, EDesignTextAlignVertical::Bottom);
+	TestEqual(TEXT("JustText growth"), JustText->Text.TextGrowth, EDesignTextGrowth::FixedWidthHeight);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLineHeightMappingTest,

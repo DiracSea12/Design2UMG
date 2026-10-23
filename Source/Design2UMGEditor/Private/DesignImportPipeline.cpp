@@ -4,6 +4,7 @@
 #include "DesignImportDiagnosticReport.h"
 #include "DesignImportGeneration.h"
 #include "DesignImportPlanning.h"
+#include "Design2UMGEditorImportSupport.h"
 #include "Design2UMGLog.h"
 #include "DesignImportDialogs.h"
 #include "DesignJsonUtils.h"
@@ -17,7 +18,6 @@
 
 #include "WidgetBlueprint.h"
 #include "Dom/JsonObject.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
 FDesign2UMGImportSettingsSnapshot FDesign2UMGImportSettingsSnapshot::FromSettings(const UDesign2UMGSettings* Settings)
@@ -223,7 +223,9 @@ namespace DesignImportPipeline
 			FDesignImportExecutionResult Result;
 			if (!AnalysisResult.ErrorMessage.IsEmpty())
 			{
-				Result.ErrorMessage = AnalysisResult.ErrorMessage;
+				Result.ErrorMessage = DesignImportDialogs::FormatImportResult(Data, AnalysisResult.ErrorMessage, false,
+					DiagnosticDocument.IsSet() ? DiagnosticDocument.GetValue().SourceDocument().SourceFilePath : FString());
+				DesignImportDialogs::ShowImportProblem(Result.ErrorMessage);
 				return Result;
 			}
 			FDesign2UMGImportSettingsSnapshot FallbackSettingsSnapshot;
@@ -234,6 +236,7 @@ namespace DesignImportPipeline
 				&& DesignImportDialogs::OpenPreviewWindow(
 					Data,
 					Request.OutputPath,
+					DiagnosticDocument.IsSet() ? DiagnosticDocument.GetValue().SourceDocument().SourceFilePath : FString(),
 					Request.PreviewWindowTitle,
 					CreatePreviewConfirmedHandler(Request, DiagnosticDocument, GenerationSettings),
 					FOnPreviewCancelled::CreateLambda(
@@ -276,6 +279,24 @@ namespace DesignImportPipeline
 			Result.RenderedSize = GenerationResult.RenderedSize;
 			Result.RenderedWidget = MoveTemp(GenerationResult.RenderedWidget);
 			Result.RenderedSlateWidget = MoveTemp(GenerationResult.RenderedSlateWidget);
+			if (!Result.bSucceeded)
+			{
+				Result.ErrorMessage = DesignImportDialogs::FormatImportResult(Data, Result.ErrorMessage, false,
+					DiagnosticDocument.IsSet() ? DiagnosticDocument.GetValue().SourceDocument().SourceFilePath : FString());
+				DesignImportDialogs::ShowImportProblem(Result.ErrorMessage);
+			}
+			else if (GenerationResult.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation
+				|| !Data.Warnings.IsEmpty() || !GenerationResult.Warnings.IsEmpty() || AnalysisResult.ImageResult.HasFailures())
+			{
+				FString Issues = FString::Join(GenerationResult.Warnings, TEXT("\n"));
+				for (const auto& Diagnostic : GenerationResult.ComponentMappingDiagnostics)
+				{
+					if (!Diagnostic.Message.IsEmpty()) Issues += TEXT("\n") + Diagnostic.Message;
+				}
+				if (AnalysisResult.ImageResult.HasFailures()) Issues += TEXT("\n") + DesignImportDialogs::FormatImageIssues(AnalysisResult.ImageResult);
+				DesignImportDialogs::ShowImportProblem(DesignImportDialogs::FormatImportResult(Data, Issues, true,
+					DiagnosticDocument.IsSet() ? DiagnosticDocument.GetValue().SourceDocument().SourceFilePath : FString()));
+			}
 			return Result;
 		}
 	}
@@ -386,19 +407,22 @@ namespace DesignImportPipeline
 		FDesignDocument& OutDocument,
 		FString* OutError)
 	{
-		auto Fail = [OutError](const FString& Message)
+		auto Fail = [OutError, &FilePath, &TargetNodeId](const FString& Message)
 		{
 			if (OutError)
 			{
-				*OutError = Message;
+				*OutError = FString::Printf(TEXT("文件：%s\n节点：%s\n原因：%s"), *FilePath,
+					TargetNodeId.IsEmpty() ? TEXT("整份设计稿") : *TargetNodeId, *Message);
 			}
 			return false;
 		};
 
 		FString JsonString;
-		if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
+		FString ReadError;
+		if (!Design2UMGEditorImportSupport::LoadTextFile(
+			FilePath, JsonString, TEXT("Failed to read pen source"), ReadError))
 		{
-			return Fail(FString::Printf(TEXT("Failed to read pen source: %s"), *FilePath));
+			return Fail(ReadError);
 		}
 
 		// Extension resources feed the parse that follows: the icon index provides icon
@@ -410,7 +434,7 @@ namespace DesignImportPipeline
 
 		if (TargetNodeId.IsEmpty())
 		{
-			if (!FPenParser::ParseDocument(JsonString, OutDocument))
+			if (!FPenParser::ParseDocument(JsonString, OutDocument, FilePath))
 			{
 				return Fail(FString::Printf(TEXT("Failed to parse pen source: %s"), *FilePath));
 			}
@@ -418,7 +442,7 @@ namespace DesignImportPipeline
 		else
 		{
 			TSharedPtr<FJsonObject> RootObject;
-			if (!DesignJsonUtils::TryParseObject(JsonString, RootObject))
+			if (!FPenParser::ParseSourceObject(JsonString, RootObject))
 			{
 				return Fail(FString::Printf(TEXT("Failed to parse pen source JSON: %s"), *FilePath));
 			}
@@ -429,16 +453,14 @@ namespace DesignImportPipeline
 				return Fail(FString::Printf(TEXT("Failed to filter pen source for target node '%s'"), *TargetNodeId));
 			}
 
-			if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument))
+			if (!FPenParser::ParseDocumentObject(FilteredDocumentObject, OutDocument, FilePath))
 			{
 				return Fail(FString::Printf(TEXT("Failed to parse filtered pen source: %s"), *FilePath));
 			}
 			FPenMCPBridge::PromoteSelectedNodeToRenderRoot(OutDocument, TargetNodeId);
 		}
 
-		const FString ResolvedSourceFilePath = FPaths::ConvertRelativePathToFull(FilePath);
-		OutDocument.MutableSourceDocument().SourceFilePath = ResolvedSourceFilePath;
-		OutDocument.Metadata.Add(TEXT("design.sourceFilePath"), ResolvedSourceFilePath);
+		const FString& ResolvedSourceFilePath = OutDocument.SourceDocument().SourceFilePath;
 		AnchorRelativeImageFillUrls(OutDocument, ResolvedSourceFilePath);
 		PencilExtensionResources::ReportPenResourceGaps(OutDocument);
 		return true;
@@ -509,22 +531,47 @@ namespace DesignImportPipeline
 		if (!LoadPenDocument(FilePath, TargetNodeId, Document, &LoadError))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: ExecutePenFile failed for %s: %s"), *FilePath, *LoadError);
-			return FDesignImportExecutionResult();
+			FDesignImportExecutionResult Result;
+			Result.ErrorMessage = LoadError;
+			DesignImportDialogs::ShowImportProblem(LoadError);
+			return Result;
 		}
 
 		return Execute(Document, Request);
 	}
 
-	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames)
+	bool LoadPenFrames(const FString& FilePath, TArray<FDesignFrameInfo>& OutFrames, FString* OutError, FString* OutWarnings)
 	{
+		if (OutWarnings) OutWarnings->Reset();
 		FDesignDocument Document;
-		if (!LoadPenDocument(FilePath, FString(), Document, nullptr))
+		if (!LoadPenDocument(FilePath, FString(), Document, OutError))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("DesignImportPipeline: Failed to parse %s"), *FilePath);
 			return false;
 		}
 
 		OutFrames = ExtractTopFrames(Document);
+		if (OutWarnings && !OutFrames.IsEmpty())
+		{
+			for (const TSharedPtr<FDesignNode>& Node : Document.Children)
+			{
+				if (!Node.IsValid() || Node->Type != EDesignNodeType::Unknown) continue;
+				if (OutWarnings->IsEmpty())
+					*OutWarnings = TEXT("文件：") + FilePath + TEXT("\n部分源根未列入画板选择（来源类型尚未识别）：");
+				*OutWarnings += FString::Printf(TEXT("\n%s (%s), %s"),
+					Node->Name.IsEmpty() ? TEXT("<未命名>") : *Node->Name, *Node->Id, *Node->Source().SourceNodeType);
+			}
+		}
+
+		if (OutFrames.IsEmpty() && OutError)
+		{
+			*OutError = TEXT("文件：") + FilePath + TEXT("\n没有可导入的画板。源根节点：");
+			for (const TSharedPtr<FDesignNode>& Node : Document.Children)
+			{
+				if (Node.IsValid()) *OutError += FString::Printf(TEXT("\n%s (%s), %s"),
+					*Node->Name, *Node->Id, *Node->Source().SourceNodeType);
+			}
+		}
 		return true;
 	}
 }

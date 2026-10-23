@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGJsonParser.h"
+#include "DesignBrowserWidget.h"
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
 #include "DesignTreeBudget.h"
@@ -376,6 +377,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 	ParseRenderPayload(JsonObject, OutNode.Render);
 	ParseWidgetStatePayload(JsonObject, OutNode.WidgetState);
 	ParseScrollBoxPayload(JsonObject, OutNode.ScrollBox);
+	DesignBrowserWidget::Parse(JsonObject, OutNode.Browser);
 
 	// Parse Children. A present-but-non-array Children field, a non-object child,
 	// or any failing child must fail the WHOLE parse (all-or-nothing): the failed
@@ -652,6 +654,19 @@ void FUMGJsonParser::ParseGradientPayload(const TSharedPtr<FJsonObject>& Gradien
 	{
 		Gradient.Size = ParseVector2DValue(JsonValue, UMGJsonKeys::Size);
 	}
+	if (const TSharedPtr<FJsonValue> BasisValue = DesignJsonUtils::TryGetField(GradientObject, UMGJsonKeys::AngularBasis); BasisValue.IsValid())
+	{
+		FVector4 Basis(0, 0, 0, 0);
+		if (BasisValue->Type != EJson::String || !TryParseVector4(BasisValue->AsString(), Basis))
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid AngularBasis; expected four finite numbers."));
+		Gradient.AngularBasis = Basis;
+	}
+	const TSharedPtr<FJsonObject>* MeshObject = nullptr;
+	if (GradientObject->TryGetObjectField(TEXT("Mesh"), MeshObject))
+	{
+		FDesignMeshGradient Mesh;
+		if (DesignMeshGradientJson::Parse(*MeshObject, Mesh)) Gradient.Mesh = MoveTemp(Mesh);
+	}
 	if (const TArray<TSharedPtr<FJsonValue>>* StopArray = DesignJsonUtils::GetArray(GradientObject, UMGJsonKeys::Stops))
 	{
 		for (const TSharedPtr<FJsonValue>& StopValue : *StopArray)
@@ -681,6 +696,9 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 	const TSharedPtr<FJsonObject>* BrushObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Brush"), BrushObject))
 	{
+        const TSharedPtr<FJsonObject>* ShaderObject=nullptr;
+        if((*BrushObject)->TryGetObjectField(TEXT("Shader"),ShaderObject))
+        {FDesignShaderData Shader;if(DesignShaderJson::Parse(*ShaderObject,Shader)) OutBrush.Shader=MoveTemp(Shader);}
 		// Check for a negative unset value before narrowing OutlineCornerRadius to float.
 		double Val;
 		float FloatVal;
@@ -747,6 +765,10 @@ void FUMGJsonParser::ParseBrushPayload(const TSharedPtr<FJsonObject>& NodeObject
 			{
 				OutBrush.Image.Mode = Str;
 			}
+			if (TryGetStrictStringField(*ImageObject, UMGJsonKeys::CropFitMode, Str))
+			{
+				OutBrush.Image.CropFitMode = Str;
+			}
 			if (const TSharedPtr<FJsonValue> TransformValue = DesignJsonUtils::TryGetField(*ImageObject, UMGJsonKeys::Transform); TransformValue.IsValid())
 			{
 				FUMGVisualBrushData::FImageTransformData Transform;
@@ -774,6 +796,9 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	const TSharedPtr<FJsonObject>* EffectObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Effect"), EffectObject))
 	{
+        const TSharedPtr<FJsonObject>* ShaderObject=nullptr;
+        if((*EffectObject)->TryGetObjectField(TEXT("Shader"),ShaderObject))
+        {FDesignShaderData Shader;if(DesignShaderJson::Parse(*ShaderObject,Shader)) OutEffect.Shader=MoveTemp(Shader);}
 		// Range-check rendering phase values before truncating to int32; PhaseCount is at least one.
 		float FloatVal;
 		FString Str;
@@ -801,6 +826,10 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 		if (TryGetStrictStringField(*EffectObject, UMGPropertyKeys::EffectColor, Str))
 		{
 			OutEffect.EffectColor = FUMGValueParser::ParseColor(Str);
+		}
+		if (TryGetStrictStringField(*EffectObject, UMGJsonKeys::InnerShadowBlendMode, Str))
+		{
+			OutEffect.InnerShadowBlendMode = Str;
 		}
 		if (const TSharedPtr<FJsonValue> JsonValue = DesignJsonUtils::TryGetField(*EffectObject, UMGPropertyKeys::EffectOffset); JsonValue.IsValid())
 		{
@@ -894,7 +923,55 @@ void FUMGJsonParser::ParsePathPayload(const TSharedPtr<FJsonObject>& NodeObject,
 		}
 		if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(*PathDataObject, TEXT("CanvasSize")); Value.IsValid())
 			OutPath.CanvasSize = ParseVector2DValue(Value, TEXT("CanvasSize"));
+		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeAlignment"), Str)) OutPath.StrokeAlignment = Str;
+		bool bFitGeometryToBounds;
+		if ((*PathDataObject)->TryGetBoolField(TEXT("FitGeometryToBounds"), bFitGeometryToBounds)) OutPath.FitGeometryToBounds = bFitGeometryToBounds;
+		FVector4 ViewBox;
+		if (TryGetStrictStringField(*PathDataObject, TEXT("ViewBox"), Str) && TryParseVector4(Str, ViewBox) && ViewBox.Z > 0 && ViewBox.W > 0) OutPath.ViewBox = ViewBox;
 		if (TryGetStrictStringField(*PathDataObject, TEXT("StrokeGeometry"), Str)) OutPath.StrokeGeometry = Str;
+		const TSharedPtr<FJsonObject>* SourceObject = nullptr;
+        if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("SourcePaintGeometry"), SourceObject))
+        {
+            FUMGSourcePaintGeometry Source;
+            const auto ReadPaths = [&](const TCHAR* Key, TOptional<TArray<FDesignGeometryPath>>& Paths)
+            {
+                const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+                if (!(*SourceObject)->TryGetArrayField(Key, Values)) return;
+                Paths.Emplace();
+                for (const auto& Value : *Values)
+                {
+                    const TSharedPtr<FJsonObject> Object = Value->AsObject();
+                    FDesignGeometryPath Geometry;
+                    if (TryGetStrictStringField(Object, TEXT("Path"), Geometry.Path)
+                        && TryGetStrictStringField(Object, TEXT("FillRule"), Geometry.FillRule))
+                        Paths->Add(MoveTemp(Geometry));
+                }
+            };
+            ReadPaths(TEXT("FillPaths"), Source.Geometry.FillPaths);
+            ReadPaths(TEXT("StrokePaths"), Source.Geometry.StrokePaths);
+            if (TryGetStrictStringField(*SourceObject, TEXT("StrokeAlignment"), Str)) Source.StrokeAlignment = Str;
+            const auto ReadPaint = [](const TSharedPtr<FJsonObject>& Object)
+            {
+                TSharedPtr<FJsonObject> Holder = MakeShared<FJsonObject>();
+                Holder->SetObjectField(TEXT("Brush"), Object);
+                FUMGVisualBrushData Brush;
+                ParseBrushPayload(Holder, Brush);
+                FUMGSurfacePaint Paint;
+                Paint.Color = Brush.BrushColor.Get(FLinearColor::White);
+                Paint.Gradient = MoveTemp(Brush.Gradient);
+                Paint.Image = MoveTemp(Brush.Image);
+                return Paint;
+            };
+            const TArray<TSharedPtr<FJsonValue>>* Paints = nullptr;
+            if ((*SourceObject)->TryGetArrayField(TEXT("FillPaints"), Paints))
+            {
+                Source.FillPaints = TArray<FUMGSurfacePaint>();
+                for (const auto& Paint : *Paints) Source.FillPaints->Add(ReadPaint(Paint->AsObject()));
+            }
+            const TSharedPtr<FJsonObject>* StrokePaint = nullptr;
+            if ((*SourceObject)->TryGetObjectField(TEXT("StrokePaint"), StrokePaint)) Source.StrokePaint = ReadPaint(*StrokePaint);
+            OutPath.SourcePaintGeometry = MoveTemp(Source);
+        }
 		const TSharedPtr<FJsonObject>* StrokeGradient = nullptr;
 		if (DesignJsonUtils::TryGetObject(*PathDataObject, TEXT("StrokeGradient"), StrokeGradient)) ParseGradientPayload(*StrokeGradient, OutPath.StrokeGradient);
 
@@ -946,6 +1023,7 @@ void FUMGJsonParser::ParseShadowPayload(const TSharedPtr<FJsonObject>& NodeObjec
 					Layer.Spread = Val;
 				}
 				TryGetStrictBoolField(*LayerObject, UMGJsonKeys::ShowShadowBehindNode, Layer.bShowShadowBehindNode);
+				TryGetStrictStringField(*LayerObject, UMGJsonKeys::BlendMode, Layer.BlendMode);
 				if (TryGetStrictStringField(*LayerObject, UMGPropertyKeys::Color, Str))
 				{
 					Layer.Color = FUMGValueParser::ParseColor(Str);
@@ -964,6 +1042,9 @@ void FUMGJsonParser::ParseRenderPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	{
 		float Val;
 		FString Str;
+		if (TryGetStrictStringField(*RenderObject, UMGJsonKeys::PaintBlendMode, Str)) OutRender.PaintBlendMode = Str;
+		if (const TSharedPtr<FJsonValue> Value = DesignJsonUtils::TryGetField(*RenderObject, UMGJsonKeys::BackgroundCaptureInsets); Value.IsValid())
+			OutRender.BackgroundCaptureInsets = ParsePaddingValue(Value, UMGJsonKeys::BackgroundCaptureInsets);
 		if (TryGetStrictStringField(*RenderObject, UMGPropertyKeys::Clipping, Str))
 		{
 			OutRender.Clipping = Str;

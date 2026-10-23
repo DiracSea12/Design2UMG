@@ -486,6 +486,7 @@ namespace
 			FJsonFields Image;
 			AddOptionalString(Image, TEXT("TexturePath"), Brush.Image.TexturePath);
 			AddOptionalString(Image, TEXT("Mode"), Brush.Image.Mode);
+			AddOptionalString(Image, TEXT("CropFitMode"), Brush.Image.CropFitMode);
 			if (Brush.Image.Transform.IsSet())
 			{
 				Image.Add(FJsonField(TEXT("Transform"), RenderImageTransformData(Brush.Image.Transform.GetValue())));
@@ -502,6 +503,7 @@ namespace
 			AddOptionalVector2D(Gradient, TEXT("EndPoint"), Brush.Gradient.EndPoint);
 			AddOptionalVector2D(Gradient, TEXT("Center"), Brush.Gradient.Center);
 			AddOptionalVector2D(Gradient, TEXT("Size"), Brush.Gradient.Size);
+			AddOptionalVector4(Gradient, TEXT("AngularBasis"), Brush.Gradient.AngularBasis);
 			Gradient.Add(FJsonField(
 				TEXT("Stops"),
 				RenderObjectArray<FUMGVisualBrushData::FGradientStopData>(

@@ -11,6 +11,9 @@ namespace Design2UMGEditorImportRequestSetup
 {
 	FDesign2UMGImportSettingsSnapshot CaptureSettingsSnapshot();
 
+	/** Read the active in-memory document through Pencil execute. */
+	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs();
+
 	FDesignImportRequest MakeImportRequest(
 		const FString& OutputPath,
 		const FText& PreviewWindowTitle,
@@ -25,6 +28,4 @@ namespace Design2UMGEditorImportRequestSetup
 		bool bUsePreview,
 		bool bRenderPng,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot);
-
-	TSharedPtr<FJsonObject> MakePencilReadDocumentArgs();
 }

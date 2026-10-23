@@ -81,7 +81,7 @@ namespace
 
 	FBox2D TransformSourceBounds(const FBox2D& Bounds, const FDesignNode& Node, const FVector2D& Size)
 	{
-		const FVector2D Pivot = Size * 0.5;
+		const FVector2D Pivot = Size * Node.Transform.TransformOrigin;
 		FBox2D Result(ForceInit);
 		for (int32 Corner = 0; Corner < 4; ++Corner)
 		{
@@ -156,3 +156,4 @@ FBox2D DesignSourceExportBounds::Calculate(const TSharedPtr<FDesignNode>& Source
 	Result.Max.Y = FMath::CeilToDouble(Result.Max.Y);
 	return Result;
 }
+

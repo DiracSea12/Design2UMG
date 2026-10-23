@@ -9,9 +9,20 @@
 struct FDesignDocument;
 struct FDesignNode;
 struct FDesignFont;
+struct FDesignPreparedFont;
 class UFont;
 
 using FDesign2UMGFontMappings = TMap<FString, TSoftObjectPtr<UFont>>;
+
+namespace TextFontResolution
+{
+	struct FResolvedFontSelection
+	{
+		FString FontAssetPath;
+		FString TypefaceName;
+		bool bRequiresResolvedFontAsset = false;
+	};
+}
 
 struct DESIGN2UMGCORE_API FFontResolutionDiagnostic
 {
@@ -50,6 +61,14 @@ struct DESIGN2UMGCORE_API FFontResolver
 	 * avoids reading the settings CDO; nullptr is the standalone editor lookup API. */
 	static FString FindFontAssetPath(const FString& FontFamily, const FString& PostScriptName,
 		const FDesign2UMGFontMappings* ExplicitMappings = nullptr);
+	/** Identity of a family/PostScript/weight/style request, shared with prepared document faces. */
+	static FString MakeFontDeclarationKey(const FString& FontFamily, const FString& PostScriptName,
+		const FString& FontWeight, const FString& FontStyle);
+	/** Shared declaration selection for import preparation, measurement and generated text binding. */
+	static TextFontResolution::FResolvedFontSelection ResolveFontSelection(
+		const FString& FontFamily, const FString& PostScriptName, const FString& FontWeight,
+		const FString& FontStyle = FString(), const FDesign2UMGFontMappings* FontMappings = nullptr,
+		const FDesignPreparedFont* PreparedFont = nullptr);
 	/** Stable, collision-resistant package name shared by automatic import and family lookup. */
 	static FString MakeImportedFamilyPackageName(const FString& FontFamily);
 
@@ -84,6 +103,8 @@ struct DESIGN2UMGCORE_API FFontResolver
 
 	/** Return true when exactly one same-name project UFont exists but is rejected as unusable. */
 	static bool HasInvalidProjectFontAsset(const FString& FontFamily);
+	/** Test project family ambiguity without consulting live settings or fallback policy. */
+	static bool HasAmbiguousProjectFontAssets(const FString& FontFamily);
 
 	/** Resolve a font declaration into the shared diagnostic state used by import reports. */
 	static FFontResolutionDiagnostic ResolveFontDiagnostic(
@@ -99,6 +120,10 @@ struct DESIGN2UMGCORE_API FFontResolver
 
 	/** Map a parsed 100..900 weight value onto its UMG typeface name (unknown values map to Regular). */
 	static FString TypefaceNameForWeightValue(int32 WeightValue);
+	/** Stable static-face name for a real weight; standard weights keep their existing names. */
+	static FString TypefaceNameForExactWeight(int32 WeightValue);
+	/** Exact instantiated icon style first, then existing nearest static style selection. */
+	static FString FindBestIconTypefaceForAssetPath(const FString& FontAssetPath, const FString& RequestedWeight);
 
 	/** Clear the font asset path cache */
 	static void ClearCache();

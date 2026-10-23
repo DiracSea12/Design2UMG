@@ -10,11 +10,17 @@ struct FUMGWidgetData;
 
 namespace DesignImportDialogs
 {
+	FString FormatImportResult(const FUMGWidgetData& Data, const FString& ErrorMessage, bool bSucceeded,
+		const FString& SourceFilePath = FString());
+	FString FormatImageIssues(const FDesignImageImportResult& Result);
+	void ShowImportProblem(const FString& Message);
+
 	using FFrameSelectedCallback = TFunction<void(const FString& FrameId)>;
 
 	bool OpenPreviewWindow(
 		const FUMGWidgetData& Data,
 		const FString& OutputPath,
+		const FString& SourceFilePath,
 		const FText& WindowTitle,
 		FOnPreviewConfirmed OnConfirmed,
 		FOnPreviewCancelled OnCancelled = FOnPreviewCancelled(),

@@ -471,7 +471,8 @@ bool FSafeReimportNestedUpdateDiagnosticTest::RunTest(const FString&)
 
 	TestTrue(TEXT("nested node update diagnosed with node name and design id"),
 		FixtureHasMessageWithAll(Result, TEXT("reimport_updated"), { TEXT("Status"), TEXT("fixture_t") }));
-	if (UTextBlock* Status = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Status"))))
+	UTextBlock* Status = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Status")));
+	if (TestNotNull(TEXT("nested Status present after reimport"), Status))
 	{
 		TestEqual(TEXT("nested text actually refreshed"), Status->GetText().ToString(), FString(TEXT("life-v2")));
 	}

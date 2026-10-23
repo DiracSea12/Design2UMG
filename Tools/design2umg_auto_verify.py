@@ -25,10 +25,11 @@ from design2umg_verify_lib.evidence_contract import engine_version_from_evidence
 from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script
 from design2umg_verify_lib.json_io import load_json as helper_load_json
+from design2umg_verify_lib.json_io import load_pencil_json as helper_load_pencil_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 from design2umg_verify_lib.net_guard import build_guarded_opener
 from design2umg_verify_lib.run_history import write_historical_best_validation
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageStat, PngImagePlugin
 from design2umg_verify_lib.pencil_mcp import (
     PENCIL_APP_PROCESS_CANDIDATES,
     PENCIL_APP_EDITOR_COMMANDS,
@@ -337,7 +338,7 @@ def pen_node_lacks_declared_size(mode: str, source_path: str, node_id: str) -> b
     if not source.is_file() or source.suffix.lower() != ".pen":
         return False
     try:
-        document = helper_load_json(source)
+        document = helper_load_pencil_json(source)
     except EvidenceReadError:
         return False
     target_node = find_node_by_id(document.get("children", []), node_id)
@@ -349,7 +350,7 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
     if not source.is_file():
         return None
     try:
-        document = helper_load_json(source)
+        document = helper_load_pencil_json(source) if mode == "pen" else helper_load_json(source)
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "expected_design_size_source_unreadable", exc.path, exc.detail)
         return None
@@ -994,18 +995,27 @@ def run_pen_authority_reference_attempt(
     return export_path, witness_path, export_error
 
 
-def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int) -> dict | None:
+def compare_image_paths(
+    left_path: Path, right_path: Path, pixel_tolerance: int, *,
+    generated_output_max_pixels: int | None = None,
+) -> dict | None:
+    """Opt in to a bounded PNG loader only when both paths are generated outputs."""
     if not left_path.is_file() or not right_path.is_file():
         return None
     left_signature = _path_signature(left_path)
     right_signature = _path_signature(right_path)
     if left_signature is None or right_signature is None:
         return None
-    cache_key = (left_signature, right_signature, pixel_tolerance)
+    cache_key = (left_signature, right_signature, pixel_tolerance, generated_output_max_pixels)
     cached = _COMPARE_IMAGE_CACHE.get(cache_key)
     if cached is not None:
         return dict(cached)
-    comparison = build_diff(load_rgba(left_path), load_rgba(right_path), pixel_tolerance)
+    if generated_output_max_pixels is None:
+        comparison = build_diff(load_rgba(left_path), load_rgba(right_path), pixel_tolerance)
+    else:
+        with load_generated_rgba(left_path, max_pixels=generated_output_max_pixels) as left_image, \
+                load_generated_rgba(right_path, max_pixels=generated_output_max_pixels) as right_image:
+            comparison = build_diff(left_image, right_image, pixel_tolerance)
     result = {
         "size_match": comparison["size_match"],
         "left_size": comparison["reference_size"],
@@ -1233,7 +1243,7 @@ def try_fetch_pencil_source_structure_snapshot(
 
 def try_get_pen_node_name(source_path: str, node_id: str) -> str:
     try:
-        document = helper_load_json(Path(source_path))
+        document = helper_load_pencil_json(Path(source_path))
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "pen_node_name_source_unreadable", exc.path, exc.detail)
         return ""
@@ -1666,6 +1676,23 @@ def load_rgba(path: Path) -> Image.Image:
     if image.mode != "RGBA":
         image = image.convert("RGBA")
     return image
+
+
+MAX_GENERATED_OUTPUT_PIXELS = 256 * 1024 * 1024
+
+
+def load_generated_rgba(path: Path, *, max_pixels: int) -> Image.Image:
+    """Read a trusted renderer PNG under its explicit output budget, not the reference policy."""
+    if not 0 < max_pixels <= MAX_GENERATED_OUTPUT_PIXELS:
+        raise ValueError("Generated screenshot pixel budget must be within 256Mi pixels")
+    # The PNG driver reads dimensions before pixel allocation. Keep Image.open's global
+    # reference guard untouched, including when comparisons run in parallel workers.
+    with PngImagePlugin.PngImageFile(path) as image:
+        if image.width * image.height > max_pixels:
+            raise Image.DecompressionBombError(
+                f"Generated screenshot exceeds pixel budget: {image.width}x{image.height} > {max_pixels}"
+            )
+        return image.convert("RGBA")
 
 
 def apply_stable_visual_tolerance(image: Image.Image) -> Image.Image:
@@ -2295,7 +2322,9 @@ def compare_and_report(
     render_chain: dict,
 ):
     reference_image = load_rgba(reference_path)
-    candidate_image = load_rgba(candidate_path)
+    output_budget = ue_result.get("render_export_max_pixels")
+    candidate_image = (load_generated_rgba(candidate_path, max_pixels=output_budget)
+                       if output_budget is not None else load_rgba(candidate_path))
     comparison = build_visual_comparison(reference_image, candidate_image, args.pixel_tolerance)
     structure_validation = validate_structure_consistency(args, ue_result, render_chain, reference_context)
 

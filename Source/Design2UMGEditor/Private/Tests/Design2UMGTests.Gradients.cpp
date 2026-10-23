@@ -10,6 +10,9 @@
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
 #include "ProceduralShapeGenerator.h"
+#include "DesignPathRasterizer.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
 #include "Materials/Material.h"
 #include "Components/Widget.h"
@@ -23,6 +26,88 @@ using namespace Design2UMGTestUtils;
 
 using Design2UMGTestUtils::BuildProceduralRequestForTest;
 using Design2UMGTestUtils::ReadTexturePixel;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAngularGradientBasisContractTest,
+	"Design2UMG.Gradient.AngularBasisContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAngularGradientBasisContractTest::RunTest(const FString&)
+{
+	const FString Fill = TEXT(R"({"type":"gradient","gradientType":"angular","rotation":35,"center":{"x":0.25,"y":0.75},"size":{"width":1,"height":1.2},"colors":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}]})");
+	FDesignDocument Frame;
+	const FString FrameJson = FString::Printf(TEXT(R"({"version":"2.21","children":[{"id":"angular","type":"frame","width":120,"height":80,"fill":%s}]})"), *Fill);
+	if (!TestTrue(TEXT("Angular source parses"), FPenParser::ParseDocument(FrameJson, Frame))) return false;
+	if (!TestEqual(TEXT("One angular source node"), Frame.Children.Num(), 1)) return false;
+	const auto& Source = Frame.Children[0]->Visual.TopmostFill().Gradient;
+	const FVector4 Expected(-0.3441458618, -0.4914912266, 0.4095760221, -0.2867882182);
+	if (!TestTrue(TEXT("Source records the complete normalized angular basis"), Source.AngularBasis.IsSet())) return false;
+	TestTrue(TEXT("Official top and right axes reach the source payload"), Source.AngularBasis.GetValue().Equals(Expected, 0.000001));
+	TestFalse(TEXT("Explicit axes do not duplicate size geometry"), Source.Size.IsSet());
+	TestEqual(TEXT("Explicit axes do not duplicate rotation geometry"), Source.Rotation, 0.0f);
+	FDesignDocument DefaultSize;
+	const FString DefaultJson = FrameJson.Replace(TEXT(",\"size\":{\"width\":1,\"height\":1.2}"), TEXT(""));
+	if (!TestTrue(TEXT("Angular default size parses"), FPenParser::ParseDocument(DefaultJson, DefaultSize))) return false;
+	const auto& DefaultBasis = DefaultSize.Children[0]->Visual.TopmostFill().Gradient.AngularBasis;
+	TestTrue(TEXT("Default size also records explicit axes"), DefaultBasis.IsSet()
+		&& DefaultBasis.GetValue().Equals(FVector4(Expected.X / 1.2, Expected.Y / 1.2, Expected.Z, Expected.W), 0.000001));
+
+	FUMGWidgetData Data;
+	Data.RootWidget = FDesign2UMGConverter::Convert(Frame, FDesign2UMGConversionSettings::Defaults()).RootWidget;
+	FUMGWidgetData Parsed;
+	FString Error;
+	if (!TestTrue(TEXT("Angular typed JSON parses"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(Data), Parsed, &Error))) return false;
+	TestTrue(TEXT("Angular basis survives source mapping and JSON"), Parsed.RootWidget.Brush.Gradient.AngularBasis.IsSet()
+		&& Parsed.RootWidget.Brush.Gradient.AngularBasis.GetValue().Equals(Expected, 0.000001));
+
+	FDesignDocument Line;
+	const FString LineJson = FString::Printf(TEXT(R"({"version":"2.21","children":[{"id":"line","type":"line","width":20,"height":4,"strokeWidth":4,"strokeLinecap":"round","stroke":%s}]})"), *Fill);
+	if (!TestTrue(TEXT("Angular stroked line parses"), FPenParser::ParseDocument(LineJson, Line))) return false;
+	if (!TestEqual(TEXT("The line source is present before conversion"), Line.Children.Num(), 1)) return false;
+	const auto& SourceStroke = Line.Children[0]->Visual.Stroke;
+	if (!TestTrue(TEXT("The line source has its declared stroke width"), SourceStroke.HasStroke())) return false;
+	if (!TestTrue(TEXT("The line source stroke retains the angular paint before conversion"),
+		SourceStroke.Fill.IsSet() && SourceStroke.Fill->Type == EDesignFillType::Gradient &&
+		SourceStroke.Fill->Gradient.AngularBasis.IsSet() &&
+		SourceStroke.Fill->Gradient.AngularBasis.GetValue().Equals(Expected, 0.000001))) return false;
+	const auto LineData = FDesign2UMGConverter::Convert(Line, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("Native line stroke owns the source angular axes"), LineData.RootWidget.Path.StrokeGradient.AngularBasis.IsSet());
+	FUMGWidgetData ParsedLine;
+	if (!TestTrue(TEXT("Native stroke JSON parses"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(LineData), ParsedLine, &Error))) return false;
+	FDesignPathRasterRequest Request;
+	if (!TestTrue(TEXT("Native line builds its production raster request"), FDesignPathRasterizer::TryBuildRequest(ParsedLine.RootWidget, Request))) return false;
+	if (!TestTrue(TEXT("Native request retains the stroke paint"), Request.StrokePaint.IsSet())) return false;
+	auto Gradient = Request.StrokePaint->Gradient;
+	if (!TestTrue(TEXT("Angular source basis survives path JSON and request transfer"), Gradient.Type.Get(FString()) == TEXT("Angular")
+		&& Gradient.AngularBasis.IsSet() && Gradient.AngularBasis.GetValue().Equals(Expected, 0.000001)
+		&& Gradient.Center.Get(FVector2D::ZeroVector).Equals(FVector2D(0.25, 0.75), 0.000001))) return false;
+	if (!TestTrue(TEXT("Round-cap native stroke expands its raster canvas"), Request.HasExpandedCanvas())) return false;
+	AddInfo(FString::Printf(TEXT("Angular native stroke request: paint=%dx%d raster=%dx%d origin=%d,%d"),
+		Request.PaintSize.X, Request.PaintSize.Y, Request.Size.X, Request.Size.Y, Request.PaintOffset.X, Request.PaintOffset.Y));
+	const FVector2D OriginalSpan(FMath::Max(Request.PaintSize.X - 1, 1), FMath::Max(Request.PaintSize.Y - 1, 1));
+	const FVector2D ExpandedSpan(FMath::Max(Request.Size.X - 1, 1), FMath::Max(Request.Size.Y - 1, 1));
+	const FVector2D Scale = OriginalSpan / ExpandedSpan;
+	const FVector2D Origin(Request.PaintOffset.X, Request.PaintOffset.Y);
+	Gradient.TransformAngularPaintSpace(Scale, Origin / ExpandedSpan);
+	const FVector4 Expanded(Expected.X * Scale.X, Expected.Y * Scale.Y, Expected.Z * Scale.X, Expected.W * Scale.Y);
+	TestTrue(TEXT("Actual raster expansion preserves both source paint axes"), Gradient.AngularBasis.GetValue().Equals(Expanded, 0.000001));
+	TestTrue(TEXT("Actual raster expansion preserves the source paint center"),
+		Gradient.Center.Get(FVector2D::ZeroVector).Equals((FVector2D(0.25, 0.75) * OriginalSpan + Origin) / ExpandedSpan, 0.000001));
+	UTexture2D* StrokeTexture = FDesignPathRasterizer::Rasterize(Request, &Error);
+	FDesignPathRasterizer::FlushPendingTextureUpdates();
+	if (!TestNotNull(FString::Printf(TEXT("Native angular stroke rasterizes: %s"), *Error), StrokeTexture)) return false;
+
+	FUMGProceduralResourceRequest Circular;
+	Circular.MaterialRef = TEXT("angulargradient");
+	Circular.WidthOverride = 12;
+	Circular.HeightOverride = 8;
+	Circular.Gradient.Type = TEXT("Angular");
+	Circular.Gradient.Rotation = 23;
+	Circular.Gradient.Stops = Data.RootWidget.Brush.Gradient.Stops;
+	TestNotNull(TEXT("Current angle-only gradient remains supported"), FProceduralShapeGenerator::GenerateFromMaterialRef(Circular, nullptr, &Error));
+	Circular.WidthOverride = 1;
+	Circular.Gradient.AngularBasis = Expected;
+	TestNotNull(TEXT("Valid angular basis supports a single-pixel dimension"), FProceduralShapeGenerator::GenerateFromMaterialRef(Circular, nullptr, &Error));
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRadialGradientMultiStopFidelityTest,
 	"Design2UMG.Gradient.RadialMultiStopFidelity",

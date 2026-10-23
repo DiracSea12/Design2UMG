@@ -328,6 +328,7 @@ def evaluate_one_off_quarantine(
     current_report: dict,
     metric_epsilon: float,
 ) -> dict | None:
+    """Classify one-off best evidence for diagnostics without waiving regressions."""
     admitted_sources = best_case.get("admitted_sources") or []
     if not isinstance(admitted_sources, list) or not admitted_sources:
         return None
@@ -728,6 +729,12 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                         )
 
                 if regressions:
+                    result["historical_best_regressions"].append(
+                        {
+                            "case": case_name,
+                            "regressions": regressions,
+                        }
+                    )
                     current_source = current_source_input(
                         case_name,
                         output_root,
@@ -745,14 +752,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                         current_report=current_report,
                         metric_epsilon=metric_epsilon,
                     )
-                    if quarantine is None:
-                        result["historical_best_regressions"].append(
-                            {
-                                "case": case_name,
-                                "regressions": regressions,
-                            }
-                        )
-                    else:
+                    if quarantine is not None:
                         result["historical_best_quarantined_one_off_sources"].append(quarantine)
 
             if result["historical_best_degraded_authority_cases"]:
@@ -796,7 +796,7 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
                     f"{len(result['historical_best_regressions'])} case(s) regressed against admissible-best metrics.",
                     count=len(result["historical_best_regressions"]),
                     detail_field="historical_best_regressions",
-                    action="Inspect the per-metric regression deltas and rerun or fix the current output before claiming no regression.",
+                    action="Report all per-metric regression deltas and obtain a user decision before retaining regressions; rerun or fix the current output before claiming no regression.",
                 )
 
     if result["historical_best_checked"]:
@@ -804,8 +804,6 @@ def validate_run(output_root: Path, admissible_best_path: Path | None = None, me
             result["historical_best_status"] = "blocked"
         elif result["historical_best_epoch_seeded_cases"]:
             result["historical_best_status"] = "pass_with_new_evidence_epoch"
-        elif result["historical_best_quarantined_one_off_sources"]:
-            result["historical_best_status"] = "pass_with_quarantined_one_off_best"
         else:
             result["historical_best_status"] = "normal_pass"
     elif result["blocked_reasons"]:

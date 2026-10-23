@@ -378,11 +378,13 @@ namespace Design2UMGConverterInternal
 		const FDesignDocument& InDocument,
 		const TMap<FString, FString>& InThemeContext,
 		TSharedPtr<FRefExpansionCache> InExpansionCache,
-		const FDesign2UMGFontMappings* InFontMappings)
+		const FDesign2UMGFontMappings* InFontMappings,
+		const FDesign2UMGConverter::FPrepareFonts& InPrepareFonts)
 		: Document(InDocument)
 		, ThemeContext(InThemeContext)
 		, ExpansionCache(InExpansionCache.IsValid() ? MoveTemp(InExpansionCache) : MakeShared<FRefExpansionCache>(InDocument))
 		, FontMappings(InFontMappings)
+		, PrepareFonts(InPrepareFonts)
 	{
 	}
 
@@ -402,7 +404,7 @@ namespace Design2UMGConverterInternal
 		}
 
 		FRefExpansionCacheEntry& CacheEntry = ExpansionCache->Entries.Add(CacheKey);
-		CacheEntry.Result = RefExpander::ExpandRef(Node, ExpansionCache->ReusableNodesById);
+		CacheEntry.Result = RefExpander::ExpandRef(Node, ExpansionCache->ReferenceTargetsById);
 		PropagateExpansionOutcome(CacheEntry.Result, *ExpansionCache);
 		if (!CacheEntry.Result.IsSuccess())
 		{
@@ -417,6 +419,23 @@ namespace Design2UMGConverterInternal
 			RefExpander::ReThemeNode(Expanded, Resolver);
 		}
 
+		if (PrepareFonts)
+		{
+			// Instance text and font variables are final here, before any fit-content measurement.
+			FDesignDocument ExpandedDocument;
+			ExpandedDocument.Fonts = Document.Fonts;
+			ExpandedDocument.Children.Add(Expanded);
+			TArray<FString> LocalWarnings;
+			TArray<FString>& Warnings = ExpansionCache->Warnings ? *ExpansionCache->Warnings : LocalWarnings;
+			FString Error;
+			const bool bPrepared = PrepareFonts(ExpandedDocument, Warnings, Error, FDesign2UMGConverter::EFontPreparation::GlyphCoverage);
+			if (!bPrepared)
+			{
+				if (ExpansionCache->FatalError) *ExpansionCache->FatalError = Error;
+				Expanded.Reset();
+				return nullptr;
+			}
+		}
 		return Expanded;
 	}
 

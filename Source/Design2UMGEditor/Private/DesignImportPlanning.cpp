@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImportPlanning.h"
+#include "PencilShaderTextures.h"
 
 #include "Design2UMGConverter.h"
 #include "Design2UMGLog.h"
@@ -34,14 +35,24 @@ namespace
 	void PrepareDocumentForGeneration(
 		FDesignDocument& Document,
 		FUMGWidgetData& OutPreparedData,
-		const FDesign2UMGConversionSettings& ConversionSettings)
+		const FDesign2UMGConversionSettings& ConversionSettings,
+		DesignLocalFontImport::FSourceIndex& FontSources,
+		TArray<FSlateFontInfo>& GlyphDonors, TMap<FFontData, FString>& FontDataHashes)
 	{
 		FFontResolver::FindMissingFonts(Document);
 		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
 			Document,
 			FString(),
 			TEXT("DesignImportPipeline"));
-		OutPreparedData = FDesign2UMGConverter::Convert(Document, ConversionSettings);
+		OutPreparedData = FDesign2UMGConverter::Convert(Document, ConversionSettings,
+			[&FontSources, &GlyphDonors, &FontDataHashes, &ConversionSettings](const FDesignDocument& Generated, TArray<FString>& Warnings, FString& Error,
+				FDesign2UMGConverter::EFontPreparation Preparation)
+			{
+				if (!DesignLocalFontImport::Prepare(Generated, ConversionSettings, Warnings, Error, &FontSources,
+					Preparation == FDesign2UMGConverter::EFontPreparation::GlyphCoverage)) return false;
+				return DesignLocalFontImport::PrepareGlyphFallbacks(Generated, ConversionSettings.ExplicitFontMappings,
+					GlyphDonors, FontDataHashes, Warnings, Error);
+			});
 	}
 }
 
@@ -56,6 +67,21 @@ namespace
 		{
 			OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Source);
 		}
+        if (Node.Path.SourcePaintGeometry.IsSet())
+        {
+            const auto& Geometry = Node.Path.SourcePaintGeometry.GetValue();
+            const auto CollectPaint = [&](const FUMGSurfacePaint& Paint)
+            {
+                const FString Image = Paint.Image.TexturePath.Get(FString()).TrimStartAndEnd();
+                if (!Image.IsEmpty()) OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Image);
+            };
+            if (Geometry.FillPaints.IsSet()) for (const auto& Paint : Geometry.FillPaints.GetValue()) CollectPaint(Paint);
+            if (Geometry.StrokePaint.IsSet()) CollectPaint(Geometry.StrokePaint.GetValue());
+        }
+        for(const auto* Payload:{&Node.Brush.Shader,&Node.Effect.Shader})
+            if (Payload->IsSet())
+                for (const auto& Image : PencilShaderTextures::ImageUniforms(Payload->GetValue()))
+                    OutSources.FindOrAdd(Node.Id.IsEmpty() ? Node.Name : Node.Id).Add(Image.Value.TrimStartAndEnd());
 		for (const FUMGWidgetNode& Child : Node.Children)
 		{
 			CollectImageSources(Child, OutSources);
@@ -161,6 +187,15 @@ namespace DesignImportPlanning
 		InOutResult.AddDiagnostic(MoveTemp(Diagnostic));
 		InOutResult.RefreshDisplaySummary();
 	}
+	FImportAnalysisResult AnalyzeConversion(
+		FDesignDocument& Document, const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot)
+	{
+		FImportAnalysisInput Input;
+		Input.bResolveImages = false;
+		Input.SettingsSnapshot = &SettingsSnapshot;
+		return AnalyzeImport(Document, Input);
+	}
+
 	FImportInPlaceAnalysisResult AnalyzeImport(FUMGWidgetData& Data, const FImportAnalysisInput& Input)
 	{
 		FImportInPlaceAnalysisResult Result;
@@ -194,19 +229,24 @@ namespace DesignImportPlanning
 		}
 
 		const FDesign2UMGConversionSettings& ConversionSettings = Result.SettingsSnapshot->ConversionSettings;
+		DesignLocalFontImport::FSourceIndex FontSources;
 		TArray<FString> FontWarnings;
-		if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Result.ErrorMessage))
+		TArray<FSlateFontInfo> GlyphDonors;
+		TMap<FFontData, FString> FontDataHashes;
+		if (!DesignLocalFontImport::Prepare(Document, ConversionSettings, FontWarnings, Result.ErrorMessage, &FontSources)
+			|| !DesignLocalFontImport::PrepareGlyphFallbacks(Document, ConversionSettings.ExplicitFontMappings,
+				GlyphDonors, FontDataHashes, FontWarnings, Result.ErrorMessage))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Result.ErrorMessage);
 			return Result;
 		}
-		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings);
+		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings, FontSources, GlyphDonors, FontDataHashes);
 		if (!Result.Data.ConversionError.IsEmpty())
 		{
 			Result.ErrorMessage = Result.Data.ConversionError;
 			return Result;
 		}
-		Result.Data.Warnings.Append(FontWarnings);
+		for (const FString& Warning : FontWarnings) Result.Data.Warnings.AddUnique(Warning);
 		Result.SettingsSnapshot->GenerationSettings.ComponentConversionSettings = ConversionSettings;
 		if (Input.bResolveImages)
 		{

@@ -8,6 +8,10 @@
 
 namespace DesignImportPlanning
 {
+	/** Convert document data without resolving images; import execution handles those. */
+	FImportAnalysisResult AnalyzeConversion(
+		FDesignDocument& Document, const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot);
+
 	FDesignImageImportResult ResolveImages(
 		FUMGWidgetData& Data,
 		const FDesignImageImportResult* PreviousResult = nullptr,

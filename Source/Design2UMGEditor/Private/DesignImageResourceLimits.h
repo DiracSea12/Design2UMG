@@ -3,9 +3,25 @@
 
 #include "CoreMinimal.h"
 
-// One image budget policy for decoded inputs and generated texture resources.
+// Image allocation, shadow working-set and widget export policies.
 namespace DesignImageResources
 {
+	inline constexpr int64 RenderExportMaxPixels = 256ll * 1024ll * 1024ll;
+	inline constexpr int32 RenderTileEdge = 8192;
+
+	inline constexpr uint64 ShadowFilterMaxWorkingBytes = 512ull * 1024ull * 1024ull;
+	inline constexpr int64 ShadowFilterMaxOperations = 1ll << 30;
+	// At most 8191 float coefficients, below 32 KiB.
+	inline constexpr int32 ShadowFilterMaxKernelRadius = 4095;
+
+	enum class EImageDimensionError : uint8
+	{
+		None,
+		NonPositive,
+		SideLimitExceeded,
+		PixelLimitExceeded
+	};
+
 	struct FImageResourceLimits
 	{
 		static constexpr uint64 DefaultMaxCompressedBytes = 32ull * 1024ull * 1024ull;
@@ -13,6 +29,7 @@ namespace DesignImageResources
 		static constexpr int64 DefaultMaxPixels = 64ll * 1024ll * 1024ll;
 		static constexpr int32 DefaultMaxUrlsPerOperation = 128;
 		static constexpr uint64 DefaultMaxTotalCompressedBytes = DefaultMaxCompressedBytes * 8ull;
+		// Import allowance; generated textures use their separate editor preference.
 		static constexpr uint64 DefaultMaxTotalDecodedBytes = 512ull * 1024ull * 1024ull;
 
 		uint64 MaxCompressedBytes = DefaultMaxCompressedBytes;
@@ -22,10 +39,10 @@ namespace DesignImageResources
 		uint64 MaxTotalCompressedBytes = DefaultMaxTotalCompressedBytes;
 		uint64 MaxTotalDecodedBytes = DefaultMaxTotalDecodedBytes;
 
+		EImageDimensionError GetDimensionError(int64 Width, int64 Height) const;
 		bool AllowsDimensions(int64 Width, int64 Height) const
 		{
-			return Width > 0 && Height > 0 && Width <= MaxDimension && Height <= MaxDimension
-				&& Width * Height <= MaxPixels;
+			return GetDimensionError(Width, Height) == EImageDimensionError::None;
 		}
 		/** Validate before narrowing source dimensions to integer pixels. */
 		bool TryGetPixelSize(float Width, float Height, FIntPoint& OutSize) const;
