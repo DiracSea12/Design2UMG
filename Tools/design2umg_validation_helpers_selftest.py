@@ -5,10 +5,11 @@ import runpy
 import subprocess
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import design2umg_auto_verify as verify
 import design2umg_auto_verify_suite as suite_verify
@@ -21,6 +22,8 @@ from design2umg_verify_lib import suite_discovery
 from design2umg_verify_lib import evidence_contract
 from design2umg_verify_lib import execution_shards
 from design2umg_verify_lib import editor_driver_writer
+from design2umg_verify_lib import reference_cache
+from design2umg_verify_lib.diagnostics import EvidenceReadError
 
 
 PNG_1X1 = (
@@ -51,6 +54,71 @@ def make_rgba_png(path: Path, rgba: tuple[int, int, int, int]) -> None:
 
 def assert_equal(actual, expected) -> None:
     assert actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
+def test_reference_cache_import_does_not_load_cli() -> None:
+    result = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import sys; sys.path.insert(0, sys.argv[1]); "
+         "from design2umg_verify_lib import reference_cache; "
+         "assert 'design2umg_auto_verify' not in sys.modules, 'cache import loaded CLI'",
+         str(Path(__file__).resolve().parent)],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_reference_cache_round_trip_and_io_errors() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "design.pen"
+        write_text(source, '{"children": []}')
+        reference = root / "input.png"
+        write_bytes(reference, PNG_1X1)
+        output = root / "output"
+        output.mkdir()
+        args = SimpleNamespace(mode="pen", source=str(source), node="root",
+                               reference_provider="pencil", reference="")
+        context = {"source_structure_live": {"children": []},
+                   "source_structure_live_path": "original.json", "label": "缓存"}
+        cache_root = root / "cache"
+        reference_cache.save_reference_to_cache(args, {}, cache_root, reference, context)
+        cache_dir = cache_root / reference_cache.build_reference_cache_key(args)
+        metadata_path = cache_dir / "meta.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        assert_equal(metadata["reference_context"], {"label": "缓存"})
+        assert_equal(context["source_structure_live_path"], "original.json")
+        restored_path, restored_context = reference_cache.restore_reference_from_cache(args, {}, output, cache_root)
+        assert_equal(restored_path.read_bytes(), PNG_1X1)
+        assert_equal(restored_context["source_structure_live"], context["source_structure_live"])
+        assert_equal(restored_context["source_structure_live_path"], str(cache_dir / "source_structure_live.json"))
+        assert_equal(restored_context["reference_cache"]["hit"], True)
+        assert_equal(restored_context["label"], "缓存")
+
+        write_text(cache_dir / "source_structure_live.json", "{")
+        diagnostics = StringIO()
+        with redirect_stderr(diagnostics):
+            _, restored_context = reference_cache.restore_reference_from_cache(args, {}, output, cache_root)
+        assert_equal(restored_context["source_structure_live_unavailable"]["reason"], "json_parse_failed")
+        assert "json_parse_failed" in diagnostics.getvalue()
+        write_text(source, '{"children": [{}]}')
+        assert_equal(reference_cache.restore_reference_from_cache(args, {}, output, cache_root), None)
+
+        write_text(metadata_path, "{")
+        try:
+            reference_cache.restore_reference_from_cache(args, {}, output, cache_root)
+        except EvidenceReadError as exc:
+            assert_equal(exc.reason, "json_parse_failed")
+            assert_equal(exc.path, metadata_path)
+        else:
+            raise AssertionError("invalid cache metadata must propagate its read error")
+        with patch.object(Path, "write_text", side_effect=PermissionError("cache write denied")):
+            try:
+                reference_cache.save_reference_to_cache(args, {}, cache_root, reference, context)
+            except PermissionError as exc:
+                assert_equal(str(exc), "cache write denied")
+            else:
+                raise AssertionError("cache write error must propagate")
 
 
 def make_pen_fixture(design_root: Path) -> Path:
@@ -1547,6 +1615,8 @@ def test_runtime_project_fails_closed_without_explicit_input() -> None:
 
 
 def main() -> None:
+    test_reference_cache_import_does_not_load_cli()
+    test_reference_cache_round_trip_and_io_errors()
     # Rich text remains subject to text geometry correspondence on both sides.
     assert "RichTextBlock" in geometry_compare.SOURCE_TEXT_TYPES
     assert "RichTextBlock" in geometry_compare.RUNTIME_TEXT_CLASSES

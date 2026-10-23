@@ -2,6 +2,9 @@ import io
 import json
 from contextlib import redirect_stderr
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from design2umg_verify_lib import json_io
 
 from design2umg_verify_lib import diagnostics
 
@@ -43,7 +46,30 @@ def test_emit_diagnostic_contract() -> None:
     )
 
 
+def test_pencil_json_comments() -> None:
+    plain = r'{"text":"https://host/a//b/*c*/\"quoted\\tail","children":[]}'
+    commented = "// header\n" + plain.replace('"children"', '/* nodes */ "children"')
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "comments.pen"
+        path.write_text(commented, encoding="utf-8")
+        assert_equal(json_io.load_pencil_json(path), json.loads(plain))
+        try:
+            json_io.load_json(path)
+        except diagnostics.EvidenceReadError:
+            pass
+        else:
+            raise AssertionError("ordinary JSON must stay strict")
+        path.write_text('{/* nodes */ "children":[],}', encoding="utf-8")
+        try:
+            json_io.load_pencil_json(path)
+        except diagnostics.EvidenceReadError:
+            pass
+        else:
+            raise AssertionError("Pencil trailing commas remain invalid")
+
+
 def main() -> None:
+    test_pencil_json_comments()
     test_error_mapping()
     test_emit_diagnostic_contract()
     print("diagnostics selftest passed")

@@ -7,6 +7,7 @@ from design2umg_verify_lib.json_io import load_json as helper_load_json
 
 DESIGN_SIZE_RENDER_RULE = "source_design_size_v1"
 DESIGN_SIZE_AUTHORITY_SOURCE = "ue_blueprint_design_time_size"
+SOURCE_EXPORT_AUTHORITY_SOURCE = "ue_blueprint_source_export_bounds"
 DESIGN_SIZE_COMPARISON_MODES = {
     "native_size",
     "reference_scaled_to_candidate_for_compare_only",
@@ -46,7 +47,7 @@ def parse_positive_int(value) -> int | None:
         parsed = int(round(float(value)))
     except (TypeError, ValueError):
         return None
-    return parsed if parsed > 1 else None
+    return parsed if parsed > 0 else None
 
 
 def as_size_pair(width, height) -> list[int] | None:
@@ -137,7 +138,12 @@ def evaluate_report_render_size_rule(report_path: Path) -> dict:
     )
     result["authority_source"] = authority_source or ""
     result["comparison_mode"] = comparison_mode or ""
+    source_export_size = as_size_pair(
+        nested_value(report, ("ue_result", "source_export_width")),
+        nested_value(report, ("ue_result", "source_export_height")),
+    )
     result["design_time_size"] = design_time_size
+    result["source_export_size"] = source_export_size
     result["authority_design_size"] = authority_design_size
     result["candidate_size"] = candidate_size
     result["render_size"] = render_size
@@ -147,24 +153,34 @@ def evaluate_report_render_size_rule(report_path: Path) -> dict:
         result["reason"] = "legacy_requested_render_size"
         return result
 
-    if authority_source != DESIGN_SIZE_AUTHORITY_SOURCE:
-        result["reason"] = "render_size_authority_missing_or_mismatch"
-        return result
-
     if design_time_size is None:
         result["reason"] = "design_time_size_missing"
         return result
 
-    if authority_design_size != design_time_size:
+    # Each native evidence type declares its extent; a missing export extent is not inferred from layout.
+    if authority_source == SOURCE_EXPORT_AUTHORITY_SOURCE:
+        if source_export_size is None:
+            result["reason"] = "source_export_size_missing"
+            return result
+        expected_size = source_export_size
+        extent_name = "source_export_size"
+    elif authority_source == DESIGN_SIZE_AUTHORITY_SOURCE:
+        expected_size = design_time_size
+        extent_name = "design_time_size"
+    else:
+        result["reason"] = "render_size_authority_missing_or_mismatch"
+        return result
+
+    if authority_design_size != expected_size:
         result["reason"] = "authority_design_size_mismatch"
         return result
 
-    if candidate_size != design_time_size:
-        result["reason"] = "candidate_size_mismatch_design_time_size"
+    if candidate_size != expected_size:
+        result["reason"] = "candidate_size_mismatch_" + extent_name
         return result
 
-    if render_size != design_time_size:
-        result["reason"] = "render_size_mismatch_design_time_size"
+    if render_size != expected_size:
+        result["reason"] = "render_size_mismatch_" + extent_name
         return result
 
     if comparison_mode not in DESIGN_SIZE_COMPARISON_MODES:

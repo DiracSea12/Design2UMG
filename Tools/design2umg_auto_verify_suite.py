@@ -62,6 +62,7 @@ def parse_args():
     parser.add_argument("--figma-export-root", action="append", default=[], help="Optional additional Figma export root, scanned recursively for design.json + reference PNG. Can be repeated. When omitted, scan only --design-root.")
     parser.add_argument("--list-cases", action="store_true", help="Write run_scope.json and print discovered cases without requiring or launching Unreal.")
     parser.add_argument("--no-publish-history", action="store_true", help="Keep historical validation run-local without updating the global history manifest.")
+    parser.add_argument("--history-root", default="", help="Read accepted historical results from this root. External history requires --no-publish-history; new outputs stay under --output-root.")
     parser.add_argument("--output-root", default="", help="Directory for suite outputs")
     parser.add_argument("--reference-root", default="", help="Optional directory containing per-case reference PNGs at <reference-root>/<case-name>/reference.png")
     parser.add_argument("--project", default="", help="Runtime project path. If omitted, DESIGN2UMG_RUNTIME_PROJECT is required. HostProject fallback and design-root inference are not supported.")
@@ -1766,6 +1767,9 @@ def main():
         raise RuntimeError(f"Design root not found: {design_root}")
     effective_figma_export_roots = suite_discovery.resolve_default_figma_export_roots(design_root, args.figma_export_root)
     output_root = Path(args.output_root).resolve() if args.output_root else suite_discovery.default_output_root()
+    history_root = Path(args.history_root).resolve() if args.history_root else output_root.parent
+    if history_root.resolve() != output_root.parent.resolve() and not args.no_publish_history:
+        raise ValueError("External --history-root requires --no-publish-history")
     cases = suite_discovery.discover_pen_cases(design_root, args.include, args.exclude)
     cases.extend(suite_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
     run_scope_path = suite_discovery.write_run_scope(output_root, args, cases, effective_figma_export_roots)
@@ -1796,7 +1800,6 @@ def main():
         print(f"figma_export_roots={effective_figma_export_roots}")
         return 0
 
-    history_root = output_root.parent
     if rebuild_best.load_baseline_anchor(history_root)[0] is None:
         raise ValueError(f"Historical validation requires an accepted baseline anchor: {history_root}")
 

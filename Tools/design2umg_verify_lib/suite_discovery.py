@@ -113,7 +113,7 @@ def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern:
     used_names: set[str] = set()
 
     for pen_path in sorted(design_root.rglob("*.pen")):
-        document = verify.helper_load_json(pen_path)
+        document = verify.helper_load_pencil_json(pen_path)
         nodes = document.get("children", [])
         if not isinstance(nodes, list):
             continue
@@ -136,7 +136,7 @@ def discover_pen_cases(design_root: Path, include_pattern: str, exclude_pattern:
             )
             if not size and not has_declared_extent:
                 continue
-            if size and (size[0] < ROOT_MIN_SIZE or size[1] < ROOT_MIN_SIZE):
+            if size and (max(size) < ROOT_MIN_SIZE):
                 continue
 
             node_name = node.get("name") or node_id

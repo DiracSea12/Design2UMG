@@ -17,6 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 import design2umg_rebuild_admissible_best as rebuild_best
+import design2umg_render_rule as render_rule
 import design2umg_validate_run as validate_run_tool
 from design2umg_verify_lib.json_io import content_file_signature as helper_content_file_signature
 from design2umg_verify_lib.diagnostics import EvidenceReadError
@@ -24,10 +25,11 @@ from design2umg_verify_lib.evidence_contract import engine_version_from_evidence
 from design2umg_verify_lib.diagnostics import emit_diagnostic
 from design2umg_verify_lib.editor_driver_writer import write_editor_driver_script
 from design2umg_verify_lib.json_io import load_json as helper_load_json
+from design2umg_verify_lib.json_io import load_pencil_json as helper_load_pencil_json
 from design2umg_verify_lib.json_io import write_json as helper_write_json
 from design2umg_verify_lib.net_guard import build_guarded_opener
 from design2umg_verify_lib.run_history import write_historical_best_validation
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageStat, PngImagePlugin
 from design2umg_verify_lib.pencil_mcp import (
     PENCIL_APP_PROCESS_CANDIDATES,
     PENCIL_APP_EDITOR_COMMANDS,
@@ -160,22 +162,22 @@ def parse_padding_box(value) -> tuple[float, float, float, float]:
 
 def resolve_node_width(node: dict, available_width: float | None = None) -> float | None:
     width = parse_numeric_dimension(node.get("width"))
-    if width and width > 1:
+    if width and width > 0:
         return width
 
-    if isinstance(node.get("width"), str) and node.get("width") == "fill_container" and available_width and available_width > 1:
+    if isinstance(node.get("width"), str) and node.get("width") == "fill_container" and available_width and available_width > 0:
         return available_width
 
     size = node.get("size")
     if isinstance(size, dict):
         width = parse_numeric_dimension(size.get("x"))
-        if width and width > 1:
+        if width and width > 0:
             return width
 
     bbox = node.get("absoluteBoundingBox")
     if isinstance(bbox, dict):
         width = parse_numeric_dimension(bbox.get("width"))
-        if width and width > 1:
+        if width and width > 0:
             return width
 
     return None
@@ -183,19 +185,19 @@ def resolve_node_width(node: dict, available_width: float | None = None) -> floa
 
 def resolve_node_height(node: dict) -> float | None:
     height = parse_numeric_dimension(node.get("height"))
-    if height and height > 1:
+    if height and height > 0:
         return height
 
     size = node.get("size")
     if isinstance(size, dict):
         height = parse_numeric_dimension(size.get("y"))
-        if height and height > 1:
+        if height and height > 0:
             return height
 
     bbox = node.get("absoluteBoundingBox")
     if isinstance(bbox, dict):
         height = parse_numeric_dimension(bbox.get("height"))
-        if height and height > 1:
+        if height and height > 0:
             return height
 
     return None
@@ -241,7 +243,7 @@ def extract_node_numeric_size(node: dict, available_width: float | None = None) 
 
     width = resolve_node_width(node, available_width)
     height = resolve_node_height(node)
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return width, height
 
     return width, height
@@ -257,7 +259,7 @@ def infer_node_size_from_children(node: dict, available_width: float | None = No
 
     width, _ = extract_node_numeric_size(node, available_width)
     top, right, bottom, left = parse_padding_box(node.get("padding"))
-    inner_width = max(0.0, width - left - right) if width and width > 1 else available_width
+    inner_width = max(0.0, width - left - right) if width and width > 0 else available_width
     gap = parse_numeric_dimension(node.get("gap")) or 0.0
     layout = str(node.get("layout") or "").lower()
 
@@ -293,7 +295,7 @@ def infer_node_size_from_children(node: dict, available_width: float | None = No
         inferred_width = left + max_right + right
         inferred_height = top + max_bottom + bottom
 
-    if inferred_width <= 1 or inferred_height <= 1:
+    if inferred_width <= 0 or inferred_height <= 0:
         return None
     return math.ceil(inferred_width), math.ceil(inferred_height)
 
@@ -306,12 +308,12 @@ def extract_node_size(node: dict, available_width: float | None = None) -> tuple
     inferred = infer_node_size_from_children(node, available_width)
     if inferred:
         inferred_width, inferred_height = inferred
-        if not width or width <= 1:
+        if not width or width <= 0:
             width = inferred_width
-        if not height or height <= 1:
+        if not height or height <= 0:
             height = inferred_height
 
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
 
     return None
@@ -319,7 +321,7 @@ def extract_node_size(node: dict, available_width: float | None = None) -> tuple
 
 def extract_declared_node_size(node: dict) -> tuple[int, int] | None:
     width, height = extract_node_numeric_size(node)
-    if width and height and width > 1 and height > 1:
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
     return None
 
@@ -336,7 +338,7 @@ def pen_node_lacks_declared_size(mode: str, source_path: str, node_id: str) -> b
     if not source.is_file() or source.suffix.lower() != ".pen":
         return False
     try:
-        document = helper_load_json(source)
+        document = helper_load_pencil_json(source)
     except EvidenceReadError:
         return False
     target_node = find_node_by_id(document.get("children", []), node_id)
@@ -348,7 +350,7 @@ def get_expected_design_size(mode: str, source_path: str, node_id: str) -> tuple
     if not source.is_file():
         return None
     try:
-        document = helper_load_json(source)
+        document = helper_load_pencil_json(source) if mode == "pen" else helper_load_json(source)
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "expected_design_size_source_unreadable", exc.path, exc.detail)
         return None
@@ -412,11 +414,11 @@ def validate_reference_against_design(reference_size: tuple[int, int], expected_
     }
 
 
-def resolve_authoritative_design_size(ue_result: dict | None) -> tuple[int, int] | None:
+def resolve_source_export_size(ue_result: dict | None) -> tuple[int, int] | None:
     ue_result = ue_result or {}
-    width = parse_numeric_dimension(ue_result.get("design_time_width"))
-    height = parse_numeric_dimension(ue_result.get("design_time_height"))
-    if width and height and width > 1 and height > 1:
+    width = parse_numeric_dimension(ue_result.get("source_export_width"))
+    height = parse_numeric_dimension(ue_result.get("source_export_height"))
+    if width and height and width > 0 and height > 0:
         return math.ceil(width), math.ceil(height)
 
     return None
@@ -429,7 +431,7 @@ def apply_render_size_authority(
     candidate_path: Path | None,
     pixel_tolerance: int,
 ) -> dict:
-    design_size = resolve_authoritative_design_size(ue_result)
+    design_size = resolve_source_export_size(ue_result)
     reference_authority = reference_context.get("reference_authority") or {}
     if reference_authority.get("canonical_source") in {"pencil_export_nodes", "pencil_get_screenshot"}:
         finalize_pen_reference_authority(reference_authority, design_size, pixel_tolerance)
@@ -438,16 +440,17 @@ def apply_render_size_authority(
     candidate_size_valid = bool(design_size and candidate_size and tuple(candidate_size) == tuple(design_size))
     if not candidate_size_valid:
         reference_validation["valid"] = False
-        reference_validation["reason"] = "candidate_size_mismatch_design_time_size" if design_size else "design_time_size_unavailable"
+        reference_validation["reason"] = "candidate_size_mismatch_source_export_size" if design_size else "source_export_size_unavailable"
     reference_validation["candidate_size"] = list(candidate_size) if candidate_size else None
-    reference_validation["candidate_size_matches_design_time"] = candidate_size_valid
+    reference_validation["candidate_size_matches_source_export"] = candidate_size_valid
     reference_context["reference_validation"] = reference_validation
     reference_context["render_size_authority"] = {
-        "source": "ue_blueprint_design_time_size",
-        "reason": "source design size defines render output; reference PNG size is compare-only",
+        "source": render_rule.SOURCE_EXPORT_AUTHORITY_SOURCE,
+        "reason": "source layout and effects define the export canvas; reference PNG size is compare-only",
         "design_size": list(design_size) if design_size else None,
+        "layout_size": [ue_result.get("design_time_width"), ue_result.get("design_time_height")],
         "candidate_size": list(candidate_size) if candidate_size else None,
-        "candidate_size_matches_design_time": candidate_size_valid,
+        "candidate_size_matches_source_export": candidate_size_valid,
         "requested_render_size": None,
     }
     return reference_validation
@@ -992,18 +995,27 @@ def run_pen_authority_reference_attempt(
     return export_path, witness_path, export_error
 
 
-def compare_image_paths(left_path: Path, right_path: Path, pixel_tolerance: int) -> dict | None:
+def compare_image_paths(
+    left_path: Path, right_path: Path, pixel_tolerance: int, *,
+    generated_output_max_pixels: int | None = None,
+) -> dict | None:
+    """Opt in to a bounded PNG loader only when both paths are generated outputs."""
     if not left_path.is_file() or not right_path.is_file():
         return None
     left_signature = _path_signature(left_path)
     right_signature = _path_signature(right_path)
     if left_signature is None or right_signature is None:
         return None
-    cache_key = (left_signature, right_signature, pixel_tolerance)
+    cache_key = (left_signature, right_signature, pixel_tolerance, generated_output_max_pixels)
     cached = _COMPARE_IMAGE_CACHE.get(cache_key)
     if cached is not None:
         return dict(cached)
-    comparison = build_diff(load_rgba(left_path), load_rgba(right_path), pixel_tolerance)
+    if generated_output_max_pixels is None:
+        comparison = build_diff(load_rgba(left_path), load_rgba(right_path), pixel_tolerance)
+    else:
+        with load_generated_rgba(left_path, max_pixels=generated_output_max_pixels) as left_image, \
+                load_generated_rgba(right_path, max_pixels=generated_output_max_pixels) as right_image:
+            comparison = build_diff(left_image, right_image, pixel_tolerance)
     result = {
         "size_match": comparison["size_match"],
         "left_size": comparison["reference_size"],
@@ -1231,7 +1243,7 @@ def try_fetch_pencil_source_structure_snapshot(
 
 def try_get_pen_node_name(source_path: str, node_id: str) -> str:
     try:
-        document = helper_load_json(Path(source_path))
+        document = helper_load_pencil_json(Path(source_path))
     except EvidenceReadError as exc:
         emit_diagnostic("warning", "pen_node_name_source_unreadable", exc.path, exc.detail)
         return ""
@@ -1664,6 +1676,23 @@ def load_rgba(path: Path) -> Image.Image:
     if image.mode != "RGBA":
         image = image.convert("RGBA")
     return image
+
+
+MAX_GENERATED_OUTPUT_PIXELS = 256 * 1024 * 1024
+
+
+def load_generated_rgba(path: Path, *, max_pixels: int) -> Image.Image:
+    """Read a trusted renderer PNG under its explicit output budget, not the reference policy."""
+    if not 0 < max_pixels <= MAX_GENERATED_OUTPUT_PIXELS:
+        raise ValueError("Generated screenshot pixel budget must be within 256Mi pixels")
+    # The PNG driver reads dimensions before pixel allocation. Keep Image.open's global
+    # reference guard untouched, including when comparisons run in parallel workers.
+    with PngImagePlugin.PngImageFile(path) as image:
+        if image.width * image.height > max_pixels:
+            raise Image.DecompressionBombError(
+                f"Generated screenshot exceeds pixel budget: {image.width}x{image.height} > {max_pixels}"
+            )
+        return image.convert("RGBA")
 
 
 def apply_stable_visual_tolerance(image: Image.Image) -> Image.Image:
@@ -2293,7 +2322,9 @@ def compare_and_report(
     render_chain: dict,
 ):
     reference_image = load_rgba(reference_path)
-    candidate_image = load_rgba(candidate_path)
+    output_budget = ue_result.get("render_export_max_pixels")
+    candidate_image = (load_generated_rgba(candidate_path, max_pixels=output_budget)
+                       if output_budget is not None else load_rgba(candidate_path))
     comparison = build_visual_comparison(reference_image, candidate_image, args.pixel_tolerance)
     structure_validation = validate_structure_consistency(args, ue_result, render_chain, reference_context)
 

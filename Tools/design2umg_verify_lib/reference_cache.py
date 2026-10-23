@@ -1,10 +1,11 @@
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
-import design2umg_auto_verify as verify
 from design2umg_verify_lib.diagnostics import EvidenceReadError
 from design2umg_verify_lib.diagnostics import emit_diagnostic
+from design2umg_verify_lib.json_io import load_json, write_json
 
 
 REFERENCE_CACHE_SCHEMA_VERSION = 1
@@ -72,7 +73,7 @@ def restore_reference_from_cache(
     if not meta_path.is_file() or not cached_reference_path.is_file():
         return None
 
-    metadata = verify.helper_load_json(meta_path)
+    metadata = load_json(meta_path)
     if metadata.get("schema") != REFERENCE_CACHE_SCHEMA_VERSION:
         return None
     if metadata.get("mode") != case_args.mode:
@@ -90,13 +91,13 @@ def restore_reference_from_cache(
         return None
 
     output_reference_path = output_dir / "reference.png"
-    verify.shutil.copyfile(cached_reference_path, output_reference_path)
+    shutil.copyfile(cached_reference_path, output_reference_path)
 
     reference_context = metadata.get("reference_context") or {}
     cached_structure_path = cache_dir / "source_structure_live.json"
     if cached_structure_path.is_file():
         try:
-            reference_context["source_structure_live"] = verify.helper_load_json(cached_structure_path)
+            reference_context["source_structure_live"] = load_json(cached_structure_path)
             reference_context["source_structure_live_path"] = str(cached_structure_path)
         except EvidenceReadError as exc:
             reference_context["source_structure_live_unavailable"] = {
@@ -133,13 +134,13 @@ def save_reference_to_cache(
     cache_key = build_reference_cache_key(case_args)
     cache_dir = cache_root / cache_key
     cache_dir.mkdir(parents=True, exist_ok=True)
-    verify.shutil.copyfile(reference_path, cache_dir / "reference.png")
+    shutil.copyfile(reference_path, cache_dir / "reference.png")
 
     cached_context = dict(reference_context or {})
     source_structure_live = cached_context.pop("source_structure_live", None)
     cached_context.pop("source_structure_live_path", None)
     if source_structure_live is not None:
-        verify.write_json(cache_dir / "source_structure_live.json", source_structure_live)
+        write_json(cache_dir / "source_structure_live.json", source_structure_live)
 
     metadata = {
         "schema": REFERENCE_CACHE_SCHEMA_VERSION,
@@ -150,4 +151,4 @@ def save_reference_to_cache(
         "source_signature": build_source_signature(source_path),
         "reference_context": cached_context,
     }
-    verify.write_json(cache_dir / "meta.json", metadata)
+    write_json(cache_dir / "meta.json", metadata)
