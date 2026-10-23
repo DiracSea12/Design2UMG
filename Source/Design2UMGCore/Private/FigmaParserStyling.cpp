@@ -252,9 +252,16 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 				continue;
 			}
 
+			const FString PaintType = GetString(StrokeObj, TEXT("type"));
+			if (PaintType != TEXT("SOLID") && !PaintType.StartsWith(TEXT("GRADIENT_")))
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: Unsupported stroke paint '%s' on node '%s'; skipping paint."),
+					*PaintType, *GetString(NodeObj, TEXT("id")));
+				continue;
+			}
+
 			bHasVisibleStroke = true;
-			const float StrokeOpacity = GetNumber(StrokeObj, TEXT("opacity"), 1.0);
-			Result.Fill = FDesignFill::FromColor(ColorToHex(GetObject(StrokeObj, TEXT("color")), StrokeOpacity));
+			Result.Fill = ParseSingleFill(StrokeObj);
 			break;
 		}
 	}

@@ -77,6 +77,12 @@ bool FFontWeightAliasSingleSourceTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("padded bold input trims to 700"), FFontResolver::ParseWeightValue(TEXT(" Bold ")), 700);
 	TestEqual(TEXT("weight 700 maps to Bold typeface"),
 		FFontResolver::TypefaceNameForWeightValue(700), FString(TEXT("Bold")));
+	TestEqual(TEXT("Instantiated icon weight 350 retains its distinct static typeface name"),
+		FFontResolver::TypefaceNameForExactWeight(350), FString(TEXT("350")));
+	TestEqual(TEXT("Existing standard static typeface names remain unchanged"),
+		FFontResolver::TypefaceNameForExactWeight(700), FString(TEXT("Bold")));
+	TestEqual(TEXT("Ordinary text still rounds numeric 350 as before"),
+		FFontResolver::ParseWeightValue(TEXT("350")), 400);
 	return true;
 }
 

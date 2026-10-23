@@ -7,6 +7,7 @@
 #include "FontResolver.h"
 #include "TextMeasurement.h"
 #include "TextMeasurementInternal.h"
+#include "TextMeasurementRuntimeProbe.h"
 #include "TextFontResolution.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetNodeAccess.h"
@@ -75,13 +76,13 @@ namespace
 			Node->Text.FontFamily,
 			Node->Text.FontPostScriptName,
 			Node->Text.FontWeight,
-			Node->Text.FontStyle, FontMappings);
+			Node->Text.FontStyle, FontMappings, &Node->Text.PreparedFont);
 		if (!ResolvedFont.FontAssetPath.IsEmpty())
 		{
 			Widget.Text.FontFamily = ResolvedFont.FontAssetPath;
 		}
 
-		if (!Node->Text.FontWeight.IsEmpty() && !ResolvedFont.TypefaceName.IsEmpty())
+		if (!ResolvedFont.TypefaceName.IsEmpty())
 		{
 			Widget.Text.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -237,17 +238,21 @@ namespace
 		Result.RowName = FString::Printf(TEXT("d2u_run_%d"), RunIndex);
 		Result.Content = Run ? Run->Content : InNode->Text.Content;
 
-		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty())
+		if (!Run || !Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty()
+			|| !Run->PreparedFont.AssetPath.IsEmpty() || !InNode->Text.PreparedFont.AssetPath.IsEmpty()
+			|| !Run->PreparedFont.DeclarationKey.IsEmpty() || !InNode->Text.PreparedFont.DeclarationKey.IsEmpty())
 		{
 			const FString EffectiveFontFamily =
 				(Run && !Run->FontFamily.IsEmpty()) ? Run->FontFamily : InNode->Text.FontFamily;
-			const FString EffectivePostScriptName = Run ? Run->FontPostScriptName : InNode->Text.FontPostScriptName;
+			const FString EffectivePostScriptName = (Run && (!Run->FontFamily.IsEmpty() || !Run->FontPostScriptName.IsEmpty()))
+				? Run->FontPostScriptName : InNode->Text.FontPostScriptName;
 			const FString EffectiveFontWeight =
 				(Run && !Run->FontWeight.IsEmpty()) ? Run->FontWeight : InNode->Text.FontWeight;
 			const FString EffectiveFontStyle =
 				(Run && !Run->FontStyle.IsEmpty()) ? Run->FontStyle : InNode->Text.FontStyle;
 			const TextFontResolution::FResolvedFontSelection ResolvedFont = TextFontResolution::Resolve(
-				EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight, EffectiveFontStyle, FontMappings);
+				EffectiveFontFamily, EffectivePostScriptName, EffectiveFontWeight, EffectiveFontStyle, FontMappings,
+				Run ? &Run->PreparedFont : &InNode->Text.PreparedFont);
 			Result.Style.FontFamily = ResolvedFont.FontAssetPath;
 			Result.Style.TypefaceFontName = ResolvedFont.TypefaceName;
 		}
@@ -539,7 +544,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 		}
 		const bool bUsingFallbackFontAsset = bUsedDefaultIconPath;
 		FString WeightToken = ResolveIconTypefaceWeightToken(Node, bUsingFallbackFontAsset);
-		FString Typeface = FFontResolver::FindBestTypefaceForAssetPath(
+		FString Typeface = FFontResolver::FindBestIconTypefaceForAssetPath(
 			FFontResolver::FindFontAssetPath(Node->Text.IconFontFamily, FString(), Args.FontMappings), WeightToken);
 		if (Typeface.IsEmpty())
 		{
@@ -588,6 +593,30 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	{
 		Widget.TextStyle.FontSize = ResolvedFontSize.GetValue();
 		Widget.TextStyle.SourceFontSize = Node->Text.FontSize;
+		if (!AssetPath.IsEmpty())
+		{
+			TextMeasurementRuntimeProbe::FTextMeasureRequest MetricsRequest;
+			MetricsRequest.FontAssetPath = AssetPath;
+			MetricsRequest.TypefaceName = Widget.Text.TypefaceFontName.Get(FString());
+			MetricsRequest.FontSize = Widget.TextStyle.FontSize;
+			MetricsRequest.Text = IconText;
+			float ParagraphWidth = 0.0f;
+			const float BoxExtent = FMath::Min(Node->Transform.Width.Value, Node->Transform.Height.Value);
+			if (BoxExtent > 0.0f && TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(MetricsRequest, ParagraphWidth))
+			{
+				const float EmHeight = MetricsRequest.FontSize * Design2UMGFontAccess::RenderDPI / 72.0f;
+				const float Scale = BoxExtent / FMath::Min(ParagraphWidth, EmHeight);
+				MetricsRequest.FontSize *= Scale;
+				Widget.TextStyle.FontSize = MetricsRequest.FontSize;
+				Widget.TextStyle.SourceFontSize = EmHeight * Scale;
+				Widget.Text.Justification = TEXT("Center");
+			}
+			float BaselineShift = 0.0f;
+			if (TextMeasurementRuntimeProbe::TryResolveIconBaselineShift(MetricsRequest, Node->Transform.Height.Value, BaselineShift))
+			{
+				Widget.Text.LineHeightBaselineShift = BaselineShift;
+			}
+		}
 	}
 
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();

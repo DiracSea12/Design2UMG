@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "FontResolver.h"
+#include "Design2UMGConverter.h"
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 
@@ -18,7 +19,8 @@ namespace Design2UMGConverterInternal
 			const FDesignDocument& InDocument,
 			const TMap<FString, FString>& InThemeContext,
 			TSharedPtr<FRefExpansionCache> InExpansionCache = nullptr,
-			const FDesign2UMGFontMappings* InFontMappings = nullptr);
+			const FDesign2UMGFontMappings* InFontMappings = nullptr,
+			const FDesign2UMGConverter::FPrepareFonts& InPrepareFonts = FDesign2UMGConverter::FPrepareFonts());
 
 		const FDesign2UMGFontMappings* GetFontMappings() const { return FontMappings; }
 
@@ -36,5 +38,6 @@ namespace Design2UMGConverterInternal
 		const TMap<FString, FString>& ThemeContext;
 		TSharedPtr<FRefExpansionCache> ExpansionCache;
 		const FDesign2UMGFontMappings* FontMappings;
+		FDesign2UMGConverter::FPrepareFonts PrepareFonts;
 	};
 }

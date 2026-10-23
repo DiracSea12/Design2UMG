@@ -20,9 +20,11 @@
 #include "LayoutMapper.h"
 #include "UMGWidgetTypes.h"
 #include "SizeEstimator.h"
+#include "DesignSourceExportBounds.h"
 #include "DesignNodeSemantics.h"
 #include "TextMeasurement.h"
 #include "RefExpander.h"
+#include "Misc/EngineVersionComparison.h"
 
 namespace Design2UMGConverterInternal
 {
@@ -40,6 +42,21 @@ namespace Design2UMGConverterPrivate
 {
 	using namespace Design2UMGConverterInternal;
 	namespace VisualSupport = Design2UMGConverterVisualSupport;
+
+	void AppendUnknownNodeWarnings(const TSharedPtr<FDesignNode>& Node, TArray<FString>& Warnings)
+	{
+		if (!Node.IsValid()) return;
+		if (Node->Type == EDesignNodeType::Unknown && !Node->Source().SourceNodeType.IsEmpty())
+		{
+			Warnings.AddUnique(FString::Printf(
+				TEXT("Node '%s' (%s) has unsupported source type '%s'."),
+				*Node->Name, *Node->Id, *Node->Source().SourceNodeType));
+		}
+		for (const auto& Child : Node->Children)
+		{
+			AppendUnknownNodeWarnings(Child, Warnings);
+		}
+	}
 
 	FConversionSettingsSnapshot BuildConversionSettingsSnapshot(const FDesign2UMGConversionSettings& Settings)
 	{
@@ -139,20 +156,33 @@ namespace Design2UMGConverterPrivate
 		}
 	}
 
+	struct FDeferredExportSubtree
+	{
+		TSharedPtr<FDesignNode> Parent;
+		int32 ChildIndex;
+		// Cache keys may still identify the original ref during later bounds queries.
+		TSharedPtr<FDesignNode> OriginalChild;
+		TSharedPtr<FDesignNode> ConvertedChild;
+	};
+
 	struct FNodeConversionOrchestrator
 	{
-		explicit FNodeConversionOrchestrator(const FConversionContext& InRootContext)
+		FNodeConversionOrchestrator(const FConversionContext& InRootContext,
+			const FDesign2UMGConverter::FPrepareFonts& InPrepareFonts,
+			TArray<FDeferredExportSubtree>* InExportSubtrees)
 			: RootContext(InRootContext)
+			, PrepareFonts(InPrepareFonts)
+			, ExportSubtrees(InExportSubtrees)
 		{
 		}
 
-		FUMGWidgetNode Convert(const TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout = EDesignLayout::None) const
+		FUMGWidgetNode Convert(TSharedPtr<FDesignNode>& Node, const EDesignLayout ParentLayout = EDesignLayout::None) const
 		{
 			return ConvertNode(Node, RootContext, ParentLayout);
 		}
 
 		FUMGWidgetNode ConvertChild(
-			const TSharedPtr<FDesignNode>& Node,
+			TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
 			const EDesignLayout ParentLayout) const
 		{
@@ -161,7 +191,7 @@ namespace Design2UMGConverterPrivate
 
 	private:
 		FUMGWidgetNode ConvertNode(
-			const TSharedPtr<FDesignNode>& Node,
+			TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
 			const EDesignLayout ParentLayout) const
 		{
@@ -205,8 +235,9 @@ namespace Design2UMGConverterPrivate
 			if (!bUsingRenderFallback)
 			{
 				VisualSupport::ApplyBaseVisualProperties(Widget, Node);
-				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver);
-				ApplyLayoutAdjustments(Widget, Node, ActiveContext, ParentLayout);
+				TArray<FUMGWidgetNode> AbsoluteChildren;
+				AppendChildWidgets(Widget, Node, ActiveContext, PreResolutionResolver, AbsoluteChildren);
+				ApplyLayoutAdjustments(Widget, Node, ActiveContext, ParentLayout, MoveTemp(AbsoluteChildren));
 				Widget = WrapWithPrototypeNavigation(MoveTemp(Widget), Node, ActiveContext);
 			}
 			else
@@ -230,11 +261,11 @@ namespace Design2UMGConverterPrivate
 				Context.State.Document,
 				Context.ThemeContext,
 				Context.State.RefExpansionCache,
-				&Context.State.SettingsSnapshot.FontMappings);
+				&Context.State.SettingsSnapshot.FontMappings, PrepareFonts);
 		}
 
 		FUMGWidgetNode ConvertExpandedRefNode(
-			const TSharedPtr<FDesignNode>& Node,
+			TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& ActiveContext,
 			const EDesignLayout ParentLayout,
 			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
@@ -256,7 +287,8 @@ namespace Design2UMGConverterPrivate
 				RefResolver,
 				&ActiveContext.State.SettingsSnapshot.FontMappings,
 				&ActiveContext.State.ConversionError);
-			return ConvertNode(Expanded, ActiveContext, ParentLayout);
+			Node = MoveTemp(Expanded);
+			return ConvertNode(Node, ActiveContext, ParentLayout);
 		}
 
 		void LogCreatedWidget(const FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node) const
@@ -271,10 +303,36 @@ namespace Design2UMGConverterPrivate
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
-			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver) const
+			const Design2UMGConverterInternal::FFlowChildPreResolutionResolver& PreResolutionResolver,
+			TArray<FUMGWidgetNode>& OutAbsoluteChildren) const
 		{
 			TArray<TSharedPtr<FDesignNode>> VisibleChildren;
 			GatherVisibleChildrenForConversion(Node, VisibleChildren);
+			if (Node->LayoutData.Layout != EDesignLayout::None)
+			{
+				TArray<TSharedPtr<FDesignNode>> FlowChildren;
+				int32 VisibleIndex = 0;
+				for (int32 ChildIndex = 0; ChildIndex < Node->Children.Num() && VisibleIndex < VisibleChildren.Num(); ++ChildIndex)
+				{
+					if (Node->Children[ChildIndex] != VisibleChildren[VisibleIndex]) continue;
+					const TSharedPtr<FDesignNode> Child = VisibleChildren[VisibleIndex++];
+					if (!Child->LayoutData.bAbsoluteLayoutPositioning)
+					{
+						FlowChildren.Add(Child);
+						continue;
+					}
+					TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
+					FUMGWidgetNode AbsoluteWidget = ConvertChild(EffectiveChild, Context, EDesignLayout::None);
+					if (ExportSubtrees && Child != EffectiveChild)
+						ExportSubtrees->Add({Node, ChildIndex, Child, EffectiveChild});
+					if (!AbsoluteWidget.Type.IsEmpty())
+					{
+						LayoutMapper::ApplySlotProperties(AbsoluteWidget, EffectiveChild, EDesignLayout::None);
+						OutAbsoluteChildren.Add(MoveTemp(AbsoluteWidget));
+					}
+				}
+				VisibleChildren = MoveTemp(FlowChildren);
+			}
 			// Grid selection and flow prep must see the same filtered child list to avoid layout drift.
 			if (Node->LayoutData.Layout == EDesignLayout::Grid && Design2UMGGridLayout::NeedsGridPanel(VisibleChildren))
 			{
@@ -340,10 +398,15 @@ namespace Design2UMGConverterPrivate
 				GridPlacementState.RowCount = Design2UMGGridLayout::ResolveGridRowCount(Node, VisibleChildren, GridPlacementState.ColumnCount);
 			}
 
-			for (const TSharedPtr<FDesignNode>& Child : VisibleChildren)
+			int32 VisibleIndex = 0;
+			for (int32 ChildIndex = 0; ChildIndex < Node->Children.Num() && VisibleIndex < VisibleChildren.Num(); ++ChildIndex)
 			{
+				if (Node->Children[ChildIndex] != VisibleChildren[VisibleIndex]) continue;
+				const TSharedPtr<FDesignNode> Child = VisibleChildren[VisibleIndex++];
 				TSharedPtr<FDesignNode> EffectiveChild = PreResolutionResolver.ResolveExpandedChild(Child, true);
 				FUMGWidgetNode ChildWidget = ConvertChild(EffectiveChild, Context, Node->LayoutData.Layout);
+				if (ExportSubtrees && Child != EffectiveChild)
+					ExportSubtrees->Add({Node, ChildIndex, Child, EffectiveChild});
 				if (ChildWidget.Type.IsEmpty())
 				{
 					UE_LOG(LogDesign2UMG, Verbose, TEXT("Converter: skipped child '%s' (id='%s') with empty widget type"),
@@ -404,7 +467,8 @@ namespace Design2UMGConverterPrivate
 			FUMGWidgetNode& Widget,
 			const TSharedPtr<FDesignNode>& Node,
 			const FConversionContext& Context,
-			const EDesignLayout ParentLayout) const
+			const EDesignLayout ParentLayout,
+			TArray<FUMGWidgetNode> AbsoluteChildren) const
 		{
 			const bool bHasResolvedGridGap = Node->LayoutData.Layout == EDesignLayout::Grid
 				&& (Design2UMGGridLayout::ResolveGridColumnGap(Node) > KINDA_SMALL_NUMBER
@@ -530,6 +594,8 @@ namespace Design2UMGConverterPrivate
 		}
 
 		const FConversionContext& RootContext;
+		const FDesign2UMGConverter::FPrepareFonts& PrepareFonts;
+		TArray<FDeferredExportSubtree>* ExportSubtrees;
 	};
 } // namespace Design2UMGConverterPrivate
 
@@ -556,6 +622,7 @@ FDesign2UMGConversionSettings FDesign2UMGConversionSettings::FromSettings(const 
 	}
 
 	Settings.ExplicitFontMappings = SourceSettings->ExplicitFontMappings;
+	Settings.DefaultFontAssetPath = SourceSettings->DefaultFontAsset.ToSoftObjectPath().ToString();
 	Settings.PlaceholderHatchStyle = SourceSettings->ResolvePlaceholderHatchStyle();
 	Settings.LuminosityFitOpacityCap = SourceSettings->ResolveLuminosityFitOpacityCap();
 	Settings.DefaultIconFontAssetPath = SourceSettings->DefaultIconFontAssetPath;
@@ -571,9 +638,14 @@ FDesign2UMGConversionSettings FDesign2UMGConversionSettings::FromSettings(const 
 	return Settings;
 }
 
-FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings)
+FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, const FDesign2UMGConversionSettings& Settings,
+	const FPrepareFonts& PrepareFonts)
 {
 	FUMGWidgetData Result;
+	for (const auto& Child : Document.Children)
+	{
+		Design2UMGConverterPrivate::AppendUnknownNodeWarnings(Child, Result.Warnings);
+	}
 
 	for (const FDesignSkippedNodeReport& Report : Document.ParseDiagnostics().SkippedDesignerNodes)
 	{
@@ -610,7 +682,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Design2UMGConverterPrivate::StampDocumentComponentIdentity(Document, Result);
 	};
 	Design2UMGConverterInternal::FConversionContext RootContext(State);
-	const Design2UMGConverterPrivate::FNodeConversionOrchestrator NodeOrchestrator(RootContext);
+	TArray<Design2UMGConverterPrivate::FDeferredExportSubtree> ExportSubtrees;
+	const Design2UMGConverterPrivate::FNodeConversionOrchestrator NodeOrchestrator(RootContext, PrepareFonts,
+		Document.Metadata.FindRef(TEXT("source.provider")) == DesignComponentMapping::ProviderPencil ? &ExportSubtrees : nullptr);
 
 	if (!Document.SourceDocument().ComponentsJson.IsEmpty() || !Document.SourceDocument().ComponentSetsJson.IsEmpty()
 		|| !Document.SourceDocument().ComponentDependenciesJson.IsEmpty())
@@ -675,7 +749,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Document,
 		RootThemeContext,
 		State.RefExpansionCache,
-		&State.SettingsSnapshot.FontMappings);
+		&State.SettingsSnapshot.FontMappings, PrepareFonts);
 	const auto RefResolver =
 		[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& RefNode)
 		{
@@ -697,6 +771,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	}
 
 	TArray<FUMGWidgetNode> RenderWidgets;
+	TSharedPtr<FDesignNode> ConvertedRootSource;
 	for (const auto& Child : VisibleChildren)
 	{
 		if (!State.ConversionError.IsEmpty())
@@ -709,9 +784,13 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 		Child->Transform.X = 0.0f;
 		Child->Transform.Y = 0.0f;
 
-		FUMGWidgetNode ChildWidget = NodeOrchestrator.Convert(Child);
+		TSharedPtr<FDesignNode> ConvertedChild = Child;
+		FUMGWidgetNode ChildWidget = NodeOrchestrator.Convert(ConvertedChild);
 		if (!ChildWidget.Type.IsEmpty())
+		{
 			RenderWidgets.Add(MoveTemp(ChildWidget));
+			ConvertedRootSource = ConvertedChild;
+		}
 	}
 
 	if (State.PrototypeNavigation.IsValid())
@@ -729,6 +808,16 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& Document, co
 	{
 		UE_LOG(LogDesign2UMG, Log, TEXT("Convert: single root '%s' type=%s"), *RenderWidgets[0].Name, *RenderWidgets[0].Type);
 		Result.RootWidget = MoveTemp(RenderWidgets[0]);
+		if (State.ConversionError.IsEmpty() && Document.Metadata.FindRef(TEXT("source.provider")) == DesignComponentMapping::ProviderPencil)
+		{
+			// All visual, slot, effect and metadata readers have finished with the source tree.
+			// Replay only for export bounds; the records keep original cache identities alive.
+			for (const auto& Subtree : ExportSubtrees)
+				Subtree.Parent->Children[Subtree.ChildIndex] = Subtree.ConvertedChild;
+			Result.ExportBounds = DesignSourceExportBounds::Calculate(ConvertedRootSource,
+				[&RootPreResolutionResolver](const TSharedPtr<FDesignNode>& Ref)
+				{ return RootPreResolutionResolver.ResolveExpandedChild(Ref, true); });
+		}
 		FinalizeResult();
 		return Result;
 	}

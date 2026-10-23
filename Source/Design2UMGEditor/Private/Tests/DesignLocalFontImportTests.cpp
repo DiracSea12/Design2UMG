@@ -1,8 +1,20 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "Design2UMGFontAccess.h"
+#include "Design2UMGConverter.h"
+#include "DesignImportDialogs.h"
+#include "UMGJsonParser.h"
+#include "UMGJsonSerializer.h"
+#include "Misc/SecureHash.h"
+#include "DesignImportPlanning.h"
+#include "UMGTextStyleApplication.h"
+#include "Design2UMGWidgetPropertyAccess.h"
+#include "Components/RichTextBlock.h"
+#include "Engine/DataTable.h"
 #include "DesignLocalFontImport.h"
+#include "Interfaces/IPluginManager.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "Design2UMGSettings.h"
 #include "Engine/Font.h"
 #include "Engine/FontFace.h"
@@ -18,6 +30,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Rendering/SlateRenderer.h"
 #include "Fonts/FontMeasure.h"
+#include "Fonts/FontCache.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
 #include "Misc/FileHelper.h"
@@ -36,6 +49,25 @@ namespace
 		Args.SaveFlags = SAVE_NoError;
 		return Test.TestTrue(TEXT("Save the existing-font policy fixture"),
 			UPackage::SavePackage(Font.GetOutermost(), &Font, *Filename, Args));
+	}
+
+	UFontFace* AddFallbackFixture(FAutomationTestBase& Test, UFont& Font)
+	{
+		TArray<uint8> Bytes;
+		if (!Test.TestTrue(TEXT("Read real supplementary fixture bytes"), FFileHelper::LoadFileToArray(
+			Bytes, *(FPaths::EngineContentDir() / TEXT("Slate/Fonts/DroidSansFallback.ttf"))))) return nullptr;
+		UFontFace* Face = NewObject<UFontFace>(&Font,
+			MakeUniqueObjectName(&Font, UFontFace::StaticClass()), RF_Public);
+		Face->LoadingPolicy = EFontLoadingPolicy::Inline;
+		Face->FontFaceData = FFontFaceData::MakeFontFaceData(MoveTemp(Bytes));
+		auto& Composite = Design2UMGFontAccess::GetMutableCompositeFont(Font);
+		FTypefaceEntry Entry(FName(TEXT("Regular")));
+		Entry.Font = FFontData(Face);
+		Composite.FallbackTypeface.Typeface.Fonts = {Entry};
+		Composite.FallbackTypeface.ScalingFactor = 0.9f;
+		Composite.MakeDirty();
+		FSlateApplication::Get().GetRenderer()->GetFontCache()->FlushCompositeFont(Composite);
+		return Face;
 	}
 
 	void DeleteFontFixture(FAutomationTestBase& Test, const FString& Package, bool bRemoveDirectory = true)
@@ -96,12 +128,12 @@ bool FLocalFontRediscoveryTest::RunTest(const FString&)
 	const FString Prefix = TEXT("D2UIdentity") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	for (const FString Suffix : {FString(TEXT("/Family")), FString(TEXT(":Family"))})
 	{
-		Face.Family = Prefix + Suffix;
-		const FString Package = FFontResolver::MakeImportedFamilyPackageName(Face.Family);
-		if (!TestTrue(TEXT("Import separate family"), DesignLocalFontImport::ImportFace(Face, Package, Error))) return false;
+		const FString RequestedFamily = Prefix + Suffix;
+		const FString Package = FFontResolver::MakeImportedFamilyPackageName(RequestedFamily);
+		if (!TestTrue(TEXT("Import separate family"), DesignLocalFontImport::ImportFace(Face, Package, Error, FString(), RequestedFamily))) return false;
 		UFont* Font = LoadObject<UFont>(nullptr, *(Package + TEXT(".") + FPackageName::GetLongPackageAssetName(Package)));
 		if (!TestNotNull(TEXT("Imported family asset exists"), Font)) return false;
-		Imported.Add(Face.Family, Font);
+		Imported.Add(RequestedFamily, Font);
 		const UFontFace* Embedded = Cast<UFontFace>(Font->GetCompositeFont()->DefaultTypeface.Fonts[0].Font.GetFontFaceAsset());
 		if (!TestNotNull(TEXT("Imported family has embedded font data"), Embedded)) return false;
 		TestEqual(TEXT("Embedded faces are cooked inline without shared sidecar filenames"), Embedded->LoadingPolicy, EFontLoadingPolicy::Inline);
@@ -189,8 +221,21 @@ bool FDesignLocalFontIdentityTest::RunTest(const FString&)
 	TestEqual(TEXT("Family is internal, not filename"), Face.Family, FString(TEXT("Roboto")));
 	TestEqual(TEXT("Weight comes from font metadata"), Face.Weight, 700);
 	DesignLocalFontImport::FFace Inconsistent;
-	TestFalse(TEXT("Contradictory static weight metadata is not imported as Regular"),
+	TestTrue(TEXT("Static font uses actual weight rather than its style label"),
 		DesignLocalFontImport::ReadFace(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Black.ttf"), Inconsistent, Error));
+	TestEqual(TEXT("OS/2 weight is authoritative over the Black style label"), Inconsistent.Weight, 400);
+	DesignLocalFontImport::FSourceIndex DirectorySources;
+	const auto& DirectoryFaces = DirectorySources.GetFaces();
+	const auto* NormalFace = DirectoryFaces.FindByPredicate([&](const DesignLocalFontImport::FFace& Candidate)
+	{
+		return Candidate.Family.Equals(Face.Family, ESearchCase::IgnoreCase)
+			&& Candidate.Weight == Inconsistent.Weight && !Candidate.bItalic && !Candidate.bVariable;
+	});
+	if (!TestNotNull(TEXT("Directory discovery finds a normal-weight face"), NormalFace)) return false;
+	TestTrue(TEXT("Directory discovery does not select the conflicting Black face as normal"),
+		FPaths::ConvertRelativePathToFull(NormalFace->Path) != FPaths::ConvertRelativePathToFull(
+			FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Black.ttf")));
+
 	TestFalse(TEXT("Condensed face is not silently substituted for normal-width Bold"),
 		DesignLocalFontImport::ReadFace(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-BoldCondensed.ttf"), Inconsistent, Error));
 	const FString PackageName = TEXT("/Game/Design2UMG/Automation/LocalFontTest_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT("/IdentityFixture");
@@ -210,6 +255,9 @@ bool FDesignLocalFontIdentityTest::RunTest(const FString&)
 	TestEqual(TEXT("Unchanged imported bytes still register the family after cache reset"),
 		FFontResolver::FindFontAssetPath(Face.Family), Font->GetPathName());
 	TestEqual(TEXT("Second import does not duplicate weight"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), 1);
+	TestTrue(TEXT("Import and reimport do not embed fonts absent from the source"),
+		Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
+
 	Font->FontCacheType = EFontCacheType::Offline;
 	TestTrue(TEXT("Same bytes still repair an offline font"), DesignLocalFontImport::ImportFace(Face, PackageName, Error));
 	TestTrue(TEXT("Imported font uses runtime cache"), Font->FontCacheType == EFontCacheType::Runtime);
@@ -325,7 +373,7 @@ bool FDesignLocalFontUserAssetProtectionTest::RunTest(const FString&)
 	Node->Text.FontWeight = TEXT("700");
 	Document.Children.Add(Node);
 	TArray<FString> Warnings;
-	TestTrue(TEXT("User font can still be referenced"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
+	TestTrue(TEXT("User font can still be referenced"), DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), Warnings, Error));
 	TestTrue(TEXT("Automatic preparation preserves user typefaces"),
 		FFontResolver::FindExactTypefaceForAssetPath(Font->GetPathName(), TEXT("700")).IsEmpty());
 	TArray<uint8> After;
@@ -353,6 +401,7 @@ bool FDesignUnusedEmbeddedFontPersistenceTest::RunTest(const FString&)
 	if (!TestNotNull(TEXT("Font exists"), Font)) return false;
 	UFontFace* Embedded = const_cast<UFontFace*>(Cast<UFontFace>(Font->GetCompositeFont()->DefaultTypeface.Fonts[0].Font.GetFontFaceAsset()));
 	if (!TestNotNull(TEXT("Embedded face exists"), Embedded)) return false;
+	if (!AddFallbackFixture(*this, *Font)) return false;
 	Embedded->LoadingPolicy = EFontLoadingPolicy::LazyLoad;
 	if (!SaveFontPolicyFixture(*this, *Font)) return false;
 	const FString Filename = FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension());
@@ -367,14 +416,15 @@ bool FDesignUnusedEmbeddedFontPersistenceTest::RunTest(const FString&)
 		bSaveAttempted |= bMatches;
 		return bMatches;
 	});
-	TestTrue(TEXT("Unused-font save failure does not affect preparation"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
+	TestTrue(TEXT("Unused-font save failure does not affect preparation"), DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), Warnings, Error));
 	TestFalse(TEXT("Unused font save is not attempted"), bSaveAttempted);
 	TestTrue(TEXT("Unused font policy stays unchanged"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
 	FFileHelper::LoadFileToArray(After, *Filename);
 	TestTrue(TEXT("Unused font file stays intact"), Before == After);
 	Failure.AllowSaves();
-	TestTrue(TEXT("Repeated preparation ignores unused generated fonts"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
+	TestTrue(TEXT("Repeated preparation ignores unused generated fonts"), DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), Warnings, Error));
 	TestTrue(TEXT("Unused font policy stays unchanged"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
+	TestFalse(TEXT("Unused automatic fallback is not repaired"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
 	return true;
 }
 
@@ -410,6 +460,8 @@ bool FDesignEmbeddedFontPersistenceTest::RunTest(const FString&)
 		UFontFace* BoldFace = const_cast<UFontFace*>(Cast<UFontFace>(Entries[1].Font.GetFontFaceAsset()));
 		if (!TestNotNull(TEXT("Regular embedded face exists"), RegularFace)
 			|| !TestNotNull(TEXT("Bold embedded face exists"), BoldFace)) return false;
+		auto& Composite = Design2UMGFontAccess::GetMutableCompositeFont(*Font);
+		TestTrue(TEXT("Imported font starts without an external fallback"), Composite.FallbackTypeface.Typeface.Fonts.IsEmpty());
 		RegularFace->LoadingPolicy = EFontLoadingPolicy::LazyLoad;
 		BoldFace->LoadingPolicy = EFontLoadingPolicy::Stream;
 		SeparateFace = NewObject<UFontFace>(Font->GetOutermost(),
@@ -420,6 +472,12 @@ bool FDesignEmbeddedFontPersistenceTest::RunTest(const FString&)
 		FTypefaceEntry SeparateEntry(FName(TEXT("Separate")));
 		SeparateEntry.Font = FFontData(SeparateFace);
 		Entries.Add(MoveTemp(SeparateEntry));
+		FCompositeSubFont& Subfont = Composite.SubTypefaces.AddDefaulted_GetRef();
+		Subfont.CharacterRanges = {FInt32Range::Inclusive('A', 'A')};
+		Subfont.ScalingFactor = 0.75f;
+		Subfont.Typeface.Fonts.Add(Entries[0]);
+		UFontFace* ExtraFace = bPrepare ? AddFallbackFixture(*this, *Font) : nullptr;
+		if (bPrepare && !ExtraFace) return false;
 		if (!SaveFontPolicyFixture(*this, *Font)) return false;
 		const TArray<uint8> RegularBytes = RegularFace->FontFaceData->GetData();
 		const TArray<uint8> BoldBytes = BoldFace->FontFaceData->GetData();
@@ -428,22 +486,57 @@ bool FDesignEmbeddedFontPersistenceTest::RunTest(const FString&)
 		TArray<uint8> Before, After;
 		if (!TestTrue(TEXT("Read original persisted policies"), FFileHelper::LoadFileToArray(Before, *Filename))) return false;
 		Font->GetOutermost()->SetDirtyFlag(bWasDirty);
+		FSlateFontCache& Cache = *FSlateApplication::Get().GetRenderer()->GetFontCache();
+		const FSlateFontInfo Info(Font, 14, TEXT("Regular"));
+		const FVector2D LatinSize = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(TEXT("A"), Info);
+		if (bPrepare)
+		{
+			float Scale = 1.0f;
+			TestTrue(TEXT("Warm native selection really uses the extra persisted face"),
+				Cache.GetFontDataForCodepoint(Info, 0x4e2d, Scale).GetFontFaceAsset() == ExtraFace);
+			FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(TEXT("A中"), Info);
+		}
 		FDesignDocument Document;
 		auto Node = MakeShared<FDesignNode>();
-		Node->Text.Content = TEXT("Existing font");
+		Node->Type = EDesignNodeType::Text;
+		Node->Text.Content = TEXT("A\u4e2d");
 		Node->Text.FontFamily = Regular.Family;
 		Node->Text.FontWeight = TEXT("400");
 		Document.Children.Add(Node);
-		TArray<FString> Warnings;
-		auto Persist = [&]()
+		auto Rich = MakeShared<FDesignNode>(*Node);
+		FDesignTextRun Run;
+		Run.Content = Node->Text.Content;
+		Rich->Text.TextRuns.Add(Run);
+		Document.Children.Add(Rich);
+		auto Icon = MakeShared<FDesignNode>();
+		Icon->Type = EDesignNodeType::IconFont;
+		Icon->Text.IconFontFamily = Regular.Family;
+		Icon->Text.IconWeight = 400;
+		Document.Children.Add(Icon);
+		if (bPrepare && bWasDirty)
 		{
-			return bPrepare ? DesignLocalFontImport::Prepare(Document, Warnings, Error)
+			FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
+			Declaration.Name = Regular.Family;
+			Declaration.Url = Regular.Path;
+		}
+		TArray<FString> Warnings;
+		const auto Captured = FDesign2UMGConversionSettings::Defaults();
+		const auto Persist = [&]()
+		{
+			return bPrepare ? DesignLocalFontImport::Prepare(Document, Captured, Warnings, Error)
 				: DesignLocalFontImport::ImportFace(Regular, Package, Error);
 		};
 		bool bSaveRejected = false;
 		Design2UMGEditorTests::FScopedPackageSaveFailure SaveFailure([&](const FString& Path)
 		{
 			bSaveRejected = Path.Equals(Filename, ESearchCase::IgnoreCase);
+			if (bSaveRejected && bPrepare)
+			{
+				float Scale = 1.0f;
+				const FFontData& DuringSave = Cache.GetFontDataForCodepoint(Info, 0x4e2d, Scale);
+				TestFalse(TEXT("Selection during a rejected save does not use stale fallback"),
+					Cache.CanLoadCodepoint(DuringSave, 0x4e2d, EFontFallback::FF_NoFallback));
+			}
 			return bSaveRejected;
 		});
 		TestFalse(TEXT("A failed policy save fails the requested operation"), Persist());
@@ -451,18 +544,55 @@ bool FDesignEmbeddedFontPersistenceTest::RunTest(const FString&)
 		TestTrue(TEXT("Policy failure names the font save"), Error.StartsWith(TEXT("Failed to save local font:")));
 		TestTrue(TEXT("Regular policy rolls back"), RegularFace->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
 		TestTrue(TEXT("Bold policy rolls back"), BoldFace->LoadingPolicy == EFontLoadingPolicy::Stream);
+		TestEqual(TEXT("Failed save restores the prior fallback count"), Composite.FallbackTypeface.Typeface.Fonts.Num(), bPrepare ? 1 : 0);
+		if (bPrepare)
+		{
+			float Scale = 1.0f;
+			TestTrue(TEXT("Rollback invalidates intermediate selection and restores the old face"),
+				Cache.GetFontDataForCodepoint(Info, 0x4e2d, Scale).GetFontFaceAsset() == ExtraFace);
+			TestEqual(TEXT("Fallback selection scale rolls back"), Scale, 0.9f);
+		}
 		TestEqual(TEXT("Dirty state rolls back"), Font->GetOutermost()->IsDirty(), bWasDirty);
 		TestTrue(TEXT("Read font after rejected save"), FFileHelper::LoadFileToArray(After, *Filename));
 		TestTrue(TEXT("Failed save leaves disk bytes identical"), Before == After);
 		SaveFailure.AllowSaves();
 		if (!TestTrue(TEXT("Retry persists existing embedded faces"), Persist())) return false;
-		TestTrue(TEXT("Regular data is stored with the owning font"), RegularFace->LoadingPolicy == EFontLoadingPolicy::Inline);
-		TestTrue(TEXT("Other embedded styles use the same rule"), BoldFace->LoadingPolicy == EFontLoadingPolicy::Inline);
+		TestTrue(TEXT("Explicit reimport does not backfill external fallback fonts"), Composite.FallbackTypeface.Typeface.Fonts.IsEmpty());
+		TestTrue(TEXT("Existing Regular policy follows the requested operation"), RegularFace->LoadingPolicy == (bPrepare ? EFontLoadingPolicy::LazyLoad : EFontLoadingPolicy::Inline));
+		TestTrue(TEXT("Existing Bold policy follows the requested operation"), BoldFace->LoadingPolicy == (bPrepare ? EFontLoadingPolicy::Stream : EFontLoadingPolicy::Inline));
 		TestTrue(TEXT("Separate font-face loading policy is untouched"), SeparateFace->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
+		TestEqual(TEXT("All default typefaces are retained"), Entries.Num(), 3);
 		TestTrue(TEXT("Regular object identity is unchanged"), Entries[0].Font.GetFontFaceAsset() == RegularFace);
 		TestTrue(TEXT("Bold object identity is unchanged"), Entries[1].Font.GetFontFaceAsset() == BoldFace);
+		TestEqual(TEXT("Regular typeface name is unchanged"), Entries[0].Name, FName(TEXT("Regular")));
+		TestEqual(TEXT("Bold typeface name is unchanged"), Entries[1].Name, FName(TEXT("Bold")));
 		TestTrue(TEXT("Regular bytes are unchanged"), RegularFace->FontFaceData->GetData() == RegularBytes);
 		TestTrue(TEXT("Bold bytes are unchanged"), BoldFace->FontFaceData->GetData() == BoldBytes);
+		TestEqual(TEXT("Native subfont and its scale survive"), Composite.SubTypefaces.Num(), 1);
+		TestEqual(TEXT("Native subfont scaling is unchanged"), Composite.SubTypefaces[0].ScalingFactor, 0.75f);
+		TestTrue(TEXT("Native subfont still references its original face"), Composite.SubTypefaces[0].Typeface.Fonts[0].Font.GetFontFaceAsset() == RegularFace);
+		TestEqual(TEXT("Native measurement for an existing glyph is unchanged"),
+			FVector2D(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(TEXT("A"), Info)), LatinSize);
+		if (bPrepare)
+		{
+			float Scale = 1.0f;
+			TestFalse(TEXT("Successful repair invalidates the original extra-face selection"), Cache.CanLoadCodepoint(
+				Cache.GetFontDataForCodepoint(Info, 0x4e2d, Scale), 0x4e2d, EFontFallback::FF_NoFallback));
+			TArray<FSlateFontInfo> Donors;
+			TMap<FFontData, FString> Hashes;
+			TestTrue(TEXT("Real glyph preparation runs after the source repair"), DesignLocalFontImport::PrepareGlyphFallbacks(
+				Document, Captured.ExplicitFontMappings, Donors, Hashes, Warnings, Error));
+			TestTrue(TEXT("A source-only missing glyph produces the actual missing-glyph warning"), Warnings.ContainsByPredicate(
+				[](const FString& Warning) { return Warning.Contains(TEXT("U+4E2D")); }));
+			TestTrue(TEXT("No replacement asset is introduced without a donor"), Node->Text.PreparedFont.AssetPath.IsEmpty());
+			if (!bWasDirty)
+			{
+				if (!AddFallbackFixture(*this, *Font) || !SaveFontPolicyFixture(*this, *Font)) return false;
+				TestTrue(TEXT("Expanded glyph-only preparation also repairs a used undeclared font"),
+					DesignLocalFontImport::Prepare(Document, Captured, Warnings, Error, nullptr, true));
+				TestTrue(TEXT("Expanded glyph-only repair persists the same source asset"), Composite.FallbackTypeface.Typeface.Fonts.IsEmpty());
+			}
+		}
 		Design2UMGEditorTests::FScopedPackageSaveFailure NoRepeatedSave([&](const FString& Path)
 		{
 			bSaveRejected = Path.Equals(Filename, ESearchCase::IgnoreCase);
@@ -505,32 +635,35 @@ bool FDesignExplicitFontPolicyProtectionTest::RunTest(const FString&)
 	Node->Text.FontFamily = Face.Family;
 	Node->Text.FontWeight = TEXT("400");
 	Document.Children.Add(Node);
+	FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
+	Declaration.Name = Face.Family;
+	Declaration.Url = FPaths::ProjectSavedDir() / FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".ttf");
 	TArray<FString> Warnings;
 	bool bSaveAttempted = false;
 	Design2UMGEditorTests::FScopedPackageSaveFailure NoSave([&](const FString&) { bSaveAttempted = true; return true; });
-	TestTrue(TEXT("Explicit mapping is usable without a save"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
+	TestTrue(TEXT("Explicit mapping is usable without a save"), DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), Warnings, Error));
 	TestFalse(TEXT("Explicitly mapped font is not saved"), bSaveAttempted);
 	TestTrue(TEXT("Explicitly mapped policy is unchanged"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignMappedGeneratedFontPolicyTest,
-	"Design2UMG.Fonts.LocalSource.MappedGeneratedPolicyMigration",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConfiguredGeneratedFontProtectionTest,
+	"Design2UMG.Fonts.LocalSource.ConfiguredGeneratedFontProtection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-bool FDesignMappedGeneratedFontPolicyTest::RunTest(const FString&)
+bool FConfiguredGeneratedFontProtectionTest::RunTest(const FString&)
 {
 	DesignLocalFontImport::FFace Face;
 	FString Error;
 	if (!TestTrue(TEXT("Read source"), DesignLocalFontImport::ReadFace(
 		FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), Face, Error))) return false;
-	Face.Family = TEXT("MappedGenerated_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	Face.Family = TEXT("ConfiguredGenerated_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 	const FString Package = FFontResolver::MakeImportedFamilyPackageName(Face.Family);
 	if (!TestTrue(TEXT("Create generated font"), DesignLocalFontImport::ImportFace(Face, Package, Error))) return false;
 	ON_SCOPE_EXIT { DeleteFontFixture(*this, Package, false); };
 	UFont* Font = LoadObject<UFont>(nullptr, *(Package + TEXT(".") + FPackageName::GetLongPackageAssetName(Package)));
 	if (!TestNotNull(TEXT("Generated font exists"), Font)) return false;
 	UFontFace* Embedded = const_cast<UFontFace*>(Cast<UFontFace>(Font->GetCompositeFont()->DefaultTypeface.Fonts[0].Font.GetFontFaceAsset()));
-	if (!TestNotNull(TEXT("Embedded face exists"), Embedded)) return false;
+	if (!TestNotNull(TEXT("Embedded face exists"), Embedded) || !AddFallbackFixture(*this, *Font)) return false;
 	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	const auto PreviousMappings = Settings->ExplicitFontMappings;
 	const auto PreviousIcons = Settings->IconFontAssetMap;
@@ -554,20 +687,99 @@ bool FDesignMappedGeneratedFontPolicyTest::RunTest(const FString&)
 		if (Mapping == 1) Settings->IconFontAssetMap.Add(Face.Family, Font);
 		if (Mapping == 2) Settings->DefaultFontAsset = Font;
 		if (Mapping == 3) Settings->DefaultIconFontAssetPath = Font->GetPathName();
+		const auto Captured = FDesign2UMGConversionSettings::FromSettings(Settings);
+		Settings->ExplicitFontMappings.Reset();
+		Settings->IconFontAssetMap.Reset();
+		Settings->DefaultFontAsset.Reset();
+		Settings->DefaultIconFontAssetPath.Reset();
 		Embedded->LoadingPolicy = EFontLoadingPolicy::LazyLoad;
 		if (!SaveFontPolicyFixture(*this, *Font)) return false;
+		const FString Filename = FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension());
+		TArray<uint8> Before, After;
+		if (!TestTrue(TEXT("Read configured font before preparation"), FFileHelper::LoadFileToArray(Before, *Filename))) return false;
+		bool bSaveAttempted = false;
+		Design2UMGEditorTests::FScopedPackageSaveFailure NoSave([&](const FString&) { bSaveAttempted = true; return true; });
 		FFontResolver::ClearCache();
 		FDesignDocument Document;
+		FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
+		Declaration.Name = Face.Family;
+		Declaration.Url = FPaths::ProjectSavedDir() / TEXT("NoDeclaredFont_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".ttf");
 		TArray<FString> Warnings;
-		TestTrue(TEXT("Unused mapped generated font does not block preparation"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
+		TestTrue(TEXT("Unused mapped generated font does not block preparation"), DesignLocalFontImport::Prepare(Document, Captured, Warnings, Error));
 		TestTrue(TEXT("Unused mapped generated font stays unchanged"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
 		auto Node = MakeShared<FDesignNode>();
 		Node->Text.Content = TEXT("Mapped font");
 		Node->Text.FontFamily = Face.Family;
+		Node->Text.IconFontFamily = Face.Family;
 		Document.Children.Add(Node);
-		TestTrue(TEXT("Requested mapped generated font prepares"), DesignLocalFontImport::Prepare(Document, Warnings, Error));
-		TestTrue(TEXT("Requested mapped generated font becomes inline"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline);
+		TestTrue(TEXT("Requested mapped text and icon fonts prepare without replacement"), DesignLocalFontImport::Prepare(Document, Captured, Warnings, Error));
+		TestFalse(TEXT("Configured font is never automatically saved"), bSaveAttempted);
+		TestTrue(TEXT("Configured font retains its chosen loading policy"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
+		if (!TestTrue(TEXT("Read configured font after preparation"), FFileHelper::LoadFileToArray(After, *Filename))) return false;
+		TestTrue(TEXT("All four configured asset kinds remain byte-identical"), Before == After);
+		TestFalse(TEXT("Captured configured fallback is retained"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
 	}
+	Settings->DefaultIconFontAssetPath = Font->GetPathName();
+	FDesignDocument IconDocument;
+	auto Icon = MakeShared<FDesignNode>();
+	Icon->Text.FontFamily.Reset();
+	Icon->Text.IconFontFamily = Face.Family;
+	IconDocument.Children.Add(Icon);
+	FDesignFont& Declaration = IconDocument.Fonts.AddDefaulted_GetRef();
+	Declaration.Name = Face.Family;
+	Declaration.Url = FPaths::ProjectSavedDir() / TEXT("NoDeclaredIcon_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".ttf");
+	TArray<FString> Warnings;
+	TestFalse(TEXT("A new global icon mapping cannot skip an unconfigured captured request"),
+		DesignLocalFontImport::Prepare(IconDocument, FDesign2UMGConversionSettings::Defaults(), Warnings, Error));
+	TestTrue(TEXT("The captured icon request reaches its declared source"), Error.Contains(Declaration.Url));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeclaredWoff2FontImportTest,
+	"Design2UMG.Fonts.LocalSource.DeclaredWoff2",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDeclaredWoff2FontImportTest::RunTest(const FString&)
+{
+	const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	if (!TestTrue(TEXT("Find the plugin containing the required fixture"), Plugin.IsValid())) return false;
+	const FString Source = Plugin->GetBaseDir() / TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/DeclaredFont.woff2");
+	TArray<uint8> SourceBytes;
+	if (!TestTrue(TEXT("Read compressed source bytes"), FFileHelper::LoadFileToArray(SourceBytes, *Source))) return false;
+	if (!TestTrue(TEXT("Fixture is actual WOFF2, not a renamed TTF"), SourceBytes.Num() >= 4
+		&& SourceBytes[0] == 'w' && SourceBytes[1] == 'O' && SourceBytes[2] == 'F' && SourceBytes[3] == '2')) return false;
+	FString Error;
+	const FString Family = TEXT("D2UDeclaredWoff2_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString Package = FFontResolver::MakeImportedFamilyPackageName(Family);
+	ON_SCOPE_EXIT { DeleteFontFixture(*this, Package, false); };
+	FDesignDocument Document;
+	FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
+	Declaration.Name = Family;
+	Declaration.Url = Source;
+	auto Text = MakeShared<FDesignNode>();
+	Text->Text.Content = TEXT("A");
+	Text->Text.FontFamily = Family;
+	Text->Text.FontWeight = TEXT("400");
+	Text->Text.FontStyle = TEXT("normal");
+	Document.Children.Add(Text);
+	TArray<FString> Warnings;
+	if (!TestTrue(TEXT("Declared WOFF2 reaches static conversion and font import"),
+		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::Defaults(), Warnings, Error, nullptr, true))) return false;
+	UFont* Font = LoadObject<UFont>(nullptr, *Text->Text.PreparedFont.SourceAssetPath);
+	if (!TestNotNull(TEXT("The declared request binds its saved asset"), Font)) return false;
+	const auto& Entries = Font->GetCompositeFont()->DefaultTypeface.Fonts;
+	if (!TestEqual(TEXT("One requested static face was imported"), Entries.Num(), 1)) return false;
+	const UFontFace* Embedded = Cast<UFontFace>(Entries[0].Font.GetFontFaceAsset());
+	if (!TestNotNull(TEXT("Converted face is embedded"), Embedded)) return false;
+	const auto& Bytes = Embedded->FontFaceData->GetData();
+	TestTrue(TEXT("WOFF2 was decoded into a static sfnt"), Bytes.Num() >= 4
+		&& !(Bytes[0] == 'w' && Bytes[1] == 'O' && Bytes[2] == 'F' && Bytes[3] == '2'));
+	TestEqual(TEXT("Prepared selection keeps the actual source weight and style"), Text->Text.PreparedFont.TypefaceName,
+		FName(TEXT("Regular")));
+	TestTrue(TEXT("WOFF2 import does not add a source-external fallback"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
+	TArray<uint8> After;
+	TestTrue(TEXT("Read compressed source after preparation"), FFileHelper::LoadFileToArray(After, *Source));
+	TestTrue(TEXT("Import leaves compressed source unchanged"), After == SourceBytes);
 	return true;
 }
 
@@ -601,7 +813,9 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	Node->Text.FontFamily = Face.Family;
 	Node->Text.FontWeight = TEXT("700");
 	Document.Children.Add(Node);
-	const FImportAnalysisResult Result = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	FDesignFont& MetadataOnlyFont = Document.Fonts.AddDefaulted_GetRef();
+	MetadataOnlyFont.Name = Face.Family;
+	const FImportAnalysisResult Result = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("No preparation failure"), Result.ErrorMessage.IsEmpty());
 	const FString Path = FFontResolver::FindFontAssetPath(Face.Family);
 	TestFalse(TEXT("Default analysis prepares a project font"), Path.IsEmpty());
@@ -617,20 +831,214 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	TestFalse(TEXT("Fixture distinguishes old and new faces"), Before.Equals(Expected, 0.01));
 	TestTrue(TEXT("An already used Slate font immediately sees the imported weight"), After.Equals(Expected, 0.01));
 	const int32 Count = Font->GetCompositeFont()->DefaultTypeface.Fonts.Num();
-	DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Repeat analysis does not append faces"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), Count);
+	FDesignDocument ExternalDocument;
+	auto Definition = MakeShared<FDesignNode>();
+	Definition->Id = TEXT("external-font");
+	Definition->Type = EDesignNodeType::Text;
+	Definition->bReusable = true;
+	Definition->Text = Node->Text;
+	ExternalDocument.MutableSourceDocument().ImportedNodes.Add(Definition);
+	auto Instance = MakeShared<FDesignNode>();
+	Instance->Type = EDesignNodeType::Ref;
+	Instance->Ref = Definition->Id;
+	ExternalDocument.Children.Add(Instance);
+	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
+	FFontResolver::ClearCache();
+	FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
+	TArray<FString> ExternalWarnings;
+	TestTrue(TEXT("External component fonts prepare through the existing importer"), DesignLocalFontImport::Prepare(ExternalDocument, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), ExternalWarnings, Error));
+	TestEqual(TEXT("External-only font requests import the missing weight"), FFontResolver::FindExactTypefaceForAssetPath(Font->GetPathName(), TEXT("700")), FString(TEXT("Bold")));
+	const FString DeclaredFamily = TEXT("D2UDeclared_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString DeclaredPackage = FFontResolver::MakeImportedFamilyPackageName(DeclaredFamily);
+	ON_SCOPE_EXIT { DeleteFontFixture(*this, DeclaredPackage, false); };
+	if (!TestTrue(TEXT("Seed automatic cache with stale bytes"),
+		DesignLocalFontImport::ImportFace(Seed, DeclaredPackage, Error, TEXT("Bold"), DeclaredFamily))) return false;
+	FDesignDocument DeclaredDocument;
+	FDesignFont& Declaration = DeclaredDocument.Fonts.AddDefaulted_GetRef();
+	Declaration.Name = DeclaredFamily;
+	Declaration.Url = FPaths::ConvertRelativePathToFull(Source);
+	auto DeclaredNode = MakeShared<FDesignNode>();
+	DeclaredNode->Text.Content = TEXT("Declared source");
+	DeclaredNode->Text.FontFamily = DeclaredFamily;
+	DeclaredNode->Text.FontWeight = TEXT("700");
+	DeclaredDocument.Children.Add(DeclaredNode);
+	TArray<FString> DeclaredWarnings;
+	if (!TestTrue(TEXT("Declared name binds the source despite different internal family"),
+		DesignLocalFontImport::Prepare(DeclaredDocument, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), DeclaredWarnings, Error))) return false;
+	UFont* DeclaredFont = LoadObject<UFont>(nullptr,
+		*(DeclaredPackage + TEXT(".") + FPackageName::GetLongPackageAssetName(DeclaredPackage)));
+	if (!TestNotNull(TEXT("Declared family asset loads"), DeclaredFont)) return false;
+	const auto& DeclaredEntries = DeclaredFont->GetCompositeFont()->DefaultTypeface.Fonts;
+	if (!TestEqual(TEXT("Declared source updates one existing typeface"), DeclaredEntries.Num(), 1)) return false;
+	const UFontFace* DeclaredEmbedded = Cast<UFontFace>(DeclaredEntries[0].Font.GetFontFaceAsset());
+	if (!TestNotNull(TEXT("Declared source is embedded"), DeclaredEmbedded)) return false;
+	TArray<uint8> DeclaredBytes;
+	TestTrue(TEXT("Read exact declared bytes"), FFileHelper::LoadFileToArray(DeclaredBytes, *Declaration.Url));
+	TestTrue(TEXT("Declaration replaces stale automatic bytes"), DeclaredEmbedded->FontFaceData->GetData() == DeclaredBytes);
+	TestEqual(TEXT("Declared name is registered"), FFontResolver::FindFontAssetPath(DeclaredFamily), DeclaredFont->GetPathName());
+	TestTrue(TEXT("Unchanged declared source prepares again"),
+		DesignLocalFontImport::Prepare(DeclaredDocument, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), DeclaredWarnings, Error));
+	TestTrue(TEXT("Identical source reuses embedded face"),
+		DeclaredEntries[0].Font.GetFontFaceAsset() == DeclaredEmbedded);
+	Declaration.Url = FPaths::ProjectSavedDir() / FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".ttf");
+	TestFalse(TEXT("Missing declared source does not fall back to automatic cache"),
+		DesignLocalFontImport::Prepare(DeclaredDocument, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), DeclaredWarnings, Error));
+	TestTrue(TEXT("Declared failure identifies family, requested style and source"),
+		Error.Contains(DeclaredFamily) && Error.Contains(TEXT("weight=700"))
+		&& Error.Contains(TEXT("italic=false")) && Error.Contains(Declaration.Url));
+	Error.Reset();
+	Declaration.Url = FPaths::ConvertRelativePathToFull(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Light.ttf"));
+	DesignLocalFontImport::FFace Light;
+	if (!TestTrue(TEXT("Read declared light source"), DesignLocalFontImport::ReadFace(Declaration.Url, Light, Error))) return false;
+	TestEqual(TEXT("Available source really has weight 300"), Light.Weight, 300);
+	DeclaredNode->Text.FontWeight = TEXT("normal");
+	if (!TestTrue(TEXT("Normal text uses the available declared face without aborting preparation"),
+		DesignLocalFontImport::Prepare(DeclaredDocument, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), DeclaredWarnings, Error))) return false;
+	const auto Selection = FFontResolver::ResolveFontSelection(DeclaredFamily, FString(), TEXT("normal"));
+	TestEqual(TEXT("Normal text keeps the declared family asset"), Selection.FontAssetPath, DeclaredFont->GetPathName());
+	TestEqual(TEXT("Normal text selects the actual 300 typeface"), Selection.TypefaceName, FString(TEXT("Light")));
+	TestTrue(TEXT("Preparation does not fabricate a regular 400 style"),
+		FFontResolver::FindExactTypefaceForAssetPath(DeclaredFont->GetPathName(), TEXT("400")).IsEmpty());
+	const auto* LightEntry = DeclaredEntries.FindByPredicate([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Light"); });
+	const UFontFace* LightEmbedded = LightEntry ? Cast<UFontFace>(LightEntry->Font.GetFontFaceAsset()) : nullptr;
+	if (!TestNotNull(TEXT("Available light source is embedded"), LightEmbedded)) return false;
+	TArray<uint8> LightBytes;
+	TestTrue(TEXT("Read available declared bytes"), FFileHelper::LoadFileToArray(LightBytes, *Declaration.Url));
+	TestTrue(TEXT("Selected face retains the actual source bytes"), LightEmbedded->FontFaceData->GetData() == LightBytes);
+	Declaration.Url = FPaths::ConvertRelativePathToFull(Seed.Path);
+	FDesignFont& ItalicDeclaration = DeclaredDocument.Fonts.AddDefaulted_GetRef();
+	ItalicDeclaration.Name = DeclaredFamily;
+	ItalicDeclaration.Url = FPaths::ConvertRelativePathToFull(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-BoldItalic.ttf"));
+	DesignLocalFontImport::FFace Italic;
+	if (!TestTrue(TEXT("Read the real declared italic face"), DesignLocalFontImport::ReadFace(ItalicDeclaration.Url, Italic, Error))) return false;
+	TestTrue(TEXT("The fixture supplies real italic 700, not requested italic 500"), Italic.bItalic && Italic.Weight == 700);
+	DeclaredNode->Type = EDesignNodeType::Text;
+	DeclaredNode->Id = TEXT("declared-italic");
+	DeclaredNode->Text.FontSize = 24;
+	DeclaredNode->Text.FontWeight = TEXT("500");
+	DeclaredNode->Text.FontStyle = TEXT("italic");
+	auto DeclaredRich = MakeShared<FDesignNode>(*DeclaredNode);
+	DeclaredRich->Id = TEXT("declared-rich");
+	FDesignTextRun ItalicRun;
+	ItalicRun.Content = TEXT("Declared italic run");
+	ItalicRun.Color = TEXT("#ffffff");
+	DeclaredRich->Text.TextRuns.Add(ItalicRun);
+	DeclaredDocument.Children.Add(DeclaredRich);
+	auto RomanTemplate = MakeShared<FDesignNode>(*DeclaredNode);
+	RomanTemplate->Id = TEXT("declared-template");
+	RomanTemplate->bReusable = true;
+	RomanTemplate->Text.FontWeight = TEXT("400");
+	RomanTemplate->Text.FontStyle = TEXT("normal");
+	DeclaredDocument.Children.Add(RomanTemplate);
+	auto DeclaredInstance = MakeShared<FDesignNode>();
+	DeclaredInstance->Type = EDesignNodeType::Ref;
+	DeclaredInstance->Id = TEXT("declared-instance");
+	DeclaredInstance->Ref = RomanTemplate->Id;
+	auto DeclaredPatch = MakeShared<FDesignNodePatch>();
+	DeclaredPatch->FontWeight = TEXT("500");
+	DeclaredPatch->FontStyle = TEXT("italic");
+	DeclaredInstance->RefOverrides = DeclaredPatch;
+	DeclaredDocument.Children.Add(DeclaredInstance);
+	const auto DeclaredResult = DesignImportPlanning::AnalyzeImport(DeclaredDocument, FImportAnalysisInput{false});
+	if (!TestTrue(TEXT("Declared styles prepare and convert through the production import entry"), DeclaredResult.ErrorMessage.IsEmpty())) return false;
+	const FDesign2UMGFontMappings NoMappings;
+	TestEqual(TEXT("Unprepared declarations retain the original roman selection"),
+		FFontResolver::ResolveFontSelection(DeclaredFamily, FString(), TEXT("500"), TEXT("italic"), &NoMappings).TypefaceName,
+		FString(TEXT("Regular")));
+	TestEqual(TEXT("Measurement's shared selection keeps the prepared real italic face"),
+		FFontResolver::ResolveFontSelection(DeclaredFamily, FString(), TEXT("500"), TEXT("italic"), &NoMappings,
+			&DeclaredNode->Text.PreparedFont).TypefaceName, FString(TEXT("Bold Italic")));
+	FDesign2UMGFontMappings ExactMapping;
+	ExactMapping.Add(DeclaredFamily, DeclaredFont);
+	TestTrue(TEXT("Prepared document selection cannot relax an explicit mapping's exact-style contract"),
+		FFontResolver::ResolveFontSelection(DeclaredFamily, FString(), TEXT("500"), TEXT("italic"), &ExactMapping,
+			&DeclaredNode->Text.PreparedFont).FontAssetPath.IsEmpty());
+	bool bPlainItalic = false, bRichItalic = false, bInstanceItalic = false;
+	TFunction<void(const FUMGWidgetNode&)> CheckDeclaredBindings = [&](const FUMGWidgetNode& Widget)
+	{
+		if (Widget.Type == TEXT("TextBlock"))
+		{
+			FSlateFontInfo BoundFont;
+			bool bChanged = false;
+			UMGTextStyleApplication::ApplyTypedFontInfo(BoundFont, Widget, bChanged);
+			const bool bCorrectFace = bChanged && BoundFont.FontObject == DeclaredFont && BoundFont.TypefaceFontName == TEXT("Bold Italic");
+			bPlainItalic |= Widget.Id == DeclaredNode->Id && bCorrectFace;
+			bInstanceItalic |= Widget.Id == DeclaredInstance->Id && bCorrectFace;
+		}
+		if (Widget.Id == DeclaredRich->Id && Widget.Text.RichTextStyleRows.IsSet())
+		{
+			URichTextBlock* BoundRich = NewObject<URichTextBlock>();
+			UMGTextStyleApplication::ApplyRichTextDefaultStyle(BoundRich, Widget);
+			UMGTextStyleApplication::ApplyRichTextStyleRows(BoundRich, Widget.Text.RichTextStyleRows.GetValue());
+			const UDataTable* Table = Design2UMGWidgetPropertyAccess::GetTextStyleSet(*BoundRich);
+			const FRichTextStyleRow* Row = Table ? Table->FindRow<FRichTextStyleRow>(TEXT("d2u_run_0"), TEXT("Declared face binding"), false) : nullptr;
+			bRichItalic = Row && Row->TextStyle.Font.FontObject == DeclaredFont && Row->TextStyle.Font.TypefaceFontName == TEXT("Bold Italic");
+		}
+		for (const auto& Child : Widget.Children) CheckDeclaredBindings(Child);
+	};
+	CheckDeclaredBindings(DeclaredResult.Data.RootWidget);
+	TestTrue(TEXT("Ordinary text binds the selected real italic face"), bPlainItalic);
+	TestTrue(TEXT("Inherited rich text binds the same selected face"), bRichItalic);
+	TestTrue(TEXT("A reference style override selects its actual declared face before sizing and binding"), bInstanceItalic);
+	FDesignDocument UsageDocument;
+	FDesignFont& UnusedDeclaration = UsageDocument.Fonts.AddDefaulted_GetRef();
+	UnusedDeclaration.Name = TEXT("D2UUnused_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	TestTrue(TEXT("Unused declaration is not a missing used font"), FFontResolver::FindMissingFonts(UsageDocument).IsEmpty());
+	auto MissingNode = MakeShared<FDesignNode>();
+	MissingNode->Type = EDesignNodeType::Text;
+	MissingNode->Text.Content = TEXT("Used missing font");
+	MissingNode->Text.FontFamily = UnusedDeclaration.Name;
+	UsageDocument.Children.Add(MissingNode);
+	TestTrue(TEXT("Actually used missing font is still reported"),
+		FFontResolver::FindMissingFonts(UsageDocument).Contains(UnusedDeclaration.Name));
+
 	auto* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	const auto SavedMappings = Settings->ExplicitFontMappings;
 	ON_SCOPE_EXIT { Settings->ExplicitFontMappings = SavedMappings; FFontResolver::ClearCache(); };
 	Settings->ExplicitFontMappings.Add(Face.Family, Font);
 	Design2UMGFontAccess::GetMutableCompositeFont(*Font).DefaultTypeface.Fonts.RemoveAll([](const FTypefaceEntry& Entry) { return Entry.Name == TEXT("Bold"); });
 	FFontResolver::ClearCache();
-	DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestEqual(TEXT("Explicit mapping prevents automatic modification"), Font->GetCompositeFont()->DefaultTypeface.Fonts.Num(), 1);
 	Node->Text.FontFamily = TEXT("D2U Missing Local Font Fixture");
-	const FImportAnalysisResult Missing = DesignImportPipeline::AnalyzeImport(Document, FImportAnalysisInput{false});
+	const FImportAnalysisResult Missing = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false});
 	TestTrue(TEXT("Missing face is recorded in generated-data diagnostics"),
 		Missing.Data.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("D2U Missing Local Font Fixture")); }));
+	Settings->ExplicitFontMappings.Reset();
+	FFontResolver::ClearCache();
+	FFontResolver::RegisterFontAssetPath(Face.Family, Font->GetPathName());
+	Node->Text.FontFamily = Face.Family;
+	Node->Text.FontPostScriptName = Face.PostScriptName;
+	const FString FontDirectory = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ManualFonts");
+	IFileManager::Get().MakeDirectory(*FontDirectory, true);
+	const FString LocatedSource = FontDirectory / (TEXT("!KnownFontSource_")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".woff2"));
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*LocatedSource); };
+	if (!TestEqual(TEXT("Copy font bytes for metadata inspection"),
+		IFileManager::Get().Copy(*LocatedSource, *Source), COPY_OK)) return false;
+	DesignLocalFontImport::FSourceIndex SourceIndex;
+	const auto* LocatedFace = SourceIndex.GetFaces().FindByPredicate([&](const DesignLocalFontImport::FFace& Candidate)
+	{
+		return Candidate.Family == Face.Family && Candidate.PostScriptName == Face.PostScriptName
+			&& Candidate.Weight == Face.Weight && Candidate.bItalic == Face.bItalic;
+	});
+	if (!TestTrue(TEXT("The requested face resolves to the temporary source"),
+		LocatedFace && FPaths::IsSamePath(LocatedFace->Path, LocatedSource))) return false;
+	const FString OriginalSourcePath = LocatedFace->Path;
+	if (!TestTrue(TEXT("Remove the located source after metadata inspection"),
+		IFileManager::Get().Delete(*LocatedSource))) return false;
+	TArray<FString> SourceWarnings;
+	Error.Reset();
+	if (!TestFalse(TEXT("Failure to convert a located source stops font preparation"),
+		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), SourceWarnings, Error, &SourceIndex))) return false;
+	TestTrue(TEXT("Font source failure preserves the requested family, weight and style"),
+		Error.Contains(Face.Family) && Error.Contains(TEXT("weight=700")) && Error.Contains(TEXT("italic=false")));
+	TestTrue(TEXT("Font source failure preserves its PostScript name and original source"),
+		Error.Contains(Face.PostScriptName) && Error.Contains(OriginalSourcePath));
+	TestFalse(TEXT("A located source failure is not downgraded to a missing-font warning"),
+		SourceWarnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("Local font unavailable")); }));
 	return true;
 }
 
@@ -760,11 +1168,7 @@ bool FLocalFontPersistenceSaveTest::RunTest(const FString&)
 	UFont* Font = LoadObject<UFont>(nullptr, *ObjectPath);
 	if (!TestNotNull(TEXT("Persistent font exists"), Font)) return false;
 	UFontFace* Embedded = const_cast<UFontFace*>(Cast<UFontFace>(Font->GetCompositeFont()->DefaultTypeface.Fonts[0].Font.GetFontFaceAsset()));
-	if (!TestNotNull(TEXT("Persistent embedded face exists"), Embedded)) return false;
-	Embedded->LoadingPolicy = EFontLoadingPolicy::LazyLoad;
-	if (!SaveFontPolicyFixture(*this, *Font)) return false;
-	if (!TestTrue(TEXT("Persist an existing-font policy through normal reimport"), DesignLocalFontImport::ImportFace(Face, Package, Error))) return false;
-	TestTrue(TEXT("Existing face policy is Inline before restart"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline);
+	if (!TestNotNull(TEXT("Persistent embedded face exists"), Embedded) || !AddFallbackFixture(*this, *Font)) return false;
 	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
 	const auto PreviousMappings = Settings->ExplicitFontMappings;
 	ON_SCOPE_EXIT
@@ -778,11 +1182,30 @@ bool FLocalFontPersistenceSaveTest::RunTest(const FString&)
 	auto Node = MakeShared<FDesignNode>();
 	Node->Text.Content = TEXT("Mapped persistent font");
 	Node->Text.FontFamily = Face.Family;
+	Node->Text.FontWeight = TEXT("700");
 	Document.Children.Add(Node);
 	TArray<FString> Diagnostics;
-	if (!SaveFontPolicyFixture(*this, *Font)
-		|| !TestTrue(TEXT("Prepare mapped generated font for restart"), DesignLocalFontImport::Prepare(Document, Diagnostics, Error))
-		|| !TestTrue(TEXT("Mapped generated face is Inline before restart"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline))
+	if (!SaveFontPolicyFixture(*this, *Font)) return false;
+	const FString MappedFilename = FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension());
+	const FMD5Hash MappedIdentity = FMD5Hash::HashFile(*MappedFilename);
+	if (!TestTrue(TEXT("Prepare mapped generated font without changing its policy"), DesignLocalFontImport::Prepare(
+		Document, FDesign2UMGConversionSettings::FromSettings(Settings), Diagnostics, Error))
+		|| !TestTrue(TEXT("Mapped generated face retains LazyLoad"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad)
+		|| !TestTrue(TEXT("Mapped asset bytes remain unchanged"), FMD5Hash::HashFile(*MappedFilename) == MappedIdentity)
+		|| !TestTrue(TEXT("Preparation preserves the explicit mapping"), Settings->ExplicitFontMappings[Face.Family].Get() == Font))
+	{
+		DeleteFontFixture(*this, Package, false);
+		return false;
+	}
+	Settings->ExplicitFontMappings = PreviousMappings;
+	FFontResolver::ClearCache();
+	if (!TestTrue(TEXT("Prepare the now-unconfigured automatic font in place"), DesignLocalFontImport::Prepare(
+		Document, FDesign2UMGConversionSettings::FromSettings(Settings), Diagnostics, Error))) return false;
+	TestTrue(TEXT("In-place cleanup preserves the old face policy"), Embedded->LoadingPolicy == EFontLoadingPolicy::LazyLoad);
+	TestTrue(TEXT("In-place cleanup removes the saved fallback"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
+	if (!TestTrue(TEXT("Explicit unmapped reimport persists the source before restart"),
+		DesignLocalFontImport::ImportFace(Face, Package, Error))
+		|| !TestTrue(TEXT("Unmapped imported face is Inline before restart"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline))
 	{
 		DeleteFontFixture(*this, Package, false);
 		return false;
@@ -822,6 +1245,7 @@ bool FLocalFontPersistenceReloadTest::RunTest(const FString&)
 		TestTrue(TEXT("Remove persistence state"), IFileManager::Get().Delete(*StatePath));
 		TestFalse(TEXT("Persistence state is removed"), IFileManager::Get().FileExists(*StatePath));
 	};
+	TestTrue(TEXT("Removed fallback stays absent after restart"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
 	TestTrue(TEXT("Runtime font cache survives restart"), Font->FontCacheType == EFontCacheType::Runtime);
 #if !UE_VERSION_OLDER_THAN(5, 7, 0)
 	TestTrue(TEXT("Asset font source survives restart"), Font->RuntimeFontSource == ERuntimeFontSource::Asset);
@@ -833,7 +1257,7 @@ bool FLocalFontPersistenceReloadTest::RunTest(const FString&)
 		const UFontFace* Embedded = Cast<UFontFace>(Entries[0].Font.GetFontFaceAsset());
 		if (TestNotNull(TEXT("Embedded face survives restart"), Embedded))
 		{
-			TestTrue(TEXT("Existing-font policy survives restart"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline);
+			TestTrue(TEXT("Unmapped explicitly imported policy survives restart"), Embedded->LoadingPolicy == EFontLoadingPolicy::Inline);
 			TArray<uint8> Source;
 			TestTrue(TEXT("Read expected face bytes"), FFileHelper::LoadFileToArray(Source,
 				*(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Bold.ttf"))));
@@ -842,6 +1266,306 @@ bool FLocalFontPersistenceReloadTest::RunTest(const FString&)
 	}
 	FFontResolver::ClearCache();
 	TestEqual(TEXT("Family is rediscovered without transient registration"), FFontResolver::FindFontAssetPath(Fields[1]), Fields[2]);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDocumentGlyphFallbackSaveTest,
+	"Design2UMG.Fonts.GlyphFallback.Save",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDocumentGlyphFallbackSaveTest::RunTest(const FString&)
+{
+	const FString StatePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG/FontTests/GlyphFallback.txt");
+	if (!TestFalse(TEXT("Preserve a pending glyph fallback fixture"), IFileManager::Get().FileExists(*StatePath))) return false;
+	const FString Directory = TEXT("/Game/Design2UMG/Automation/GlyphFallback_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const FString PrimaryPackage = Directory / TEXT("Primary");
+	const FString DonorPackage = Directory / TEXT("Donor");
+	FString DerivedPackage;
+	bool bKeepForReload = false;
+	ON_SCOPE_EXIT
+	{
+		if (!bKeepForReload)
+		{
+			IFileManager::Get().Delete(*StatePath);
+			IFileManager::Get().Delete(*FPaths::ChangeExtension(StatePath, TEXT("json")));
+			if (!DerivedPackage.IsEmpty()) DeleteFontFixture(*this, DerivedPackage, false);
+			DeleteFontFixture(*this, DonorPackage, false);
+			DeleteFontFixture(*this, PrimaryPackage, false);
+		}
+	};
+	FString Error;
+	DesignLocalFontImport::FFace PrimarySource, DonorSource;
+	if (!TestTrue(TEXT("Read primary fixture"), DesignLocalFontImport::ReadFace(
+		FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), PrimarySource, Error))
+		|| !TestTrue(TEXT("Read donor fixture"), DesignLocalFontImport::ReadFace(
+			FPaths::EngineContentDir() / TEXT("Slate/Fonts/DroidSansFallback.ttf"), DonorSource, Error))) return false;
+	if (!TestTrue(TEXT("Import primary fixture"), DesignLocalFontImport::ImportFace(PrimarySource, PrimaryPackage, Error, TEXT("Regular")))
+		|| !TestTrue(TEXT("Import donor fixture"), DesignLocalFontImport::ImportFace(DonorSource, DonorPackage, Error, TEXT("Regular")))) return false;
+	UFont* Primary = LoadObject<UFont>(nullptr, *(PrimaryPackage + TEXT(".Primary")));
+	UFont* Donor = LoadObject<UFont>(nullptr, *(DonorPackage + TEXT(".Donor")));
+	if (!TestNotNull(TEXT("Primary fixture exists"), Primary) || !TestNotNull(TEXT("Donor fixture exists"), Donor)) return false;
+	// Source imports must preserve the document font boundary before donor preparation.
+	auto& PrimaryComposite = Design2UMGFontAccess::GetMutableCompositeFont(*Primary);
+	TestTrue(TEXT("Primary import has no external fallback"), PrimaryComposite.FallbackTypeface.Typeface.Fonts.IsEmpty());
+	// The donor's default face also lacks these glyphs; its native subfont is the only supplier.
+	auto& DonorComposite = Design2UMGFontAccess::GetMutableCompositeFont(*Donor);
+	const FFontData DonorData = DonorComposite.DefaultTypeface.Fonts[0].Font;
+	DonorComposite.DefaultTypeface.Fonts[0].Font = PrimaryComposite.DefaultTypeface.Fonts[0].Font;
+	TestTrue(TEXT("Donor import has no external fallback"), DonorComposite.FallbackTypeface.Typeface.Fonts.IsEmpty());
+	FCompositeSubFont& DonorSubfont = DonorComposite.SubTypefaces.AddDefaulted_GetRef();
+	DonorSubfont.ScalingFactor = 0.75f;
+	DonorSubfont.CharacterRanges = {FInt32Range::Inclusive(0x4e2d, 0x4e2d), FInt32Range::Inclusive(0x65e5, 0x65e5)};
+	FTypefaceEntry DonorEntry(FName(TEXT("Regular")));
+	DonorEntry.Font = DonorData;
+	DonorSubfont.Typeface.Fonts.Add(MoveTemp(DonorEntry));
+	DonorComposite.MakeDirty();
+	if (!SaveFontPolicyFixture(*this, *Donor)) return false;
+	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
+	const auto PreviousMappings = Settings->ExplicitFontMappings;
+	const auto PreviousDefault = Settings->DefaultFontAsset;
+	const auto PreviousIconMap = Settings->IconFontAssetMap;
+	const auto PreviousDefaultIcon = Settings->DefaultIconFontAssetPath;
+	ON_SCOPE_EXIT
+	{
+		Settings->ExplicitFontMappings = PreviousMappings;
+		Settings->DefaultFontAsset = PreviousDefault;
+		Settings->IconFontAssetMap = PreviousIconMap;
+		Settings->DefaultIconFontAssetPath = PreviousDefaultIcon;
+		FFontResolver::ClearCache();
+	};
+	Settings->ExplicitFontMappings.Add(TEXT("GlyphPrimary"), Primary);
+	Settings->ExplicitFontMappings.Add(TEXT("GlyphDonor"), Donor);
+	Settings->DefaultFontAsset = Primary;
+	Settings->IconFontAssetMap.Add(TEXT("GlyphIcon"), Donor);
+	Settings->DefaultIconFontAssetPath = Primary->GetPathName();
+	const auto CapturedSettings = FDesign2UMGConversionSettings::FromSettings(Settings);
+	const auto& FontMappings = CapturedSettings.ExplicitFontMappings;
+	Settings->ExplicitFontMappings[TEXT("GlyphPrimary")] = Donor;
+	Settings->ExplicitFontMappings[TEXT("GlyphDonor")] = Primary;
+	FFontResolver::ClearCache();
+	const auto FileIdentity = [](const FString& Package)
+	{
+		return LexToString(FMD5Hash::HashFile(*FPackageName::LongPackageNameToFilename(Package, FPackageName::GetAssetPackageExtension())));
+	};
+	const FString PrimaryIdentity = FileIdentity(PrimaryPackage);
+	const FString DonorIdentity = FileIdentity(DonorPackage);
+	FDesignDocument Document;
+	auto Text = MakeShared<FDesignNode>();
+	Text->Type = EDesignNodeType::Text;
+	Text->Name = TEXT("Mixed text");
+	Text->Id = TEXT("mixed-text");
+	Text->Text.FontFamily = TEXT("GlyphPrimary");
+	Text->Text.FontWeight = TEXT("400");
+	Text->Text.Content = TEXT("A\u4e2d\u65e5");
+	Document.Children.Add(Text);
+	auto Rich = MakeShared<FDesignNode>(*Text);
+	Rich->Id = TEXT("rich-text");
+	FDesignTextRun Run;
+	Run.Content = Text->Text.Content;
+	Run.Color = TEXT("#ffffff");
+	Rich->Text.TextRuns.Add(Run);
+	Document.Children.Add(Rich);
+	auto DonorText = MakeShared<FDesignNode>(*Text);
+	DonorText->Id = TEXT("donor-text");
+	DonorText->Text.FontFamily = TEXT("GlyphDonor");
+	Document.Children.Add(DonorText);
+	FSlateFontCache& Cache = *FSlateApplication::Get().GetRenderer()->GetFontCache();
+	TestFalse(TEXT("Primary really lacks the fixture glyph"), Cache.CanLoadCodepoint(
+		Cache.GetDefaultFontData(FSlateFontInfo(Primary, 14, TEXT("Regular"))), 0x4e2d, EFontFallback::FF_NoFallback));
+	TestFalse(TEXT("Donor default face also lacks the fixture glyph"), Cache.CanLoadCodepoint(
+		Cache.GetDefaultFontData(FSlateFontInfo(Donor, 14, TEXT("Regular"))), 0x4e2d, EFontFallback::FF_NoFallback));
+	float DonorScale = 1.0f;
+	const FFontData& NativeDonor = Cache.GetFontDataForCodepoint(FSlateFontInfo(Donor, 14, TEXT("Regular")), 0x4e2d, DonorScale);
+	TestTrue(TEXT("Document donor's own native subfont supports the glyph"), Cache.CanLoadCodepoint(NativeDonor, 0x4e2d, EFontFallback::FF_NoFallback));
+	TestEqual(TEXT("Native subfont has an effective scale distinct from the default"), DonorScale, 0.75f);
+	TestFalse(TEXT("Primary lacks the adjacent distinct fixture glyph"), Cache.CanLoadCodepoint(
+		Cache.GetDefaultFontData(FSlateFontInfo(Primary, 14, TEXT("Regular"))), 0x65e5, EFontFallback::FF_NoFallback));
+	float NativeAdjacentScale = 1.0f;
+	const FFontData& NativeAdjacent = Cache.GetFontDataForCodepoint(FSlateFontInfo(Donor, 14, TEXT("Regular")), 0x65e5, NativeAdjacentScale);
+	TestTrue(TEXT("Document donor supports the adjacent distinct fixture glyph"), Cache.CanLoadCodepoint(NativeAdjacent, 0x65e5, EFontFallback::FF_NoFallback));
+	TArray<FString> Warnings;
+	TArray<FSlateFontInfo> DocumentDonors;
+	TArray<FSlateFontInfo> UnsupportedDonors;
+	TMap<FFontData, FString> FontDataHashes;
+	FDesignDocument Unsupported;
+	Unsupported.Children = {Text, Rich};
+	TestTrue(TEXT("Missing document donor remains a diagnostic, not a failed import"),
+		DesignLocalFontImport::PrepareGlyphFallbacks(Unsupported, FontMappings, UnsupportedDonors, FontDataHashes, Warnings, Error));
+	TestEqual(TEXT("Repeated missing characters in two nodes are aggregated by font"), Warnings.Num(), 1);
+	if (!Warnings.IsEmpty())
+	{
+		TestTrue(TEXT("Diagnostic identifies the missing character and source asset"),
+			Warnings[0].Contains(TEXT("U+4E2D")) && Warnings[0].Contains(Primary->GetPathName()));
+		FUMGWidgetData WarningData;
+		WarningData.Warnings = Warnings;
+		const FString Message = DesignImportDialogs::FormatImportResult(WarningData, FString(), true);
+		TestTrue(TEXT("Existing completion message carries the aggregated glyph diagnostic"), Message.Contains(Warnings[0]));
+	}
+	TestTrue(TEXT("No external font is substituted when the document has no donor"), Text->Text.PreparedFont.AssetPath.IsEmpty());
+	Warnings.Reset();
+	if (!TestTrue(TEXT("Prepare source fonts through the existing import entry"), DesignLocalFontImport::Prepare(Document, CapturedSettings, Warnings, Error))) return false;
+	{
+		Design2UMGEditorTests::FScopedPackageSaveFailure RejectDerived([](const FString& Filename)
+		{
+			return Filename.Contains(TEXT("/GlyphFallbacks/")) || Filename.Contains(TEXT("\\GlyphFallbacks\\"));
+		});
+		TestFalse(TEXT("A rejected composite save fails preparation"),
+			DesignLocalFontImport::PrepareGlyphFallbacks(Document, FontMappings, DocumentDonors, FontDataHashes, Warnings, Error));
+		TestTrue(TEXT("A failed save does not bind an unsaved composite"), Text->Text.PreparedFont.AssetPath.IsEmpty());
+	}
+	if (!TestTrue(TEXT("Prepare document-local glyph fallback with captured mappings"),
+		DesignLocalFontImport::PrepareGlyphFallbacks(Document, FontMappings, DocumentDonors, FontDataHashes, Warnings, Error))) return false;
+	TestTrue(TEXT("Empty fonts header does not warn when document fonts cover the text"), Warnings.IsEmpty());
+	const FString DerivedPath = Text->Text.PreparedFont.AssetPath;
+	if (!TestFalse(TEXT("Missing glyph receives a derived asset"), DerivedPath.IsEmpty())) return false;
+	DerivedPackage = FPackageName::ObjectPathToPackageName(DerivedPath);
+	TestTrue(TEXT("Complete donor text keeps its original asset"), DonorText->Text.PreparedFont.AssetPath.IsEmpty());
+	TestEqual(TEXT("Source family is preserved"), Text->Text.FontFamily, FString(TEXT("GlyphPrimary")));
+	TestEqual(TEXT("Rich run receives the same prepared selection"), Rich->Text.TextRuns[0].PreparedFont.AssetPath, DerivedPath);
+	TestTrue(TEXT("Repeated preparation succeeds"),
+		DesignLocalFontImport::PrepareGlyphFallbacks(Document, FontMappings, DocumentDonors, FontDataHashes, Warnings, Error));
+	TestEqual(TEXT("Repeated preparation reuses the derived asset"), Text->Text.PreparedFont.AssetPath, DerivedPath);
+	TestEqual(TEXT("Primary asset is never rewritten"), FileIdentity(PrimaryPackage), PrimaryIdentity);
+	TestEqual(TEXT("Donor asset is never rewritten"), FileIdentity(DonorPackage), DonorIdentity);
+	TestTrue(TEXT("Primary native fallback is never changed"), Primary->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
+	TestEqual(TEXT("Prepared primary comes from the captured mapping"), Text->Text.PreparedFont.SourceAssetPath, Primary->GetPathName());
+	TestEqual(TEXT("Current global policy is different, proving the snapshot fixture discriminates"),
+		FFontResolver::ResolveFontSelection(TEXT("GlyphPrimary"), FString(), TEXT("400")).FontAssetPath, Donor->GetPathName());
+	TestTrue(TEXT("Changed global mappings are not rewritten by preparation"), Settings->ExplicitFontMappings[TEXT("GlyphPrimary")].Get() == Donor
+		&& Settings->ExplicitFontMappings[TEXT("GlyphDonor")].Get() == Primary);
+	TestTrue(TEXT("Default and icon configurations remain intact"), Settings->DefaultFontAsset.Get() == Primary
+		&& Settings->IconFontAssetMap[TEXT("GlyphIcon")].Get() == Donor && Settings->DefaultIconFontAssetPath == Primary->GetPathName());
+	auto Template = MakeShared<FDesignNode>(*Text);
+	Template->Id = TEXT("glyph-template");
+	Template->bReusable = true;
+	Template->Text.Content = TEXT("A");
+	Template->Text.PreparedFont = FDesignPreparedFont();
+	Document.Children.Add(Template);
+	auto Instance = MakeShared<FDesignNode>();
+	Instance->Type = EDesignNodeType::Ref;
+	Instance->Id = TEXT("glyph-instance");
+	Instance->Ref = Template->Id;
+	auto InstancePatch = MakeShared<FDesignNodePatch>();
+	InstancePatch->Content = Text->Text.Content;
+	Instance->RefOverrides = InstancePatch;
+	Document.Children.Add(Instance);
+	int32 PreparedInstances = 0;
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, CapturedSettings,
+		[&](const FDesignDocument& Expanded, TArray<FString>& InstanceWarnings, FString& InstanceError,
+			FDesign2UMGConverter::EFontPreparation Preparation)
+		{
+			++PreparedInstances;
+			if (!TestEqual(TEXT("Reference preparation only visits the actual expanded subtree"), Expanded.Children.Num(), 1)) return false;
+			TestEqual(TEXT("Instance content is final before preparing its font"), Expanded.Children.Last()->Text.Content, Text->Text.Content);
+			TestTrue(TEXT("Reference preparation only reuses existing fonts"), Preparation == FDesign2UMGConverter::EFontPreparation::GlyphCoverage);
+			const bool bPrepared = DesignLocalFontImport::PrepareGlyphFallbacks(Expanded, FontMappings, DocumentDonors, FontDataHashes, InstanceWarnings, InstanceError);
+			TestEqual(TEXT("Expanded instance binds the composite before sizing"), Expanded.Children.Last()->Text.PreparedFont.AssetPath, DerivedPath);
+			return bPrepared;
+		});
+	TestTrue(TEXT("Reference expansion runs font preparation"), PreparedInstances > 0);
+	TestTrue(TEXT("Conversion succeeds"), Data.ConversionError.IsEmpty());
+	const FString Json = FUMGJsonSerializer::Serialize(Data);
+	const FString JsonPath = FPaths::ChangeExtension(StatePath, TEXT("json"));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(StatePath), true);
+	TestTrue(TEXT("Persist generated bindings for a fresh process"), FFileHelper::SaveStringToFile(
+		Json, *JsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	const FString State = FString::Printf(TEXT("%u\n%s\n%s\n%s\n%s\n%s\n"), FPlatformProcess::GetCurrentProcessId(),
+		*Primary->GetPathName(), *Donor->GetPathName(), *DerivedPath, *PrimaryIdentity, *DonorIdentity);
+	TestTrue(TEXT("Record only owned fixture paths"), FFileHelper::SaveStringToFile(
+		State, *StatePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	bKeepForReload = !HasAnyErrors();
+	return bKeepForReload;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDocumentGlyphFallbackReloadTest,
+	"Design2UMG.Fonts.GlyphFallback.Reload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FDocumentGlyphFallbackReloadTest::RunTest(const FString&)
+{
+	const FString StatePath = FPaths::ProjectSavedDir() / TEXT("Design2UMG/FontTests/GlyphFallback.txt");
+	FString State, Json;
+	if (!TestTrue(TEXT("Read saved fixture state"), FFileHelper::LoadFileToString(State, *StatePath))) return false;
+	TArray<FString> Fields;
+	State.ParseIntoArrayLines(Fields);
+	if (!TestEqual(TEXT("Persistence state contains process, assets and original identities"), Fields.Num(), 6)) return false;
+	if (!TestTrue(TEXT("Reload uses a different editor process"), FCString::Strtoui64(*Fields[0], nullptr, 10) != FPlatformProcess::GetCurrentProcessId())) return false;
+	if (!TestTrue(TEXT("Cleanup is restricted to owned fixtures"), Fields[1].StartsWith(TEXT("/Game/Design2UMG/Automation/GlyphFallback_"))
+		&& Fields[2].StartsWith(TEXT("/Game/Design2UMG/Automation/GlyphFallback_"))
+		&& Fields[3].StartsWith(TEXT("/Game/Design2UMG/Fonts/GlyphFallbacks/GlyphFallback_")))) return false;
+	const FString JsonPath = FPaths::ChangeExtension(StatePath, TEXT("json"));
+	ON_SCOPE_EXIT
+	{
+		const TArray<FString> OwnedPackages = {
+			FPackageName::ObjectPathToPackageName(Fields[3]),
+			FPackageName::ObjectPathToPackageName(Fields[2]),
+			FPackageName::ObjectPathToPackageName(Fields[1])};
+		ADD_LATENT_AUTOMATION_COMMAND(FUntilCommand(
+			[this, OwnedPackages, StatePath, JsonPath]()
+			{
+				if (IsAsyncLoading()) return false;
+				// Delete dependents after the loader releases their public exports.
+				for (const FString& Package : OwnedPackages) DeleteFontFixture(*this, Package, false);
+				TestTrue(TEXT("Remove fixture state"), IFileManager::Get().Delete(*StatePath));
+				TestTrue(TEXT("Remove generated binding fixture"), IFileManager::Get().Delete(*JsonPath));
+				return true;
+			},
+			[this, StatePath]()
+			{
+				AddError(FString::Printf(TEXT("Timed out waiting for font fixture loading to finish; owned assets and state are retained: %s"), *StatePath));
+				return true;
+			}));
+	};
+	UFont* Primary = LoadObject<UFont>(nullptr, *Fields[1]);
+	UFont* Donor = LoadObject<UFont>(nullptr, *Fields[2]);
+	UFont* Font = LoadObject<UFont>(nullptr, *Fields[3]);
+	if (!TestNotNull(TEXT("Primary reloads"), Primary) || !TestNotNull(TEXT("Donor reloads"), Donor)
+		|| !TestNotNull(TEXT("Derived native UFont reloads"), Font)) return false;
+	for (int32 Index = 1; Index <= 2; ++Index)
+	{
+		const FString Filename = FPackageName::LongPackageNameToFilename(
+			FPackageName::ObjectPathToPackageName(Fields[Index]), FPackageName::GetAssetPackageExtension());
+		TestEqual(TEXT("Original asset identity survives the separate process"), LexToString(FMD5Hash::HashFile(*Filename)), Fields[Index + 3]);
+	}
+	FSlateFontCache& Cache = *FSlateApplication::Get().GetRenderer()->GetFontCache();
+	const FSlateFontInfo Info(Font, 14, TEXT("Regular"));
+	float Scale = 1.0f;
+	const FFontData& Supplement = Cache.GetFontDataForCodepoint(Info, 0x4e2d, Scale);
+	float AdjacentScale = 1.0f;
+	const FFontData& Adjacent = Cache.GetFontDataForCodepoint(Info, 0x65e5, AdjacentScale);
+	TestTrue(TEXT("Adjacent different missing characters share one native FontData entry"), &Supplement == &Adjacent);
+	float NativeScale = 1.0f;
+	const FFontData& NativeDonor = Cache.GetFontDataForCodepoint(FSlateFontInfo(Donor, 14, TEXT("Regular")), 0x4e2d, NativeScale);
+	TestEqual(TEXT("The original donor subfont scale survives reload"), NativeScale, 0.75f);
+	TestEqual(TEXT("The derived glyph preserves the native donor's effective scale"), Scale, NativeScale);
+	TestEqual(TEXT("Adjacent supplied glyphs keep the same native scale"), AdjacentScale, NativeScale);
+	TestTrue(TEXT("Adjacent glyph loads without LastResort"), Cache.CanLoadCodepoint(Adjacent, 0x65e5, EFontFallback::FF_NoFallback));
+	const UFontFace* SupplementFace = Cast<UFontFace>(Supplement.GetFontFaceAsset());
+	if (!TestNotNull(TEXT("Native subfont asset reference reloads"), SupplementFace)) return false;
+	TestTrue(TEXT("Subfont reuses the original donor face without copying or rewriting it"),
+		SupplementFace == NativeDonor.GetFontFaceAsset());
+	TestTrue(TEXT("Original donor loading policy remains inline"), SupplementFace->LoadingPolicy == EFontLoadingPolicy::Inline);
+	TestTrue(TEXT("Native font supplies the actual glyph without LastResort"), Cache.CanLoadCodepoint(Supplement, 0x4e2d, EFontFallback::FF_NoFallback));
+	const FFontData& Latin = Cache.GetFontDataForCodepoint(Info, 'A', Scale);
+	TestTrue(TEXT("Existing glyph keeps the primary face"), Latin == Cache.GetDefaultFontData(Info));
+	TestTrue(TEXT("Primary typeface bytes are preserved"), Latin.GetFontFaceData()->GetData()
+		== Cache.GetDefaultFontData(FSlateFontInfo(Primary, 14, TEXT("Regular"))).GetFontFaceData()->GetData());
+	TestTrue(TEXT("Supplement contains the imported donor bytes"), Supplement.GetFontFaceData()->GetData()
+		== NativeDonor.GetFontFaceData()->GetData());
+	if (!TestTrue(TEXT("Read generated UMG data"), FFileHelper::LoadFileToString(Json, *JsonPath))) return false;
+	FUMGWidgetData Parsed;
+	if (!TestTrue(TEXT("Resolved font bindings survive JSON parsing"), FUMGJsonParser::ParseJson(Json, Parsed, &State))) return false;
+	bool bPlainBound = false, bRichBound = false;
+	TFunction<void(const FUMGWidgetNode&)> Visit = [&](const FUMGWidgetNode& Node)
+	{
+		bPlainBound |= Node.Type == TEXT("TextBlock") && Node.Text.FontFamily.Get(FString()) == Fields[3];
+		if (Node.Text.RichTextStyleRows.IsSet())
+			for (const auto& Row : Node.Text.RichTextStyleRows.GetValue()) bRichBound |= Row.Value.FontFamily == Fields[3];
+		for (const auto& Child : Node.Children) Visit(Child);
+	};
+	Visit(Parsed.RootWidget);
+	TestTrue(TEXT("Plain text binds the saved composite"), bPlainBound);
+	TestTrue(TEXT("Rich text binds the saved composite"), bRichBound);
 	return true;
 }
 #endif

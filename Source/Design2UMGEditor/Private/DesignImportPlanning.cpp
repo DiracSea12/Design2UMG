@@ -34,14 +34,24 @@ namespace
 	void PrepareDocumentForGeneration(
 		FDesignDocument& Document,
 		FUMGWidgetData& OutPreparedData,
-		const FDesign2UMGConversionSettings& ConversionSettings)
+		const FDesign2UMGConversionSettings& ConversionSettings,
+		DesignLocalFontImport::FSourceIndex& FontSources,
+		TArray<FSlateFontInfo>& GlyphDonors, TMap<FFontData, FString>& FontDataHashes)
 	{
 		FFontResolver::FindMissingFonts(Document);
 		DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
 			Document,
 			FString(),
 			TEXT("DesignImportPipeline"));
-		OutPreparedData = FDesign2UMGConverter::Convert(Document, ConversionSettings);
+		OutPreparedData = FDesign2UMGConverter::Convert(Document, ConversionSettings,
+			[&FontSources, &GlyphDonors, &FontDataHashes, &ConversionSettings](const FDesignDocument& Generated, TArray<FString>& Warnings, FString& Error,
+				FDesign2UMGConverter::EFontPreparation Preparation)
+			{
+				if (!DesignLocalFontImport::Prepare(Generated, ConversionSettings, Warnings, Error, &FontSources,
+					Preparation == FDesign2UMGConverter::EFontPreparation::GlyphCoverage)) return false;
+				return DesignLocalFontImport::PrepareGlyphFallbacks(Generated, ConversionSettings.ExplicitFontMappings,
+					GlyphDonors, FontDataHashes, Warnings, Error);
+			});
 	}
 }
 
@@ -214,13 +224,18 @@ namespace DesignImportPlanning
 		}
 
 		const FDesign2UMGConversionSettings& ConversionSettings = Result.SettingsSnapshot->ConversionSettings;
+		DesignLocalFontImport::FSourceIndex FontSources;
 		TArray<FString> FontWarnings;
-		if (!DesignLocalFontImport::Prepare(Document, FontWarnings, Result.ErrorMessage))
+		TArray<FSlateFontInfo> GlyphDonors;
+		TMap<FFontData, FString> FontDataHashes;
+		if (!DesignLocalFontImport::Prepare(Document, ConversionSettings, FontWarnings, Result.ErrorMessage, &FontSources)
+			|| !DesignLocalFontImport::PrepareGlyphFallbacks(Document, ConversionSettings.ExplicitFontMappings,
+				GlyphDonors, FontDataHashes, FontWarnings, Result.ErrorMessage))
 		{
 			UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Result.ErrorMessage);
 			return Result;
 		}
-		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings);
+		PrepareDocumentForGeneration(Document, Result.Data, ConversionSettings, FontSources, GlyphDonors, FontDataHashes);
 		if (!Result.Data.ConversionError.IsEmpty())
 		{
 			Result.ErrorMessage = Result.Data.ConversionError;

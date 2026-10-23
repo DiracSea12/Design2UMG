@@ -26,6 +26,8 @@ public class Design2UMGCore : ModuleRules
 			"Slate",
 		});
 
+		AddEngineThirdPartyPrivateStaticDependencies(Target, "HarfBuzz", "ICU");
+
 		if (Target.bBuildDeveloperTools)
 		{
 			PrivateDependencyModuleNames.Add("Projects");

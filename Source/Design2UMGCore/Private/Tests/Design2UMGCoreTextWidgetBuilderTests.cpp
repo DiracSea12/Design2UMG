@@ -14,6 +14,8 @@
 #include "Fonts/SlateFontInfo.h"
 #include "FontResolver.h"
 #include "TextMeasurementRuntimeProbe.h"
+#include "TextMeasurement.h"
+#include "SizeEstimator.h"
 #include "Design2UMGFontMetrics.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
@@ -139,6 +141,59 @@ bool FTextWidgetBuilderOverflowClippingContractTest::RunTest(const FString& Para
 	const FUMGWidgetNode TruncatingWidget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
 	TestEqual(TEXT("Truncate mode keeps clipping"),
 		TruncatingWidget.Render.Clipping.Get(FString()), FString(TEXT("ClipToBounds")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIconFontBaselineMetricsContractTest,
+	"Design2UMG.TextWidgetBuilder.IconFontBaselineMetricsContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIconFontBaselineMetricsContractTest::RunTest(const FString& Parameters)
+{
+	Design2UMGTextWidgetBuilder::FIconFontSettingsSnapshot Snapshot;
+	Snapshot.DefaultIconFontAssetPath = TEXT("/Engine/EngineFonts/Roboto.Roboto");
+	Design2UMGTextWidgetBuilder::FIconFontBuildArgs Args;
+	Args.SettingsSnapshot = &Snapshot;
+	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::IconFont, 16.0f, 16.0f);
+	Node->Text.IconFontFamily = TEXT("BaselineMetricsProbe");
+	Node->Text.IconFontName = TEXT("A");
+	Node->Text.FontSize = 16.0f;
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args).Widget;
+	TestEqual(TEXT("Icon remains a native text block"), Widget.Type, FString(TEXT("TextBlock")));
+	TestTrue(TEXT("Icon has no wrapper children"), Widget.Children.IsEmpty());
+	TestEqual(TEXT("Icon uses the selected font asset"), Widget.Text.FontFamily.Get(FString()), Snapshot.DefaultIconFontAssetPath);
+	TestTrue(TEXT("Icon carries its font-metric baseline correction"), Widget.Text.LineHeightBaselineShift.IsSet());
+	if (Widget.Text.LineHeightBaselineShift.IsSet())
+	{
+		TestTrue(TEXT("Correction is finite and nonzero for the measured face"),
+			FMath::IsFinite(Widget.Text.LineHeightBaselineShift.GetValue())
+			&& !FMath::IsNearlyZero(Widget.Text.LineHeightBaselineShift.GetValue()));
+		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+		Request.FontAssetPath = Widget.Text.FontFamily.Get(FString());
+		Request.TypefaceName = Widget.Text.TypefaceFontName.Get(FString());
+		Request.FontSize = Widget.TextStyle.FontSize;
+		float ExpectedShift = 0.0f;
+		TestTrue(TEXT("Selected face metrics are available"), TextMeasurementRuntimeProbe::TryResolveIconBaselineShift(Request, Node->Transform.Height.Value, ExpectedShift));
+		TestTrue(TEXT("Builder carries the correction measured for its actual face"),
+			FMath::IsNearlyEqual(Widget.Text.LineHeightBaselineShift.GetValue(), ExpectedShift));
+		const float OriginalHeight = Node->Transform.Height.Value;
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(24.0f));
+		const FUMGWidgetNode Taller = Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args).Widget;
+		TestTrue(TEXT("Baseline centers the measured font in the actual icon box"),
+			Taller.Text.LineHeightBaselineShift.IsSet()
+			&& FMath::IsNearlyEqual(Taller.Text.LineHeightBaselineShift.GetValue(),
+				ExpectedShift + (Node->Transform.Height.Value - OriginalHeight) / 2.0f));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(OriginalHeight));
+		Node->Text.FontSize = 32.0f;
+		const FUMGWidgetNode Larger = Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args).Widget;
+		TestTrue(TEXT("Icon normalization is independent of the intermediate em size"),
+			FMath::IsNearlyEqual(Larger.TextStyle.FontSize, Widget.TextStyle.FontSize));
+		Node->Text.FontSize = 16.0f;
+		Node->Transform.SetWidthValue(FDesignSize::Fixed(24.0f));
+		Node->Transform.SetHeightValue(FDesignSize::Fixed(24.0f));
+		const FUMGWidgetNode Scaled = Design2UMGTextWidgetBuilder::CreateIconFontWidget(Node, Args).Widget;
+		TestTrue(TEXT("Uniform authored box scaling scales the selected icon face"),
+			FMath::IsNearlyEqual(Scaled.TextStyle.FontSize, Widget.TextStyle.FontSize * 1.5f));
+	}
 	return true;
 }
 
@@ -305,6 +360,38 @@ bool FTextWidgetBuilderMultilineMarkupTest::RunTest(const FString&)
 	TestEqual(TEXT("Each nonempty line has balanced tags; blank lines remain blank"),
 		Widget.Text.Text.Get(FString()),
 		FString(TEXT("<d2u_run_0>A&amp;B</>\r\n\r\n<d2u_run_0>&lt;C&gt;</>")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIntrinsicParagraphWidthTest,
+	"Design2UMG.TextWidgetBuilder.IntrinsicParagraphWidth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FIntrinsicParagraphWidthTest::RunTest(const FString&)
+{
+	const TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Text, 0.0f, 0.0f);
+	Node->Transform.SetWidthValue(FDesignSize::Fit(0.0f));
+	Node->Text.Content = TEXT("Intrinsic advance widths");
+	Node->Text.FontFamily = TEXT("Roboto");
+	Node->Text.FontSize = 14.0f;
+	const FUMGWidgetNode Widget = Design2UMGTextWidgetBuilder::CreateTextWidget(Node);
+	TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+	Request.Text = Node->Text.Content;
+	Request.FontAssetPath = Widget.Text.FontFamily.Get(FString());
+	Request.TypefaceName = Widget.Text.TypefaceFontName.Get(FString());
+	Request.FontSize = Widget.TextStyle.FontSize;
+	float Width = 0.0f;
+	if (!TestTrue(TEXT("Selected font supplies fractional paragraph advances"), TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(Request, Width))) return false;
+	const FVector2D Size = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
+	TestTrue(TEXT("Content layout rounds the paragraph, not each glyph"), FMath::IsNearlyEqual(static_cast<float>(Size.X), FMath::CeilToFloat(Width)));
+	Request.FontSize *= 2.0f;
+	float ScaledWidth = 0.0f;
+	TestTrue(TEXT("Fractional advance measurement scales with the selected face"), TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(Request, ScaledWidth) && FMath::IsNearlyEqual(ScaledWidth, Width * 2.0f, 0.001f));
+	Node->Transform.SetWidthValue(FDesignSize::Fit(17.25f));
+	Node->Transform.LayoutBoundsSize = FVector2D(17.25f, 20.0f);
+	TestEqual(TEXT("Computed source width remains exact when text height needs measurement"),
+		static_cast<float>(TextMeasurement::MeasureTextNodeSize(Node, 0.0f).X), 17.25f);
+	TestEqual(TEXT("Fit sizing does not enlarge a computed source width"),
+		static_cast<float>(SizeEstimator::EstimateNodeSize(Node).X), 17.25f);
 	return true;
 }
 
