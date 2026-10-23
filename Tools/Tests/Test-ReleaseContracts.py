@@ -127,7 +127,10 @@ class ReleaseContracts(unittest.TestCase):
                                 env=dict(os.environ, UBT_EXTRA_ARGS="-NoHotReloadFromIDE"),
                                 capture_output=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout.split(), ["-NoHotReloadFromIDE", "-WaitMutex"])
+        self.assertEqual(result.stdout.split(), [
+            "-NoHotReloadFromIDE", "-WaitMutex", "-UsePrecompiled",
+            "-NoEngineChanges", "-NoPCH", "-NoSharedPCH",
+        ])
 
     def test_ci_runs_font_rollback_tests(self):
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
