@@ -240,7 +240,7 @@ See [Docs/Architecture.md](Docs/Architecture.md) for the full pipeline, module b
   -> UMGGenerator
 ```
 
-Key principle: **Bounds is the source of truth** for layout projection. Layout dimensions remain separate from the PNG export bounds, which also contain source-defined outer shadows and unclipped content. Reference PNG dimensions never set either size. One-pixel dimensions are valid; exports above the GPU texture dimension are rendered in tiles, within the existing 64 × 1024 × 1024 pixel export budget.
+Key principle: **Bounds is the source of truth** for layout projection. Layout dimensions remain separate from the PNG export bounds, which also contain source-defined outer shadows and unclipped content. Reference PNG dimensions never set either size. One-pixel dimensions are valid; exports above the GPU texture dimension are rendered in tiles, within the independent 256 × 1024 × 1024 pixel screenshot export budget.
 
 ## Supported Widget Types
 
