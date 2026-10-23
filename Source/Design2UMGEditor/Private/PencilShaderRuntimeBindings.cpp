@@ -914,13 +914,14 @@ bool SaveSurfaceBlueprint(UWidgetBlueprint* Blueprint, const FTarget& Target, bo
     return true;
 }
 
-UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMaterial, FString& Error)
+UWidgetBlueprint* PrepareSurfaceBlueprint(const FTarget& Target, const TCHAR* OwnershipError,
+    const TCHAR* CreationError, bool& NewAsset, FString& Error)
 {
     const FString Identity = SurfaceIdentity(Target);
     const FString Name = TEXT("D2U_ShaderSurface_") + FMD5::HashAnsiString(*Identity);
     const FString PackageName = TEXT("/Game/Design2UMG/GeneratedShaderWidgets/") + Name;
     auto* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn);
-    const bool NewAsset = Blueprint == nullptr;
+    NewAsset = Blueprint == nullptr;
     if (Blueprint)
     {
         FDesign2UMGGenerationManifestSidecar Manifest;
@@ -928,7 +929,7 @@ UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMa
             !Design2UMGGenerationManifest::TryLoadSidecarForAsset(PackageName, Manifest, Error) ||
             Manifest.GeneratedAssetHash != Design2UMGGenerationManifest::ComputeSavedAssetHash(PackageName))
         {
-            Error = TEXT("Generated shader surface has user changes or no ownership record: ") + PackageName;
+            Error = FString(OwnershipError) + PackageName;
             return nullptr;
         }
         TArray<UEdGraph*> Graphs;
@@ -950,9 +951,19 @@ UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMa
     }
     if (!Blueprint)
     {
-        Error = TEXT("Shader surface blueprint creation failed: ") + PackageName;
+        Error = FString(CreationError) + PackageName;
         return nullptr;
     }
+    return Blueprint;
+}
+
+UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMaterial, FString& Error)
+{
+    bool NewAsset = false;
+    auto* Blueprint = PrepareSurfaceBlueprint(Target,
+        TEXT("Generated shader surface has user changes or no ownership record: "),
+        TEXT("Shader surface blueprint creation failed: "), NewAsset, Error);
+    if (!Blueprint) return nullptr;
     auto* Slot = Cast<UNamedSlot>(Blueprint->WidgetTree->RootWidget);
     if (!Slot)
     {
@@ -1077,7 +1088,7 @@ UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMa
     FKismetEditorUtilities::CompileBlueprint(Blueprint);
     if (Blueprint->Status != BS_UpToDate)
     {
-        Error = TEXT("Native shader surface blueprint has compilation errors or warnings: ") + PackageName;
+        Error = TEXT("Native shader surface blueprint has compilation errors or warnings: ") + Blueprint->GetOutermost()->GetName();
         return nullptr;
     }
     return SaveSurfaceBlueprint(Blueprint, Target, NewAsset, Error) ? Blueprint : nullptr;
@@ -1141,36 +1152,10 @@ bool HasNativeRole(const UUserWidget* Widget, FName Role)
 }
 UWidgetBlueprint* CreateBoundaryBlueprint(const FTarget& Target, bool& NewAsset, FString& Error)
 {
-    const FString Name = TEXT("D2U_ShaderSurface_") + FMD5::HashAnsiString(*SurfaceIdentity(Target));
-    const FString PackageName = TEXT("/Game/Design2UMG/GeneratedShaderWidgets/") + Name;
-    auto* Blueprint = LoadObject<UWidgetBlueprint>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn);
-    NewAsset = !Blueprint;
-    if (Blueprint)
-    {
-        FDesign2UMGGenerationManifestSidecar Manifest;
-        if (Blueprint->GetOutermost()->IsDirty()
-            || !Design2UMGGenerationManifest::TryLoadSidecarForAsset(PackageName, Manifest, Error)
-            || Manifest.GeneratedAssetHash != Design2UMGGenerationManifest::ComputeSavedAssetHash(PackageName))
-        {
-            Error = TEXT("Generated paint-boundary asset has local edits: ") + PackageName;
-            return nullptr;
-        }
-        TArray<UEdGraph*> Graphs;
-        Blueprint->GetAllGraphs(Graphs);
-        for (auto* Graph : Graphs) FBlueprintEditorUtils::RemoveGraph(Blueprint, Graph);
-        TArray<FName> Variables;
-        for (const auto& Variable : Blueprint->NewVariables) Variables.Add(Variable.VarName);
-        FBlueprintEditorUtils::BulkRemoveMemberVariables(Blueprint, Variables);
-    }
-    else
-        Blueprint = Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(
-            UUserWidget::StaticClass(), CreatePackage(*PackageName), *Name, BPTYPE_Normal,
-            UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass()));
-    if (!Blueprint)
-    {
-        Error = TEXT("Native paint-boundary blueprint could not be created: ") + PackageName;
-        return nullptr;
-    }
+    auto* Blueprint = PrepareSurfaceBlueprint(Target,
+        TEXT("Generated paint-boundary asset has local edits: "),
+        TEXT("Native paint-boundary blueprint could not be created: "), NewAsset, Error);
+    if (!Blueprint) return nullptr;
     Blueprint->WidgetTree = NewObject<UWidgetTree>(Blueprint, TEXT("WidgetTree"), RF_Transactional);
     return Blueprint;
 }
