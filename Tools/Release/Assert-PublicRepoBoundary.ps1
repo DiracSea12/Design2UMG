@@ -88,6 +88,9 @@ $commonForbiddenRootNames = @(
 )
 
 $packageForbiddenRootNames = @(
+    'Resources/PencilFontWorker',
+    'Tools/BuildPencilFontWorker.py',
+    'Tools/PencilFontWorker',
     'Fonts',
     'PenDesigns',
     'FigmaExports',
@@ -96,6 +99,7 @@ $packageForbiddenRootNames = @(
 )
 
 $exportForbiddenRootNames = @(
+    'Resources/PencilFontWorker',
     'Fonts',
     'PenDesigns',
     'FigmaExports',
@@ -120,6 +124,8 @@ $forbiddenRootReviewPatterns = @(
 
 # Local-only files that must never be tracked (case-insensitive regex on repo-relative paths).
 $sourceForbiddenTrackedRegexes = @(
+    '^Resources/PencilFontWorker/',
+    '^Saved/',
     '^\.cowork-temp/',
     '^\.claude/',
     '^\.codex/',
@@ -178,6 +184,7 @@ $publicSurfaceGlobs = @(
     'Tools/design2umg_auto_verify.py',
     'Tools/design2umg_auto_verify_suite.py',
     'Tools/*.json',
+    'Resources/FontToolText.json',
     'Tools/FigmaExporter/README.md',
     '.github/workflows/*.yml',
     '.github/workflows/*.yaml',
@@ -215,7 +222,7 @@ if ($Mode -in @('Package', 'ExportWorkspace')) {
         'KNOWN_LIMITATIONS.md', 'Design2UMG.uplugin',
         'Tools/FigmaExporter/manifest.json', 'Tools/FigmaExporter/code.js',
         'Tools/FigmaExporter/ui.html', 'Tools/FigmaExporter/README.md',
-        'Examples/SimpleCard.pen'
+        'Examples/SimpleCard.pen', 'Resources/PencilFontWorkerDownload.json', 'Resources/FontToolText.json'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $resolvedRoot $required) -PathType Leaf)) {
             $failures += "Required public file missing: $required"

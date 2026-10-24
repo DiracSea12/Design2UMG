@@ -34,6 +34,7 @@ namespace
 		const FString& JsonContents,
 		const FString& SourceFilePath,
 		const FDesign2UMGImportSettingsSnapshot& SettingsSnapshot,
+		bool bUsePreview,
 		FUMGWidgetData& OutData)
 	{
 		FDesignDocument Document;
@@ -58,7 +59,12 @@ namespace
 			return false;
 		}
 
-		const FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeConversion(Document, SettingsSnapshot);
+		FImportAnalysisInput Input;
+		Input.bResolveImages = false;
+		Input.SettingsSnapshot = &SettingsSnapshot;
+		const FImportAnalysisResult Analysis = bUsePreview
+			? DesignImportDialogs::AnalyzeForPreview(Document, Input)
+			: DesignImportPlanning::AnalyzeImport(Document, Input);
 		if (!Analysis.ErrorMessage.IsEmpty()) return false;
 		OutData = Analysis.Data;
 		return true;
@@ -118,24 +124,15 @@ namespace Design2UMGEditorImportOrchestrator
 
 		const FDesign2UMGImportSettingsSnapshot SettingsSnapshot =
 			Design2UMGEditorImportRequestSetup::CaptureSettingsSnapshot();
-		FUMGWidgetData Data;
-		if (bOk && !FPenMCPBridge::ConvertFromMCP(NodesContents, VarsContents, SettingsSnapshot, Data, Request.TargetNodeId))
+		FDesignDocument Document;
+		if (bOk && !FPenMCPBridge::ParseFromMCP(NodesContents, VarsContents, Document, Request.TargetNodeId))
 		{
 			bOk = false;
 		}
 
-		if (bOk)
-		{
-			for (int32 Index = 0; Index < Data.RootWidget.Children.Num(); ++Index)
-			{
-				const FUMGWidgetNode& Child = Data.RootWidget.Children[Index];
-				UE_LOG(LogDesign2UMG, Log, TEXT("  [%d] %s (%s)"), Index, *Child.Name, *Child.Type);
-			}
-		}
-
 		const FDesignImportExecutionResult ExecutionResult = bOk
 			? DesignImportPipeline::Execute(
-				Data,
+				Document,
 				Design2UMGEditorImportRequestSetup::MakePenImportRequest(
 					Request.OutputPath, Design2UMGEditorUnattendedExit::ShouldUsePreviewInCurrentMode(Request.bUsePreview), true, SettingsSnapshot))
 			: FDesignImportExecutionResult();
@@ -210,6 +207,7 @@ namespace Design2UMGEditorImportOrchestrator
 				JsonContents,
 				Request.JsonPath,
 				SettingsSnapshot,
+				Design2UMGEditorUnattendedExit::ShouldUsePreviewInCurrentMode(Request.bUsePreview),
 				Data))
 			{
 				bOk = false;

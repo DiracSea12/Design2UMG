@@ -111,6 +111,12 @@ Pick one. Never let UE discover two copies:
 - **Source**: install the C++ toolchain for your UE version and build the project's Editor target; see [CONTRIBUTING](CONTRIBUTING.md). GitHub's auto-generated "Source code" archives are not precompiled plugins.
 - Close the editor before replacing an installation.
 - **Fonts are not bundled.** Map licensed project fonts in the plugin settings and follow the diagnostic report for missing fonts rather than expecting pixel parity.
+- **Static TTF/OTF fonts can be previewed and imported directly, without installing the font tool.** Web-compressed fonts (WOFF2) and variable fonts (one file containing multiple weights) need the optional Win64 tool to convert them into font files UE can use. It extracts the weight the design needs from a variable font, for example 600.
+- The font tool is **not installed by default and never downloads automatically**. Check its option in the preview, then confirm again to download; cancelling does not install it. Without it, static TTF/OTF fonts still work; fonts that need conversion produce a message that they cannot be converted. **移除工具** (Remove Tool) removes the installed tool and keeps font resources already imported into UE.
+- The tool converts existing font files; it **does not find or download missing fonts**. The plugin package excludes the tool and its Python / FontTools / Brotli components. Download and disk-space details appear in the installation confirmation; `Resources/PencilFontWorkerDownload.json` describes the download.
+- Enter a storage directory in **安装位置** (Installation Location), or select it with **浏览…** (Browse). UE saves the choice in the current project's user config across panel/editor restarts. The default is `<plugin>/Saved/Tools`; the actual install is `<selected directory>/PencilFontWorker/1.0.0`, shown in the panel and confirmation. Remove the current tool before changing location; installation/conversion blocks changes. No old AppData lookup or migration occurs.
+- Removal validates the installation record and package file list, deletes only owned files and empty subdirectories, and preserves extra user files. Existing foreign installation directories are never overwritten. Missing/corrupt records, modified files, and reparse nodes inside the managed subtree prevent removal; approved junctions above the storage directory remain supported.
+- Edit font-tool UI, management errors and remedy-dialog text in `Resources/FontToolText.json` (flat string values). Reopen the panel or make the next request to reload it. Keep keys and named placeholders: `{Version}`, `{DownloadUrl}`, `{DownloadMiB}`, `{InstalledMiB}`, `{InstallDirectory}`, `{File}`. Nested values and literal-brace escaping are unsupported. Invalid resources/keys display their path/key, with no compiled Chinese fallback.
 
 Release ZIPs contain the license, documentation, Figma exporter and public examples, but not the contributor validation scripts; those require the source repository.
 
@@ -137,6 +143,8 @@ Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>
 ```
 
 > ⚠️ Never paste tokens into screenshots, shared logs or chat transcripts. Expanding one from an environment variable still puts it in the command record.
+
+Import targets ordinary design layers; web programs in Figma code layers cannot be imported directly as native UMG. You can try **Extract designs** first, then export or import the resulting ordinary design layers; see [Figma's help](https://help.figma.com/hc/en-us/articles/44193259600535-Code-layers-in-Figma-Design) for the steps.
 
 ### Figma local export JSON
 

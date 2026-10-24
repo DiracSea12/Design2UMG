@@ -41,11 +41,18 @@ This document tracks current limitations that are known and accepted for now.
 
 ## Figma-Specific Fallbacks
 
+- Web programs in Figma code layers cannot be imported directly as native UMG. You can try **Extract designs** first, then export or import the resulting ordinary design layers; see [Figma's help](https://help.figma.com/hc/en-us/articles/44193259600535-Code-layers-in-Figma-Design).
 - `TEXT_PATH` currently degrades to a plain `TextBlock`; text-on-path geometry is not reproduced.
 - `SLICE` and FigJam-only node types (`TABLE`, `TABLE_CELL`, `STICKY`, `SHAPE_WITH_TEXT`, `CONNECTOR`, `WASHI_TAPE`) are intentionally skipped from the runtime widget tree.
 
 ## Font Assets
 
+- Static TTF/OTF fonts can be previewed and imported directly without the optional Win64 tool. Web-compressed fonts (WOFF2) and variable fonts (one file containing multiple weights) need conversion into font files UE can use, with the design's required weight extracted from a variable font, for example 600.
+- The tool is not installed by default and never downloads automatically. Check its option in the preview, then confirm again to download; cancelling does not install it. Without it, static TTF/OTF fonts still work, while fonts that need conversion produce a message that they cannot be converted. Removing the tool keeps font resources already imported into UE.
+- The tool only converts existing font files; it does not find or download missing fonts. The plugin package contains its download manifest, not the tool binaries or Python / FontTools / Brotli.
+- Enter a storage directory in **安装位置** (Installation Location), or select it with **浏览…** (Browse). UE saves the choice in the current project's user config across panel/editor restarts. The default is `<plugin>/Saved/Tools`; the actual install is `<selected directory>/PencilFontWorker/1.0.0`, shown in the panel and confirmation. Remove the current tool before changing location; installation/conversion blocks changes. No old AppData lookup or migration occurs.
+- Removal validates the installation record and package file list, deletes only owned files and empty subdirectories, and preserves extra user files. Existing foreign installation directories are never overwritten. Missing/corrupt records, modified files, and reparse nodes inside the managed subtree prevent removal; approved junctions above the storage directory remain supported.
+- Edit font-tool UI, management errors and remedy-dialog text in `Resources/FontToolText.json` (flat string values). Reopen the panel or make the next request to reload it. Keep keys and named placeholders: `{Version}`, `{DownloadUrl}`, `{DownloadMiB}`, `{InstalledMiB}`, `{InstallDirectory}`, `{File}`. Nested values and literal-brace escaping are unsupported. Invalid resources/keys display their path/key, with no compiled Chinese fallback.
 - Design metadata does not contain font binaries.
 - Plugin can map/import known fonts, but cannot guarantee full automatic font reconstruction for all projects.
 - Automatic known-web-font download is best treated as an experimental convenience path, not a guaranteed offline-safe production workflow.

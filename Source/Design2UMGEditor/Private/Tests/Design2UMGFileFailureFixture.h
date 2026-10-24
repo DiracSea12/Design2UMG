@@ -90,6 +90,7 @@ namespace Design2UMGEditorTests
 		TFunction<bool(const FString&)> RejectWrite;
 		TFunction<bool(const FString&, const FString&)> RejectMove;
 		TFunction<void(const FString&)> OnRead;
+		TFunction<bool(const FString&)> RejectRead;
 
 		FScopedFileFailures()
 		{
@@ -130,6 +131,7 @@ namespace Design2UMGEditorTests
 		IFileHandle* OpenRead(const TCHAR* Filename, bool bAllowWrite = false) override
 		{
 			if (FPlatformTLS::GetCurrentThreadId() == TestThread && OnRead) OnRead(FPaths::ConvertRelativePathToFull(Filename));
+			if (FPlatformTLS::GetCurrentThreadId() == TestThread && RejectRead && RejectRead(FPaths::ConvertRelativePathToFull(Filename))) return nullptr;
 			return GetLowerLevel()->OpenRead(Filename, bAllowWrite);
 		}
 		IFileHandle* OpenWrite(const TCHAR* Filename, bool bAppend = false, bool bAllowRead = false) override

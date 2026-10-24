@@ -33,8 +33,12 @@ namespace DesignLocalFontImport
 		/** Source metadata only; matching variable/compressed faces are converted on demand.
 		 * Lazy for one import; discard between imports so newly added fonts are seen. */
 		const TArray<FFace>& GetFaces();
+		const TArray<FString>& GetUninspectedCompressedSources() const { return UninspectedCompressedSources; }
+		const FString& GetError() const { return DiscoveryError; }
 	private:
 		TArray<FFace> Faces;
+		TArray<FString> UninspectedCompressedSources;
+		FString DiscoveryError;
 		bool bLoaded = false;
 	};
 	/** Extends this import's resolved font array and reuses its face digests, then prepares only Targets. No source imports or downloads. */

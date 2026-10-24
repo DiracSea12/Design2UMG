@@ -7,9 +7,14 @@
 
 struct FDesignFrameInfo;
 struct FUMGWidgetData;
+struct FDesignDocument;
+struct FImportAnalysisInput;
+struct FImportAnalysisResult;
 
 namespace DesignImportDialogs
 {
+	/** Interactive preparation retains the source on failure; the business analyzer never installs tools. */
+	FImportAnalysisResult AnalyzeForPreview(FDesignDocument& Document, const FImportAnalysisInput& Input);
 	FString FormatImportResult(const FUMGWidgetData& Data, const FString& ErrorMessage, bool bSucceeded,
 		const FString& SourceFilePath = FString());
 	FString FormatImageIssues(const FDesignImageImportResult& Result);

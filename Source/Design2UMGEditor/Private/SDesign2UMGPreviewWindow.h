@@ -10,6 +10,7 @@
 #include "Widgets/Input/SEditableTextBox.h"
 
 class SBox;
+class SPencilFontTool;
 struct FArtifactGenerationResult;
 
 DECLARE_DELEGATE_RetVal_OneParam(FArtifactGenerationResult, FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
@@ -37,6 +38,7 @@ public:
 
 	void Construct(const FArguments& InArgs);
 	virtual ~SDesign2UMGPreviewWindow();
+	void CancelFontToolInstall();
 
 private:
 	friend struct FDesign2UMGPreviewWindowTestAccess;
@@ -45,6 +47,7 @@ private:
 	TSharedPtr<SEditableTextBox> OutputPathBox;
 	TSharedPtr<SBox> UMGPreviewContainer;
 	TSharedPtr<SBox> PreviewDesignFrame;
+	TSharedPtr<SPencilFontTool> FontTool;
 	bool bFitPreviewToWindow = true;
 	TSharedPtr<IDesignPreviewRefreshAnalyzer> PreviewRefreshAnalyzer;
 	TSharedPtr<IDesignPreviewMaterializationService> PreviewMaterializationService;

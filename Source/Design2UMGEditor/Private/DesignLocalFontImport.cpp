@@ -2,6 +2,7 @@
 #include "DesignLocalFontImport.h"
 #include "DesignFontImportPolicy.h"
 #include "PencilFontProcess.h"
+#include "PencilFontTool.h"
 #include "Design2UMGFontAccess.h"
 #include "ExternalServices/PencilExtensionResources.h"
 #include "Design2UMGConverter.h"
@@ -799,6 +800,13 @@ const TArray<FFace>& FSourceIndex::GetFaces()
 			const FString Extension = FPaths::GetExtension(File).ToLower();
 			if (Extension != TEXT("ttf") && Extension != TEXT("otf") && Extension != TEXT("ttc") && Extension != TEXT("woff2")) continue;
 			Seen.Add(File);
+			// Keep native sources usable; unresolved compressed sources matter only after matching a request.
+			if (Extension == TEXT("woff2") && !PencilFontTool::IsInstalled())
+			{
+				UninspectedCompressedSources.Add(File);
+				DiscoveryError = TEXT("字体转换工具未安装，尚有 WOFF2 来源未能检查。");
+				continue;
+			}
 			const FFileStatData Stat = IFileManager::Get().GetStatData(*File);
 			const FCachedFace* Cached = MetadataCache.Find(File);
 			if (Stat.bIsValid && Cached && Cached->Stat.ModificationTime == Stat.ModificationTime
@@ -810,12 +818,18 @@ const TArray<FFace>& FSourceIndex::GetFaces()
 			MetadataCache.Remove(File);
 			FFace Face;
 			FString Error;
+			bool bToolUnavailable = false;
 			if (Extension == TEXT("woff2")
-				? PencilFontProcess::InspectFont(File, Face, Error)
+				? PencilFontProcess::InspectFont(File, Face, Error, &bToolUnavailable)
 				: ReadLocalFontFaceMetadata(File, Face, Error, true))
 			{
 				if (Stat.bIsValid) MetadataCache.Add(File, {Stat, Face});
 				Faces.Add(MoveTemp(Face));
+			}
+			else if (bToolUnavailable)
+			{
+				UninspectedCompressedSources.Add(File);
+				DiscoveryError = Error;
 			}
 			else UE_LOG(LogDesign2UMG, Verbose, TEXT("%s"), *Error);
 		}
@@ -938,7 +952,8 @@ bool Prepare(const FDesignDocument& Document, const FDesign2UMGConversionSetting
 			DeclaredFaces.Add(MoveTemp(Face));
 		}
 		const bool bDeclared = !DeclaredFaces.IsEmpty();
-		const TArray<FFace>& Faces = bDeclared ? DeclaredFaces : (SourceIndex ? *SourceIndex : LocalIndex).GetFaces();
+		FSourceIndex& ActiveIndex = SourceIndex ? *SourceIndex : LocalIndex;
+		const TArray<FFace>& Faces = bDeclared ? DeclaredFaces : ActiveIndex.GetFaces();
 		if (!bDeclared && FFontResolver::FindFontAssetPath(Request.Family, Request.PostScript, FontMappings).IsEmpty()
 			&& FFontResolver::HasAmbiguousProjectFontAssets(Request.Family))
 		{
@@ -1006,6 +1021,13 @@ bool Prepare(const FDesignDocument& Document, const FDesign2UMGConversionSetting
 			const FCompositeFont* Composite = Existing ? Existing->GetCompositeFont() : nullptr;
 			if (Composite && ContainsFontStyle(*Composite, ResolveSourceWeight(*Match, Request.Weight), Request.bItalic))
 				continue;
+		}
+		if (!bDeclared && (!Match || Match->bVariable) && !ActiveIndex.GetUninspectedCompressedSources().IsEmpty())
+		{
+			OutError = FString::Printf(TEXT("字体 '%s'（weight=%d, italic=%s, PostScript='%s'）没有明确匹配的原生静态来源；需要字体转换工具检查尚未解析的 WOFF2 来源。%s\n来源：%s"),
+				*Request.Family, Request.Weight, Request.bItalic ? TEXT("true") : TEXT("false"), *Request.PostScript,
+				*ActiveIndex.GetError(), *FString::Join(ActiveIndex.GetUninspectedCompressedSources(), TEXT("\n")));
+			return false;
 		}
 		const bool bHasLocalSource = Match != nullptr;
 		FString SourceDescription = Match ? Match->Path : FString();

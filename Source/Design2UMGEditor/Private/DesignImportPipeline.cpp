@@ -366,7 +366,9 @@ namespace DesignImportPipeline
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = Request.bResolveImages;
 			AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
-			OwnedAnalysisResult = DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
+			OwnedAnalysisResult = Request.bUsePreview
+				? DesignImportDialogs::AnalyzeForPreview(Document, AnalysisInput)
+				: DesignImportPlanning::AnalyzeImport(Document, AnalysisInput);
 			AnalysisResult = &OwnedAnalysisResult;
 		}
 		FUMGWidgetData Data = PrecomputedAnalysis

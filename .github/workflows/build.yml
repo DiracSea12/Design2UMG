@@ -292,6 +292,9 @@ jobs:
               '"-TestExit=Automation Test Queue Empty"',
               ('"-AbsLog={0}"' -f $filterLogPath)
             ) -join ' ')
+            if ($testRun.Filter -eq "Design2UMG.Fonts.LocalSource") {
+              $argumentLine += ' -D2UInstallFontToolForTests'
+            }
             if ($testRun.Mode -eq "NullRHI") {
               $argumentLine += ' -NullRHI'
             }

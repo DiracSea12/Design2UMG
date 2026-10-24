@@ -1,11 +1,14 @@
 """Release checks use disposable fixtures, never an Unreal project."""
 from pathlib import Path
+import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +18,8 @@ REQUIRED = (
     "Tools/FigmaExporter/manifest.json", "Tools/FigmaExporter/code.js",
     "Tools/FigmaExporter/ui.html", "Tools/FigmaExporter/README.md",
     "Examples/SimpleCard.pen",
+    "Resources/PencilFontWorkerDownload.json",
+    "Resources/FontToolText.json",
 )
 
 
@@ -185,6 +190,120 @@ class ReleaseContracts(unittest.TestCase):
         (package / "Fonts/local.ttf").write_bytes(b"local font")
         self.assertNotEqual(self.check_package(package).returncode, 0)
 
+    def test_optional_font_tool_and_publisher_tools_excluded_from_plugin_package(self):
+        package = self.package()
+        for name in ("Resources/PencilFontWorker/Win64/PencilFontWorker.exe",
+                     "Tools/BuildPencilFontWorker.py", "Tools/PencilFontWorker/worker.py",
+                     "Saved/Tools/PencilFontWorker/1.0.0/PencilFontWorker.exe"):
+            with self.subTest(name=name):
+                path = package / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"separate optional dependency")
+                self.assertNotEqual(self.check_package(package).returncode, 0)
+                path.unlink()
+                for parent in path.parents:
+                    if parent == package or any(parent.iterdir()):
+                        break
+                    parent.rmdir()
+                self.assertEqual(self.check_package(package).returncode, 0)
+
+    def test_optional_font_tool_text_resource(self):
+        resource = ROOT / "Resources/FontToolText.json"
+        texts = json.loads(resource.read_text(encoding="utf-8"))
+        self.assertFalse(resource.read_bytes().startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(texts)
+        self.assertTrue(all(isinstance(value, str) and value for value in texts.values()))
+        allowed = {"Version", "DownloadUrl", "DownloadMiB", "InstalledMiB", "InstallDirectory", "File"}
+        for key, value in texts.items():
+            self.assertLessEqual(set(re.findall(r"\{([^{}]+)\}", value)), allowed, key)
+            self.assertNotRegex(re.sub(r"\{[^{}]+\}", "", value), r"[{}]", key)
+        for name in ("PencilFontTool.cpp", "SPencilFontTool.cpp"):
+            source = (ROOT / "Source/Design2UMGEditor/Private" / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r'[\u4e00-\u9fff]', name)
+            for key in re.findall(r'\.Get\(TEXT\("([^"]+)"\)', source):
+                self.assertIn(key, texts, name)
+        self.assertIn("/Resources/FontToolText.json", (ROOT / "Config/FilterPlugin.ini").read_text(encoding="utf-8"))
+
+    def optional_worker_fixture(self, directory):
+        names = (
+            "PencilFontWorker.exe", "_internal/python313.dll",
+            "notices/Python-LICENSE.txt", "notices/fonttools-0-LICENSE",
+            "notices/brotli-0-LICENSE", "notices/pyinstaller-0-COPYING.txt",
+            "notices/Microsoft-Visual-C-Runtime-2015-2022.docx",
+        )
+        hashes = {}
+        for name in names:
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(name.encode("utf-8"))
+            hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        identity = {"protocol": 1, "source_sha256": "original-build-identity",
+                    "binary_sha256": hashes["PencilFontWorker.exe"], "files_sha256": hashes}
+        (directory / "identity.json").write_text(json.dumps(identity), encoding="utf-8")
+        return directory
+
+    def package_optional_worker(self, worker, build):
+        return subprocess.run([os.sys.executable, str(ROOT / "Tools/BuildPencilFontWorker.py"),
+                               "--package-dir", str(worker), "--build-dir", str(build)],
+                              capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+
+    def test_optional_font_tool_archive_and_manifest_preserve_independent_identity(self):
+        worker = self.optional_worker_fixture(self.root / "worker")
+        original = {p.relative_to(worker).as_posix(): p.read_bytes()
+                    for p in worker.rglob("*") if p.is_file()}
+        results = []
+        for name in ("release", "repeat"):
+            result = self.package_optional_worker(worker, self.root / name)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            results.append(json.loads(result.stdout))
+        first, repeated = results
+        archive = Path(first["archive"])
+        manifest = json.loads(Path(first["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(set(manifest), {"version", "url", "archive_sha256", "archive_bytes", "installed_bytes"})
+        self.assertEqual(manifest["version"], "1.0.0")
+        self.assertEqual(archive.name, "PencilFontWorker-1.0.0-Win64.zip")
+        self.assertEqual(manifest["url"], "https://github.com/DiracSea12/Design2UMG/releases/download/"
+                         "pencil-font-worker-1.0.0/PencilFontWorker-1.0.0-Win64.zip")
+        self.assertEqual(manifest["archive_sha256"], hashlib.sha256(archive.read_bytes()).hexdigest())
+        self.assertEqual(manifest["archive_bytes"], archive.stat().st_size)
+        self.assertEqual(manifest["installed_bytes"], sum(map(len, original.values())))
+        self.assertEqual(archive.read_bytes(), Path(repeated["archive"]).read_bytes())
+        with zipfile.ZipFile(archive) as package:
+            self.assertEqual(set(package.namelist()), set(original))
+            self.assertEqual({name: package.read(name) for name in package.namelist()}, original)
+        self.assertEqual({p.relative_to(worker).as_posix(): p.read_bytes()
+                          for p in worker.rglob("*") if p.is_file()}, original)
+
+    def test_optional_font_tool_rejects_incomplete_or_corrupt_dependency(self):
+        for mode in ("missing", "changed", "extra", "missing_license", "binary_identity"):
+            with self.subTest(mode=mode):
+                worker = self.optional_worker_fixture(self.root / mode)
+                if mode == "missing":
+                    (worker / "_internal/python313.dll").unlink()
+                elif mode == "changed":
+                    (worker / "PencilFontWorker.exe").write_bytes(b"changed")
+                elif mode == "extra":
+                    (worker / "unexpected.dll").write_bytes(b"unregistered")
+                else:
+                    path = worker / "identity.json"
+                    identity = json.loads(path.read_text(encoding="utf-8"))
+                    if mode == "missing_license":
+                        name = "notices/brotli-0-LICENSE"
+                        (worker / name).unlink()
+                        del identity["files_sha256"][name]
+                    else:
+                        identity["binary_sha256"] = "wrong"
+                    path.write_text(json.dumps(identity), encoding="utf-8")
+                build = self.root / (mode + "-release")
+                result = self.package_optional_worker(worker, build)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(build.exists(), result.stdout + result.stderr)
+
+    def test_optional_font_tool_rejects_build_output_inside_plugin(self):
+        result = self.package_optional_worker(self.root / "unused", ROOT / "Resources/PencilFontWorker")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("outside the plugin", result.stderr)
+
     def test_package_filter_includes_public_files_not_fonts(self):
         rules = set((ROOT / 'Config/FilterPlugin.ini').read_text(encoding='utf-8').splitlines())
         for name in REQUIRED:
@@ -194,6 +313,9 @@ class ReleaseContracts(unittest.TestCase):
             self.assertIn(rule, rules)
         self.assertNotIn('/Fonts/...', rules)
         self.assertIn('-/Fonts/...', rules)
+        for name in ('Resources/PencilFontWorker/...', 'Tools/BuildPencilFontWorker.py', 'Tools/PencilFontWorker/...'):
+            self.assertNotIn('/' + name, rules)
+            self.assertIn('-/' + name, rules)
 
     def candidate_fixture(self):
         source = self.root / "candidate"
@@ -427,7 +549,9 @@ class ReleaseContracts(unittest.TestCase):
         repo = self.root / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
-        for name in ("README.md", "Design2UMG图片/a.png", "screenshot.py"):
+        for name in ("README.md", "Design2UMG图片/a.png", "screenshot.py",
+                     "Resources/PencilFontWorker/Win64/PencilFontWorker.exe",
+                     "Saved/Tools/PencilFontWorker/1.0.0/PencilFontWorker.exe"):
             path = repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("fixture\n", encoding="utf-8")
@@ -438,6 +562,8 @@ class ReleaseContracts(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, output)
         self.assertIn("Forbidden local-only file tracked in SourceWorkspace: screenshot.py", output)
         self.assertIn("Design2UMG图片/a.png", output)
+        self.assertIn("Resources/PencilFontWorker/Win64/PencilFontWorker.exe", output)
+        self.assertIn("Saved/Tools/PencilFontWorker/1.0.0/PencilFontWorker.exe", output)
 
     def test_additional_plugin_directory(self):
         source, installed, project = self.candidate_fixture()

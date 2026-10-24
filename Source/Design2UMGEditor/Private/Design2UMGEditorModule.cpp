@@ -12,6 +12,7 @@
 #include "Design2UMGNotifications.h"
 #include "Design2UMGSettings.h"
 #include "FontResolver.h"
+#include "PencilFontTool.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserModule.h"
@@ -135,6 +136,7 @@ void FDesign2UMGEditorModule::StartupModule()
 
 void FDesign2UMGEditorModule::ShutdownModule()
 {
+	PencilFontTool::Shutdown();
 	GetPostEngineInitDelegate().RemoveAll(this);
 	if (UImportSubsystem* ImportSubsystem = GEditor ? GEditor->GetEditorSubsystem<UImportSubsystem>() : nullptr)
 	{

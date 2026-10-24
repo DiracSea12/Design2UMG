@@ -111,6 +111,12 @@ Design2UMG.LocalFigmaImport <Project>/Plugins/Design2UMG/Examples/AiHud/design.j
 - **源码**：需要安装对应 UE 版本的 C++ 工具链，并构建项目的 Editor 目标，详见 [贡献指南](CONTRIBUTING.zh-CN.md)。GitHub 自动生成的 “Source code” 压缩包不是预编译插件。
 - 替换插件前先关闭编辑器。
 - 插件**不附带字体文件**。请在插件设置里映射你有授权的项目字体；缺少字体时按诊断报告处理，不要指望像素级一致。
+- **固定粗细的普通 TTF/OTF 字体可直接预览和导入，无需安装字体工具。** 网页压缩字体（WOFF2），或一个文件支持多种粗细的可变字体，需要可选的 Win64 工具转换成 UE 能使用的字体文件；工具会从可变字体中提取设计需要的粗细（字重，例如 600）。
+- 字体工具**默认未安装，不会自动下载**。在预览窗口中勾选启用后，再次确认才下载；取消不会安装。不安装不影响上述固定粗细字体，需要转换时会提示无法转换。安装后可“移除工具”，已经导入 UE 的字体资源会保留。
+- 工具只转换已有字体文件，**不会补找或下载缺失字体**。插件包不携带工具及其 Python / FontTools / Brotli 组件；下载与占用等详情见安装确认框，下载清单位于 `Resources/PencilFontWorkerDownload.json`。
+- “安装位置”可输入存放目录或点“浏览…”，选择会保存在当前项目的 UE 用户配置中，关闭窗口或重启编辑器仍有效。默认存放于 `<插件>/Saved/Tools`，实际安装在所选目录下的 `PencilFontWorker/1.0.0`；界面和确认框显示完整实际路径。已安装时先移除再换位置，安装或转换期间不能更换；不会寻找、迁移旧 AppData 安装。
+- 移除依据校验过的安装记录与包文件清单，仅删除工具拥有的文件及已空子目录，保留额外放入的用户文件。陌生安装目录不会被覆盖；记录缺失或损坏、文件已修改、受管子树中存在目录联接/符号链接时保留目录并说明原因，不猜测删除。
+- 字体工具界面、提示和管理错误文案集中在 `Resources/FontToolText.json`，可直接修改平面字符串值；关闭重开面板或下一次请求生效。保留键名及命名占位符：`{Version}`、`{DownloadUrl}`、`{DownloadMiB}`、`{InstalledMiB}`、`{InstallDirectory}`、`{File}`。不支持嵌套结构或花括号转义；缺失/错误会显示资源路径及键，不使用内置中文回退。
 
 Release ZIP 包含许可证、文档、Figma 导出器和公开示例，但不包含贡献者验证脚本，后者需要源码仓库。
 
@@ -137,6 +143,8 @@ Design2UMG.FigmaImport <file_url_or_key> <FigmaAccessToken>
 ```
 
 > ⚠️ 不要把 Token 贴进截图、共享日志或聊天记录。从环境变量展开后，它同样会出现在命令记录里。
+
+导入面向普通设计图层；Figma 代码图层中的网页程序不能直接导入为原生 UMG。可以尝试先用 **Extract designs** 提取普通设计图层，再导出或导入这些图层，操作见 [Figma 官方帮助](https://help.figma.com/hc/en-us/articles/44193259600535-Code-layers-in-Figma-Design)。
 
 ### Figma 本地导出 JSON
 

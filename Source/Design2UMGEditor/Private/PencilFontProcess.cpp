@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 #include "PencilFontProcess.h"
+#include "PencilFontTool.h"
 #include "DesignLocalFontImport.h"
 #include "DesignFontImportPolicy.h"
 #include "Design2UMGLog.h"
@@ -7,27 +8,29 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
-#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#if PLATFORM_WINDOWS
+#include "Windows/WindowsHWrapper.h"
+#endif
 
 namespace
 {
     bool RunPencilFontWorker(const TSharedRef<FJsonObject>& Request, const FString& Directory,
-                            TSharedPtr<FJsonObject>& Response, FString& OutError)
+                            TSharedPtr<FJsonObject>& Response, FString& OutError, bool* bToolUnavailable = nullptr)
     {
-        const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-        if (!Plugin)
+        FString Worker;
+        if (bToolUnavailable) *bToolUnavailable = false;
+        if (!PencilFontTool::AcquireWorker(Worker, OutError))
         {
-            OutError = TEXT("Design2UMG plugin directory was not found for font conversion.");
+            if (bToolUnavailable) *bToolUnavailable = true;
             return false;
         }
-        const FString Worker = FPaths::ConvertRelativePathToFull(
-            Plugin->GetBaseDir() / TEXT("Resources/PencilFontWorker/Win64/PencilFontWorker.exe"));
+        ON_SCOPE_EXIT { PencilFontTool::ReleaseWorker(); };
         const FString RequestPath = Directory / TEXT("request.json");
         const FString ResponsePath = Directory / TEXT("response.json");
         FString RequestText;
@@ -40,11 +43,33 @@ namespace
         }
         const FString Arguments = FString::Printf(TEXT("--request \"%s\" --response \"%s\""),
                                                   *RequestPath, *ResponsePath);
-        FProcHandle Process = FPlatformProcess::CreateProc(*Worker, *Arguments, false, true, true, nullptr, 0,
-                                                          *FPaths::GetPath(Worker), nullptr);
+        FProcHandle Process;
+#if PLATFORM_WINDOWS
+        FString Executable = FPaths::ConvertRelativePathToFull(Worker);
+        FPaths::MakePlatformFilename(Executable);
+        Executable = Executable.StartsWith(TEXT("\\\\"))
+            ? TEXT("\\\\?\\UNC\\") + Executable.Mid(2) : TEXT("\\\\?\\") + Executable;
+        FString CommandLine = FString::Printf(TEXT("\"%s\" %s"), *Executable, *Arguments);
+        STARTUPINFOW StartupInfo = {};
+        StartupInfo.cb = sizeof(StartupInfo);
+        StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
+        StartupInfo.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION ProcessInfo = {};
+        // An explicit module path avoids the command-line module limit; absolute requests need no worker directory.
+        if (CreateProcessW(*Executable, CommandLine.GetCharArray().GetData(), nullptr, nullptr, false,
+                           CREATE_NEW_PROCESS_GROUP | NORMAL_PRIORITY_CLASS, nullptr, nullptr, &StartupInfo, &ProcessInfo))
+        {
+            CloseHandle(ProcessInfo.hThread);
+            Process = FProcHandle(ProcessInfo.hProcess);
+        }
+#else
+        Process = FPlatformProcess::CreateProc(*Worker, *Arguments, false, true, true, nullptr, 0,
+                                               *FPaths::GetPath(Worker), nullptr);
+#endif
         if (!Process.IsValid())
         {
-            OutError = TEXT("Could not start the bundled font converter: ") + Worker;
+            if (bToolUnavailable) *bToolUnavailable = true;
+            OutError = TEXT("无法启动已安装的字体转换工具：") + Worker;
             return false;
         }
         ON_SCOPE_EXIT { FPlatformProcess::CloseProc(Process); };
@@ -119,8 +144,10 @@ bool PencilFontProcess::ConvertToStaticFont(const FString& InputPath, const FStr
     return true;
 }
 
-bool PencilFontProcess::InspectFont(const FString& InputPath, DesignLocalFontImport::FFace& OutFace, FString& OutError)
+bool PencilFontProcess::InspectFont(const FString& InputPath, DesignLocalFontImport::FFace& OutFace, FString& OutError,
+                                   bool* bToolUnavailable)
 {
+    if (bToolUnavailable) *bToolUnavailable = false;
     const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir()
         / TEXT("Design2UMG/FontImport") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
     if (!IFileManager::Get().MakeDirectory(*Directory, true))
@@ -137,7 +164,7 @@ bool PencilFontProcess::InspectFont(const FString& InputPath, DesignLocalFontImp
     Request->SetStringField(TEXT("action"), TEXT("inspect"));
     Request->SetStringField(TEXT("input_path"), FPaths::ConvertRelativePathToFull(InputPath));
     TSharedPtr<FJsonObject> Response;
-    if (!RunPencilFontWorker(Request, Directory, Response, OutError)) return false;
+    if (!RunPencilFontWorker(Request, Directory, Response, OutError, bToolUnavailable)) return false;
     OutFace = DesignLocalFontImport::FFace();
     OutFace.Path = InputPath;
     OutFace.Family = Response->GetStringField(TEXT("family"));

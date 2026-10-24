@@ -8,6 +8,7 @@
 #include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
 #include "Design2UMGNotifications.h"
+#include "SPencilFontTool.h"
 
 #include "TimerManager.h"
 #include "Engine/World.h"
@@ -133,6 +134,11 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 			.Orientation(Orient_Horizontal)
 			+ SSplitter::Slot().Value(0.68f)[ BuildUMGPreviewPanel() ]
 			+ SSplitter::Slot().Value(0.32f)[ BuildJsonEditorPanel() ]
+		]
+
+		+ SVerticalBox::Slot().AutoHeight().Padding(8, 0)
+		[
+			SAssignNew(FontTool, SPencilFontTool)
 		]
 
 		+ SVerticalBox::Slot()
@@ -409,12 +415,18 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 
 SDesign2UMGPreviewWindow::~SDesign2UMGPreviewWindow()
 {
+	CancelFontToolInstall();
 	// Clear debounce timer.
 	if (GEditor)
 	{
 		GEditor->GetTimerManager()->ClearTimer(PreviewRefreshTimerHandle);
 	}
 	CleanupPreviewWidget();
+}
+
+void SDesign2UMGPreviewWindow::CancelFontToolInstall()
+{
+	if (FontTool) FontTool->CancelInstall();
 }
 
 TOptional<FDesignPreviewMaterializationSettingsSnapshot>
@@ -537,6 +549,7 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 
 FReply SDesign2UMGPreviewWindow::OnCancelClicked()
 {
+	CancelFontToolInstall();
 	OnCancelled.ExecuteIfBound();
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());

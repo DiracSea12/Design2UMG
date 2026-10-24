@@ -1,4 +1,4 @@
-"""Publisher-only, pinned Win64 font-worker build. End users run the bundled exe."""
+"""Build or package the optional Win64 font worker outside the plugin."""
 
 import argparse
 import hashlib
@@ -9,6 +9,13 @@ import shutil
 import subprocess
 import sys
 import venv
+import zipfile
+
+
+VERSION = "1.0.0"
+RELEASE_TAG = f"pencil-font-worker-{VERSION}"
+ASSET_NAME = f"PencilFontWorker-{VERSION}-Win64.zip"
+DOWNLOAD_URL = f"https://github.com/DiracSea12/Design2UMG/releases/download/{RELEASE_TAG}/{ASSET_NAME}"
 
 
 def digest(path):
@@ -66,18 +73,59 @@ def build_identity(plugin, output, sources, packages):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build-dir", required=True, type=Path)
-    args = parser.parse_args()
+def verify_worker(output):
+    identity = json.loads((output / "identity.json").read_text(encoding="utf-8"))
+    files = {p.relative_to(output).as_posix(): p for p in output.rglob("*") if p.is_file()}
+    expected = identity["files_sha256"]
+    if set(files) != set(expected) | {"identity.json"}:
+        raise ValueError("Worker file set differs from identity.json.")
+    required = {
+        "PencilFontWorker.exe", "_internal/python313.dll",
+        "notices/Python-LICENSE.txt", "notices/fonttools-0-LICENSE",
+        "notices/brotli-0-LICENSE", "notices/pyinstaller-0-COPYING.txt",
+        "notices/Microsoft-Visual-C-Runtime-2015-2022.docx",
+    }
+    if not required.issubset(expected):
+        raise ValueError("Worker executable, runtime or license notices are missing.")
+    for name, checksum in expected.items():
+        if digest(files[name]) != checksum:
+            raise ValueError(f"Worker SHA-256 mismatch: {name}")
+    if identity["binary_sha256"] != expected["PencilFontWorker.exe"]:
+        raise ValueError("Worker binary identity disagrees with file identity.")
+    return files
+
+
+def package_worker(output, build, manifest_path):
+    files = verify_worker(output)
+    archive = build / ASSET_NAME
+    build.mkdir(parents=True, exist_ok=True)
+    # Fixed order, timestamps and permissions make repackaging the same bytes repeatable.
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as package:
+        for name, path in sorted(files.items()):
+            entry = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.create_system = 3
+            entry.external_attr = 0o100644 << 16
+            package.writestr(entry, path.read_bytes(), compresslevel=9)
+    with zipfile.ZipFile(archive) as package:
+        for name, path in files.items():
+            if hashlib.sha256(package.read(name)).hexdigest() != digest(path):
+                raise ValueError(f"Archive SHA-256 mismatch: {name}")
+    manifest = {
+        "version": VERSION,
+        "url": DOWNLOAD_URL,
+        "archive_sha256": digest(archive),
+        "archive_bytes": archive.stat().st_size,
+        "installed_bytes": sum(p.stat().st_size for p in files.values()),
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return {"archive": str(archive), "manifest": str(manifest_path), **manifest}
+
+
+def build_worker(plugin, build):
     if sys.version_info[:3] != (3, 13, 7) or sys.platform != "win32":
         raise RuntimeError("Build with the pinned CPython 3.13.7 Windows x64 distribution.")
-    if not args.build_dir.is_absolute():
-        raise ValueError("Use an absolute, external build directory.")
-    plugin = Path(__file__).resolve().parents[1]
-    build = args.build_dir.resolve()
-    if build.is_relative_to(plugin):
-        raise ValueError("Keep packaging intermediates outside the plugin.")
     env = build / "env"
     if not (env / "Scripts/python.exe").exists():
         venv.EnvBuilder(with_pip=True).create(env)
@@ -88,13 +136,7 @@ def main():
                     "--index-url", "https://pypi.org/simple", "--only-binary=:all:",
                     "--require-hashes", "-r", str(sources[2])], check=True)
     freeze_worker(build, python, sources)
-    output = plugin / "Resources/PencilFontWorker/Win64"
-    if (output.resolve().parent != (plugin / "Resources/PencilFontWorker").resolve()
-            or not output.resolve().is_relative_to(plugin)):
-        raise ValueError("Worker output left its dedicated resource directory.")
-    if output.exists():
-        shutil.rmtree(output)
-    shutil.copytree(build / "dist/PencilFontWorker", output)
+    output = build / "dist/PencilFontWorker"
     notices = output / "notices"
     notices.mkdir()
     shutil.copyfile(Path(sys.base_prefix) / "LICENSE.txt", notices / "Python-LICENSE.txt")
@@ -116,8 +158,24 @@ print(json.dumps(result))
             shutil.copyfile(filename, notices / f"{package['name']}-{index}-{Path(filename).name}")
     identity = build_identity(plugin, output, sources, packages)
     (output / "identity.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
-    size = sum(p.stat().st_size for p in output.rglob("*") if p.is_file())
-    print(json.dumps({"output": str(output), "bytes": size, "binary_sha256": identity["binary_sha256"]}))
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--build-dir", required=True, type=Path)
+    parser.add_argument("--package-dir", type=Path,
+                        help="Package an existing identity-verified worker without rebuilding Python.")
+    parser.add_argument("--manifest", type=Path,
+                        help="Download manifest destination; defaults to the external build directory.")
+    args = parser.parse_args()
+    plugin = Path(__file__).resolve().parents[1]
+    if not args.build_dir.is_absolute() or args.build_dir.resolve().is_relative_to(plugin):
+        raise ValueError("Use an absolute build directory outside the plugin.")
+    build = args.build_dir.resolve()
+    output = args.package_dir.resolve() if args.package_dir else build_worker(plugin, build)
+    manifest = args.manifest or build / "PencilFontWorkerDownload.json"
+    print(json.dumps(package_worker(output, build, manifest)))
 
 
 if __name__ == "__main__":

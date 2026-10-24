@@ -11,6 +11,7 @@
 #include "Components/RichTextBlock.h"
 #include "Engine/DataTable.h"
 #include "DesignLocalFontImport.h"
+#include "PencilFontTool.h"
 #include "Interfaces/IPluginManager.h"
 #include "DesignImportPipeline.h"
 #include "DesignSchema.h"
@@ -21,6 +22,9 @@
 #include "FontResolver.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Misc/AutomationTest.h"
 #include "Tests/Design2UMGFileFailureFixture.h"
 #include "Misc/Paths.h"
@@ -202,6 +206,58 @@ bool FDesignLocalFontIndexLifetimeTest::RunTest(const FString&)
 	DesignLocalFontImport::FSourceIndex DeletedImport;
 	TestFalse(TEXT("Deleted fonts disappear next import"), DeletedImport.GetFaces().ContainsByPredicate(
 		[&](const DesignLocalFontImport::FFace& Face) { return FPaths::IsSamePath(Face.Path, AddedPath); }));
+
+	// A missing optional worker must not let an unrelated WOFF2 hide a usable TTF.
+	const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+	if (!TestTrue(TEXT("Find compressed font fixture"), Plugin.IsValid())) return false;
+	PencilFontTool::FDownload Download;
+	FString Error;
+	if (!TestTrue(TEXT("Read optional tool contract"), PencilFontTool::ReadDownload(Download, Error))) return false;
+	const FString Receipt = Download.InstallDirectory() / TEXT("installed.json");
+	Files.OnRead = nullptr;
+	Files.RejectRead = [Receipt](const FString& Path) { return FPaths::IsSamePath(Path, Receipt); };
+	TestFalse(TEXT("Test boundary presents the tool as uninstalled without modifying it"), PencilFontTool::IsInstalled());
+	const FString Compressed = Directory / (TEXT("!UnrelatedCompressed_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".woff2"));
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Compressed); FFontResolver::ClearCache(); };
+	if (!TestEqual(TEXT("Copy native source beside compressed source"), IFileManager::Get().Copy(*AddedPath,
+		*(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"))), COPY_OK)
+		|| !TestEqual(TEXT("Copy actual compressed source"), IFileManager::Get().Copy(*Compressed,
+			*(Plugin->GetBaseDir() / TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/DeclaredFont.woff2"))), COPY_OK)) return false;
+	DesignLocalFontImport::FSourceIndex MixedSources;
+	TestTrue(TEXT("Unrelated compressed source does not stop native discovery"), MixedSources.GetFaces().ContainsByPredicate(
+		[&](const DesignLocalFontImport::FFace& Face) { return FPaths::IsSamePath(Face.Path, AddedPath); }));
+	TestTrue(TEXT("Uninspected compressed source is retained"), MixedSources.GetUninspectedCompressedSources().ContainsByPredicate(
+		[&](const FString& Path) { return FPaths::IsSamePath(Path, Compressed); }));
+	DesignLocalFontImport::FFace Native, Seed;
+	if (!TestTrue(TEXT("Read native source identity"), DesignLocalFontImport::ReadFace(AddedPath, Native, Error))
+		|| !TestTrue(TEXT("Read a different initial weight"), DesignLocalFontImport::ReadFace(Replacement, Seed, Error))) return false;
+	const FString Package = TEXT("/Game/Design2UMG/Fonts/IndexLifetime_") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT("/NativeFont");
+	ON_SCOPE_EXIT { DeleteFontFixture(*this, Package); FFontResolver::ClearCache(); };
+	if (!TestTrue(TEXT("Seed a fixture that still needs the native regular source"), DesignLocalFontImport::ImportFace(Seed, Package, Error))) return false;
+	const FString Asset = Package + TEXT(".NativeFont");
+	FFontResolver::RegisterFontAssetPath(Native.Family, Asset);
+	FDesignDocument Document;
+	auto Text = MakeShared<FDesignNode>();
+	Text->Text.Content = TEXT("A");
+	Text->Text.FontFamily = Native.Family;
+	Text->Text.FontWeight = FString::FromInt(Native.Weight);
+	Text->Text.FontStyle = TEXT("normal");
+	Document.Children.Add(Text);
+	TArray<FString> Warnings;
+	Error.Reset();
+	if (!TestTrue(TEXT("Native static request succeeds without the optional tool"),
+		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::Defaults(), Warnings, Error, &MixedSources)))
+	{ AddError(Error); return false; }
+	TestFalse(TEXT("Native preparation supplies the exact requested style"),
+		FFontResolver::FindExactTypefaceForAssetPath(Asset, Text->Text.FontWeight).IsEmpty());
+	FDesignFont& Required = Document.Fonts.AddDefaulted_GetRef();
+	Required.Name = Native.Family;
+	Required.Url = Compressed;
+	Error.Reset();
+	TestFalse(TEXT("An explicitly requested compressed source still requires the tool"),
+		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::Defaults(), Warnings, Error, &MixedSources));
+	TestTrue(TEXT("The real compressed request preserves its source and explains the missing tool"),
+		Error.Contains(Compressed) && Error.Contains(TEXT("字体转换工具未安装")));
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesignLocalFontIdentityTest,
@@ -735,51 +791,137 @@ bool FConfiguredGeneratedFontProtectionTest::RunTest(const FString&)
 	return true;
 }
 
+namespace
+{
+	class FPrepareDeclaredWoff2Test final : public IAutomationLatentCommand
+	{
+		FAutomationTestBase& Test;
+		PencilFontTool::FDownload Download;
+		TFunction<bool()> VerifyImport;
+		TSharedPtr<PencilFontTool::FInstall, ESPMode::ThreadSafe> Operation;
+		FHttpRequestPtr CancelledRequest;
+		double Deadline = 0;
+		bool bTimedOut = false;
+
+	public:
+		FPrepareDeclaredWoff2Test(FAutomationTestBase& InTest, const PencilFontTool::FDownload& InDownload, TFunction<bool()> InVerifyImport)
+			: Test(InTest), Download(InDownload), VerifyImport(MoveTemp(InVerifyImport)) {}
+
+		virtual bool Update() override
+		{
+			if (!Operation)
+			{
+				if (PencilFontTool::IsInstalled())
+				{
+					if (!VerifyImport()) Test.AddError(TEXT("DeclaredWoff2 positive test failed using the existing installation."));
+					return true;
+				}
+				if (PencilFontTool::HasInstallation() || PencilFontTool::IsBusy())
+				{
+					Test.AddError(TEXT("DeclaredWoff2 setup refused: preserve an existing installation or active tool operation."));
+					return true;
+				}
+				Operation = PencilFontTool::Install(Download);
+				if (!Operation) { Test.AddError(TEXT("DeclaredWoff2 dependency Install was refused.")); return true; }
+				Deadline = FPlatformTime::Seconds() + 330;
+				return false;
+			}
+			if (!Operation->Poll() || (CancelledRequest && CancelledRequest->GetStatus() == EHttpRequestStatus::Processing))
+			{
+				if (!bTimedOut && FPlatformTime::Seconds() > Deadline)
+				{
+					Test.AddError(TEXT("DeclaredWoff2 dependency setup timed out; cancelling and waiting for cleanup. ") + Operation->Error);
+					CancelledRequest = Operation->Request;
+					Operation->Cancel();
+					bTimedOut = true;
+				}
+				return false;
+			}
+			if (!Operation->Error.IsEmpty())
+			{
+				Test.AddError(TEXT("DeclaredWoff2 dependency setup failed: ") + Operation->Error);
+				return true;
+			}
+			// Only this successful Install grants ownership of the directory to this test.
+			ON_SCOPE_EXIT
+			{
+				FString Error;
+				Test.TestTrue(TEXT("Remove only the installation created for DeclaredWoff2"), PencilFontTool::Remove(Error));
+				if (!Error.IsEmpty()) Test.AddError(TEXT("DeclaredWoff2 dependency cleanup: ") + Error);
+				Test.TestFalse(TEXT("Test-created font tool directory is removed"), PencilFontTool::HasInstallation());
+			};
+			if (bTimedOut) return true;
+			if (!Test.TestTrue(TEXT("DeclaredWoff2 dependency installation is verified"), PencilFontTool::IsInstalled())) return true;
+			if (!VerifyImport()) Test.AddError(TEXT("DeclaredWoff2 positive test failed after dependency preparation."));
+			return true;
+		}
+	};
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeclaredWoff2FontImportTest,
 	"Design2UMG.Fonts.LocalSource.DeclaredWoff2",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FDeclaredWoff2FontImportTest::RunTest(const FString&)
 {
-	const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
-	if (!TestTrue(TEXT("Find the plugin containing the required fixture"), Plugin.IsValid())) return false;
-	const FString Source = Plugin->GetBaseDir() / TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/DeclaredFont.woff2");
-	TArray<uint8> SourceBytes;
-	if (!TestTrue(TEXT("Read compressed source bytes"), FFileHelper::LoadFileToArray(SourceBytes, *Source))) return false;
-	if (!TestTrue(TEXT("Fixture is actual WOFF2, not a renamed TTF"), SourceBytes.Num() >= 4
-		&& SourceBytes[0] == 'w' && SourceBytes[1] == 'O' && SourceBytes[2] == 'F' && SourceBytes[3] == '2')) return false;
+	auto VerifyImport = [this]()
+	{
+		const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+		if (!TestTrue(TEXT("Find the plugin containing the required fixture"), Plugin.IsValid())) return false;
+		const FString Source = Plugin->GetBaseDir() / TEXT("Source/Design2UMGEditor/Private/Tests/Fixtures/DeclaredFont.woff2");
+		TArray<uint8> SourceBytes;
+		if (!TestTrue(TEXT("Read compressed source bytes"), FFileHelper::LoadFileToArray(SourceBytes, *Source))) return false;
+		if (!TestTrue(TEXT("Fixture is actual WOFF2, not a renamed TTF"), SourceBytes.Num() >= 4
+			&& SourceBytes[0] == 'w' && SourceBytes[1] == 'O' && SourceBytes[2] == 'F' && SourceBytes[3] == '2')) return false;
+		FString Error;
+		const FString Family = TEXT("D2UDeclaredWoff2_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+		const FString Package = FFontResolver::MakeImportedFamilyPackageName(Family);
+		ON_SCOPE_EXIT { DeleteFontFixture(*this, Package, false); };
+		FDesignDocument Document;
+		FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
+		Declaration.Name = Family;
+		Declaration.Url = Source;
+		auto Text = MakeShared<FDesignNode>();
+		Text->Text.Content = TEXT("A");
+		Text->Text.FontFamily = Family;
+		Text->Text.FontWeight = TEXT("400");
+		Text->Text.FontStyle = TEXT("normal");
+		Document.Children.Add(Text);
+		TArray<FString> Warnings;
+		if (!TestTrue(TEXT("Declared WOFF2 reaches static conversion and font import"),
+			DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::Defaults(), Warnings, Error, nullptr, true))) return false;
+		UFont* Font = LoadObject<UFont>(nullptr, *Text->Text.PreparedFont.SourceAssetPath);
+		if (!TestNotNull(TEXT("The declared request binds its saved asset"), Font)) return false;
+		const auto& Entries = Font->GetCompositeFont()->DefaultTypeface.Fonts;
+		if (!TestEqual(TEXT("One requested static face was imported"), Entries.Num(), 1)) return false;
+		const UFontFace* Embedded = Cast<UFontFace>(Entries[0].Font.GetFontFaceAsset());
+		if (!TestNotNull(TEXT("Converted face is embedded"), Embedded)) return false;
+		const auto& Bytes = Embedded->FontFaceData->GetData();
+		TestTrue(TEXT("WOFF2 was decoded into a static sfnt"), Bytes.Num() >= 4
+			&& !(Bytes[0] == 'w' && Bytes[1] == 'O' && Bytes[2] == 'F' && Bytes[3] == '2'));
+		TestEqual(TEXT("Prepared selection keeps the actual source weight and style"), Text->Text.PreparedFont.TypefaceName,
+			FName(TEXT("Regular")));
+		TestTrue(TEXT("WOFF2 import does not add a source-external fallback"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
+		TArray<uint8> After;
+		TestTrue(TEXT("Read compressed source after preparation"), FFileHelper::LoadFileToArray(After, *Source));
+		TestTrue(TEXT("Import leaves compressed source unchanged"), After == SourceBytes);
+		return true;
+	};
+	if (PencilFontTool::IsInstalled()) return VerifyImport();
+	if (!FParse::Param(FCommandLine::Get(), TEXT("D2UInstallFontToolForTests")))
+	{
+		AddError(TEXT("DeclaredWoff2 requires the optional font tool. Install it explicitly, or select -D2UInstallFontToolForTests for this dependency test."));
+		return false;
+	}
+	if (PencilFontTool::HasInstallation() || PencilFontTool::IsBusy())
+	{
+		AddError(TEXT("DeclaredWoff2 setup refused: an existing installation or active operation must be preserved."));
+		return false;
+	}
+	PencilFontTool::FDownload Download;
 	FString Error;
-	const FString Family = TEXT("D2UDeclaredWoff2_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-	const FString Package = FFontResolver::MakeImportedFamilyPackageName(Family);
-	ON_SCOPE_EXIT { DeleteFontFixture(*this, Package, false); };
-	FDesignDocument Document;
-	FDesignFont& Declaration = Document.Fonts.AddDefaulted_GetRef();
-	Declaration.Name = Family;
-	Declaration.Url = Source;
-	auto Text = MakeShared<FDesignNode>();
-	Text->Text.Content = TEXT("A");
-	Text->Text.FontFamily = Family;
-	Text->Text.FontWeight = TEXT("400");
-	Text->Text.FontStyle = TEXT("normal");
-	Document.Children.Add(Text);
-	TArray<FString> Warnings;
-	if (!TestTrue(TEXT("Declared WOFF2 reaches static conversion and font import"),
-		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::Defaults(), Warnings, Error, nullptr, true))) return false;
-	UFont* Font = LoadObject<UFont>(nullptr, *Text->Text.PreparedFont.SourceAssetPath);
-	if (!TestNotNull(TEXT("The declared request binds its saved asset"), Font)) return false;
-	const auto& Entries = Font->GetCompositeFont()->DefaultTypeface.Fonts;
-	if (!TestEqual(TEXT("One requested static face was imported"), Entries.Num(), 1)) return false;
-	const UFontFace* Embedded = Cast<UFontFace>(Entries[0].Font.GetFontFaceAsset());
-	if (!TestNotNull(TEXT("Converted face is embedded"), Embedded)) return false;
-	const auto& Bytes = Embedded->FontFaceData->GetData();
-	TestTrue(TEXT("WOFF2 was decoded into a static sfnt"), Bytes.Num() >= 4
-		&& !(Bytes[0] == 'w' && Bytes[1] == 'O' && Bytes[2] == 'F' && Bytes[3] == '2'));
-	TestEqual(TEXT("Prepared selection keeps the actual source weight and style"), Text->Text.PreparedFont.TypefaceName,
-		FName(TEXT("Regular")));
-	TestTrue(TEXT("WOFF2 import does not add a source-external fallback"), Font->GetCompositeFont()->FallbackTypeface.Typeface.Fonts.IsEmpty());
-	TArray<uint8> After;
-	TestTrue(TEXT("Read compressed source after preparation"), FFileHelper::LoadFileToArray(After, *Source));
-	TestTrue(TEXT("Import leaves compressed source unchanged"), After == SourceBytes);
+	if (!PencilFontTool::ReadDownload(Download, Error)) { AddError(Error); return false; }
+	ADD_LATENT_AUTOMATION_COMMAND(FPrepareDeclaredWoff2Test(*this, Download, MoveTemp(VerifyImport)));
 	return true;
 }
 
@@ -1014,7 +1156,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 	const FString FontDirectory = FPaths::ProjectSavedDir() / TEXT("Design2UMG/ManualFonts");
 	IFileManager::Get().MakeDirectory(*FontDirectory, true);
 	const FString LocatedSource = FontDirectory / (TEXT("!KnownFontSource_")
-		+ FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".woff2"));
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".ttf"));
 	ON_SCOPE_EXIT { IFileManager::Get().Delete(*LocatedSource); };
 	if (!TestEqual(TEXT("Copy font bytes for metadata inspection"),
 		IFileManager::Get().Copy(*LocatedSource, *Source), COPY_OK)) return false;
@@ -1031,7 +1173,7 @@ bool FDesignLocalFontDefaultPipelineTest::RunTest(const FString&)
 		IFileManager::Get().Delete(*LocatedSource))) return false;
 	TArray<FString> SourceWarnings;
 	Error.Reset();
-	if (!TestFalse(TEXT("Failure to convert a located source stops font preparation"),
+	if (!TestFalse(TEXT("Failure to import a located source stops font preparation"),
 		DesignLocalFontImport::Prepare(Document, FDesign2UMGConversionSettings::FromSettings(UDesign2UMGSettings::Get()), SourceWarnings, Error, &SourceIndex))) return false;
 	TestTrue(TEXT("Font source failure preserves the requested family, weight and style"),
 		Error.Contains(Face.Family) && Error.Contains(TEXT("weight=700")) && Error.Contains(TEXT("italic=false")));

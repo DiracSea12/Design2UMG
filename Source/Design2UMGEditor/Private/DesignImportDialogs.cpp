@@ -11,6 +11,15 @@
 #include "Misc/App.h"
 #include "Misc/MessageDialog.h"
 #include "UMGJsonSerializer.h"
+#include "SPencilFontTool.h"
+#include "DesignImportPlanning.h"
+#include "DesignImportPipeline.h"
+#include "DesignReferenceExpansion.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/SNullWidget.h"
+#include "HttpModule.h"
+#include "HttpManager.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
@@ -28,6 +37,67 @@ namespace
 
 namespace DesignImportDialogs
 {
+	FImportAnalysisResult AnalyzeForPreview(FDesignDocument& Document, const FImportAnalysisInput& Input)
+	{
+		if (FApp::IsUnattended() || !FSlateApplication::IsInitialized())
+			return DesignImportPlanning::AnalyzeImport(Document, Input);
+
+		auto Analyze = [&Document, &Input]()
+		{
+			// Metadata is owned by the copy constructor; nodes must be copied separately.
+			FDesignDocument Working = Document;
+			for (auto& Child : Working.Children) Child = RefExpander::DeepCopyNode(Child);
+			if (Working.HasSourceDocumentData())
+				for (auto& Imported : Working.MutableSourceDocument().ImportedNodes) Imported = RefExpander::DeepCopyNode(Imported);
+			FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Working, Input);
+			if (Analysis.ErrorMessage.IsEmpty()) Document = MoveTemp(Working);
+			return Analysis;
+		};
+		FImportAnalysisResult Result = Analyze();
+		if (Result.ErrorMessage.IsEmpty()) return Result;
+		FPencilFontToolText Texts;
+		FText Status = FText::FromString(Result.ErrorMessage + Texts.Get(TEXT("RemedyHint")));
+		TSharedRef<SWindow> Window = SNew(SWindow)
+			.Title(FText::FromString(Texts.Get(TEXT("RemedyTitle"))))
+			.ClientSize(FVector2D(760, 360)).SupportsMinimize(false).SupportsMaximize(false);
+		TSharedPtr<SPencilFontTool> Tool;
+		Window->SetContent(SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(16)
+			[ SAssignNew(Tool, SPencilFontTool) ]
+			+ SVerticalBox::Slot().FillHeight(1).Padding(16, 0)
+			[ SNew(STextBlock).AutoWrapText(true).Text_Lambda([&Status]() { return Status; }) ]
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right).Padding(16)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
+				[ SNew(SButton).Text(FText::FromString(Texts.Get(TEXT("RemedyCancel"))))
+					.OnClicked_Lambda([Window, Tool]() { Tool->CancelInstall(); Window->RequestDestroyWindow(); return FReply::Handled(); }) ]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(4, 0)
+				[ SNew(SButton).Text(FText::FromString(Texts.Get(TEXT("RemedyRetry"))))
+					.IsEnabled_Lambda([]() { return !PencilFontTool::IsBusy(); })
+					.OnClicked_Lambda([&Analyze, &Result, &Status, Window]()
+					{
+						Result = Analyze();
+						if (Result.ErrorMessage.IsEmpty())
+						{
+							Window->RequestDestroyWindow();
+						}
+						else Status = FText::FromString(Result.ErrorMessage + FPencilFontToolText().Get(TEXT("RemedyRetryHint")));
+						return FReply::Handled();
+					}) ]
+			]);
+		Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda([Tool](const TSharedRef<SWindow>&) { Tool->CancelInstall(); }));
+		// Slate's modal loop pauses the engine tick; keep HTTP completion/cancellation moving.
+		const FDelegateHandle HttpTick = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda(
+			[](float Delta) { FHttpModule::Get().GetHttpManager().Tick(Delta); });
+		FSlateApplication::Get().AddModalWindow(Window, nullptr);
+		FSlateApplication::Get().GetOnModalLoopTickEvent().Remove(HttpTick);
+		// Release callbacks capturing the modal stack before returning.
+		Window->SetContent(SNullWidget::NullWidget);
+		Window->SetOnWindowClosed(FOnWindowClosed());
+		return Result;
+	}
+
 	FString FormatImportResult(const FUMGWidgetData& Data, const FString& ErrorMessage, const bool bSucceeded, const FString& SourceFilePath)
 	{
 		const FString& FilePath = SourceFilePath.IsEmpty() ? Data.SourceDocument().SourceFilePath : SourceFilePath;
@@ -85,8 +155,7 @@ namespace DesignImportDialogs
 			.SupportsMinimize(false)
 			.SupportsMaximize(true);
 
-		Window->SetContent(
-			SNew(SDesign2UMGPreviewWindow)
+		TSharedRef<SDesign2UMGPreviewWindow> Preview = SNew(SDesign2UMGPreviewWindow)
 			.OriginalJson(FUMGJsonSerializer::Serialize(Data))
 			.OriginalData(MakeShared<FUMGWidgetData>(Data))
 			.InitialImageResult(InitialImageResult)
@@ -95,7 +164,13 @@ namespace DesignImportDialogs
 			.Warnings(Data.Warnings)
 			.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)
 			.OnConfirmed(MoveTemp(OnConfirmed))
-			.OnCancelled(MoveTemp(OnCancelled)));
+			.OnCancelled(MoveTemp(OnCancelled));
+		Window->SetContent(Preview);
+		TWeakPtr<SDesign2UMGPreviewWindow> WeakPreview = Preview;
+		Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda([WeakPreview](const TSharedRef<SWindow>&)
+		{
+			if (auto ClosedPreview = WeakPreview.Pin()) ClosedPreview->CancelFontToolInstall();
+		}));
 
 		FSlateApplication::Get().AddWindow(Window);
 		return true;

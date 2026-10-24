@@ -17,9 +17,22 @@
 #include "UObject/UObjectGlobals.h"
 #include "PenBundledLibraries.h"
 #include "PenParser.h"
+#include "PencilFontTool.h"
+#include "PencilFontToolText.h"
+#include "HAL/PlatformMisc.h"
+THIRD_PARTY_INCLUDES_START
+#include <openssl/sha.h>
+THIRD_PARTY_INCLUDES_END
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+#include "Misc/ConfigCacheIni.h"
+#include "HttpModule.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -614,6 +627,339 @@ bool FPencilExtensionLibrariesDirectoryScanTest::RunTest(const FString&)
 		TestEqual(TEXT("Library layout preserves document contents"), RegisteredDocument, DocumentJson);
 		TestEqual(TEXT("Library layout source path is retained"), RegisteredPath, LibraryPath);
 	}
+	return true;
+}
+
+namespace
+{
+    class FFontToolTestLocation
+    {
+        FString Original;
+        bool bHadValue = false, bDirty = false;
+    public:
+        FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Automation")
+            / (TEXT("FontTool-") + FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+        FFontToolTestLocation()
+        {
+            bHadValue = GConfig->GetString(TEXT("Design2UMG.FontTool"), TEXT("StorageDirectory"), Original, GEditorPerProjectIni);
+            if (const FConfigFile* Config = GConfig->FindConfigFile(GEditorPerProjectIni)) bDirty = Config->Dirty;
+            // Select only this fixture without inspecting/removing an existing user installation.
+            GConfig->SetString(TEXT("Design2UMG.FontTool"), TEXT("StorageDirectory"), *Root, GEditorPerProjectIni);
+            IFileManager::Get().MakeDirectory(*Root, true);
+        }
+        ~FFontToolTestLocation()
+        {
+            if (bHadValue) GConfig->SetString(TEXT("Design2UMG.FontTool"), TEXT("StorageDirectory"), *Original, GEditorPerProjectIni);
+            else GConfig->RemoveKey(TEXT("Design2UMG.FontTool"), TEXT("StorageDirectory"), GEditorPerProjectIni);
+            GConfig->Flush(false, GEditorPerProjectIni);
+            if (FConfigFile* Config = GConfig->FindConfigFile(GEditorPerProjectIni)) Config->Dirty = bDirty;
+            // The fixture owns this unique directory; junction tests remove their link before cleanup.
+            IFileManager::Get().DeleteDirectory(*Root, false, true);
+        }
+    };
+    FString FontToolFixtureHash(const FString& Text)
+    {
+        FTCHARToUTF8 Bytes(*Text);
+        uint8 Digest[SHA256_DIGEST_LENGTH];
+        SHA256(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length(), Digest);
+        return BytesToHex(Digest, sizeof(Digest));
+    }
+    bool WriteFontToolFixture(const PencilFontTool::FDownload& Download)
+    {
+        const FString Directory = Download.InstallDirectory();
+        IFileManager::Get().MakeDirectory(*Directory, true);
+        const FString Payload = TEXT("fixture, never executed");
+        const FString Identity = FString::Printf(TEXT("{\"protocol\":1,\"binary_sha256\":\"%s\",\"files_sha256\":{\"PencilFontWorker.exe\":\"%s\"}}"), *FontToolFixtureHash(Payload), *FontToolFixtureHash(Payload));
+        const FString Receipt = FString::Printf(TEXT("{\"archive_sha256\":\"%s\",\"identity_sha256\":\"%s\"}"),
+            *Download.ArchiveSha256, *FontToolFixtureHash(Identity));
+        auto Save = [&Directory](const FString& Name, const FString& Value)
+        { return FFileHelper::SaveStringToFile(Value, *(Directory / Name), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM); };
+        return Save(TEXT("PencilFontWorker.exe"), Payload) && Save(TEXT("identity.json"), Identity) && Save(TEXT("installed.json"), Receipt);
+    }
+	// Explicitly selected online validation; engine ticks keep real HTTP and Slate responsive.
+	class FValidateFontToolLifecycle final : public IAutomationLatentCommand
+	{
+		FAutomationTestBase& Test;
+		PencilFontTool::FDownload Download;
+        TSharedPtr<FFontToolTestLocation> Location;
+		enum class EStep { CancelDownload, WrongDigest, InstallAndRemove, Cleanup };
+		EStep Step = EStep::CancelDownload;
+		TSharedPtr<PencilFontTool::FInstall, ESPMode::ThreadSafe> Operation;
+		FHttpRequestPtr CancelledRequest;
+		TArray<FString> OriginalStaging;
+		double Deadline = 0;
+		bool bOwnInstallation = false;
+
+		bool Finish()
+		{
+			if (bOwnInstallation && PencilFontTool::HasInstallation())
+			{
+				FString Error;
+				if (!PencilFontTool::Remove(Error)) Test.AddError(TEXT("Lifecycle cleanup failed: ") + Error);
+			}
+			return true;
+		}
+
+	public:
+		FValidateFontToolLifecycle(FAutomationTestBase& InTest, const PencilFontTool::FDownload& InDownload, const TSharedPtr<FFontToolTestLocation>& InLocation)
+			: Test(InTest), Download(InDownload), Location(InLocation)
+		{
+			IFileManager::Get().FindFiles(OriginalStaging, *(FPaths::GetPath(Download.InstallDirectory()) / TEXT("staging-*")), false, true);
+		}
+
+		virtual bool Update() override
+		{
+			if (!Operation)
+			{
+				if (PencilFontTool::HasInstallation() || PencilFontTool::IsBusy())
+				{
+					Test.AddError(TEXT("Lifecycle step refused: an installation or another tool operation appeared before Install."));
+					return Finish();
+				}
+				PencilFontTool::FDownload Request = Download;
+				if (Step == EStep::WrongDigest)
+					Request.ArchiveSha256[0] = Request.ArchiveSha256[0] == TEXT('0') ? TEXT('1') : TEXT('0');
+				Operation = PencilFontTool::Install(Request);
+				if (!Operation) { Test.AddError(TEXT("Lifecycle Install was refused because the service is busy.")); return Finish(); }
+                FString LocationError;
+                Test.TestFalse(TEXT("Active install prevents location changes"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("blocked"), LocationError));
+                Test.TestEqual(TEXT("Async install captures the chosen destination"), Operation->Directory, Request.InstallDirectory());
+				if (Step == EStep::CancelDownload)
+				{
+					CancelledRequest = Operation->Request;
+					Operation->Cancel();
+				}
+				Deadline = FPlatformTime::Seconds() + 330;
+				return false;
+			}
+			if (!Operation->Poll() || (CancelledRequest && CancelledRequest->GetStatus() == EHttpRequestStatus::Processing))
+			{
+				if (Step != EStep::Cleanup && FPlatformTime::Seconds() > Deadline)
+				{
+					Test.AddError(FString::Printf(TEXT("Lifecycle step %d timed out; cancelling and waiting for cleanup. Last error: %s"),
+						static_cast<int32>(Step), *Operation->Error));
+					if (Operation->Request) CancelledRequest = Operation->Request;
+					Operation->Cancel();
+					Step = EStep::Cleanup;
+				}
+				return false;
+			}
+			Test.AddInfo(FString::Printf(TEXT("Lifecycle step %d completed: %s"), static_cast<int32>(Step),
+				Operation->Error.IsEmpty() ? TEXT("success") : *Operation->Error));
+			CancelledRequest.Reset();
+			bOwnInstallation |= Operation->Error.IsEmpty() && PencilFontTool::HasInstallation();
+			TArray<FString> RemainingStaging;
+			IFileManager::Get().FindFiles(RemainingStaging, *(FPaths::GetPath(Download.InstallDirectory()) / TEXT("staging-*")), false, true);
+			for (const FString& Directory : OriginalStaging) RemainingStaging.Remove(Directory);
+			if (!Test.TestTrue(TEXT("Completed work has cleaned its staging directory"), RemainingStaging.IsEmpty()))
+			{
+				Test.AddError(TEXT("Staging left after completion: ") + FString::Join(RemainingStaging, TEXT("\n")));
+				return Finish();
+			}
+			if (Step == EStep::Cleanup) return Finish();
+			if (Step == EStep::CancelDownload)
+			{
+				if (!Test.TestFalse(TEXT("Immediately cancelled download leaves no installation"), PencilFontTool::HasInstallation())
+					|| !Test.TestFalse(TEXT("Cancelled download is not usable"), PencilFontTool::IsInstalled())) return Finish();
+				Step = EStep::WrongDigest;
+				Operation.Reset();
+				return false;
+			}
+			if (Step == EStep::WrongDigest)
+			{
+				if (!Test.TestTrue(TEXT("Real download with the wrong digest fails archive verification"), Operation->Error == FPencilFontToolText().Get(TEXT("ArchiveVerificationFailed")))
+					|| !Test.TestFalse(TEXT("Wrong digest leaves no installation"), PencilFontTool::HasInstallation())
+					|| !Test.TestFalse(TEXT("Wrong digest is not usable"), PencilFontTool::IsInstalled())) return Finish();
+				Step = EStep::InstallAndRemove;
+				Operation.Reset();
+				return false;
+			}
+			if (!Test.TestTrue(TEXT("Real HTTP and background installation completed successfully"), Operation->Error.IsEmpty())
+				|| !Test.TestTrue(TEXT("Verified installation is usable"), PencilFontTool::IsInstalled())) return Finish();
+			FString Worker, Error;
+			const bool bAcquired = PencilFontTool::AcquireWorker(Worker, Error);
+			if (!Test.TestTrue(TEXT("Acquire verifies the installed worker and dependencies"), bAcquired))
+			{
+				Test.AddError(TEXT("AcquireWorker: ") + Error);
+				return Finish();
+			}
+			Error.Reset();
+			Test.TestFalse(TEXT("Remove is refused while the worker is acquired"), PencilFontTool::Remove(Error));
+            FString LocationError;
+            Test.TestFalse(TEXT("Acquired worker prevents location changes"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("blocked"), LocationError));
+			Test.AddInfo(TEXT("Remove while working: ") + Error);
+			Test.TestFalse(TEXT("Busy removal supplies its full reason"), Error.IsEmpty());
+			PencilFontTool::ReleaseWorker();
+			Error.Reset();
+			if (!Test.TestTrue(TEXT("Remove succeeds after worker release"), PencilFontTool::Remove(Error)))
+			{
+				Test.AddError(TEXT("Remove after release: ") + Error);
+				return Finish();
+			}
+			bOwnInstallation = false;
+			Test.TestFalse(TEXT("Removal deletes the tool directory"), PencilFontTool::HasInstallation());
+			Test.TestFalse(TEXT("Removed tool is not installed"), PencilFontTool::IsInstalled());
+			Error.Reset();
+			const bool bAcquiredAfterRemoval = PencilFontTool::AcquireWorker(Worker, Error);
+			Test.TestFalse(TEXT("Acquire fails again after removal"), bAcquiredAfterRemoval);
+			if (bAcquiredAfterRemoval) PencilFontTool::ReleaseWorker();
+			Test.AddInfo(TEXT("Acquire after removal: ") + Error);
+			Test.TestTrue(TEXT("Missing tool gives the installation error"), Error == FPencilFontToolText().Get(TEXT("NotInstalled")));
+			return Finish();
+		}
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPencilFontToolDownloadTest,
+	"Design2UMG.Pencil.FontTool.DownloadManifest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FPencilFontToolDownloadTest::RunTest(const FString& Parameters)
+{
+	if (!TestFalse(TEXT("Path tests require an idle tool service"), PencilFontTool::IsBusy())) return false;
+    auto Location = MakeShared<FFontToolTestLocation>();
+	const FString Manifest = TEXT(R"({"version":"1.0.0","url":"https://github.com/DiracSea12/Design2UMG/releases/download/pencil-font-worker-1.0.0/PencilFontWorker-1.0.0-Win64.zip","archive_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","archive_bytes":100,"installed_bytes":200})");
+	PencilFontTool::FDownload Download;
+	FString Error;
+	if (!TestTrue(TEXT("Fixed release contract parses"), PencilFontTool::ParseDownload(Manifest, Download, Error))) return false;
+	TestEqual(TEXT("Download byte count retained"), Download.ArchiveBytes, int64(100));
+	TestEqual(TEXT("Installed byte count retained"), Download.InstalledBytes, int64(200));
+	TestEqual(TEXT("Tool uses its own versioned directory under the selected storage location"), Download.InstallDirectory(),
+        Location->Root / TEXT("PencilFontWorker/1.0.0"));
+    const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("Design2UMG"));
+    if (!TestTrue(TEXT("Plugin is discoverable"), Plugin.IsValid())) return false;
+    TestEqual(TEXT("Default storage is inside the active plugin, not AppData"), PencilFontTool::DefaultStorageDirectory(),
+        FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Saved/Tools")));
+    TestTrue(TEXT("Chosen location is saved"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("chosen{root}"), Error));
+    FConfigFile SavedConfig;
+    SavedConfig.Read(GEditorPerProjectIni);
+    FString SavedLocation;
+    TestTrue(TEXT("Location is written to editor user config"), SavedConfig.GetString(TEXT("Design2UMG.FontTool"), TEXT("StorageDirectory"), SavedLocation));
+    TestEqual(TEXT("Persisted location equals the selected location"), SavedLocation, PencilFontTool::StorageDirectory());
+    TestEqual(TEXT("Template arguments may contain braces in user paths"),
+        FPencilFontToolText().Get(TEXT("ActualLocation"), {{TEXT("InstallDirectory"), TEXT("X:/{user}/PencilFontWorker/1.0.0")}}).Contains(TEXT("X:/{user}/PencilFontWorker/1.0.0")), true);
+    TestTrue(TEXT("Missing text keys identify the editable resource and key"),
+        FPencilFontToolText().Get(TEXT("TestMissingKey")).Contains(TEXT("Resources/FontToolText.json [TestMissingKey:")));
+#if PLATFORM_WINDOWS
+    const FString Directory = Download.InstallDirectory();
+    IFileManager::Get().MakeDirectory(*Directory, true);
+    const FString UserFile = Directory / TEXT("keep.txt");
+    TestTrue(TEXT("Create foreign destination content"), FFileHelper::SaveStringToFile(TEXT("user file"), *UserFile));
+    auto Occupied = PencilFontTool::Install(Download);
+    TestTrue(TEXT("Foreign destination is refused before HTTP"), Occupied && Occupied->bComplete && !Occupied->Request);
+    TestFalse(TEXT("Missing receipt never permits removal"), PencilFontTool::Remove(Error));
+    TestTrue(TEXT("Unregistered user content remains"), FPaths::FileExists(UserFile));
+    PencilFontTool::FDownload RealDownload;
+    if (!TestTrue(TEXT("Use the real archive identity for ownership fixture"), PencilFontTool::ReadDownload(RealDownload, Error))) return false;
+    if (!TestTrue(TEXT("Create an owned tool fixture"), WriteFontToolFixture(RealDownload))) return false;
+    TestFalse(TEXT("Existing installation prevents location changes"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("other"), Error));
+    TestTrue(TEXT("Owned files can be removed"), PencilFontTool::Remove(Error));
+    TestTrue(TEXT("Extra user file in the installation folder is preserved"), FPaths::FileExists(UserFile));
+    TestFalse(TEXT("Owned executable is removed"), FPaths::FileExists(Directory / TEXT("PencilFontWorker.exe")));
+    TestFalse(TEXT("Preserved user files do not count as an installed tool"), PencilFontTool::HasInstallation());
+    if (!TestTrue(TEXT("Create fixture for record cleanup retry"), WriteFontToolFixture(RealDownload))) return false;
+    const FString ReceiptFile = Directory / TEXT("installed.json"), IdentityFile = Directory / TEXT("identity.json");
+    TArray<uint8> ReceiptBefore, ReceiptAfter;
+    FString UserContents;
+    if (!TestTrue(TEXT("Read original receipt bytes"), FFileHelper::LoadFileToArray(ReceiptBefore, *ReceiptFile))) return false;
+    {
+        ON_SCOPE_EXIT { TestTrue(TEXT("Restore writable fixture identity"), FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*IdentityFile, false)); };
+        if (!TestTrue(TEXT("Make fixture identity read-only"), FPlatformFileManager::Get().GetPlatformFile().SetReadOnly(*IdentityFile, true))) return false;
+        TestFalse(TEXT("Read-only identity prevents record cleanup"), PencilFontTool::Remove(Error));
+        TestEqual(TEXT("Record cleanup reports the read-only identity"), Error, FPencilFontToolText().Get(TEXT("RemoveFailed"), {{TEXT("File"), IdentityFile}}));
+        TestTrue(TEXT("Receipt remains readable after identity deletion fails"), FFileHelper::LoadFileToArray(ReceiptAfter, *ReceiptFile));
+        TestTrue(TEXT("Receipt is restored with identical bytes"), ReceiptBefore == ReceiptAfter);
+        TestTrue(TEXT("Foreign file is unchanged after record cleanup failure"), FFileHelper::LoadFileToString(UserContents, *UserFile) && UserContents == TEXT("user file"));
+    }
+    TestTrue(TEXT("Removal retries successfully after identity becomes writable"), PencilFontTool::Remove(Error));
+    TestTrue(TEXT("Foreign file is unchanged after record cleanup retry"), FFileHelper::LoadFileToString(UserContents, *UserFile) && UserContents == TEXT("user file"));
+    TestTrue(TEXT("Create fixture for damaged record check"), WriteFontToolFixture(RealDownload));
+    FFileHelper::SaveStringToFile(TEXT("{}"), *(Directory / TEXT("installed.json")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    TestFalse(TEXT("Damaged receipt refuses deletion"), PencilFontTool::Remove(Error));
+    TestTrue(TEXT("Damaged receipt leaves tool payload"), FPaths::FileExists(Directory / TEXT("PencilFontWorker.exe")));
+    // Only fixture-owned contents are cleared; user configuration and existing tools are untouched.
+    IFileManager::Get().DeleteDirectory(*Directory, false, true);
+    TestTrue(TEXT("Return to empty fixture location"), PencilFontTool::SetStorageDirectory(Location->Root, Error));
+    const FString Outside = Location->Root / TEXT("outside"), Link = Location->Root / TEXT("PencilFontWorker");
+    IFileManager::Get().MakeDirectory(*Outside, true);
+    const FString Sentinel = Outside / TEXT("keep.txt");
+    FFileHelper::SaveStringToFile(TEXT("outside content"), *Sentinel);
+    int32 LinkExit = -1;
+    FString Cmd = FPlatformMisc::GetEnvironmentVariable(TEXT("SystemRoot")) / TEXT("System32/cmd.exe");
+    FPaths::MakePlatformFilename(Cmd);
+    const FString LinkCommand = FString::Printf(TEXT("/d /c mklink /J \"%s\" \"%s\""), *Link, *Outside);
+    const bool bLinkCreated = FPlatformProcess::ExecProcess(*Cmd, *LinkCommand, &LinkExit, nullptr, nullptr) && LinkExit == 0;
+    if (!TestTrue(TEXT("Create real Windows junction inside the managed subtree"), bLinkCreated)) return false;
+    ON_SCOPE_EXIT { IFileManager::Get().DeleteDirectory(*Link, false, false); };
+    auto Linked = PencilFontTool::Install(Download);
+    TestTrue(TEXT("Managed junction is rejected before HTTP"), Linked && Linked->bComplete && !Linked->Request);
+    TestFalse(TEXT("Removal rejects a managed junction"), PencilFontTool::Remove(Error));
+    TestFalse(TEXT("Unsafe managed junction is not an installation"), PencilFontTool::HasInstallation());
+    TestTrue(TEXT("An uninstalled managed junction permits choosing a safe location"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("safe"), Error));
+    TestTrue(TEXT("Real junction target content is untouched"), FPaths::FileExists(Sentinel));
+    if (!TestTrue(TEXT("Remove only the fixture junction before further tests"), IFileManager::Get().DeleteDirectory(*Link, false, false))) return false;
+#endif
+	TestFalse(TEXT("An alternate download origin is rejected"), PencilFontTool::ParseDownload(
+		Manifest.Replace(TEXT("https://github.com/"), TEXT("https://example.com/")), Download, Error));
+	TestFalse(TEXT("A missing complete archive digest is rejected"), PencilFontTool::ParseDownload(
+		Manifest.Replace(TEXT("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"), TEXT("bad")), Download, Error));
+	TestFalse(TEXT("An unknown version cannot choose a different installation directory"), PencilFontTool::ParseDownload(
+		Manifest.Replace(TEXT("\"version\":\"1.0.0\""), TEXT("\"version\":\"../other\"")), Download, Error));
+	FHttpModule& Http = FHttpModule::Get();
+	if (!TestFalse(TEXT("Synchronous rejection requires an idle tool service"), PencilFontTool::IsBusy())
+		|| !TestFalse(TEXT("Synchronous rejection uses the real HTTP backend"), Http.IsNullHttpEnabled())) return false;
+	FConfigFile* EngineConfig = GConfig->FindConfigFile(GEngineIni);
+	if (!TestNotNull(TEXT("HTTP configuration is loaded"), EngineConfig)) return false;
+	FString OriginalHttpValue;
+	const bool bHadHttpValue = GConfig->GetString(TEXT("HTTP"), TEXT("bEnableHttp"), OriginalHttpValue, GEngineIni);
+	const bool bWasHttpEnabled = Http.IsHttpEnabled();
+	const bool bWasConfigDirty = EngineConfig->Dirty;
+	{
+		ON_SCOPE_EXIT
+		{
+			// UpdateConfigs leaves a missing key unchanged, so restore runtime state before key presence.
+			GConfig->SetBool(TEXT("HTTP"), TEXT("bEnableHttp"), bWasHttpEnabled, GEngineIni);
+			Http.UpdateConfigs();
+			if (bHadHttpValue) GConfig->SetString(TEXT("HTTP"), TEXT("bEnableHttp"), *OriginalHttpValue, GEngineIni);
+			else GConfig->RemoveKey(TEXT("HTTP"), TEXT("bEnableHttp"), GEngineIni);
+			EngineConfig->Dirty = bWasConfigDirty;
+		};
+		GConfig->SetBool(TEXT("HTTP"), TEXT("bEnableHttp"), false, GEngineIni);
+		Http.UpdateConfigs();
+		if (!TestFalse(TEXT("Engine HTTP is disabled before attempting Install"), Http.IsHttpEnabled())) return false;
+		const auto Rejected = PencilFontTool::Install(Download);
+		if (!TestTrue(TEXT("Disabled HTTP returns a completed installation operation"), Rejected.IsValid())) return false;
+		ON_SCOPE_EXIT
+		{
+			Rejected->Cancel();
+			if (Rejected->Work.IsValid()) Rejected->Work.Wait();
+		};
+		TestTrue(TEXT("Startup rejection completed synchronously before Install returned"), Rejected->bComplete);
+        const FString FrozenDirectory = Rejected->Directory;
+        TestTrue(TEXT("Idle completed request permits a new location"), PencilFontTool::SetStorageDirectory(Location->Root / TEXT("after-request"), Error));
+        TestEqual(TEXT("Install request retains its captured destination after config changes"), Rejected->Directory, FrozenDirectory);
+		TestEqual(TEXT("Startup failure preserves the synchronous completion callback error"), Rejected->Error,
+			FPencilFontToolText().Get(TEXT("DownloadFailed")));
+		TestFalse(TEXT("Completed rejection releases its request member"), Rejected->Request.IsValid());
+		TestFalse(TEXT("Disabled HTTP starts no background installation work"), Rejected->Work.IsValid());
+		TestFalse(TEXT("Completed rejection leaves the tool service idle"), PencilFontTool::IsBusy());
+		AddInfo(TEXT("Synchronous HTTP rejection: ") + Rejected->Error);
+	}
+	FString RestoredHttpValue;
+	TestEqual(TEXT("Original HTTP enabled state is restored"), Http.IsHttpEnabled(), bWasHttpEnabled);
+	TestEqual(TEXT("Original HTTP configuration key presence is restored"),
+		GConfig->GetString(TEXT("HTTP"), TEXT("bEnableHttp"), RestoredHttpValue, GEngineIni), bHadHttpValue);
+	TestEqual(TEXT("Original HTTP configuration value is restored"), RestoredHttpValue, OriginalHttpValue);
+	TestEqual(TEXT("Original HTTP configuration dirty state is restored"), bool(EngineConfig->Dirty), bWasConfigDirty);
+	if (!FParse::Param(FCommandLine::Get(), TEXT("D2UValidateFontToolLifecycle"))) return true;
+	if (!TestTrue(TEXT("Read real release contract for explicitly selected online validation"), PencilFontTool::ReadDownload(Download, Error)))
+	{ AddError(Error); return false; }
+	if (PencilFontTool::HasInstallation() || PencilFontTool::IsBusy())
+	{
+		AddError(TEXT("Online lifecycle validation refused: an existing user installation or active tool operation must be left untouched."));
+		return false;
+	}
+	ADD_LATENT_AUTOMATION_COMMAND(FValidateFontToolLifecycle(*this, Download, Location));
 	return true;
 }
 

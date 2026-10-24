@@ -7,6 +7,7 @@
 #include "Design2UMGEditorImportRequestSetup.h"
 #include "Design2UMGEditorImportSupport.h"
 #include "DesignImportPlanning.h"
+#include "DesignImportDialogs.h"
 #include "Design2UMGEditorMcpImportPayload.h"
 #include "Design2UMGEditorUnattendedExit.h"
 #include "Design2UMGLog.h"
@@ -325,7 +326,9 @@ namespace Design2UMGEditorImportServices
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = ImportRequest.bResolveImages;
 			AnalysisInput.SettingsSnapshot = &SettingsSnapshot;
-			FImportAnalysisResult AnalysisResult = DesignImportPlanning::AnalyzeImport(*Document, AnalysisInput);
+			FImportAnalysisResult AnalysisResult = ImportRequest.bUsePreview
+				? DesignImportDialogs::AnalyzeForPreview(*Document, AnalysisInput)
+				: DesignImportPlanning::AnalyzeImport(*Document, AnalysisInput);
 			if (!AnalysisResult.ErrorMessage.IsEmpty())
 			{
 				Design2UMGEditorImportSupport::ShowNotification(FText::FromString(AnalysisResult.ErrorMessage), SNotificationItem::CS_Fail);

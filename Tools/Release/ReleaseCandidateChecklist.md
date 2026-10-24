@@ -9,6 +9,8 @@ Use this checklist before cutting a GitHub release branch or tag.
 - [ ] Included file list reviewed
 - [ ] Package includes LICENSE, both READMEs, changelog, limitations, the Figma exporter and public examples
 - [ ] Package contains no local Fonts directory; third-party redistribution permission is recorded before adding any bundled font
+- [ ] Plugin package includes `Resources/PencilFontWorkerDownload.json` but excludes font-worker binaries, Python/FontTools/Brotli and publisher build tools; the separate font-tool ZIP preserves all identity hashes and license notices, and matches the download manifest's SHA-256 and byte counts
+- [ ] Publish the independent font-tool asset before checking its download/install/remove flow; local repackaging alone is not proof that the release URL works
 - [ ] Excluded local-only files confirmed
 - [ ] Export plan reviewed against `Tools/Release/PublicRepoExportWorkflow.md`
 - [ ] GitHub Release draft targets this exact candidate commit / tag
