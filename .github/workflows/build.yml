@@ -62,7 +62,7 @@ jobs:
         shell: pwsh
         run: ./Tools/Tests/Test-CIAutomationReportContract.ps1
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
