@@ -267,7 +267,14 @@ class FGraph
                 Error = TEXT("Shader graph native function is missing: ") + Function.ToString();
             return nullptr;
         }
-        return Node<UK2Node_CallFunction>([&](auto* N) { N->SetFromFunction(Fn); });
+        auto* CallNode = Node<UK2Node_CallFunction>([&](auto* N) { N->SetFromFunction(Fn); });
+        UClass* Owner = Fn->GetOwnerClass();
+        if (Owner->HasAnyClassFlags(CLASS_Native))
+        {
+            // Finalize refreshes inherited calls to self; retain their native declaration for graph reload matching.
+            CallNode->FunctionReference.SetExternalMember(Fn->GetFName(), Owner);
+        }
+        return CallNode;
     }
     UK2Node_CallFunction* Math(FName Function)
     {
@@ -467,6 +474,27 @@ class FGraph
 
 const FName SurfaceSlot(TEXT("Surface"));
 const TArray<FName> TargetNames = {TEXT("Coords0"), TEXT("Coords1"), TEXT("Distance"), TEXT("Blur"), TEXT("Sdf")};
+
+// A resized target keeps its UObject, so materials that already sample it keep its previous texture.
+// A replacement target is a new parameter value and rebinds every sampler that receives it.
+void ReplaceTarget(FGraph& Builder, FName Name, UEdGraphPin* Width, UEdGraphPin* Height,
+    const TCHAR* Format, bool Mips, UEdGraphPin*& Exec)
+{
+    auto* Release = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("ReleaseRenderTarget2D"), Exec);
+    Builder.Link(Builder.Get(Name), Builder.Pin(Release, TEXT("TextureRenderTarget")));
+    auto* Create = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("CreateRenderTarget2D"), Exec);
+    Builder.Link(Builder.Self(), Builder.Pin(Create, TEXT("WorldContextObject")));
+    Builder.Link(Width, Builder.Pin(Create, TEXT("Width")));
+    Builder.Link(Height, Builder.Pin(Create, TEXT("Height")));
+    Builder.Default(Create, TEXT("Format"), Format);
+    Builder.Default(Create, TEXT("ClearColor"), TEXT("(R=0,G=0,B=0,A=1)"));
+    Builder.Default(Create, TEXT("bAutoGenerateMipMaps"), Mips ? TEXT("true") : TEXT("false"));
+    // OnPaint is const; use the native UObject setter for the instance-owned target.
+    auto* Store = Builder.Execute(UKismetSystemLibrary::StaticClass(), TEXT("SetObjectPropertyByName"), Exec);
+    Builder.Link(Builder.Self(), Builder.Pin(Store, TEXT("Object")));
+    Builder.Default(Store, TEXT("PropertyName"), Name.ToString());
+    Builder.Link(Builder.Return(Create), Builder.Pin(Store, TEXT("Value")));
+}
 TArray<FName> PassNames()
 {
     TArray<FName> Names = {TEXT("Init")};
@@ -647,13 +675,8 @@ void WireSdfPaint(FGraph& Builder, UWidgetBlueprint* Blueprint, const FTarget& T
     Exec = ResizeNeeded->GetThenPin();
     for (FName Name : TargetNames)
     {
-        // Rebuild on size changes so Canvas sees the new resource extent before its draw is queued.
-        auto* Release = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("ReleaseRenderTarget2D"), Exec);
-        Builder.Link(Builder.Get(Name), Builder.Pin(Release, TEXT("TextureRenderTarget")));
-        auto* Resize = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("ResizeRenderTarget2D"), Exec);
-        Builder.Link(Builder.Get(Name), Builder.Pin(Resize, TEXT("TextureRenderTarget")));
-        Builder.Link(Width, Builder.Pin(Resize, TEXT("Width")));
-        Builder.Link(Height, Builder.Pin(Resize, TEXT("Height")));
+        const bool Scalar = Name == TEXT("Distance") || Name == TEXT("Blur");
+        ReplaceTarget(Builder, Name, Width, Height, Scalar ? TEXT("RTF_R16f") : TEXT("RTF_RGBA16f"), false, Exec);
     }
     auto* Resized = Builder.Node<UK2Node_ExecutionSequence>();
     Builder.Link(Exec, Resized->GetExecPin());
@@ -695,6 +718,10 @@ void WireSdfPaint(FGraph& Builder, UWidgetBlueprint* Blueprint, const FTarget& T
     }
     Builder.Texture(Builder.Get(TEXT("DistancePass")), TEXT("Input"), Current, Exec);
     Builder.Draw(TEXT("DistancePass"), Builder.Get(TEXT("Distance")), Exec);
+    // Size changes replace these targets, so every pass binds the current objects before drawing.
+    Builder.Texture(Builder.Get(TEXT("BlurX")), TEXT("Input"), Builder.Get(TEXT("Distance")), Exec);
+    Builder.Texture(Builder.Get(TEXT("BlurY")), TEXT("Input"), Builder.Get(TEXT("Blur")), Exec);
+    Builder.Texture(Builder.Get(TEXT("Gradient")), TEXT("Input"), Builder.Get(TEXT("Distance")), Exec);
     Builder.Draw(TEXT("BlurX"), Builder.Get(TEXT("Blur")), Exec);
     Builder.Draw(TEXT("BlurY"), Builder.Get(TEXT("Distance")), Exec);
     Builder.Draw(TEXT("Gradient"), Builder.Get(TEXT("Sdf")), Exec);
@@ -747,9 +774,6 @@ void WireSdfLifecycle(FGraph& Builder, const FTarget& Target, const PencilShader
             Builder.Scalar(Builder.Get(Names[I]), TEXT("Jump"), PencilShaderSdf::MaximumDimension >> (I - 1), Exec);
         }
     }
-    Builder.Texture(Builder.Get(TEXT("BlurX")), TEXT("Input"), Builder.Get(TEXT("Distance")), Exec);
-    Builder.Texture(Builder.Get(TEXT("BlurY")), TEXT("Input"), Builder.Get(TEXT("Blur")), Exec);
-    Builder.Texture(Builder.Get(TEXT("Gradient")), TEXT("Input"), Builder.Get(TEXT("Distance")), Exec);
     Exec = Builder.Parameter(Exec, Builder.Get(TEXT("BlurX")), TEXT("Axis"),
                              Builder.Color(Builder.Literal(1), Builder.Literal(0)));
     Exec = Builder.Parameter(Exec, Builder.Get(TEXT("BlurY")), TEXT("Axis"),
@@ -819,6 +843,24 @@ void WireObjectMipLifecycle(FGraph& Builder, UMaterial* CopyMaterial)
     Builder.SetObject(TEXT("ObjectCopy"), nullptr, Exec);
 }
 
+void RecreateOnSizeChange(FGraph& Builder, FName Name, UEdGraphPin* Width, UEdGraphPin* Height, UEdGraphPin*& Exec)
+{
+    auto* Target = Builder.Get(Name);
+    auto* Changed = Builder.Binary(TEXT("BooleanOR"),
+        Builder.Binary(TEXT("NotEqual_IntInt"), Width,
+            Builder.ObjectMember(Target, UTextureRenderTarget2D::StaticClass(), TEXT("SizeX"))),
+        Builder.Binary(TEXT("NotEqual_IntInt"), Height,
+            Builder.ObjectMember(Target, UTextureRenderTarget2D::StaticClass(), TEXT("SizeY"))));
+    auto* RecreateNeeded = Builder.Node<UK2Node_IfThenElse>();
+    Builder.Link(Exec, RecreateNeeded->GetExecPin());
+    Builder.Link(Changed, RecreateNeeded->GetConditionPin());
+    Exec = RecreateNeeded->GetThenPin();
+    ReplaceTarget(Builder, Name, Width, Height, TEXT("RTF_RGBA16f"), true, Exec);
+    auto* Ready = Builder.Node<UK2Node_ExecutionSequence>();
+    Builder.Link(Exec, Ready->GetExecPin());
+    Builder.Link(RecreateNeeded->GetElsePin(), Ready->GetExecPin());
+    Exec = Ready->GetThenPinGivenIndex(0);
+}
 void WireObjectMipPaint(FGraph& Builder, UEdGraphPin* CaptureMID, UEdGraphPin* OutputMID, UEdGraphPin*& Exec)
 {
     auto* Source = Builder.ReadTexture(CaptureMID, TEXT("D2UObject"), Exec);
@@ -829,36 +871,9 @@ void WireObjectMipPaint(FGraph& Builder, UEdGraphPin* CaptureMID, UEdGraphPin* O
     Builder.Link(Exec, Branch->GetExecPin());
     Builder.Link(Builder.Return(Valid), Branch->GetConditionPin());
     Exec = Branch->GetThenPin();
-    auto* Target = Builder.Get(TEXT("ObjectMip"));
-    auto* Width = Builder.ObjectMember(Capture, UTextureRenderTarget2D::StaticClass(), TEXT("SizeX"));
-    auto* Height = Builder.ObjectMember(Capture, UTextureRenderTarget2D::StaticClass(), TEXT("SizeY"));
-    auto* Changed = Builder.Binary(TEXT("BooleanOR"),
-        Builder.Binary(TEXT("NotEqual_IntInt"), Width,
-            Builder.ObjectMember(Target, UTextureRenderTarget2D::StaticClass(), TEXT("SizeX"))),
-        Builder.Binary(TEXT("NotEqual_IntInt"), Height,
-            Builder.ObjectMember(Target, UTextureRenderTarget2D::StaticClass(), TEXT("SizeY"))));
-    auto* RecreateNeeded = Builder.Node<UK2Node_IfThenElse>();
-    Builder.Link(Exec, RecreateNeeded->GetExecPin());
-    Builder.Link(Changed, RecreateNeeded->GetConditionPin());
-    Exec = RecreateNeeded->GetThenPin();
-    auto* Release = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("ReleaseRenderTarget2D"), Exec);
-    Builder.Link(Target, Builder.Pin(Release, TEXT("TextureRenderTarget")));
-    auto* Create = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("CreateRenderTarget2D"), Exec);
-    Builder.Link(Builder.Self(), Builder.Pin(Create, TEXT("WorldContextObject")));
-    Builder.Link(Width, Builder.Pin(Create, TEXT("Width")));
-    Builder.Link(Height, Builder.Pin(Create, TEXT("Height")));
-    Builder.Default(Create, TEXT("Format"), TEXT("RTF_RGBA16f"));
-    Builder.Default(Create, TEXT("ClearColor"), TEXT("(R=0,G=0,B=0,A=1)"));
-    Builder.Default(Create, TEXT("bAutoGenerateMipMaps"), TEXT("true"));
-    // OnPaint is const; use the native UObject setter for the instance-owned target.
-    auto* Store = Builder.Execute(UKismetSystemLibrary::StaticClass(), TEXT("SetObjectPropertyByName"), Exec);
-    Builder.Link(Builder.Self(), Builder.Pin(Store, TEXT("Object")));
-    Builder.Default(Store, TEXT("PropertyName"), TEXT("ObjectMip"));
-    Builder.Link(Builder.Return(Create), Builder.Pin(Store, TEXT("Value")));
-    auto* Ready = Builder.Node<UK2Node_ExecutionSequence>();
-    Builder.Link(Exec, Ready->GetExecPin());
-    Builder.Link(RecreateNeeded->GetElsePin(), Ready->GetExecPin());
-    Exec = Ready->GetThenPinGivenIndex(0);
+    RecreateOnSizeChange(Builder, TEXT("ObjectMip"),
+        Builder.ObjectMember(Capture, UTextureRenderTarget2D::StaticClass(), TEXT("SizeX")),
+        Builder.ObjectMember(Capture, UTextureRenderTarget2D::StaticClass(), TEXT("SizeY")), Exec);
     auto* CurrentTarget = Builder.Get(TEXT("ObjectMip"));
     Builder.Texture(Builder.Get(TEXT("ObjectCopy")), TEXT("Source"), Source, Exec);
     Builder.Draw(TEXT("ObjectCopy"), CurrentTarget, Exec);
@@ -879,6 +894,26 @@ FString SurfaceIdentity(const FTarget& Target)
                            double(Insets.Bottom));
     return Identity + Target.NativeRole + (Target.ObjectMip ? TEXT("|object-mip") : TEXT("")) +
         (Target.FillObject ? TEXT("|fill-object") : TEXT(""));
+}
+
+// Surfaces saved during this editor session, by identity. Their content is a function of the identity, so
+// reuse avoids in-place rebuilds that would leave loaded users bound to replaced generated properties.
+TMap<FString, TWeakObjectPtr<UWidgetBlueprint>> SessionSurfaces;
+
+bool IsOwnedUnchanged(UWidgetBlueprint* Blueprint)
+{
+    const FString PackageName = Blueprint->GetOutermost()->GetName();
+    FDesign2UMGGenerationManifestSidecar Manifest;
+    FString Error;
+    return !Blueprint->GetOutermost()->IsDirty()
+        && Design2UMGGenerationManifest::TryLoadSidecarForAsset(PackageName, Manifest, Error)
+        && Manifest.GeneratedAssetHash == Design2UMGGenerationManifest::ComputeSavedAssetHash(PackageName);
+}
+
+UWidgetBlueprint* FindSessionSurface(const FTarget& Target)
+{
+    UWidgetBlueprint* Blueprint = SessionSurfaces.FindRef(SurfaceIdentity(Target)).Get();
+    return Blueprint && IsOwnedUnchanged(Blueprint) ? Blueprint : nullptr;
 }
 
 bool SaveSurfaceBlueprint(UWidgetBlueprint* Blueprint, const FTarget& Target, bool NewAsset, FString& Error)
@@ -911,6 +946,7 @@ bool SaveSurfaceBlueprint(UWidgetBlueprint* Blueprint, const FTarget& Target, bo
     }
     if (NewAsset)
         FAssetRegistryModule::AssetCreated(Blueprint);
+    SessionSurfaces.Add(SurfaceIdentity(Target), Blueprint);
     return true;
 }
 
@@ -924,10 +960,7 @@ UWidgetBlueprint* PrepareSurfaceBlueprint(const FTarget& Target, const TCHAR* Ow
     NewAsset = Blueprint == nullptr;
     if (Blueprint)
     {
-        FDesign2UMGGenerationManifestSidecar Manifest;
-        if (Blueprint->GetOutermost()->IsDirty() ||
-            !Design2UMGGenerationManifest::TryLoadSidecarForAsset(PackageName, Manifest, Error) ||
-            Manifest.GeneratedAssetHash != Design2UMGGenerationManifest::ComputeSavedAssetHash(PackageName))
+        if (!IsOwnedUnchanged(Blueprint))
         {
             Error = FString(OwnershipError) + PackageName;
             return nullptr;
@@ -959,6 +992,7 @@ UWidgetBlueprint* PrepareSurfaceBlueprint(const FTarget& Target, const TCHAR* Ow
 
 UWidgetBlueprint* BuildSurfaceBlueprint(const FTarget& Target, UMaterial* CopyMaterial, FString& Error)
 {
+    if (auto* Built = FindSessionSurface(Target)) return Built;
     bool NewAsset = false;
     auto* Blueprint = PrepareSurfaceBlueprint(Target,
         TEXT("Generated shader surface has user changes or no ownership record: "),
@@ -1229,6 +1263,7 @@ UEdGraphPin* CurrentPaintFrame(FGraph& Builder)
 }
 UWidgetBlueprint* BuildProducer(const FTarget& Target, UMaterial* Opacity, FString& Error)
 {
+    if (auto* Built = FindSessionSurface(Target)) return Built;
     bool NewAsset = false;
     auto* Blueprint = CreateBoundaryBlueprint(Target, NewAsset, Error);
     if (!Blueprint || !BoundaryObject(Blueprint, NativeProducerRole, UWidget::StaticClass(), Error)) return nullptr;
@@ -1283,6 +1318,10 @@ UWidgetBlueprint* BuildProducer(const FTarget& Target, UMaterial* Opacity, FStri
     FGraph Painted(Paint, Error);
     auto* PaintedExec = Painted.Parameter(Painted.Pin(Entry, UEdGraphSchema_K2::PN_Then),
         Painted.Get(TEXT("PaintState")), TEXT("D2UPaintFrame"), CurrentPaintFrame(Painted));
+    auto* OpacityParameter = Painted.Execute(UMaterialInstanceDynamic::StaticClass(), TEXT("SetScalarParameterValue"), PaintedExec);
+    Painted.Link(Painted.Get(TEXT("PaintState")), Painted.Pin(OpacityParameter, UEdGraphSchema_K2::PN_Self));
+    Painted.Default(OpacityParameter, TEXT("ParameterName"), TEXT("D2UGroupOpacity"));
+    Painted.Link(Painted.Get(TEXT("SourceOpacity")), Painted.Pin(OpacityParameter, TEXT("Value")));
     CompleteBoundaryPaint(Painted, Result, PaintedExec);
     return FinishBoundary(Blueprint, Target, NewAsset, Error) ? Blueprint : nullptr;
 }
@@ -1456,17 +1495,15 @@ void SizeBoundaryTargets(FGraph& Builder, const TArray<FName>& Targets, UEdGraph
         Builder.Link(Builder.Binary(TEXT("Subtract_Vector2DVector2D"), Builder.Return(Absolute), Builder.Return(Origin)), Builder.Pin(Length, TEXT("A")));
         Dimensions[Index] = Builder.Return(Length);
     }
-    for (FName Name : Targets)
+    UEdGraphPin* Pixels[2];
+    for (int32 Index = 0; Index < 2; ++Index)
     {
-        auto* Resize = Builder.Execute(UKismetRenderingLibrary::StaticClass(), TEXT("ResizeRenderTarget2D"), Exec);
-        Builder.Link(Builder.Get(Name), Builder.Pin(Resize, TEXT("TextureRenderTarget")));
-        for (int32 Index = 0; Index < 2; ++Index)
-        {
-            auto* Round = Builder.Math(TEXT("FCeil"));
-            Builder.Link(Dimensions[Index], Builder.Pin(Round, TEXT("A")));
-            Builder.Link(Builder.Return(Round), Builder.Pin(Resize, Index == 0 ? TEXT("Width") : TEXT("Height")));
-        }
+        auto* Round = Builder.Math(TEXT("FCeil"));
+        Builder.Link(Dimensions[Index], Builder.Pin(Round, TEXT("A")));
+        Pixels[Index] = Builder.Return(Round);
     }
+    for (FName Name : Targets)
+        RecreateOnSizeChange(Builder, Name, Pixels[0], Pixels[1], Exec);
 }
 void ClearBoundary(FGraph& Builder, UEdGraphPin* Target, UEdGraphPin*& Exec, bool EmptyDestination = false)
 {
@@ -1546,6 +1583,7 @@ UWidgetBlueprint* BuildBackgroundBefore(const FBackgroundContext& Context, const
     Target.NativeRole += Context.DirectBackground ? TEXT("|direct") : TEXT("|consumer");
     const FString Key = SurfaceIdentity(Target);
     if (auto* Existing = Classes.FindRef(Key)) return Existing;
+    if (auto* Built = FindSessionSurface(Target)) return Classes.Add(Key, Built);
     bool NewAsset = false;
     auto* Blueprint = CreateBoundaryBlueprint(Target, NewAsset, Error);
     if (!Blueprint || !BoundaryObject(Blueprint, BackgroundBoundaryRole, UWidget::StaticClass(), Error)) return nullptr;
@@ -1565,11 +1603,8 @@ UWidgetBlueprint* BuildBackgroundBefore(const FBackgroundContext& Context, const
     if (!CompileBoundaryState(Blueprint, Error)) return nullptr;
     FGraph Lifecycle(BoundaryEvents(Blueprint), Error);
     BoundaryTargets(Lifecycle, Targets, Composite);
-    auto* Alias = Lifecycle.Event(TEXT("PreConstruct"));
-    // Every prefix writes exactly once; the final ping-pong object is stable for this class.
-    Lifecycle.SetObject(TEXT("Background"), Lifecycle.Get(Prefix.Num() % 2 ? TEXT("BackgroundA") : TEXT("BackgroundB")), Alias);
-    Alias = Lifecycle.Event(TEXT("Destruct"));
-    Lifecycle.SetObject(TEXT("Background"), nullptr, Alias);
+    auto* Release = Lifecycle.Event(TEXT("Destruct"));
+    Lifecycle.SetObject(TEXT("Background"), nullptr, Release);
     UK2Node_FunctionEntry* Entry = nullptr;
     UK2Node_FunctionResult* Result = nullptr;
     auto* Paint = BoundaryPaint(Blueprint, Entry, Result, Error);
@@ -1578,6 +1613,11 @@ UWidgetBlueprint* BuildBackgroundBefore(const FBackgroundContext& Context, const
     auto* Exec = Builder.Pin(Entry, UEdGraphSchema_K2::PN_Then);
     auto* Geometry = PaintGeometry(Builder, Context.DirectBackground ? Builder.Self() : Builder.Get(BackgroundBoundaryRole));
     SizeBoundaryTargets(Builder, Targets, Geometry, Exec);
+    // Every prefix writes exactly once; alias the final ping-pong target after sizing may replace it.
+    auto* Alias = Builder.Execute(UKismetSystemLibrary::StaticClass(), TEXT("SetObjectPropertyByName"), Exec);
+    Builder.Link(Builder.Self(), Builder.Pin(Alias, TEXT("Object")));
+    Builder.Default(Alias, TEXT("PropertyName"), TEXT("Background"));
+    Builder.Link(Builder.Get(Prefix.Num() % 2 ? TEXT("BackgroundA") : TEXT("BackgroundB")), Builder.Pin(Alias, TEXT("Value")));
     ClearBoundary(Builder, Builder.Get(TEXT("BackgroundA")), Exec, true);
     // A clear updates only the base level; draw the empty destination once so even
     // an empty background has this paint's complete automatic mip chain.
@@ -1650,6 +1690,7 @@ UWidgetBlueprint* BuildBackgroundAfter(const FBackgroundContext& Context, UWidge
         + PaintSpaceIdentity(Context.PaintSpace, Spaces.FindChecked(Context.SourceProducer));
     const FString Key = SurfaceIdentity(Target);
     if (auto* Existing = Classes.FindRef(Key)) return Existing;
+    if (auto* Built = FindSessionSurface(Target)) return Classes.Add(Key, Built);
     bool NewAsset = false;
     auto* Blueprint = CreateBoundaryBlueprint(Target, NewAsset, Error);
     if (!Blueprint || !BoundaryObject(Blueprint, BackgroundBoundaryRole, UWidget::StaticClass(), Error)
@@ -1739,7 +1780,7 @@ UUserWidget* WrapProducer(UWidgetBlueprint* Blueprint, UWidget* Source, const FM
     FTarget Target;
     Target.Widget = Source;
     Target.CaptureInsets = Insets;
-    Target.NativeRole = TEXT("|native-prefix-producer|opacity-once|paint-frame");
+    Target.NativeRole = TEXT("|native-prefix-producer|animated-opacity-once|paint-frame");
     const FString Key = SurfaceIdentity(Target);
     auto* Class = Classes.FindRef(Key);
     if (!Class)
@@ -2165,6 +2206,22 @@ bool UnwrapSurfaces(UWidgetBlueprint* Blueprint, TArray<FString>* GeneratedNames
     return true;
 }
 } // namespace
+
+TMap<UWidget*, UWidget*> PencilShaderRuntimeBindings::ProducerPlacements(UWidgetBlueprint* Blueprint)
+{
+    TMap<UWidget*, UWidget*> Placements;
+    if (!Blueprint || !Blueprint->WidgetTree) return Placements;
+    Blueprint->WidgetTree->ForEachWidget([&](UWidget* Widget)
+    {
+        auto* Producer = Cast<UUserWidget>(Widget);
+        if (!Producer) return;
+        const auto* SourceProperty = FindFProperty<FObjectPropertyBase>(Producer->GetClass(), NativeProducerRole);
+        UWidget* Source = SourceProperty ? Cast<UWidget>(SourceProperty->GetObjectPropertyValue_InContainer(Producer)) : nullptr;
+        if (Source && Producer->GetContentForSlot(SurfaceSlot) == Source)
+            Placements.Add(Source, Producer);
+    });
+    return Placements;
+}
 
 bool PencilShaderRuntimeBindings::Prepare(UWidgetBlueprint* Blueprint, FString& Error, TArray<FString>* GeneratedNames)
 {

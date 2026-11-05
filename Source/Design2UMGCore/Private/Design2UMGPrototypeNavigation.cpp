@@ -4,15 +4,55 @@
 
 #include "Design2UMGGeneratedNameSuffixes.h"
 #include "Design2UMGPrototypeStepGraph.h"
+#include "Design2UMGWidgetNames.h"
+#include "DesignSchemaSourceExtensions.h"
+#include "RefExpander.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetTypes.h"
 
 namespace
 {
-	void ResetPrototypePageForSwitcher(FUMGWidgetNode& PageWidget)
+	/**
+	 * Graph wiring resolves pages and trigger buttons by unique runtime base name. Each keeps its
+	 * design name unless another widget of its role could answer the same lookup; then it uses its
+	 * stable id. A contested page name stays with the initial page.
+	 */
+	void AssignAddressNames(TArray<FUMGWidgetNode>& PageWidgets, FUMGPrototypeNavigationData& NavigationData)
 	{
-		PageWidget.Name = PageWidget.Id.IsEmpty() ? PageWidget.Name : PageWidget.Id;
+		const auto UsesId = [](const FUMGWidgetNode& Node, const TArray<FUMGWidgetNode*>& Peers, const TCHAR* Role, bool bOwnsContestedName)
+		{
+			return !Node.Id.IsEmpty() && (Node.Name.IsEmpty() || (!bOwnsContestedName && Peers.ContainsByPredicate(
+				[&](const FUMGWidgetNode* Peer) { return Peer != &Node && Design2UMGWidgetNames::Collide(Peer->Name, Node.Name, Role); })));
+		};
+		TArray<FUMGWidgetNode*> Pages;
+		for (FUMGWidgetNode& Page : PageWidgets) Pages.Add(&Page);
+		TArray<bool> PageUsesId;
+		for (int32 Index = 0; Index < Pages.Num(); ++Index)
+			PageUsesId.Add(UsesId(*Pages[Index], Pages, TEXT("CanvasPanel"), Index == NavigationData.InitialPageIndex));
+		for (int32 Index = 0; Index < Pages.Num(); ++Index) if (PageUsesId[Index]) Pages[Index]->Name = Pages[Index]->Id;
+
+		TSet<FString> TriggerIds;
+		for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings) TriggerIds.Add(Binding.TriggerWidgetId);
+		TArray<FUMGWidgetNode*> Buttons;
+		TFunction<void(FUMGWidgetNode&)> CollectButtons = [&](FUMGWidgetNode& Node)
+		{
+			if (Node.Type == UMGWidgetTypes::Button) Buttons.Add(&Node);
+			for (FUMGWidgetNode& Child : Node.Children) CollectButtons(Child);
+		};
+		for (FUMGWidgetNode& Page : PageWidgets) CollectButtons(Page);
+		TMap<FString, FString> TriggerNames;
+		for (FUMGWidgetNode* Button : Buttons)
+			if (TriggerIds.Contains(Button->Id))
+				TriggerNames.Add(Button->Id, UsesId(*Button, Buttons, TEXT("Button"), false) ? Button->Id : Button->Name);
+		for (FUMGWidgetNode* Button : Buttons)
+			if (const FString* Name = TriggerNames.Find(Button->Id)) Button->Name = *Name;
+		for (FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
+			if (const FString* Name = TriggerNames.Find(Binding.TriggerWidgetId)) Binding.TriggerWidgetName = *Name;
+	}
+
+	void ResetPrototypePageForHost(FUMGWidgetNode& PageWidget)
+	{
 		PageWidget.Bounds.X = 0.0f;
 		PageWidget.Bounds.Y = 0.0f;
 		PageWidget.Slot = FUMGSlotData();
@@ -21,8 +61,10 @@ namespace
 	/** Hosted-page conventions for a page parented under the overlay host at build time. */
 	void ApplyHostedPageConventions(FUMGWidgetNode& PageWidget)
 	{
-		PageWidget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-		PageWidget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		PageWidget.Slot.Anchors.Max.X = 1.0f;
+		PageWidget.Slot.Anchors.Max.Y = 1.0f;
+		PageWidget.Slot.Offsets.Right = 0.0f;
+		PageWidget.Slot.Offsets.Bottom = 0.0f;
 		PageWidget.WidgetStyle.Visibility = TEXT("Collapsed");
 	}
 
@@ -78,6 +120,81 @@ namespace
 
 namespace Design2UMGPrototypeNavigation
 {
+	bool AddReachablePages(FDesignDocument& Document, TArray<FString>& Warnings)
+	{
+		const auto& ExportedPages = Document.SourceDocument().PrototypePages;
+		if (ExportedPages.IsEmpty() || Document.Children.IsEmpty()) return false;
+
+		FDesignDocument Candidate = Document;
+		TSet<FString> Seen;
+		TSet<FString> Reachable;
+		for (const auto& Root : Document.Children)
+		{
+			if (!Root || Root->Id.IsEmpty()) continue;
+			Seen.Add(Root->Id);
+			Reachable.Add(Root->Id);
+		}
+		for (const auto& Page : ExportedPages)
+		{
+			if (!Page || Page->Id.IsEmpty()) continue;
+			if (Seen.Contains(Page->Id))
+			{
+				Warnings.AddUnique(FString::Printf(TEXT("Duplicate prototype page '%s' ignored"), *Page->Id));
+				continue;
+			}
+			Seen.Add(Page->Id);
+			TSharedPtr<FDesignNode> PageCopy = RefExpander::DeepCopyNode(Page);
+			PageCopy->bReusable = false;
+			Candidate.Children.Add(MoveTemp(PageCopy));
+		}
+
+		TArray<FString> CandidateWarnings;
+		const FPrototypeNavigationAnalysis Analysis = BuildAnalysis(Candidate, Candidate.Children, CandidateWarnings);
+		for (const FString& Warning : CandidateWarnings) Warnings.AddUnique(Warning);
+		bool bChanged = true;
+		while (bChanged)
+		{
+			bChanged = false;
+			for (const auto& Binding : Analysis.Data.ClickBindings)
+			{
+				if (!Reachable.Contains(Binding.SourcePageId) || Binding.Steps.Num() != 1) continue;
+				const auto Kind = Binding.Steps[0].Kind;
+				const bool bNavigate = Kind == EUMGPrototypeNavigationStepKind::Navigate;
+				const bool bOverlay = Kind == EUMGPrototypeNavigationStepKind::Overlay;
+				if (!bNavigate && !bOverlay) continue;
+				const bool bMouse = Binding.UsesClickTrigger() || Binding.UsesMouseEnterTrigger()
+					|| Binding.UsesHoverTrigger() || Binding.UsesPressTrigger() || Binding.UsesDragTrigger();
+				const bool bKeyboard = bNavigate && (Binding.UsesKeyDownTrigger() || Binding.UsesKeyUpTrigger());
+				const bool bPageOpen = Binding.UsesPageOpenTrigger()
+					&& (bOverlay || (bNavigate && !Binding.Transition.WidgetTargets.IsEmpty()));
+				if (!bMouse && !bKeyboard && !bPageOpen) continue;
+				const FString& Target = Binding.Steps[0].TargetPageId;
+				if (!Target.IsEmpty() && !Reachable.Contains(Target))
+				{
+					Reachable.Add(Target);
+					bChanged = true;
+				}
+			}
+		}
+
+		const int32 OriginalCount = Document.Children.Num();
+		for (int32 Index = OriginalCount; Index < Candidate.Children.Num(); ++Index)
+		{
+			const auto& Page = Candidate.Children[Index];
+			if (Reachable.Contains(Page->Id)) Document.Children.Add(Page);
+		}
+		if (Document.Children.Num() == OriginalCount) return false;
+		for (const auto& Root : Document.Children)
+		{
+			if (Root && !Root->Id.IsEmpty())
+			{
+				Document.MutableSourceDocument().PrototypeStartNodeId = Root->Id;
+				break;
+			}
+		}
+		return true;
+	}
+
 	FPrototypeNavigationAnalysis BuildAnalysis(
 		const FDesignDocument& Document,
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
@@ -104,12 +221,14 @@ namespace Design2UMGPrototypeNavigation
 		FUMGWidgetNode Button;
 		Button.Type = UMGWidgetTypes::Button;
 		Button.Id = Node->Id;
-		Button.Name = Node->Id.IsEmpty() ? TEXT("PrototypeButton") : Node->Id;
+		// The button takes the node's place, so it carries the design name; BuildRoot settles contested names.
+		Button.Name = !Node->Name.IsEmpty() ? Node->Name : Node->Id.IsEmpty() ? FString(TEXT("PrototypeButton")) : Node->Id;
 		Button.Bounds = Widget.Bounds;
 		Button.Slot = Widget.Slot;
 		Button.WidgetStyle.BackgroundColor = FLinearColor::Transparent;
 		Button.WidgetStyle.HoveredColor = FLinearColor::Transparent;
 		Button.WidgetStyle.PressedColor = FLinearColor::Transparent;
+		Button.WidgetStyle.Padding = FMargin(0.0f);
 
 		Widget.Id = Node->Id + Design2UMGGeneratedNameSuffixes::Content();
 		Widget.Name = (Node->Name.IsEmpty() ? Node->Id : Node->Name) + Design2UMGGeneratedNameSuffixes::Content();
@@ -122,37 +241,39 @@ namespace Design2UMGPrototypeNavigation
 
 	FUMGWidgetNode BuildRoot(
 		TArray<FUMGWidgetNode>&& PageWidgets,
-		const FUMGPrototypeNavigationData& NavigationData)
+		FUMGPrototypeNavigationData& NavigationData,
+		bool bUseInitialPageSize)
 	{
-		// Overlay-target pages are parented under the overlay host at build time (Collapsed, Fill):
-		// the runtime wiring then only toggles visibility, never reparents. A page that is also a
-		// Navigate target must stay a switcher child (the switcher owns the page flow), and the initial
-		// page must stay a switcher child too (InitialPageIndex keeps pointing at it); such pages get a
-		// synthesized mirror copy under the host instead, so the overlay binding stays a layered display
-		// over the current page and never disturbs the page flow or the history.
+		// Flow pages remain native canvas children so transitions can display two real pages together.
 		const TSet<FString> OverlayPageIds = CollectActionTargetPageIds(
 			NavigationData, EUMGPrototypeNavigationStepKind::Overlay);
 		const TSet<FString> NavigatePageIds = CollectActionTargetPageIds(
 			NavigationData, EUMGPrototypeNavigationStepKind::Navigate);
 
-		FUMGWidgetNode BaseSwitcher;
-		BaseSwitcher.Type = UMGWidgetTypes::WidgetSwitcher;
-		BaseSwitcher.Id = NavigationData.SwitcherWidgetId;
-		BaseSwitcher.Name = NavigationData.SwitcherWidgetName;
+		FUMGWidgetNode PageHost;
+		PageHost.Type = UMGWidgetTypes::CanvasPanel;
+		PageHost.Id = NavigationData.PageHostWidgetId;
+		PageHost.Name = NavigationData.PageHostWidgetName;
 
 		float MaxWidth = 0.0f;
 		float MaxHeight = 0.0f;
-		int32 SwitcherChildCount = 0;
+		int32 PageChildCount = 0;
 		TArray<FUMGWidgetNode> OverlayPages;
+		NavigationData.PageDisplayVisibility.Reset();
 		const int32 InitialPagePosition = NavigationData.InitialPageIndex;
+		AssignAddressNames(PageWidgets, NavigationData);
+		NavigationData.PageWidgetNames.Reset();
 		for (int32 PageIndex = 0; PageIndex < PageWidgets.Num(); ++PageIndex)
 		{
 			FUMGWidgetNode& PageWidget = PageWidgets[PageIndex];
-			ResetPrototypePageForSwitcher(PageWidget);
-			// The design size is the max over ALL pages: an overlay page larger than the flow
-			// pages must not shrink the switcher by moving under the host.
-			MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
-			MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
+			ResetPrototypePageForHost(PageWidget);
+			NavigationData.PageWidgetNames.Add(PageWidget.Id, PageWidget.Name);
+			// Exported destination pages preserve the selected page's initial canvas size.
+			if (!bUseInitialPageSize || PageIndex == InitialPagePosition)
+			{
+				MaxWidth = FMath::Max(MaxWidth, PageWidget.Bounds.W);
+				MaxHeight = FMath::Max(MaxHeight, PageWidget.Bounds.H);
+			}
 
 			const bool bOverlayTargetPage = OverlayPageIds.Contains(PageWidget.Id);
 			const bool bOverlayOnlyPage = bOverlayTargetPage
@@ -166,9 +287,9 @@ namespace Design2UMGPrototypeNavigation
 			}
 			if (PageIndex == InitialPagePosition)
 			{
-				BaseSwitcher.WidgetState.ActiveWidgetIndex = SwitcherChildCount;
+				NavigationData.InitialPageIndex = PageChildCount;
 			}
-			++SwitcherChildCount;
+			++PageChildCount;
 			if (bOverlayTargetPage)
 			{
 				FUMGWidgetNode Mirror = PageWidget; // deep copy; children are value types
@@ -176,41 +297,47 @@ namespace Design2UMGPrototypeNavigation
 				MirrorWidgetSubtreeForOverlay(Mirror);
 				OverlayPages.Add(MoveTemp(Mirror));
 			}
-			BaseSwitcher.Children.Add(MoveTemp(PageWidget));
+			NavigationData.PageDisplayVisibility.Add(PageWidget.WidgetStyle.Visibility.Get(TEXT("Visible")));
+			if (PageIndex != InitialPagePosition) PageWidget.WidgetStyle.Visibility = TEXT("Collapsed");
+			PageWidget.Slot.Anchors.Max.X = 1.0f;
+			PageWidget.Slot.Anchors.Max.Y = 1.0f;
+			PageWidget.Slot.Offsets.Right = 0.0f;
+			PageWidget.Slot.Offsets.Bottom = 0.0f;
+			PageHost.Children.Add(MoveTemp(PageWidget));
 		}
 
-		BaseSwitcher.Bounds.W = MaxWidth;
-		BaseSwitcher.Bounds.H = MaxHeight;
+		PageHost.Bounds.W = MaxWidth;
+		PageHost.Bounds.H = MaxHeight;
 		if (!NavigationData.HasOverlayBindings())
 		{
-			return BaseSwitcher;
+			return PageHost;
 		}
 
 		FUMGWidgetNode OverlayHost;
-		OverlayHost.Type = UMGWidgetTypes::Overlay;
+		OverlayHost.Type = UMGWidgetTypes::CanvasPanel;
 		OverlayHost.Id = NavigationData.OverlayHostWidgetId;
 		OverlayHost.Name = NavigationData.OverlayHostWidgetName;
-		OverlayHost.Bounds = BaseSwitcher.Bounds;
+		OverlayHost.Bounds = PageHost.Bounds;
 		OverlayHost.Slot = FUMGSlotData();
 		OverlayHost.WidgetStyle.Visibility = TEXT("Collapsed");
 		OverlayHost.Children = MoveTemp(OverlayPages);
 
-		BaseSwitcher.Bounds.X = 0.0f;
-		BaseSwitcher.Bounds.Y = 0.0f;
-		BaseSwitcher.Slot = FUMGSlotData();
-		BaseSwitcher.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-		BaseSwitcher.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		PageHost.Bounds.X = 0.0f;
+		PageHost.Bounds.Y = 0.0f;
+		PageHost.Slot = FUMGSlotData();
+		PageHost.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		PageHost.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
 		FUMGWidgetNode Root;
 		Root.Type = UMGWidgetTypes::Overlay;
-		Root.Id = NavigationData.SwitcherWidgetId.IsEmpty()
+		Root.Id = NavigationData.PageHostWidgetId.IsEmpty()
 			? TEXT("__d2u_prototype_root")
-			: NavigationData.SwitcherWidgetId + Design2UMGPrototypeTokens::OverlayRootSuffix();
-		Root.Name = NavigationData.SwitcherWidgetName.IsEmpty()
+			: NavigationData.PageHostWidgetId + Design2UMGPrototypeTokens::OverlayRootSuffix();
+		Root.Name = NavigationData.PageHostWidgetName.IsEmpty()
 			? Root.Id
-			: NavigationData.SwitcherWidgetName + Design2UMGPrototypeTokens::OverlayRootSuffix();
-		Root.Bounds = BaseSwitcher.Bounds;
-		Root.Children.Add(MoveTemp(BaseSwitcher));
+			: NavigationData.PageHostWidgetName + Design2UMGPrototypeTokens::OverlayRootSuffix();
+		Root.Bounds = PageHost.Bounds;
+		Root.Children.Add(MoveTemp(PageHost));
 		Root.Children.Add(MoveTemp(OverlayHost));
 		return Root;
 	}

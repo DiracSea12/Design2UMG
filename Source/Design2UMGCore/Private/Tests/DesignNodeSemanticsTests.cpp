@@ -912,23 +912,28 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	TestEqual(TEXT("Ellipse input X remains untouched"), EllipseNode->Transform.X, EllipseTransformBefore.X);
 	TestEqual(TEXT("Ellipse input Y remains untouched"), EllipseNode->Transform.Y, EllipseTransformBefore.Y);
 	TestTrue(TEXT("Ellipse fallback still builds widget geometry"), EllipseResult.Widget.Path.Geometry.IsSet() && !EllipseResult.Widget.Path.Geometry.GetValue().IsEmpty());
+	const FString SourceContour = TEXT("M0 0L96 0L48 48Z");
+	EllipseNode->Shape.Geometry = SourceContour;
+	const auto SourceEllipseResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(EllipseNode);
+	TestEqual(TEXT("Authored ellipse geometry is retained by the widget factory"), SourceEllipseResult.Widget.Path.Geometry.Get(FString()), SourceContour);
+	EllipseNode->Transform.Width = FDesignSize::Fixed(0.01f);
+	EllipseNode->Transform.Height = FDesignSize::Fixed(12.5f);
+	FDesignDocument GeometryDocument;
+	SizeEstimator::PromoteFitContentSizes(EllipseNode, GeometryDocument,
+		[](const TSharedPtr<FDesignNode>&) { return TSharedPtr<FDesignNode>(); });
+	const auto FractionalEllipseResult = Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(EllipseNode);
+	TestEqual(TEXT("Subpixel path width stays in design space"), FractionalEllipseResult.Widget.WidgetStyle.WidthOverride.Get(0.0f), 0.01f);
+	TestEqual(TEXT("Fractional path height is not rounded to pixels"), FractionalEllipseResult.Widget.WidgetStyle.HeightOverride.Get(0.0f), 12.5f);
 
-	TSharedPtr<FDesignNode> RasterizedEllipseNode = Design2UMGCoreTests::MakeNode(TEXT("ellipse_raster"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
-	FDesignFill& RasterizedEllipseFill = RasterizedEllipseNode->Visual.Fills.AddDefaulted_GetRef();
-	RasterizedEllipseFill.Type = EDesignFillType::Image;
-	RasterizedEllipseFill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
-	RasterizedEllipseNode->Visual.VectorRasterFallbackImageRef = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
-	const Design2UMGNodeWidgetFactory::FBuildResult RasterizedEllipseResult =
-		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
-	TestEqual(TEXT("Full pre-rasterized ellipse keeps its ellipse mask"), RasterizedEllipseResult.Widget.Type, TEXT("Border"));
-
-	RasterizedEllipseNode->Visual.bRenderBoundsClippedByParent = true;
-	const Design2UMGNodeWidgetFactory::FBuildResult ClippedRasterizedEllipseResult =
-		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(RasterizedEllipseNode);
-	TestEqual(TEXT("Parent-clipped rasterized ellipse does not add another ellipse mask"), ClippedRasterizedEllipseResult.Widget.Type, TEXT("Image"));
-	TestTrue(TEXT("Parent-clipped rasterized ellipse keeps its texture"),
-		ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.IsSet()
-		&& ClippedRasterizedEllipseResult.Widget.Brush.Image.TexturePath.GetValue() == TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop"));
+	TSharedPtr<FDesignNode> ImageEllipseNode = Design2UMGCoreTests::MakeNode(TEXT("ellipse_image"), EDesignNodeType::Ellipse, FDesignSize::Fixed(96.0f), FDesignSize::Fixed(48.0f));
+	FDesignFill& ImageEllipseFill = ImageEllipseNode->Visual.Fills.AddDefaulted_GetRef();
+	ImageEllipseFill.Type = EDesignFillType::Image;
+	ImageEllipseFill.Image.Url = TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop");
+	const Design2UMGNodeWidgetFactory::FBuildResult ImageEllipseResult =
+		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(ImageEllipseNode);
+	TestEqual(TEXT("Image-filled ellipse keeps its native mask"), ImageEllipseResult.Widget.Type, TEXT("Border"));
+	TestTrue(TEXT("Factory preserves genuine image paint"), ImageEllipseNode->Visual.Fills[0].IsImage()
+		&& ImageEllipseNode->Visual.Fills[0].Image.Url == TEXT("/Game/Textures/T_EllipseCrop.T_EllipseCrop"));
 
 	TSharedPtr<FDesignNode> LineNode = Design2UMGCoreTests::MakeNode(TEXT("line_fallback"), EDesignNodeType::Line, FDesignSize::Fixed(120.0f), FDesignSize::Fixed(6.0f));
 	LineNode->Transform.SetPosition(6.0f, 18.0f);

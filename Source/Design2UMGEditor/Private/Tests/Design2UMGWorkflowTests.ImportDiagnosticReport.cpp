@@ -465,7 +465,7 @@ bool FImportDiagnosticReportGenerationFailureTest::RunTest(const FString&)
 		Request.OutputPath = TEXT("/Temp/FailedImportReport_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		Request.Generation.Mode = Mode;
 		Request.DiagnosticDocument = FDesignDocument();
-		AddExpectedError(TEXT("has no valid capture size"), EAutomationExpectedErrorFlags::Contains, 1);
+		AddExpectedError(TEXT("requires its existing single content surface"), EAutomationExpectedErrorFlags::Contains, 1);
 		if (Mode != EDesignBlueprintGenerationMode::BlueprintAndCompiledPng)
 		{
 			AddExpectedError(TEXT("DesignImportGeneration: Widget Blueprint build failed"), EAutomationExpectedErrorFlags::Contains, 1);
@@ -491,7 +491,7 @@ bool FImportDiagnosticReportGenerationFailureTest::RunTest(const FString&)
 			const TSharedPtr<FJsonObject> Entry = Value->AsObject();
 			return Entry->GetStringField(TEXT("kind")) == TEXT("resource_preparation_failed")
 				&& Entry->GetStringField(TEXT("message")).Contains(TEXT("FailedCaptureRoot"))
-				&& Entry->GetStringField(TEXT("message")).Contains(TEXT("has no valid capture size"));
+				&& Entry->GetStringField(TEXT("message")).Contains(TEXT("requires its existing single content surface"));
 		}));
 	}
 	return true;
@@ -531,18 +531,16 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	TextPathNode->MutableSource().SourceNodeType = TEXT("TEXT_PATH");
 	TextPathNode->Text.FontFamily = TEXT("DefinitelyMissingReportFont");
 
-	TSharedPtr<FDesignNode> RenderFallbackNode = MakeShared<FDesignNode>();
-	RenderFallbackNode->Id = TEXT("render_1");
-	RenderFallbackNode->Name = TEXT("Blurred Hero");
-	RenderFallbackNode->Type = EDesignNodeType::Rectangle;
-	RenderFallbackNode->MutableSource().SourceNodeType = TEXT("RECTANGLE");
-	RenderFallbackNode->Visual.RenderFallback.ImageRef = TEXT("render_hero");
-	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackScope"), TEXT("full"));
-	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackSource"), TEXT("figma_render_png"));
-	RenderFallbackNode->Metadata.Add(TEXT("design2umgRenderFallbackReason"), TEXT("foreground_blur"));
+	TSharedPtr<FDesignNode> ImageFilterNode = MakeShared<FDesignNode>();
+	ImageFilterNode->Id = TEXT("filtered_image");
+	ImageFilterNode->Name = TEXT("Filtered Image");
+	ImageFilterNode->Type = EDesignNodeType::Rectangle;
+	ImageFilterNode->MutableSource().SourceNodeType = TEXT("RECTANGLE");
+	ImageFilterNode->Metadata.Add(TEXT("figma.imageFiltersUnsupported"), TEXT("true"));
+	ImageFilterNode->Metadata.Add(TEXT("figma.gifStaticFrame"), TEXT("true"));
 
 	Document.Children.Add(TextPathNode);
-	Document.Children.Add(RenderFallbackNode);
+	Document.Children.Add(ImageFilterNode);
 
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_ImportReportFixture");
@@ -637,7 +635,8 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Top-level skipped nodes alias is retired"), RootObject->HasField(TEXT("skippedDesignerNodes")));
 
 	bool bFoundTextPathFallback = false;
-	bool bFoundRenderFallback = false;
+	bool bFoundUnsupportedImageFilters = false;
+	bool bFoundStaticGifFrame = false;
 	for (const TSharedPtr<FJsonValue>& Value : *Degradations)
 	{
 		const TSharedPtr<FJsonObject> Entry = Value.IsValid() ? Value->AsObject() : nullptr;
@@ -648,10 +647,12 @@ bool FImportDiagnosticReportStructureTest::RunTest(const FString& Parameters)
 
 		const FString Kind = Entry->GetStringField(TEXT("kind"));
 		bFoundTextPathFallback |= Kind == TEXT("text_path_fallback");
-		bFoundRenderFallback |= Kind == TEXT("render_fallback");
+		bFoundUnsupportedImageFilters |= Kind == TEXT("unsupported_image_filters");
+		bFoundStaticGifFrame |= Kind == TEXT("static_gif_frame");
 	}
 	TestTrue(TEXT("Report records text path fallback"), bFoundTextPathFallback);
-	TestTrue(TEXT("Report records render fallback"), bFoundRenderFallback);
+	TestTrue(TEXT("Report records unsupported image filters"), bFoundUnsupportedImageFilters);
+	TestTrue(TEXT("Report records static GIF playback"), bFoundStaticGifFrame);
 
 	const TSharedPtr<FJsonObject>* EffectsObject = nullptr;
 	TestTrue(TEXT("Report has effects object"), RootObject->TryGetObjectField(TEXT("effects"), EffectsObject) && EffectsObject);

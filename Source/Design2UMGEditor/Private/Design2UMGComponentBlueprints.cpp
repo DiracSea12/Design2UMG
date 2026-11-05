@@ -222,6 +222,7 @@ namespace
 
 FString FDesign2UMGComponentBlueprintContext::ResolveKey(const FUMGWidgetNode& Node) const
 {
+	if (InlineAnimationInstanceIds.Contains(Node.GetStableDesignNodeId())) return FString();
 	if (!Node.HasSourceData() || Node.Source().SourceNodeType != TEXT("INSTANCE")) return FString();
 	if (!Node.Source().MainComponentKey.IsEmpty()) return Node.Source().MainComponentKey;
 	if (const FString* Key = NodeIdToKey.Find(Node.Source().ComponentId)) return *Key;
@@ -291,6 +292,37 @@ namespace
 		const FDesign2UMGGenerationSettingsSnapshot& Effective, FDesign2UMGComponentBlueprintContext& Context,
 		FPreparedComponentTemplates& OutPrepared)
 	{
+		TSet<FString> AnimatedIds;
+		for (const auto& Binding : Data.PrototypeNavigation().ClickBindings)
+		{
+			for (const auto& Target : Binding.Transition.WidgetTargets) AnimatedIds.Add(Target.NodeId);
+			for (const auto& Live : Binding.Transition.LivePresentations)
+			{
+				AnimatedIds.Add(Live.WidgetId);
+				AnimatedIds.Add(Live.OriginalSocketWidgetId);
+				AnimatedIds.Add(Live.PresentationSocketWidgetId);
+				if (const auto* Host = Data.PrototypeNavigation().StateHosts.FindByPredicate(
+					[&](const FUMGPrototypeStateHost& Item) { return Item.HostWidgetId == Live.WidgetId; }))
+				{
+					AnimatedIds.Add(Host->InstanceWidgetId);
+					for (const auto& State : Host->States) AnimatedIds.Add(State.WidgetId);
+				}
+			}
+			for (const auto& Target : Binding.Transition.LayoutTargets)
+			{
+				AnimatedIds.Add(Target.NodeId);
+				AnimatedIds.Add(Target.DestinationWidgetId);
+				AnimatedIds.Add(Target.PresentationWidgetId);
+			}
+		}
+		TFunction<bool(const FUMGWidgetNode&)> KeepAnimationTree = [&](const FUMGWidgetNode& Node)
+		{
+			bool bAnimated = AnimatedIds.Contains(Node.GetStableDesignNodeId());
+			for (const auto& Child : Node.Children) bAnimated |= KeepAnimationTree(Child);
+			if (bAnimated && Node.Source().IsFigmaInstance()) Context.InlineAnimationInstanceIds.Add(Node.GetStableDesignNodeId());
+			return bAnimated;
+		};
+		KeepAnimationTree(Data.RootWidget);
 		FigmaComponentDependencies::FCatalog Catalog;
 		if (!FigmaComponentDependencies::Parse(Data.SourceDocument().ComponentDependenciesJson, Catalog, Context.Error))
 			return false;

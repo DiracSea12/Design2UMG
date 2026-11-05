@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGGenerator.h"
+#include "Design2UMGInitialScrollWiring.h"
 #include "PencilShaderRuntimeBindings.h"
 #include "Design2UMGAssetRegistryAccess.h"
 #include "Design2UMGComponentBlueprints.h"
@@ -10,6 +11,7 @@
 #include "Design2UMGPrototypeGraphWiring.h"
 #include "UMGGeneratorRootHandoff.h"
 #include "UMGPrototypeAnimationBuilder.h"
+#include "Design2UMGAnimationPresets.h"
 #include "UMGWidgetNodeAccess.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetRenderer.h"
@@ -638,6 +640,10 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 		DiscardFailedAsset();
 		return Result;
 	}
+	FUMGPrototypeNavigationData PreparedNavigation;
+	if (PrototypeNavigation) PreparedNavigation = *PrototypeNavigation;
+	UMGPrototypeAnimationBuilder::ResolvePreparedPlacements(WBP,
+		PencilShaderRuntimeBindings::ProducerPlacements(WBP), PrototypeNavigation ? &PreparedNavigation : nullptr);
 
 	// Compile after rendering; transient texture data may already be gone at this point.
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WBP);
@@ -656,18 +662,20 @@ FDesign2UMGCommitResult FUMGGenerator::SaveSingleWidgetBlueprint(
 	// Runs strictly before the final full compile below, which registers the delegate
 	// bindings from the authored source nodes and emits the bound functions.
 	bool bHasWiringWarnings = false;
+	TArray<FString> WiringWarnings;
 	if (PrototypeNavigation)
 	{
-		TArray<FString> WiringWarnings;
-		Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, *PrototypeNavigation, WiringWarnings);
-		bHasWiringWarnings = !WiringWarnings.IsEmpty();
-		if (GenerationOutput && bHasWiringWarnings)
+		Design2UMGPrototypeGraphWiring::WireSimplePrototypeBindings(WBP, PreparedNavigation, WiringWarnings);
+	}
+	Design2UMGAnimationPresets::Restore(WBP, WiringWarnings);
+	Design2UMGInitialScrollWiring::Wire(WBP);
+	bHasWiringWarnings = !WiringWarnings.IsEmpty();
+	if (GenerationOutput && bHasWiringWarnings)
+	{
+		GenerationOutput->bHasDegradation = true;
+		for (FString& Warning : WiringWarnings)
 		{
-			GenerationOutput->bHasDegradation = true;
-			for (FString& Warning : WiringWarnings)
-			{
-				GenerationOutput->MappingDiagnostics.Add({TEXT("prototype_wiring_skipped"), MoveTemp(Warning)});
-			}
+			GenerationOutput->MappingDiagnostics.Add({TEXT("prototype_wiring_skipped"), MoveTemp(Warning)});
 		}
 	}
 

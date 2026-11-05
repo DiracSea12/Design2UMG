@@ -18,8 +18,13 @@
 #include "Editor.h"
 #include "Components/TextBlock.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateUser.h"
+#include "Input/Events.h"
+#include "InputCoreTypes.h"
 #include "Layout/Children.h"
+#include "Layout/WidgetPath.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
@@ -67,6 +72,30 @@ struct FDesign2UMGPreviewWindowTestAccess
 
 namespace
 {
+	FString PreviewWindowLabel(const TCHAR* Key)
+	{
+		return FText::FromStringTable(TEXT("Design2UMGPreviewWindow"), Key).ToString();
+	}
+
+	TSharedPtr<SWidget> FindWidgetOfType(const TSharedRef<SWidget>& Widget, const FName TypeName)
+	{
+		if (Widget->GetType() == TypeName)
+		{
+			return Widget;
+		}
+		if (FChildren* Children = Widget->GetChildren())
+		{
+			for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+			{
+				if (TSharedPtr<SWidget> Found = FindWidgetOfType(Children->GetChildAt(ChildIndex), TypeName))
+				{
+					return Found;
+				}
+			}
+		}
+		return nullptr;
+	}
+
 	TSharedRef<SDesign2UMGPreviewWindow> GetPreviewWindowContent(SWindow& Window)
 	{
 #if UE_VERSION_OLDER_THAN(5, 1, 0)
@@ -109,14 +138,14 @@ namespace
 		return RootTextBlock ? RootTextBlock->GetText().ToString() : FString();
 	}
 
-	bool WidgetTreeContainsText(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
+	TSharedPtr<STextBlock> FindTextBlockByText(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
 	{
 		if (Widget->GetType() == STextBlock::StaticWidgetClass().GetWidgetType())
 		{
 			const TSharedRef<STextBlock> TextBlock = StaticCastSharedRef<STextBlock>(Widget);
 			if (TextBlock->GetText().ToString() == ExpectedText)
 			{
-				return true;
+				return TextBlock;
 			}
 		}
 
@@ -124,14 +153,19 @@ namespace
 		{
 			for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
 			{
-				if (WidgetTreeContainsText(Children->GetChildAt(ChildIndex), ExpectedText))
+				if (TSharedPtr<STextBlock> Found = FindTextBlockByText(Children->GetChildAt(ChildIndex), ExpectedText))
 				{
-					return true;
+					return Found;
 				}
 			}
 		}
 
-		return false;
+		return nullptr;
+	}
+
+	bool WidgetTreeContainsText(const TSharedRef<SWidget>& Widget, const FString& ExpectedText)
+	{
+		return FindTextBlockByText(Widget, ExpectedText).IsValid();
 	}
 
 	bool WidgetTreeContainsTextFragment(const TSharedRef<SWidget>& Widget, const FString& Fragment)
@@ -660,7 +694,7 @@ namespace
 			}
 
 			JsonEditor->SetText(FText::FromString(EditedJson));
-			const TSharedPtr<SButton> FormatButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Format JSON"));
+			const TSharedPtr<SButton> FormatButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("FormatJson")));
 			if (!FormatButton.IsValid())
 			{
 				return false;
@@ -696,7 +730,7 @@ namespace
 			}
 
 			const int32 PreviousInvocationCount = ConfirmDelegateSpy->GetInvocationCount();
-			const TSharedPtr<SButton> GenerateButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Generate Widget Blueprint"));
+			const TSharedPtr<SButton> GenerateButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("Generate")));
 			if (!GenerateButton.IsValid())
 			{
 				return false;
@@ -721,7 +755,7 @@ namespace
 			}
 
 			const int32 PreviousInvocationCount = CancelDelegateSpy->GetInvocationCount();
-			const TSharedPtr<SButton> CancelButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), TEXT("Cancel"));
+			const TSharedPtr<SButton> CancelButton = FindButtonByLabel(PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("Cancel")));
 			if (!CancelButton.IsValid())
 			{
 				return false;
@@ -820,10 +854,10 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Initial open preview text comes from injected seam"), Harness.GetPreviewWidgetText(), TEXT("SpyMaterialized:SpyAnalyzed-1"));
 	TestTrue(TEXT("Preview window is attached to Slate"), Harness.IsWindowAttached());
 	const UUserWidget* InitialWidget = Harness.MaterializationSpy->GetLastPreviewWidget();
-	TSharedPtr<SButton> ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), TEXT("Original size (1:1)"));
+	TSharedPtr<SButton> ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("PreviewActualSize")));
 	if (!TestTrue(TEXT("Preview starts fitted with an original-size action"), ScaleButton.IsValid())) return false;
 	ScaleButton->SimulateClick();
-	ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), TEXT("Fit to window"));
+	ScaleButton = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("FitPreview")));
 	if (!TestTrue(TEXT("Original-size view offers fit to window"), ScaleButton.IsValid())) return false;
 	TestTrue(TEXT("Original-size view retains preview content"), Harness.PreviewWidgetMatchesSpyMaterialization());
 	ScaleButton->SimulateClick();
@@ -831,6 +865,224 @@ bool FPreviewWindowTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Scale changes reuse the same preview widget"), Harness.MaterializationSpy->GetLastPreviewWidget() == InitialWidget);
 	TestEqual(TEXT("Scale changes do not rematerialize the preview"), Harness.MaterializationSpy->GetInvocationCount(), 1);
 	TestTrue(TEXT("Scale changes retain the approved generation snapshot"), FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Harness.PreviewWindow));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewWindowManyWarningsLayoutTest,
+	"Design2UMG.PreviewWindow.ManyWarningsLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPreviewWindowManyWarningsLayoutTest::RunTest(const FString& Parameters)
+{
+	TArray<FString> Warnings;
+	for (int32 WarningIndex = 0; WarningIndex < 400; ++WarningIndex)
+	{
+		Warnings.Add(FString::Printf(TEXT("Node 'shared-node': 告警 %d，完整详情应可滚动查看。"), WarningIndex));
+	}
+	FDesignImageImportResult ImageResult;
+	for (int32 ImageIndex = 0; ImageIndex < 48; ++ImageIndex)
+	{
+		FDesignImageDiagnostic Diagnostic;
+		Diagnostic.Outcome = EDesignImageDiagnosticOutcome::Failed;
+		Diagnostic.Category = EDesignImageDiagnosticCategory::UnresolvedReference;
+		Diagnostic.Message = FString::Printf(TEXT("图片告警 %d，保留原始原因。"), ImageIndex);
+		ImageResult.AddDiagnostic(MoveTemp(Diagnostic));
+	}
+	FPreviewWindowHarness Harness;
+	if (!TestTrue(TEXT("Preview opens with many diagnostics"), Harness.Open(
+		MakePreviewHarnessJson(TEXT("Many warnings")), TEXT("/Game/Test"), Warnings,
+		TOptional<FDesignPreviewMaterializationSettingsSnapshot>(), true, ImageResult)))
+	{
+		return false;
+	}
+	const FText SummaryPattern = FText::FromStringTable(TEXT("Design2UMGPreviewWindow"), TEXT("ConversionWarningsSummary"));
+	TArray<FString> SummaryParameters;
+	FText::GetFormatPatternParameters(SummaryPattern, SummaryParameters);
+	TestTrue(TEXT("Summary template retains the warning-count parameter"), SummaryParameters.Contains(TEXT("0")));
+	const FText WarningCount = FText::AsNumber(Warnings.Num());
+	const FString ExpectedSummary = TEXT("转换告警：400 条");
+	TestTrue(TEXT("Summary counts warnings, not distinct nodes"),
+		WidgetTreeContainsText(Harness.PreviewWindow.ToSharedRef(), ExpectedSummary));
+	const TSharedPtr<STextBlock> Summary = FindTextBlockByText(Harness.PreviewWindow.ToSharedRef(), ExpectedSummary);
+	TestTrue(TEXT("Displayed summary contains the input warning count"), Summary.IsValid() && Summary->GetText().ToString().Contains(WarningCount.ToString()));
+	for (const FString& Warning : Warnings)
+	{
+		TestTrue(TEXT("Every conversion warning is retained"), WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), Warning));
+	}
+	for (const FDesignImageDiagnostic& Diagnostic : ImageResult.Diagnostics)
+	{
+		TestTrue(TEXT("Every image failure is retained, including beyond 32"),
+			WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), Diagnostic.Message));
+	}
+	const TSharedPtr<SScrollBox> Diagnostics = StaticCastSharedPtr<SScrollBox>(FindWidgetOfType(Harness.PreviewWindow.ToSharedRef(), TEXT("SScrollBox")));
+	const TSharedPtr<SWidget> FontTool = FindWidgetOfType(Harness.PreviewWindow.ToSharedRef(), TEXT("SPencilFontTool"));
+	const TSharedPtr<SButton> Generate = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("Generate")));
+	const TSharedPtr<SButton> Cancel = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("Cancel")));
+	const TSharedPtr<SButton> Format = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("FormatJson")));
+	const TSharedPtr<SButton> Scale = FindButtonByLabel(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("PreviewActualSize")));
+	const TSharedPtr<STextBlock> MainTitle = FindTextBlockByText(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("PreviewTitle")));
+	const TSharedPtr<STextBlock> PreviewTitle = FindTextBlockByText(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("UMGPreviewFit")));
+	const TSharedPtr<STextBlock> JsonTitle = FindTextBlockByText(Harness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("JsonEditor")));
+	if (!TestTrue(TEXT("Diagnostics have a scroll container"), Diagnostics.IsValid())
+		|| !TestTrue(TEXT("Font tool remains present"), FontTool.IsValid())
+		|| !TestTrue(TEXT("Generate remains present"), Generate.IsValid())
+		|| !TestTrue(TEXT("Cancel remains present"), Cancel.IsValid())
+		|| !TestTrue(TEXT("JSON format action remains present"), Format.IsValid())
+		|| !TestTrue(TEXT("Preview scale action remains present"), Scale.IsValid())
+		|| !TestTrue(TEXT("Main title remains present"), MainTitle.IsValid())
+		|| !TestTrue(TEXT("Preview title remains present"), PreviewTitle.IsValid())
+		|| !TestTrue(TEXT("JSON title remains present"), JsonTitle.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("All conversion warnings are inside the scroll container"), WidgetTreeContainsTextFragment(Diagnostics.ToSharedRef(), Warnings.Last()));
+	TestTrue(TEXT("All image failures are inside the scroll container"), WidgetTreeContainsTextFragment(Diagnostics.ToSharedRef(), ImageResult.Diagnostics.Last().Message));
+	TestTrue(TEXT("Image summary retains the complete failure count"),
+		WidgetTreeContainsTextFragment(Harness.PreviewWindow.ToSharedRef(), TEXT("图片解析失败：48 张")));
+	for (const TCHAR* Key : { TEXT("ImageDiagnosticItem"), TEXT("GenerationRecoveryStates"), TEXT("GenerationAssetPath"), TEXT("PreviewWidgetMissing") })
+	{
+		const FString Template = PreviewWindowLabel(Key);
+		TestTrue(FString::Printf(TEXT("%s contains an expanded newline"), Key), Template.Contains(TEXT("\n")));
+		TestFalse(FString::Printf(TEXT("%s contains no residual backslash"), Key), Template.Contains(TEXT("\\")));
+	}
+	TSharedPtr<FSlateVirtualUserHandle> VirtualUserHandle;
+	int32 VirtualUserIndex = 0;
+	do
+	{
+		VirtualUserHandle = FSlateApplication::Get().FindOrCreateVirtualUser(VirtualUserIndex++);
+	}
+	while (!VirtualUserHandle.IsUnique());
+	const int32 UserIndex = VirtualUserHandle->GetUserIndex();
+	const TSharedPtr<FSlateUser> VirtualUser = FSlateApplication::Get().GetUser(UserIndex);
+	if (!TestTrue(TEXT("Pointer routing owns an independent virtual Slate user"), VirtualUser.IsValid()
+		&& VirtualUser->IsVirtualUser() && UserIndex != FSlateApplication::Get().GetCursorUser()->GetUserIndex()))
+	{
+		return false;
+	}
+	const auto LocateControl = [this, UserIndex](FPreviewWindowHarness& TargetHarness, const TSharedRef<SWidget>& Control)
+	{
+		bool bInteractive = TestTrue(TEXT("Interactive control is enabled and visible"), Control->IsEnabled() && Control->GetVisibility().IsVisible());
+		const FGeometry& Geometry = Control->GetCachedGeometry();
+		const FVector2D Center = Geometry.LocalToAbsolute(Geometry.GetLocalSize() * 0.5f);
+		const TArray<TSharedRef<SWindow>> Windows{ TargetHarness.Window.ToSharedRef() };
+		FWidgetPath Path = FSlateApplication::Get().LocateWindowUnderMouse(Center, Windows, false, UserIndex);
+		bInteractive &= TestTrue(TEXT("Native hit path reaches the actual control"), Path.IsValid() && Path.ContainsWidget(&Control.Get()));
+		if (Path.IsValid())
+		{
+			bInteractive &= TestTrue(TEXT("Native hit path belongs only to the target test window"), Path.GetWindow() == TargetHarness.Window.ToSharedRef());
+			for (int32 WidgetIndex = 0; WidgetIndex < Path.Widgets.Num(); ++WidgetIndex)
+			{
+				const TSharedRef<SWidget>& Ancestor = Path.Widgets[WidgetIndex].Widget;
+				bInteractive &= TestTrue(TEXT("Hit path ancestors are enabled and visible"), Ancestor->IsEnabled() && Ancestor->GetVisibility().IsVisible());
+			}
+		}
+		return bInteractive ? Path : FWidgetPath();
+	};
+	const auto ClickControl = [this, &LocateControl, &VirtualUser, UserIndex](FPreviewWindowHarness& TargetHarness, const TSharedRef<SWidget>& Control)
+	{
+		const FWidgetPath Path = LocateControl(TargetHarness, Control);
+		if (!Path.IsValid())
+		{
+			return false;
+		}
+		const FGeometry& Geometry = Control->GetCachedGeometry();
+		const FVector2D Center = Geometry.LocalToAbsolute(Geometry.GetLocalSize() * 0.5f);
+		const TSet<FKey> PressedButtons{ EKeys::LeftMouseButton };
+		const TSet<FKey> ReleasedButtons;
+		const FPointerEvent Move(UserIndex, FSlateApplication::CursorPointerIndex, Center, Center, ReleasedButtons, FKey(), 0.0f, FModifierKeysState());
+		const FPointerEvent Press(UserIndex, FSlateApplication::CursorPointerIndex, Center, Center, PressedButtons, EKeys::LeftMouseButton, 0.0f, FModifierKeysState());
+		const FPointerEvent Release(UserIndex, FSlateApplication::CursorPointerIndex, Center, Center, ReleasedButtons, EKeys::LeftMouseButton, 0.0f, FModifierKeysState());
+		FSlateApplication::Get().RoutePointerMoveEvent(Path, Move, true);
+		const bool bDownHandled = FSlateApplication::Get().RoutePointerDownEvent(Path, Press).IsEventHandled();
+		const FWidgetPath CapturePath = VirtualUser->GetCaptorPath(FSlateApplication::CursorPointerIndex);
+		const bool bTargetCapture = TestTrue(TEXT("Pointer capture is confined to the target test window and control"),
+			CapturePath.IsValid() && CapturePath.GetWindow() == TargetHarness.Window.ToSharedRef() && CapturePath.ContainsWidget(&Control.Get()));
+		const bool bUpHandled = FSlateApplication::Get().RoutePointerUpEvent(Path, Release).IsEventHandled();
+		const bool bCaptureReleased = TestFalse(TEXT("Virtual pointer capture is released after pointer up"), VirtualUser->HasCapture(FSlateApplication::CursorPointerIndex));
+		TargetHarness.PumpSlate(6);
+		return bDownHandled && bUpHandled && bTargetCapture && bCaptureReleased;
+	};
+	for (const FVector2D Size : { FVector2D(1200, 720), FVector2D(900, 620) })
+	{
+		// Resize takes desktop pixels; the layout contract is stated in Slate units.
+		Harness.Window->Resize(Size * Harness.Window->GetDPIScaleFactor());
+		Harness.PumpSlate(6);
+		TestTrue(TEXT("Diagnostics height stays bounded"), Diagnostics->GetCachedGeometry().GetLocalSize().Y > 0
+			&& Diagnostics->GetCachedGeometry().GetLocalSize().Y <= 160.0f);
+		TestTrue(TEXT("Preview retains usable height"), FDesign2UMGPreviewWindowTestAccess::GetPreviewContainer(*Harness.PreviewWindow)->GetCachedGeometry().GetLocalSize().Y >= 120.0f);
+		TestTrue(TEXT("JSON retains usable height"), FDesign2UMGPreviewWindowTestAccess::GetJsonEditor(*Harness.PreviewWindow)->GetCachedGeometry().GetLocalSize().Y >= 120.0f);
+		const FGeometry& WindowGeometry = Harness.PreviewWindow->GetCachedGeometry();
+		const auto BoundsInWindow = [&WindowGeometry](const TSharedRef<SWidget>& Widget)
+		{
+			const FGeometry& Geometry = Widget->GetCachedGeometry();
+			const FVector2D TopLeft = WindowGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(FVector2D::ZeroVector));
+			const FVector2D BottomRight = WindowGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(Geometry.GetLocalSize()));
+			return FSlateRect(TopLeft.X, TopLeft.Y, BottomRight.X, BottomRight.Y);
+		};
+		for (const TSharedRef<SWidget>& Control : {
+			StaticCastSharedRef<SWidget>(FontTool.ToSharedRef()),
+			StaticCastSharedRef<SWidget>(FDesign2UMGPreviewWindowTestAccess::GetOutputPathBox(*Harness.PreviewWindow).ToSharedRef()),
+			StaticCastSharedRef<SWidget>(Generate.ToSharedRef()), StaticCastSharedRef<SWidget>(Cancel.ToSharedRef()),
+			StaticCastSharedRef<SWidget>(Format.ToSharedRef()), StaticCastSharedRef<SWidget>(Scale.ToSharedRef()),
+			StaticCastSharedRef<SWidget>(MainTitle.ToSharedRef()), StaticCastSharedRef<SWidget>(PreviewTitle.ToSharedRef()),
+			StaticCastSharedRef<SWidget>(JsonTitle.ToSharedRef()) })
+		{
+			const FGeometry& Geometry = Control->GetCachedGeometry();
+			const FVector2D TopLeft = WindowGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(FVector2D::ZeroVector));
+			const FVector2D BottomRight = WindowGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(Geometry.GetLocalSize()));
+			TestTrue(TEXT("Tools and bottom controls remain inside the window with positive area"),
+				Geometry.GetLocalSize().GetMin() > 0 && TopLeft.GetMin() >= 0
+				&& BottomRight.X <= WindowGeometry.GetLocalSize().X + 1
+				&& BottomRight.Y <= WindowGeometry.GetLocalSize().Y + 1);
+		}
+		const FSlateRect MainBounds = BoundsInWindow(MainTitle.ToSharedRef());
+		const FSlateRect PreviewBounds = BoundsInWindow(PreviewTitle.ToSharedRef());
+		const FSlateRect JsonBounds = BoundsInWindow(JsonTitle.ToSharedRef());
+		TestTrue(TEXT("Main title stays above both panel headers"), MainBounds.Bottom <= PreviewBounds.Top && MainBounds.Bottom <= JsonBounds.Top);
+		TestTrue(TEXT("Preview title does not overlap the scale button"), PreviewBounds.Right <= BoundsInWindow(Scale.ToSharedRef()).Left);
+		TestTrue(TEXT("JSON title does not overlap the format button"), JsonBounds.Right <= BoundsInWindow(Format.ToSharedRef()).Left);
+		for (const TSharedRef<SWidget>& Control : {
+			StaticCastSharedRef<SWidget>(FDesign2UMGPreviewWindowTestAccess::GetOutputPathBox(*Harness.PreviewWindow).ToSharedRef()),
+			StaticCastSharedRef<SWidget>(Generate.ToSharedRef()), StaticCastSharedRef<SWidget>(Cancel.ToSharedRef()),
+			StaticCastSharedRef<SWidget>(Format.ToSharedRef()), StaticCastSharedRef<SWidget>(Scale.ToSharedRef()) })
+		{
+			LocateControl(Harness, Control);
+		}
+		TestFalse(TEXT("Output path remains editable"), FDesign2UMGPreviewWindowTestAccess::GetOutputPathBox(*Harness.PreviewWindow)->IsReadOnly());
+		TestTrue(TEXT("Long diagnostics require scrolling"), Diagnostics->GetScrollOffsetOfEnd() > 0);
+		Diagnostics->ScrollToEnd();
+		Harness.PumpSlate(6);
+		TestTrue(TEXT("Last diagnostic can be reached by scrolling"),
+			FMath::IsNearlyEqual(Diagnostics->GetScrollOffset(), Diagnostics->GetScrollOffsetOfEnd(), 1.0f));
+	}
+	TestTrue(TEXT("Many warnings do not invalidate the approved snapshot"), Harness.CanConfirm());
+	const bool bCancelClicked = ClickControl(Harness, Cancel.ToSharedRef());
+	TestTrue(TEXT("Cancel still dispatches after scrolling diagnostics"), bCancelClicked && Harness.CancelDelegateSpy->GetInvocationCount() == 1);
+	TestEqual(TEXT("Cancellation does not dispatch generation"), Harness.ConfirmDelegateSpy->GetInvocationCount(), 0);
+	TestFalse(TEXT("Native cancellation closes the warning window"), Harness.IsWindowAttached());
+
+	FPreviewWindowHarness ConfirmationHarness;
+	if (!TestTrue(TEXT("Independent many-warning confirmation window opens"), ConfirmationHarness.Open(
+		MakePreviewHarnessJson(TEXT("Many warnings confirmation")), TEXT("/Game/Test"), Warnings)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Confirmation window still contains all conversion warnings"), WidgetTreeContainsTextFragment(ConfirmationHarness.PreviewWindow.ToSharedRef(), Warnings.Last()));
+	const TSharedPtr<SEditableTextBox> OutputPath = FDesign2UMGPreviewWindowTestAccess::GetOutputPathBox(*ConfirmationHarness.PreviewWindow);
+	TestFalse(TEXT("Confirmation output path is editable"), OutputPath->IsReadOnly());
+	TestTrue(TEXT("Output path accepts native pointer routing"), ClickControl(ConfirmationHarness, OutputPath.ToSharedRef()));
+	const FString ConfirmedPath = TEXT("/Game/Design2UMG/_TestOutput/ManyWarningsConfirmed");
+	ConfirmationHarness.SetOutputPath(ConfirmedPath);
+	const TSharedPtr<SButton> ConfirmButton = FindButtonByLabel(ConfirmationHarness.PreviewWindow.ToSharedRef(), PreviewWindowLabel(TEXT("Generate")));
+	if (!TestTrue(TEXT("Independent confirmation action exists"), ConfirmButton.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Many-warning confirmation accepts native pointer routing"), ClickControl(ConfirmationHarness, ConfirmButton.ToSharedRef()));
+	TestEqual(TEXT("Many-warning confirmation dispatches the existing delegate once"), ConfirmationHarness.ConfirmDelegateSpy->GetInvocationCount(), 1);
+	TestEqual(TEXT("Many-warning confirmation forwards the edited output path"), ConfirmationHarness.ConfirmDelegateSpy->GetLastConfirmedOutputPath(), ConfirmedPath);
+	TestTrue(TEXT("Many-warning confirmation forwards an approved snapshot"), ConfirmationHarness.ConfirmDelegateSpy->GetLastApprovedRequestId() > 0);
+	TestEqual(TEXT("Confirmation does not dispatch cancellation"), ConfirmationHarness.CancelDelegateSpy->GetInvocationCount(), 0);
+	TestFalse(TEXT("Native confirmation closes its window"), ConfirmationHarness.IsWindowAttached());
 	return true;
 }
 
@@ -1229,9 +1481,9 @@ bool FPreviewGenerationFailureKeepsWindowTest::RunTest(const FString& Parameters
 		TestTrue(TEXT("Failure reason is visible"), StatusText.Contains(TEXT("Requested operation failed")));
 		TestTrue(TEXT("Known asset path is visible"), StatusText.Contains(TEXT("/Game/D2U_PreviewRetry/WBP_Result")));
 		if (Status == EDesign2UMGCommitStatus::RollbackIncomplete)
-			TestTrue(TEXT("Recovery exposes memory state"), StatusText.Contains(TEXT("memory state:")));
+			TestTrue(TEXT("Recovery exposes memory state"), StatusText.Contains(TEXT("内存状态：未更改")));
 		if (Status == EDesign2UMGCommitStatus::CommittedWithMetadataFailure)
-			TestTrue(TEXT("Partial commit is not reported as no asset"), StatusText.Contains(TEXT("asset was saved")));
+			TestTrue(TEXT("Partial commit is not reported as no asset"), StatusText.Contains(TEXT("资源已保存")));
 		TestTrue(TEXT("Failure preserves approved snapshot"), Harness.CanConfirm());
 		TestEqual(TEXT("Failure preserves edited JSON"), Harness.ConfirmDelegateSpy->GetLastConfirmedJson(), Json);
 		if (Harness.IsWindowAttached())
@@ -1258,7 +1510,7 @@ bool FPreviewUnboundConfirmationTest::RunTest(const FString& Parameters)
     Harness.PumpSlate();
     TestTrue(TEXT("Unbound callback leaves window open"), Harness.IsWindowAttached());
     TestTrue(TEXT("Unbound callback leaves snapshot ready"), Harness.CanConfirm());
-    TestTrue(TEXT("No operation is reported"), FDesign2UMGPreviewWindowTestAccess::Status(*Harness.PreviewWindow).Contains(TEXT("not started")));
+    TestTrue(TEXT("No operation is reported"), FDesign2UMGPreviewWindowTestAccess::Status(*Harness.PreviewWindow).Contains(TEXT("未开始生成")));
     return true;
 }
 
@@ -1307,7 +1559,7 @@ bool FPreviewPipelineGenerationRetryTest::RunTest(const FString& Parameters)
     FDesign2UMGPreviewWindowTestAccess::Confirm(*Preview);
     Pump.PumpSlate(6);
     TestFalse(TEXT("Actual metadata failure retains window"), bClosed);
-    TestTrue(TEXT("Actual partial commit is shown"), FDesign2UMGPreviewWindowTestAccess::Status(*Preview).Contains(TEXT("asset was saved")));
+    TestTrue(TEXT("Actual partial commit is shown"), FDesign2UMGPreviewWindowTestAccess::Status(*Preview).Contains(TEXT("资源已保存")));
     TestNotNull(TEXT("Asset really exists despite metadata failure"), LoadObject<UWidgetBlueprint>(nullptr, *(PackageName + TEXT(".") + Data.WidgetName)));
     TestTrue(TEXT("Failure retains confirmed snapshot"), FDesign2UMGPreviewWindowTestAccess::CanConfirmLatestSnapshot(*Preview));
     IFileManager::Get().DeleteDirectory(*ManifestPath, false, false);

@@ -69,6 +69,8 @@ namespace
 
 		TArray<uint8> Signature;
 		FMemoryWriter Writer(Signature);
+		auto ContourPaths = Request.SourceContourPaths;
+		Writer << ContourPaths;
 		Writer << Geometry << Width << Height << FillColor << Rule << StrokeColor
 			<< StrokeWidth << StrokeCap << StrokeJoin << Path.CanvasSize << Path.ViewBox << Path.FitGeometryToBounds
 			<< Path.StrokeAlignment << Request.PaintSize << Request.PaintOffset;
@@ -826,7 +828,8 @@ void SampleArc(
 	}
 }
 
-void ScanlineFill(
+template<bool bAreaCoverage>
+static void RasterizeFill(
 	const TArray<TArray<FPathPoint>>& SubPaths,
 	TArray<FColor>& OutPixels,
 	int32 Width, int32 Height,
@@ -868,57 +871,88 @@ void ScanlineFill(
 		}
 	}
 
+	constexpr int32 Samples = bAreaCoverage ? 8 : 1;
+	TArray<float> RowCoverage;
+	if (bAreaCoverage) RowCoverage.SetNumUninitialized(Width);
+	TArray<TPair<float, int32>> Intersections;
 	for (int32 Y = 0; Y < Height; ++Y)
 	{
-		float ScanY = Y + 0.5f;
-
-		TArray<TPair<float, int32>> Intersections;
-		for (const FEdge& E : Edges)
+		if (bAreaCoverage) FMemory::Memzero(RowCoverage.GetData(), Width * sizeof(float));
+		const auto FillSpan = [&](float Left, float Right)
 		{
-			if (ScanY < E.Y1 || ScanY >= E.Y2) continue;
-			float T = (ScanY - E.Y1) / (E.Y2 - E.Y1);
-			float IX = E.X1 + T * (E.X2 - E.X1);
-			Intersections.Add({IX, E.Dir});
-		}
-
-		Intersections.Sort([](const TPair<float, int32>& A, const TPair<float, int32>& B)
-		{
-			return A.Key < B.Key;
-		});
-
-		if (bEvenOdd)
-		{
-			for (int32 i = 0; i + 1 < Intersections.Num(); i += 2)
+			if (bAreaCoverage)
 			{
-				int32 X0 = FMath::Max(0, FMath::CeilToInt(Intersections[i].Key - 0.5f));
-				int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i + 1].Key - 0.5f));
+				const int32 X0 = FMath::Max(0, FMath::FloorToInt(Left));
+				const int32 X1 = FMath::Min(Width, FMath::CeilToInt(Right));
 				for (int32 X = X0; X < X1; ++X)
-					OutPixels[Y * Width + X] = FillColor;
+					RowCoverage[X] += FMath::Clamp(FMath::Min(Right, static_cast<float>(X + 1))
+						- FMath::Max(Left, static_cast<float>(X)), 0.0f, 1.0f);
+			}
+			else
+			{
+				const int32 X0 = FMath::Max(0, FMath::CeilToInt(Left - 0.5f));
+				const int32 X1 = FMath::Min(Width, FMath::CeilToInt(Right - 0.5f));
+				for (int32 X = X0; X < X1; ++X) OutPixels[Y * Width + X] = FillColor;
+			}
+		};
+		for (int32 Sample = 0; Sample < Samples; ++Sample)
+		{
+			const float ScanY = Y + (Sample + 0.5f) / Samples;
+			Intersections.Reset();
+			for (const FEdge& E : Edges)
+			{
+				if (ScanY < E.Y1 || ScanY >= E.Y2) continue;
+				const float T = (ScanY - E.Y1) / (E.Y2 - E.Y1);
+				Intersections.Add({E.X1 + T * (E.X2 - E.X1), E.Dir});
+			}
+			Intersections.Sort([](const TPair<float, int32>& A, const TPair<float, int32>& B)
+			{
+				return A.Key < B.Key;
+			});
+			if (bEvenOdd)
+			{
+				for (int32 i = 0; i + 1 < Intersections.Num(); i += 2)
+					FillSpan(Intersections[i].Key, Intersections[i + 1].Key);
+			}
+			else
+			{
+				int32 Winding = 0;
+				float SpanStart = 0.0f;
+				for (const auto& Intersection : Intersections)
+				{
+					const int32 Previous = Winding;
+					Winding += Intersection.Value;
+					if (Previous == 0 && Winding != 0) SpanStart = Intersection.Key;
+					else if (Previous != 0 && Winding == 0) FillSpan(SpanStart, Intersection.Key);
+				}
 			}
 		}
-		else
+		if (bAreaCoverage)
 		{
-			int32 Winding = 0;
-			float SpanStart = 0.0f;
-			for (int32 i = 0; i < Intersections.Num(); ++i)
+			for (int32 X = 0; X < Width; ++X)
 			{
-				int32 PrevWinding = Winding;
-				Winding += Intersections[i].Value;
-
-				if (PrevWinding == 0 && Winding != 0)
-				{
-					SpanStart = Intersections[i].Key;
-				}
-				else if (PrevWinding != 0 && Winding == 0)
-				{
-					int32 X0 = FMath::Max(0, FMath::CeilToInt(SpanStart - 0.5f));
-					int32 X1 = FMath::Min(Width, FMath::CeilToInt(Intersections[i].Key - 0.5f));
-					for (int32 X = X0; X < X1; ++X)
-						OutPixels[Y * Width + X] = FillColor;
-				}
+				const float Coverage = FMath::Clamp(RowCoverage[X] / Samples, 0.0f, 1.0f);
+				if (Coverage <= 0.0f) continue;
+				FColor& Pixel = OutPixels[Y * Width + X];
+				Pixel = FillColor;
+				Pixel.A = static_cast<uint8>(FMath::RoundToInt(FillColor.A * Coverage));
 			}
 		}
 	}
+}
+
+// Stroke construction and its clipping masks retain sample-center coverage.
+void ScanlineFill(const TArray<TArray<FPathPoint>>& SubPaths, TArray<FColor>& OutPixels,
+	int32 Width, int32 Height, FColor FillColor, bool bEvenOdd)
+{
+	RasterizeFill<false>(SubPaths, OutPixels, Width, Height, FillColor, bEvenOdd);
+}
+
+// Integrate horizontal span lengths over eight subrows of each existing raster texel.
+static void ScanlineFillCoverage(const TArray<TArray<FPathPoint>>& SubPaths, TArray<FColor>& OutPixels,
+	int32 Width, int32 Height, FColor FillColor, bool bEvenOdd)
+{
+	RasterizeFill<true>(SubPaths, OutPixels, Width, Height, FillColor, bEvenOdd);
 }
 
 bool FDesignPathRasterizer::IsRasterSizeAllowed(int64 Width, int64 Height)
@@ -950,6 +984,19 @@ bool FDesignPathRasterizer::TryGetRasterSize(float Width, float Height, FIntPoin
 
 namespace
 {
+	bool HasExplicitlyEmptyFillGeometry(const FUMGSourcePaintGeometry& Source)
+	{
+		return Source.Geometry.FillPaths.IsSet() && Source.Geometry.FillPaths->IsEmpty();
+	}
+
+	bool HasOnlySourceStrokePaint(const FUMGPathData& Path)
+	{
+		if (!Path.SourcePaintGeometry.IsSet()) return false;
+		const auto& Source = Path.SourcePaintGeometry.GetValue();
+		return HasExplicitlyEmptyFillGeometry(Source) && Source.FillPaints.IsSet()
+			&& Source.FillPaints->IsEmpty() && Source.StrokePaint.IsSet() && Path.CanvasSize.IsSet();
+	}
+
 	bool IsSourceStrokeRegion(const FUMGPathData& Path)
 	{
 		return Path.SourcePaintGeometry.IsSet() && Path.Geometry.Get(FString()).IsEmpty()
@@ -964,6 +1011,13 @@ namespace
 	bool ResolveSourcePaintGeometryBounds(FUMGPathData& Path)
 	{
 		if (!Path.SourcePaintGeometry.IsSet()) return true;
+		if (HasOnlySourceStrokePaint(Path))
+		{
+			// The layout uses at least one unit per axis; keep stroke coordinates in that space.
+			const FVector4 ViewBox = Path.ViewBox.Get(FVector4(0, 0, Path.CanvasSize->X, Path.CanvasSize->Y));
+			Path.ViewBox = FVector4(ViewBox.X, ViewBox.Y, FMath::Max(1.0, ViewBox.Z), FMath::Max(1.0, ViewBox.W));
+			return true;
+		}
 		const auto& Source = Path.SourcePaintGeometry.GetValue();
 		FBox2D Bounds(ForceInit);
 		const auto AddPaths = [&](const TOptional<TArray<FDesignGeometryPath>>& Paths)
@@ -980,7 +1034,8 @@ namespace
 			return true;
 		};
 		if (!AddPaths(Source.Geometry.FillPaths)) return false;
-		if (Source.StrokeAlignment != TEXT("inner") && !AddPaths(Source.Geometry.StrokePaths)) return false;
+		if ((Source.StrokeAlignment != TEXT("inner") || HasExplicitlyEmptyFillGeometry(Source))
+			&& !AddPaths(Source.Geometry.StrokePaths)) return false;
 		if (Path.ViewBox.IsSet())
 		{
 			const FVector4& ViewBox = Path.ViewBox.GetValue();
@@ -1131,9 +1186,14 @@ namespace
 			};
 			FBox2D FillBounds(ForceInit), StrokeBounds(ForceInit);
 			if (!RegionBounds(Source->Geometry.FillPaths, FillBounds) || !RegionBounds(Source->Geometry.StrokePaths, StrokeBounds)) return false;
-			if (Source->StrokeAlignment == TEXT("inner")) StrokeBounds = IntersectBounds(StrokeBounds, FillBounds);
+			if (Source->StrokeAlignment == TEXT("inner") && !HasExplicitlyEmptyFillGeometry(*Source))
+				StrokeBounds = IntersectBounds(StrokeBounds, FillBounds);
 			if (!Source->FillPaints->IsEmpty() && FillBounds.bIsValid) Ink += FillBounds;
-			if (StrokeBounds.bIsValid) Ink += StrokeBounds;
+			if (StrokeBounds.bIsValid)
+			{
+				Ink += StrokeBounds;
+				if (HasOnlySourceStrokePaint(Path)) Canvas += StrokeBounds;
+			}
 		}
 		else
 		{
@@ -1194,6 +1254,7 @@ bool FDesignPathRasterizer::TryBuildRequest(const FUMGWidgetNode& Node, FDesignP
 	}
 	if (!TryGetRasterSize(CanvasSize.X, CanvasSize.Y, OutRequest.Size)) return false;
 	OutRequest.Path = Node.Path;
+	OutRequest.SourceContourPaths = Node.Effect.GeometryMaskPaths;
     if (TextureMap && Node.Path.SourcePaintGeometry.IsSet())
     {
         const auto& Source = Node.Path.SourcePaintGeometry.GetValue();
@@ -1244,9 +1305,8 @@ bool FDesignPathRasterizer::TryBuildRequest(const FUMGWidgetNode& Node, FDesignP
 		if (TextureMap) OutRequest.FillTexture = TextureMap->FindRef(Node.Brush.Image.TexturePath.GetValue());
 	}
 	if (!BuildRasterBounds(OutRequest)) return false;
-	// Dynamic shader consumers sample the geometry mask directly in drawing-quad UVs.
-	// Retain that mask domain; static image and gradient paints use the cropped window.
-	if (Node.Brush.Shader.IsSet())
+	// Direct shader and source-contour consumers sample the authored drawing-quad UV domain.
+	if (Node.Brush.Shader.IsSet() || Node.Effect.GeometryMaskPaths.IsSet())
 	{
 		OutRequest.Size = OutRequest.CanvasBounds.Size();
 		OutRequest.PaintOffset = FIntPoint::ZeroValue - OutRequest.CanvasBounds.Min;
@@ -1443,7 +1503,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 	bool bEvenOdd = FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase);
 	if (bHasVisibleFill)
 	{
-		ScanlineFill(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
+		ScanlineFillCoverage(SubPaths, Pixels, Width, Height, FillColor->ToFColor(true), bEvenOdd);
 	}
 
 	// For implicit nonzero fills with multiple contours, compare an evenodd raster.
@@ -1452,7 +1512,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 	if (bHasVisibleFill && FillRule.IsEmpty())
 	{
 		TArray<FColor> EvenOddPixels;
-		ScanlineFill(SubPaths, EvenOddPixels, Width, Height, FillColor->ToFColor(true), true);
+		ScanlineFillCoverage(SubPaths, EvenOddPixels, Width, Height, FillColor->ToFColor(true), true);
 
 		const int64 NonZeroCoverage = CountFilledPixels(Pixels);
 		const int64 EvenOddCoverage = CountFilledPixels(EvenOddPixels);
@@ -1469,7 +1529,8 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 	if (bSourceStrokeRegion)
 	{
 		const auto& Source = PathData.SourcePaintGeometry.GetValue();
-		if (Source.StrokeAlignment == TEXT("inner") || Source.StrokeAlignment == TEXT("outer"))
+		if ((Source.StrokeAlignment == TEXT("inner") && !HasExplicitlyEmptyFillGeometry(Source))
+			|| Source.StrokeAlignment == TEXT("outer"))
 		{
 			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 			{
@@ -1559,7 +1620,8 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 	if (bSourceSurface)
 	{
 		for (auto& Pixel : Pixels) Pixel = FColor::Transparent;
-		const auto RasterizeRegions = [&](const TOptional<TArray<FDesignGeometryPath>>& Regions, TArray<FColor>& Mask) -> bool
+		const auto RasterizeRegions = [&](const TOptional<TArray<FDesignGeometryPath>>& Regions, TArray<FColor>& Mask,
+			const auto& FillRegion) -> bool
 		{
 			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 			{ if (OutError) *OutError = BudgetError; return false; }
@@ -1579,7 +1641,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 				if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 				{ if (OutError) *OutError = BudgetError; return false; }
 				TArray<FColor> RegionMask;
-				ScanlineFill(Contours, RegionMask, Width, Height, FColor::White,
+				FillRegion(Contours, RegionMask, Width, Height, FColor::White,
 					Region.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
 				for (int32 Index = 0; Index < Mask.Num(); ++Index)
 					if (RegionMask[Index].A > Mask[Index].A) Mask[Index] = RegionMask[Index];
@@ -1587,12 +1649,24 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 			return true;
 		};
 		TArray<FColor> FillMask, StrokeMask;
-		if (!RasterizeRegions(Surface->Geometry.FillPaths, FillMask) || !RasterizeRegions(Surface->Geometry.StrokePaths, StrokeMask)) return nullptr;
-		if (Surface->StrokeAlignment != TEXT("center"))
+		if (!RasterizeRegions(Surface->Geometry.FillPaths, FillMask, ScanlineFillCoverage)
+			|| !RasterizeRegions(Surface->Geometry.StrokePaths, StrokeMask, ScanlineFill)) return nullptr;
+		const bool bHasSourceStroke = Surface->Geometry.StrokePaths.IsSet() && !Surface->Geometry.StrokePaths->IsEmpty();
+		const bool bInnerStroke = bHasSourceStroke && Surface->StrokeAlignment == TEXT("inner")
+			&& !HasExplicitlyEmptyFillGeometry(*Surface);
+		const bool bOuterStroke = bHasSourceStroke && Surface->StrokeAlignment == TEXT("outer");
+		if (bOuterStroke)
+		{
 			for (int32 Index = 0; Index < StrokeMask.Num(); ++Index)
-				if ((FillMask[Index].A > 0) != (Surface->StrokeAlignment == TEXT("inner"))) StrokeMask[Index] = FColor::Transparent;
+			{
+				const uint32 Coverage = 255 - FillMask[Index].A;
+				StrokeMask[Index].A = static_cast<uint8>((StrokeMask[Index].A * Coverage + 127) / 255);
+				if (StrokeMask[Index].A == 0) StrokeMask[Index] = FColor::Transparent;
+			}
+		}
 
-		const auto CompositePaint = [&](const TArray<FColor>& Mask, const FUMGSurfacePaint& SourcePaint) -> bool
+		const auto CompositePaint = [&](const TArray<FColor>& Mask, const FUMGSurfacePaint& SourcePaint,
+			bool bDisjointCoverage = false) -> bool
 		{
 			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 			{ if (OutError) *OutError = BudgetError; return false; }
@@ -1626,16 +1700,33 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 			{
 				const FLinearColor Under = FLinearColor::FromSRGBColor(Pixels[Index]);
 				const FLinearColor Over = FLinearColor::FromSRGBColor(Painted[Index]) * SourcePaint.Color;
-				const float Alpha = Over.A + Under.A * (1.0f - Over.A);
-				FLinearColor Combined = Over * Over.A + Under * Under.A * (1.0f - Over.A);
+				const float UnderWeight = bDisjointCoverage ? 1.0f : 1.0f - Over.A;
+				const float Alpha = Over.A + Under.A * UnderWeight;
+				FLinearColor Combined = Over * Over.A + Under * Under.A * UnderWeight;
 				if (Alpha > 0.0f) Combined /= Alpha;
 				Combined.A = Alpha;
 				Pixels[Index] = Combined.ToFColor(true);
 			}
 			return true;
 		};
-		for (const auto& Paint : Surface->FillPaints.GetValue()) if (!CompositePaint(FillMask, Paint)) return nullptr;
-		if (!CompositePaint(StrokeMask, Surface->StrokePaint.GetValue())) return nullptr;
+		TArray<FColor> UncoveredFill;
+		const bool bDeferFillCoverage = Request.SourceContourPaths.IsSet() || bInnerStroke || bOuterStroke;
+		if (bDeferFillCoverage)
+		{
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{ if (OutError) *OutError = BudgetError; return nullptr; }
+			UncoveredFill.Init(FColor::White, FillMask.Num());
+		}
+		const TArray<FColor>& FillCoverage = bDeferFillCoverage ? UncoveredFill : FillMask;
+		for (const auto& Paint : Surface->FillPaints.GetValue()) if (!CompositePaint(FillCoverage, Paint)) return nullptr;
+		if (bDeferFillCoverage && !bInnerStroke)
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+				Pixels[Index].A = static_cast<uint8>(FMath::RoundToInt(Pixels[Index].A * (FillMask[Index].A / 255.0f)));
+		// Inner paint shares the fill boundary; outer paint occupies its complement.
+		if (!CompositePaint(StrokeMask, Surface->StrokePaint.GetValue(), bOuterStroke)) return nullptr;
+		if (bInnerStroke)
+			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
+				Pixels[Index].A = static_cast<uint8>(FMath::RoundToInt(Pixels[Index].A * (FillMask[Index].A / 255.0f)));
 	}
 	else
 	{

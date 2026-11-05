@@ -247,59 +247,12 @@ struct FUMGVisualBrushData
 	FGradientData Gradient;
 };
 
-/**
- * Typed effect fields such as BackgroundBlur and Retainer effects.
- * New effect contracts should land here as explicit typed payload fields.
- */
-enum class EUMGGeometryMaskShape : uint8
-{
-	Ellipse,
-	RoundedRectangle
-};
-
-struct FUMGEffectData
-{
-	struct FRenderingPhaseData
-	{
-		int32 Phase = 0;
-		int32 PhaseCount = 1;
-	};
-
-	TOptional<FDesignShaderData> Shader;
-	TOptional<float> BlurStrength;
-	TOptional<bool> bRetainRendering;
-	TOptional<FString> EffectMaterial;
-	TOptional<FString> TextureParameter;
-	TOptional<FVector2D> EffectBlurUVStep;
-	TOptional<FLinearColor> EffectColor;
-	TOptional<FVector2D> EffectOffset;
-	TOptional<FString> InnerShadowBlendMode;
-	TOptional<EUMGGeometryMaskShape> GeometryMaskShape;
-	TOptional<FVector2D> GeometryMaskSize;
-	TOptional<FVector4> GeometryMaskCornerRadii;
-	TOptional<FRenderingPhaseData> RenderingPhase;
-
-	bool HasAny() const
-	{
-		return Shader.IsSet() || BlurStrength.IsSet()
-			|| bRetainRendering.IsSet()
-			|| EffectMaterial.IsSet()
-			|| TextureParameter.IsSet()
-			|| EffectBlurUVStep.IsSet()
-			|| EffectColor.IsSet()
-			|| EffectOffset.IsSet()
-			|| InnerShadowBlendMode.IsSet()
-			|| GeometryMaskShape.IsSet()
-			|| GeometryMaskSize.IsSet()
-			|| GeometryMaskCornerRadii.IsSet()
-			|| RenderingPhase.IsSet();
-	}
-};
-
 // One static paint; object opacity belongs to the owning native widget.
 struct FUMGSurfacePaint
 {
 	FLinearColor Color = FLinearColor::White;
+	float Opacity = 1.0f;
+	FString BlendMode;
 	FUMGVisualBrushData::FGradientData Gradient;
 	FUMGVisualBrushData::FImageData Image;
 
@@ -326,6 +279,23 @@ struct FUMGSurfacePaint
 	}
 };
 
+struct FUMGSurfacePaintTarget
+{
+	FString DestinationWidgetId;
+	TArray<FUMGSurfacePaint> Paints;
+};
+
+/**
+ * Typed effect fields such as BackgroundBlur and Retainer effects.
+ * New effect contracts should land here as explicit typed payload fields.
+ */
+enum class EUMGGeometryMaskShape : uint8
+{
+	Ellipse,
+	RoundedRectangle,
+	Rectangle
+};
+
 struct FUMGSourcePaintGeometry
 {
 	FDesignPaintGeometry Geometry;
@@ -348,6 +318,87 @@ struct FUMGSourcePaintGeometry
 		Archive << HasStroke;
 		if (HasStroke) Source.StrokePaint->WriteSignature(Archive);
 		return Archive;
+	}
+};
+
+struct FUMGBoxShadowLayerData
+{
+	FString BlendMode;
+	FVector2D Offset = FVector2D::ZeroVector;
+	float Blur = 0.0f;
+	float Spread = 0.0f;
+	FLinearColor Color = FLinearColor::Transparent;
+	bool bShowShadowBehindNode = false;
+};
+
+/** One static native endpoint in the capture owner's logical coordinates. */
+struct FUMGSharedCaptureEndpoint
+{
+	FString DestinationWidgetId;
+	FVector2D Size = FVector2D::ZeroVector;
+	bool bClipContent = false;
+	EUMGGeometryMaskShape Shape = EUMGGeometryMaskShape::RoundedRectangle;
+	FVector4 CornerRadii = FVector4(0, 0, 0, 0);
+	TOptional<TArray<FDesignGeometryPath>> ClipPaths;
+	// Complete own paint, including filled outside-stroke regions; never subtree opacity.
+	FUMGSourcePaintGeometry OwnPaint;
+	TArray<FUMGBoxShadowLayerData> BoxShadows;
+	FString CoverageTexture;
+	FString PaintTexture;
+	FVector4 PaintRect = FVector4(0, 0, 0, 0);
+	FString StrokeTexture;
+	FVector4 StrokeRect = FVector4(0, 0, 0, 0);
+};
+
+struct FUMGSharedCaptureData
+{
+	FUMGSharedCaptureEndpoint Source;
+	TArray<FUMGSharedCaptureEndpoint> Targets;
+};
+
+struct FUMGEffectData
+{
+	struct FRenderingPhaseData
+	{
+		int32 Phase = 0;
+		int32 PhaseCount = 1;
+	};
+
+	TOptional<FUMGSharedCaptureData> SharedCapture;
+	TOptional<FDesignShaderData> Shader;
+	TOptional<TArray<FUMGSurfacePaint>> TextPaints;
+	TOptional<TArray<FUMGSurfacePaintTarget>> TextPaintTargets;
+	TOptional<TArray<FUMGSurfacePaint>> SurfacePaints;
+	TOptional<TArray<FUMGSurfacePaintTarget>> SurfacePaintTargets;
+	TOptional<float> BlurStrength;
+	TOptional<bool> bRetainRendering;
+	TOptional<FString> EffectMaterial;
+	TOptional<FString> TextureParameter;
+	TOptional<FVector2D> EffectBlurUVStep;
+	TOptional<FLinearColor> EffectColor;
+	TOptional<FVector2D> EffectOffset;
+	TOptional<FString> InnerShadowBlendMode;
+	TOptional<EUMGGeometryMaskShape> GeometryMaskShape;
+	TOptional<FVector2D> GeometryMaskSize;
+	TOptional<FVector4> GeometryMaskCornerRadii;
+	TOptional<TArray<FDesignGeometryPath>> GeometryMaskPaths;
+	TOptional<FRenderingPhaseData> RenderingPhase;
+
+	bool HasAny() const
+	{
+		return SharedCapture.IsSet() || Shader.IsSet() || TextPaints.IsSet() || TextPaintTargets.IsSet() || SurfacePaints.IsSet() || SurfacePaintTargets.IsSet() || BlurStrength.IsSet()
+			|| bRetainRendering.IsSet()
+			|| EffectMaterial.IsSet()
+			|| TextureParameter.IsSet()
+			|| EffectBlurUVStep.IsSet()
+			|| EffectColor.IsSet()
+			|| EffectOffset.IsSet()
+			|| InnerShadowBlendMode.IsSet()
+			|| GeometryMaskShape.IsSet()
+			|| GeometryMaskSize.IsSet()
+			|| GeometryMaskCornerRadii.IsSet()
+			|| GeometryMaskPaths.IsSet()
+			|| RenderingPhase.IsSet();
 	}
 };
 
@@ -393,16 +444,6 @@ struct FUMGPathData
 			|| StrokeJoin.IsSet()
 			|| StrokeAlignment.IsSet();
 	}
-};
-
-struct FUMGBoxShadowLayerData
-{
-	FString BlendMode;
-	FVector2D Offset = FVector2D::ZeroVector;
-	float Blur = 0.0f;
-	float Spread = 0.0f;
-	FLinearColor Color = FLinearColor::Transparent;
-	bool bShowShadowBehindNode = false;
 };
 
 struct FUMGShadowData
@@ -464,10 +505,12 @@ struct FUMGScrollBoxData
 {
 	TOptional<FString> Orientation;
 	TOptional<FString> ScrollBarVisibility;
+	/** Source scroll position along the orientation, restored when the widget is constructed. */
+	TOptional<float> ScrollOffset;
 
 	bool HasAny() const
 	{
-		return Orientation.IsSet() || ScrollBarVisibility.IsSet();
+		return Orientation.IsSet() || ScrollBarVisibility.IsSet() || ScrollOffset.IsSet();
 	}
 };
 

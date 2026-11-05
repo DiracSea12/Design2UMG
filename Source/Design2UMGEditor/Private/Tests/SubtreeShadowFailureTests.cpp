@@ -51,7 +51,7 @@ bool FSubtreeShadowPreparationFailureTest::RunTest(const FString&)
 	Data.RootWidget.Type = TEXT("RetainerBox");
 	Data.RootWidget.Effect.EffectMaterial = UMGPropertyKeys::RetainerSubtreeShadowEffectRef;
 	Data.RootWidget.Bounds.W = 0;
-	AddExpectedError(TEXT("has no valid capture size"), EAutomationExpectedErrorFlags::Contains, 1);
+	AddExpectedError(TEXT("requires its existing single content surface"), EAutomationExpectedErrorFlags::Contains, 1);
 	FDesign2UMGGenerationOutput Output;
 	UWidgetBlueprint* Result = FUMGGenerator::BuildWidgetBlueprint(Data, PackagePath, nullptr, &Output, nullptr, Existing);
 	TestNull(TEXT("Invalid shadow capture is reported as failed generation"), Result);
@@ -59,7 +59,7 @@ bool FSubtreeShadowPreparationFailureTest::RunTest(const FString&)
 		Output.MappingDiagnostics.ContainsByPredicate([](const FDesign2UMGMappingDiagnostic& Diagnostic)
 		{
 			return Diagnostic.Kind == TEXT("resource_preparation_failed") && Diagnostic.Message.Contains(TEXT("OriginalRoot"))
-				&& Diagnostic.Message.Contains(TEXT("has no valid capture size"));
+				&& Diagnostic.Message.Contains(TEXT("requires its existing single content surface"));
 		}));
 	TestEqual(TEXT("Failure preserves the existing WidgetTree"), Existing->WidgetTree.Get(), OriginalTree);
 	TestEqual(TEXT("Failure preserves the original root object"), Existing->WidgetTree->RootWidget.Get(), OriginalRoot);

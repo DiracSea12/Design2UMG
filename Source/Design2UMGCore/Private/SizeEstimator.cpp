@@ -284,13 +284,13 @@ namespace
 
 		if (IsVectorLeaf(Node))
 		{
-			const float W = FMath::Max(1.0f, FMath::RoundToFloat(Node->Transform.Width.Value));
-			const float H = FMath::Max(1.0f, FMath::RoundToFloat(Node->Transform.Height.Value));
-			if (!Node->Transform.Width.IsFixed() || Node->Transform.Width.Value < 1.0f)
+			const float W = Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 1.0f;
+			const float H = Node->Transform.Height.Value > 0.0f ? Node->Transform.Height.Value : 1.0f;
+			if (!Node->Transform.Width.IsFixed() || Node->Transform.Width.Value <= 0.0f)
 			{
 				SizeEstimator::SetResolvedNodeDimension(Node, true, W);
 			}
-			if (!Node->Transform.Height.IsFixed() || Node->Transform.Height.Value < 1.0f)
+			if (!Node->Transform.Height.IsFixed() || Node->Transform.Height.Value <= 0.0f)
 			{
 				SizeEstimator::SetResolvedNodeDimension(Node, false, H);
 			}

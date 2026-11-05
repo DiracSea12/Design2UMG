@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "DesignPreviewContracts.h"
 #include "TimerManager.h"
+#include "Styling/SlateTypes.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -15,6 +16,8 @@ struct FArtifactGenerationResult;
 
 DECLARE_DELEGATE_RetVal_OneParam(FArtifactGenerationResult, FOnPreviewConfirmed, const FPreviewGenerationRequest& /*GenerationRequest*/);
 DECLARE_DELEGATE(FOnPreviewCancelled);
+/** Converts the original design again with the chosen widget-tree mode. */
+DECLARE_DELEGATE_RetVal_ThreeParams(bool, FOnPreviewReconvert, bool /*bPreserveSourceNodes*/, FUMGWidgetData& /*OutData*/, FString& /*OutError*/);
 
 /**
  * Editor preview UI contract for Design2UMG preview workflows.
@@ -34,6 +37,7 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<IDesignPreviewMaterializationService>, PreviewMaterializationService)
 		SLATE_EVENT(FOnPreviewConfirmed, OnConfirmed)
 		SLATE_EVENT(FOnPreviewCancelled, OnCancelled)
+		SLATE_EVENT(FOnPreviewReconvert, OnReconvert)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -68,8 +72,10 @@ private:
 
 	FOnPreviewConfirmed OnConfirmed;
 	FOnPreviewCancelled OnCancelled;
+	FOnPreviewReconvert OnReconvert;
 
 	FReply OnGenerateClicked();
+	void OnPreserveSourceNodesChanged(ECheckBoxState State);
 	FString FormatPreviewFailure(const FString& ErrorMessage) const;
 	FReply OnCancelClicked();
 	FReply OnFormatJsonClicked();

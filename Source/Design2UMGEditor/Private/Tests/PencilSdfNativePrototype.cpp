@@ -2,6 +2,7 @@
 #include "Tests/PencilSdfNativePrototype.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/EngineVersionComparison.h"
+#include "Misc/ScopeExit.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
@@ -438,6 +439,8 @@ bool PencilSdfNativePrototype::Run(FAutomationTestBase& Test)
     UWorld* World=GEditor?GEditor->GetEditorWorldContext().World():nullptr;
     if(!World){Test.AddError(TEXT("SDF prototype has no real editor World"));return false;}
     TArray<TStrongObjectPtr<UObject>> Keep;
+    // CreateBlueprint marks transient probes standalone; release them so their world render targets can be collected.
+    ON_SCOPE_EXIT{for(const auto& Object:Keep)if(auto* Probe=Cast<UBlueprint>(Object.Get()))Probe->ClearFlags(RF_Standalone);};
     auto* Placeholder=UKismetRenderingLibrary::CreateRenderTarget2D(World,Extent,Extent,RTF_RGBA16f,FLinearColor(0,0,0,1));
     if(!Placeholder){Test.AddError(TEXT("SDF placeholder RT creation failed"));return false;}
     Keep.Emplace(Placeholder);

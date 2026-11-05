@@ -19,6 +19,16 @@ struct FVisualMapperOptions
  */
 namespace VisualMapper
 {
+	/**
+	 * Rounded Figma surface drawn through its exact source contour. Animated surfaces keep it so both endpoints share
+	 * one silhouette; static ones need it only for smoothed corners or clipped content that crosses a corner arc.
+	 */
+	bool RequiresSourceContour(const FDesignNode& Node, bool bAnimatedSurface);
+	bool RequiresSourceContour(const FDesignNode& Node);
+	/** Child paint box, including its outer shadows and render transform, in the parent's layout space. */
+	FBox2D ChildPaintBounds(const FDesignNode& Child);
+	bool BuildSourceContour(const FDesignNode& Node, FUMGEffectData& Contour, FString& Error);
+	FUMGWidgetNode WrapWithSourceContour(FUMGWidgetNode&& Widget, const FUMGEffectData& Contour);
 	void ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	void ApplyRenderTransformProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	void ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCornerRadius& Radius, float Width = -1.0f, float Height = -1.0f);

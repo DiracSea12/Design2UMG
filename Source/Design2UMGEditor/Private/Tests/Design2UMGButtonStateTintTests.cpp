@@ -75,6 +75,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FButtonStateTintExplicitColorPrecedenceTest,
 bool FButtonStateTintExplicitColorPrecedenceTest::RunTest(const FString& Parameters)
 {
 	UButton* Button = NewObject<UButton>();
+	const FMargin DefaultNormalPadding = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button).NormalPadding;
+	const FMargin DefaultPressedPadding = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button).PressedPadding;
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Button");
 	Node.WidgetStyle.BackgroundColor = FLinearColor::Black;
@@ -87,6 +89,14 @@ bool FButtonStateTintExplicitColorPrecedenceTest::RunTest(const FString& Paramet
 		Style.Hovered.TintColor.GetSpecifiedColor().Equals(Node.WidgetStyle.HoveredColor.GetValue()));
 	TestTrue(TEXT("Explicit pressed color overrides derived tint"),
 		Style.Pressed.TintColor.GetSpecifiedColor().Equals(Node.WidgetStyle.PressedColor.GetValue()));
+	TestTrue(TEXT("Unspecified button padding retains the native style"),
+		Style.NormalPadding == DefaultNormalPadding && Style.PressedPadding == DefaultPressedPadding);
+	Node.WidgetStyle.Padding = FMargin(3.0f, 4.0f, 5.0f, 6.0f);
+	UMGPropertyApplierInternal::ApplyWidgetProperties(Button, Node);
+	const FButtonStyle& PaddedStyle = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button);
+	TestTrue(TEXT("Explicit button padding is preserved in normal and pressed states"),
+		PaddedStyle.NormalPadding == Node.WidgetStyle.Padding.GetValue()
+		&& PaddedStyle.PressedPadding == Node.WidgetStyle.Padding.GetValue());
 	return true;
 }
 

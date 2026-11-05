@@ -5,6 +5,7 @@
 #include "Design2UMGTestUtils.h"
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
+#include "DesignSchemaSourceExtensions.h"
 #include "UMGPropertyKeys.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetNodeAccess.h"
@@ -32,7 +33,7 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 				TEXT("\"fontFamily\":\"Inter\",\"fontSize\":24,\"fontWeight\":600,\"textAlignHorizontal\":\"LEFT\","
 					 "\"textAlignVertical\":\"TOP\",\"textDecoration\":\"NONE\",\"letterSpacing\":0,"
 					 "\"lineHeightUnit\":\"AUTO\",\"lineHeightPx\":0")))),
-		TEXT(",\"prototypeStartNodeID\":\"2:1\""));
+		TEXT(",\"prototypeStartNodeID\":\"2:1\",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\""));
 
 	FDesignDocument Doc;
 	TestTrue(TEXT("Figma prototype navigation parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
@@ -40,9 +41,10 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
 	TestTrue(TEXT("Prototype navigation plan exists"), NavigationData.IsValid());
-	TestEqual(TEXT("Prototype root uses WidgetSwitcher"), Data.RootWidget.Type, TEXT("WidgetSwitcher"));
+	TestEqual(TEXT("Prototype root uses CanvasPanel"), Data.RootWidget.Type, TEXT("CanvasPanel"));
 	TestEqual(TEXT("Prototype start page resolves to second page"), NavigationData.InitialPageIndex, 1);
 	TestEqual(TEXT("Prototype page count"), NavigationData.PageIds.Num(), 2);
+	TestEqual(TEXT("Hosted pages keep their design names"), NavigationData.PageWidgetNames.FindRef(TEXT("2:1")), FString(TEXT("PageTwo")));
 	TestEqual(TEXT("Prototype click binding count"), NavigationData.ClickBindings.Num(), 1);
 	if (!NavigationData.IsValid() || NavigationData.ClickBindings.Num() != 1)
 	{
@@ -51,17 +53,17 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 
 	const FUMGPrototypeNavigationBinding& Binding = NavigationData.ClickBindings[0];
 	TestEqual(TEXT("Prototype trigger widget id"), Binding.TriggerWidgetId, TEXT("cta_button"));
-	TestEqual(TEXT("Prototype trigger widget runtime name"), Binding.TriggerWidgetName, TEXT("cta_button"));
-	TestTrue(TEXT("Prototype switcher widget name is no longer fixed hardcode"),
-		NavigationData.SwitcherWidgetName != TEXT("__d2u_prototype_switcher"));
+	TestEqual(TEXT("Prototype trigger button keeps its design name"), Binding.TriggerWidgetName, TEXT("CTA"));
+	TestTrue(TEXT("Prototype page host widget name is no longer fixed hardcode"),
+		NavigationData.PageHostWidgetName != TEXT("__d2u_prototype_page_host"));
 	TestEqual(TEXT("Prototype trigger type recorded"), Binding.TriggerType, TEXT("ON_CLICK"));
 	TestEqual(TEXT("Prototype target page id"), Binding.TargetPageId, TEXT("2:1"));
 	TestEqual(TEXT("Prototype target page index"), Binding.TargetPageIndex, 1);
 	TestEqual(TEXT("Prototype transition type preserved"), Binding.Transition.Type, TEXT("DISSOLVE"));
 	TestTrue(TEXT("Prototype transition duration preserved"), FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.18f, 0.0001f));
 	TestEqual(TEXT("Prototype transition easing preserved"), Binding.Transition.EasingType, TEXT("EASE_IN_AND_OUT"));
-	TestTrue(TEXT("Prototype switcher active index exported via typed state"), Data.RootWidget.WidgetState.ActiveWidgetIndex.IsSet());
-	TestEqual(TEXT("Prototype switcher typed active index preserved"), Data.RootWidget.WidgetState.ActiveWidgetIndex.GetValue(), 1);
+	TestEqual(TEXT("Only the initial page is visible"), Data.RootWidget.Children[0].WidgetStyle.Visibility.Get(TEXT("Visible")), FString(TEXT("Collapsed")));
+	TestEqual(TEXT("The selected page preserves its design visibility"), Data.RootWidget.Children[1].WidgetStyle.Visibility.Get(TEXT("Visible")), FString(TEXT("Visible")));
 
 	const FUMGWidgetNode* TriggerWidget = FindWidgetById(Data.RootWidget, TEXT("cta_button"));
 	TestTrue(TEXT("Prototype trigger widget exists"), TriggerWidget != nullptr);
@@ -72,6 +74,39 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Prototype trigger converts to transparent button wrapper"), TriggerWidget->Type, TEXT("Button"));
 	TestTrue(TEXT("Prototype trigger keeps one visual child"), TriggerWidget->Children.Num() == 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeContestedNamesTest,
+	"Design2UMG.Converter.FigmaPrototypeContestedNames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeContestedNamesTest::RunTest(const FString& Parameters)
+{
+	const auto Trigger = [](const TCHAR* Id, const TCHAR* Destination)
+	{
+		return MakeLeafNode(Id, TEXT("Go"), TEXT("RECTANGLE"), 40, 60, 120, 44, FString::Printf(
+			TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
+				 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"%s\",\"navigation\":\"NAVIGATE\"}]}]"),
+			*MakeSolidFillJson(0.1, 0.4, 0.9), Destination));
+	};
+	// Both pages are named "Home / S1" in the source; both triggers are named "Go".
+	const FString Json = MakeFigmaDocJson(FString::Printf(TEXT("%s,%s"),
+		*MakeContainerNode(TEXT("1:1"), TEXT("Home / S1"), TEXT("FRAME"), 0, 0, 360, 240, Trigger(TEXT("go_1"), TEXT("2:1"))),
+		*MakeContainerNode(TEXT("2:1"), TEXT("Home S1"), TEXT("FRAME"), 0, 0, 360, 240, Trigger(TEXT("go_2"), TEXT("1:1")))),
+		TEXT(",\"prototypeStartNodeID\":\"2:1\""));
+	FDesignDocument Doc;
+	TestTrue(TEXT("Figma prototype parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
+	TestEqual(TEXT("The initial page keeps the contested design name"), NavigationData.PageWidgetNames.FindRef(TEXT("2:1")), FString(TEXT("Home S1")));
+	TestEqual(TEXT("Another page with the same runtime name uses its id"), NavigationData.PageWidgetNames.FindRef(TEXT("1:1")), FString(TEXT("1:1")));
+	TestEqual(TEXT("Both contested triggers are bound"), NavigationData.ClickBindings.Num(), 2);
+	for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
+	{
+		TestEqual(TEXT("Triggers sharing a runtime name use their ids"), Binding.TriggerWidgetName, Binding.TriggerWidgetId);
+		const FUMGWidgetNode* Button = FindWidgetById(Data.RootWidget, Binding.TriggerWidgetId);
+		TestTrue(TEXT("The trigger button carries its recorded name"), Button && Button->Name == Binding.TriggerWidgetName);
+	}
 	return true;
 }
 
@@ -87,7 +122,7 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 			*MakeLeafNode(TEXT("overlay_button"), TEXT("Overlay"), TEXT("RECTANGLE"), 40, 60, 120, 44,
 				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
 					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"OPEN_OVERLAY\","
-					 "\"transition\":{\"type\":\"DISSOLVE\",\"duration\":150}}]}]"),
+					 "\"transition\":{\"type\":\"DISSOLVE\",\"duration\":150,\"easing\":{\"type\":\"LINEAR\"}}}]}]"),
 					*MakeSolidFillJson(0.1, 0.4, 0.9))),
 			*MakeLeafNode(TEXT("link_button"), TEXT("Link"), TEXT("RECTANGLE"), 40, 120, 120, 44,
 				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
@@ -96,9 +131,9 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 		*MakeContainerNode(TEXT("2:1"), TEXT("OverlayPage"), TEXT("FRAME"), 0, 0, 360, 240,
 			MakeLeafNode(TEXT("back_button"), TEXT("Back"), TEXT("RECTANGLE"), 40, 60, 120, 44,
 				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},"
-					 "\"actions\":[{\"type\":\"BACK\",\"transition\":{\"type\":\"DISSOLVE\",\"duration\":90}}]}]"),
+					 "\"actions\":[{\"type\":\"BACK\",\"transition\":{\"type\":\"DISSOLVE\",\"duration\":90,\"easing\":{\"type\":\"LINEAR\"}}}]}]"),
 					*MakeSolidFillJson(0.8, 0.3, 0.2))))),
-		TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+		TEXT(",\"prototypeStartNodeID\":\"1:1\",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\""));
 
 	FDesignDocument Document;
 	TestTrue(TEXT("Figma prototype special actions parse succeeds"), FFigmaParser::ParseDocument(Json, Document));
@@ -260,7 +295,7 @@ bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& 
 		*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, FString::Printf(
 			TEXT("%s,%s"),
 			*MakeLeafNode(TEXT("key_down_hotspot"), TEXT("KeyDownHotspot"), TEXT("RECTANGLE"), 32, 40, 100, 40,
-				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"keyCodes\":[\"ENTER\"]},"
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_DOWN\",\"device\":\"KEYBOARD\",\"keyCodes\":[\"ENTER\"]},"
 					 "\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"2:1\",\"navigation\":\"NAVIGATE\"}]}]"),
 					*MakeSolidFillJson(0.3, 0.3, 0.8))),
 			*MakeLeafNode(TEXT("conditional_button"), TEXT("ConditionalCTA"), TEXT("RECTANGLE"), 32, 104, 120, 44,
@@ -275,7 +310,7 @@ bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& 
 					*MakeSolidFillJson(0.8, 0.4, 0.1))))),
 		*MakeContainerNode(TEXT("2:1"), TEXT("PageTwo"), TEXT("FRAME"), 0, 0, 360, 240,
 			MakeLeafNode(TEXT("key_up_hotspot"), TEXT("KeyUpHotspot"), TEXT("RECTANGLE"), 32, 40, 100, 40,
-				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_UP\",\"keyCodes\":[\"ESCAPE\"]},"
+				FString::Printf(TEXT(",\"fills\":[%s],\"interactions\":[{\"trigger\":{\"type\":\"ON_KEY_UP\",\"device\":\"KEYBOARD\",\"keyCodes\":[\"ESCAPE\"]},"
 					 "\"actions\":[{\"type\":\"BACK\"}]}]"),
 					*MakeSolidFillJson(0.2, 0.7, 0.4)))),
 		*MakeContainerNode(TEXT("3:1"), TEXT("PageThree"), TEXT("FRAME"), 0, 0, 360, 240,
@@ -373,12 +408,12 @@ bool FFigmaOverflowDirectionMapsToScrollBoxTest::RunTest(const FString& Paramete
 
 	TestEqual(TEXT("overflowDirection frame maps to ScrollBox"), ScrollFrame->Type, TEXT("ScrollBox"));
 	TestEqual(TEXT("ScrollBox orientation exported"), GetWidgetProperty(*ScrollFrame, UMGPropertyKeys::Orientation), TEXT("Vertical"));
-	TestEqual(TEXT("ScrollBox scrollbar visibility exported"), GetWidgetProperty(*ScrollFrame, UMGPropertyKeys::ScrollBarVisibility), TEXT("Hidden"));
+	TestEqual(TEXT("ScrollBox scrollbar visibility exported"), GetWidgetProperty(*ScrollFrame, UMGPropertyKeys::ScrollBarVisibility), TEXT("Collapsed"));
 
 	TestTrue(TEXT("Typed ScrollBox owner keeps orientation"), ScrollFrame->ScrollBox.Orientation.IsSet());
 	TestEqual(TEXT("Typed ScrollBox orientation value"), ScrollFrame->ScrollBox.Orientation.GetValue(), FString(TEXT("Vertical")));
 	TestTrue(TEXT("Typed ScrollBox owner keeps scrollbar visibility"), ScrollFrame->ScrollBox.ScrollBarVisibility.IsSet());
-	TestEqual(TEXT("Typed ScrollBox scrollbar visibility value"), ScrollFrame->ScrollBox.ScrollBarVisibility.GetValue(), FString(TEXT("Hidden")));
+	TestEqual(TEXT("Typed ScrollBox scrollbar visibility value"), ScrollFrame->ScrollBox.ScrollBarVisibility.GetValue(), FString(TEXT("Collapsed")));
 	TestTrue(TEXT("ScrollBox keeps both children"), ScrollFrame->Children.Num() == 2);
 	return true;
 }
@@ -450,8 +485,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrototypeKeysIndependentOfRawJsonTest,
 bool FPrototypeKeysIndependentOfRawJsonTest::RunTest(const FString&)
 {
 	const FString Triggers = TEXT(R"(,"interactions":[
-		{"trigger":{"type":"ON_KEY_DOWN","keyCodes":["enter","ENTER",null,{},[],"","escape"],"keyCode":"tab"},"actions":[{"type":"BACK"}]},
-		{"trigger":{"type":"ON_KEY_UP","keyCode":"escape"},"actions":[{"type":"BACK"}]},
+		{"trigger":{"type":"ON_KEY_DOWN","device":"KEYBOARD","keyCodes":["enter","ENTER",null,{},[],"","escape"],"keyCode":"tab"},"actions":[{"type":"BACK"}]},
+		{"trigger":{"type":"ON_KEY_UP","device":"KEYBOARD","keyCode":"escape"},"actions":[{"type":"BACK"}]},
 		{"trigger":{"type":"ON_CLICK"},"actions":[{"type":"BACK"}]}
 	])");
 	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("page"), TEXT("Page"), TEXT("FRAME"), 0, 0, 320, 200,
@@ -494,6 +529,136 @@ bool FPrototypeKeysIndependentOfRawJsonTest::RunTest(const FString&)
 		Cleared.Warnings.ContainsByPredicate([](const FString& Warning) { return Warning.Contains(TEXT("missing keyCodes")); }));
 	TestEqual(TEXT("Unrelated bindings survive an empty key list"), Cleared.PrototypeNavigation().ClickBindings.Num(), 2);
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExportedPrototypePagesTest,
+	"Design2UMG.Converter.FigmaExportedPrototypePages",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExportedPrototypePagesTest::RunTest(const FString&)
+{
+	const auto Navigation = [](const TCHAR* Target, const TCHAR* Trigger)
+	{
+		return FString::Printf(TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"%s\"},\"actions\":[{\"type\":\"NODE\",\"navigation\":\"NAVIGATE\",\"destinationId\":\"%s\"}]}]"), Trigger, Target);
+	};
+	const auto Page = [&](const TCHAR* Id, const TCHAR* Target, const TCHAR* Trigger, float Width)
+	{
+		const FString ChildId = FString(Id) + TEXT("_button");
+		const TCHAR* Image = FCString::Strcmp(Id, TEXT("A")) == 0 ? TEXT("root-image") : TEXT("target-image");
+		FString Children = MakeLeafNode(*ChildId, TEXT("Button"), TEXT("RECTANGLE"), 0, 0, 30, 20,
+			FString::Printf(TEXT(",\"fills\":[{\"type\":\"IMAGE\",\"imageRef\":\"%s\"}]"), Image) + Navigation(Target, Trigger));
+		if (FCString::Strcmp(Id, TEXT("A")) == 0)
+		{
+			Children += TEXT(",");
+			Children += MakeLeafNode(TEXT("drag"), TEXT("Drag"), TEXT("RECTANGLE"), 40, 0, 30, 20, Navigation(TEXT("unused"), TEXT("MOUSE_LEAVE")));
+			Children += TEXT(",");
+			Children += MakeLeafNode(TEXT("hover"), TEXT("Hover"), TEXT("RECTANGLE"), 0, 25, 30, 20,
+				TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"ON_HOVER\"},\"actions\":[{\"type\":\"NODE\",\"navigation\":\"OPEN_OVERLAY\",\"destinationId\":\"tooltip\"}]}]"));
+			Children += TEXT(",");
+			Children += MakeLeafNode(TEXT("animated_overlay"), TEXT("Animated"), TEXT("RECTANGLE"), 40, 25, 30, 20,
+				TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"navigation\":\"OPEN_OVERLAY\",\"destinationId\":\"animated_page\",\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":300,\"easing\":{\"type\":\"LINEAR\"}}}]}]"));
+		}
+		if (FCString::Strcmp(Id, TEXT("unused")) == 0)
+		{
+			Children += TEXT(",");
+			Children += MakeLeafNode(TEXT("unsupported_trigger"), TEXT("Unsupported"), TEXT("RECTANGLE"), 0, 25, 30, 20,
+				Navigation(TEXT("A"), TEXT("ON_UNSUPPORTED")));
+		}
+		return MakeContainerNode(Id, Id, TEXT("FRAME"), 0, 0, Width, 80, Children,
+			FString::Printf(TEXT(",\"absoluteRenderBounds\":%s"), *MakeBoundsJson(-17, -6, Width + 34, 114)));
+	};
+	const FString Json = MakeFigmaDocJson(Page(TEXT("A"), TEXT("B"), TEXT("ON_CLICK"), 100),
+		FString::Printf(TEXT(",\"prototypeStartNodeID\":\"C\",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\",\"design2umgPrototypePages\":[%s,%s,%s,%s,%s]"),
+			*Page(TEXT("B"), TEXT("C"), TEXT("ON_CLICK"), 200),
+			*Page(TEXT("C"), TEXT("A"), TEXT("ON_CLICK"), 300),
+			*Page(TEXT("unused"), TEXT("A"), TEXT("ON_DRAG"), 400),
+			*Page(TEXT("tooltip"), TEXT("A"), TEXT("ON_DRAG"), 50),
+			*Page(TEXT("animated_page"), TEXT("A"), TEXT("ON_DRAG"), 50)));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Exported pages parse"), FFigmaParser::ParseDocument(Json, Document))) return false;
+	if (!TestEqual(TEXT("Only selected page is a source root"), Document.Children.Num(), 1)
+		|| !TestEqual(TEXT("Exported pages remain separate"), Document.SourceDocument().PrototypePages.Num(), 5)) return false;
+	TSet<FString> ImageRefs;
+	FFigmaParser::CollectImageRefs(Document, ImageRefs);
+	TestTrue(TEXT("Images on prototype pages are collected"), ImageRefs.Contains(TEXT("target-image")));
+	TMap<FString, FString> ImageMap;
+	ImageMap.Add(TEXT("target-image"), TEXT("resolved-image"));
+	FFigmaParser::ApplyImageUrls(Document, ImageMap);
+	ImageRefs.Reset();
+	FFigmaParser::CollectImageRefs(Document, ImageRefs);
+	TestTrue(TEXT("Prototype page image mappings are applied"), ImageRefs.Contains(TEXT("resolved-image")));
+	TestTrue(TEXT("Selected page image remains distinct"), ImageRefs.Contains(TEXT("root-image")));
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const auto& Plan = Data.PrototypeNavigation();
+	TestTrue(TEXT("Reachable pages produce navigation"), Plan.IsValid());
+	TestEqual(TEXT("Only reachable destinations are generated"), Plan.PageIds.Num(), 4);
+	TestEqual(TEXT("Selected page remains initial"), Plan.InitialPageIndex, 0);
+	TestEqual(TEXT("Selected width remains the canvas width"), Data.RootWidget.Bounds.W, 100.0f);
+	TestEqual(TEXT("Selected height remains the canvas height"), Data.RootWidget.Bounds.H, 80.0f);
+	// Container render bounds are layout aggregates; the initial page's own paint sets the export extent.
+	TestTrue(TEXT("Only the initial page supplies the source export extent"), Data.ExportBounds.IsSet()
+		&& Data.ExportBounds->Min.Equals(FVector2D::ZeroVector)
+		&& Data.ExportBounds->GetSize().Equals(FVector2D(100, 80)));
+	TestFalse(TEXT("Unreachable page is not generated"), Plan.PageIds.Contains(TEXT("unused")));
+	TestTrue(TEXT("Ordinary hover overlay target is generated"), Plan.PageIds.Contains(TEXT("tooltip")) && Plan.HasOverlayBindings());
+	TestNotNull(TEXT("Overlay target is hosted in the generated tree"), FindWidgetById(Data.RootWidget, TEXT("tooltip")));
+	TestFalse(TEXT("Unsupported animated overlay is not generated"), Plan.PageIds.Contains(TEXT("animated_page")));
+	TestTrue(TEXT("Unsupported animated overlay remains diagnosed"), Data.Warnings.ContainsByPredicate(
+		[](const FString& Warning) { return Warning.Contains(TEXT("animated_overlay")) && Warning.Contains(TEXT("not executed")); }));
+	TestTrue(TEXT("Unsupported trigger remains diagnosed"), Data.Warnings.ContainsByPredicate(
+		[](const FString& Warning) { return Warning.Contains(TEXT("MOUSE_LEAVE")); }));
+	TestTrue(TEXT("Candidate analysis warnings are retained"), Data.Warnings.ContainsByPredicate(
+		[](const FString& Warning) { return Warning.Contains(TEXT("unsupported_trigger")) && Warning.Contains(TEXT("ON_UNSUPPORTED")); }));
+	TestEqual(TEXT("Source roots remain unchanged"), Document.Children.Num(), 1);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExportedPrototypePageTimeoutTest,
+	"Design2UMG.Converter.FigmaExportedPrototypePageTimeout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaExportedPrototypePageTimeoutTest::RunTest(const FString&)
+{
+	const FString Fill = FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.4, 0.6));
+	const FString Action = TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"AFTER_TIMEOUT\",\"timeout\":1},"
+		"\"actions\":[{\"type\":\"NODE\",\"navigation\":\"NAVIGATE\",\"destinationId\":\"B\","
+		"\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":300,\"easing\":{\"type\":\"LINEAR\"}}}]}]");
+	const FString A = MakeContainerNode(TEXT("A"), TEXT("First"), TEXT("FRAME"), 0, 0, 100, 80,
+		MakeLeafNode(TEXT("A_shape"), TEXT("Shape"), TEXT("RECTANGLE"), 10, 10, 20, 20, Fill), Action);
+	const FString B = MakeContainerNode(TEXT("B"), TEXT("Second"), TEXT("FRAME"), 0, 0, 100, 80,
+		MakeLeafNode(TEXT("B_shape"), TEXT("Shape"), TEXT("RECTANGLE"), 30, 10, 20, 20, Fill));
+	const FString Json = MakeFigmaDocJson(A, FString::Printf(
+		TEXT(",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\",\"design2umgPrototypePages\":[%s]"), *B));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Page timeout source parses"), FFigmaParser::ParseDocument(Json, Document))) return false;
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const auto& Navigation = Data.PrototypeNavigation();
+	if (!TestTrue(TEXT("Timeout creates page navigation"), Navigation.IsValid())
+		|| !TestEqual(TEXT("Both pages are generated"), Navigation.PageIds.Num(), 2)
+		|| !TestEqual(TEXT("One timeout binding exists"), Navigation.ClickBindings.Num(), 1)) return false;
+	const auto& Binding = Navigation.ClickBindings[0];
+	TestTrue(TEXT("Source timeout is retained"), Binding.UsesPageOpenTrigger());
+	TestTrue(*FString::Printf(TEXT("Source transition is admitted: %s"), *Binding.Transition.Diagnostic), Binding.Transition.Diagnostic.IsEmpty());
+	TestTrue(TEXT("Source transition has an actual target"), !Binding.Transition.WidgetTargets.IsEmpty());
+	FDesignDocument DragDocument;
+	if (!TestTrue(TEXT("Drag navigation with exported target parses"), FFigmaParser::ParseDocument(
+		Json.Replace(TEXT("\"type\":\"AFTER_TIMEOUT\",\"timeout\":1"), TEXT("\"type\":\"ON_DRAG\"")), DragDocument))) return false;
+	const FUMGWidgetData DragData = FDesign2UMGConverter::Convert(DragDocument, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("Drag-only destination is included in the reachable page closure"),
+		DragData.PrototypeNavigation().PageIds.Contains(TEXT("B"))
+		&& DragData.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Item)
+			{ return Item.TriggerWidgetId == TEXT("A") && Item.UsesDragTrigger() && Item.TargetPageId == TEXT("B"); }));
+	const FString RejectedJson = Json.Replace(TEXT("\"AFTER_TIMEOUT\""), TEXT("\"ON_CLICK\""))
+		.Replace(TEXT("\"LINEAR\""), TEXT("\"CUSTOM_SPRING\""));
+	FDesignDocument RejectedDocument;
+	if (!TestTrue(TEXT("Rejected animation with exported page parses"),
+		FFigmaParser::ParseDocument(RejectedJson, RejectedDocument))) return false;
+	const FUMGWidgetData RejectedData = FDesign2UMGConverter::Convert(RejectedDocument, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("Rejected animation retains its diagnostic"), RejectedData.Warnings.ContainsByPredicate(
+		[](const FString& Warning) { return Warning.Contains(TEXT("unsupported easing")) && Warning.Contains(TEXT("action not executed")); }));
+	TestFalse(TEXT("Rejected animation produces no executable navigation"), RejectedData.PrototypeNavigation().IsValid());
+	TestNotNull(TEXT("Selected root remains visible"), FindWidgetById(RejectedData.RootWidget, TEXT("A")));
+	TestNull(TEXT("Rejected target page is not rendered as a second root"), FindWidgetById(RejectedData.RootWidget, TEXT("B")));
+	TestEqual(TEXT("Rejected target remains source dependency"), RejectedDocument.SourceDocument().PrototypePages.Num(), 1);
+	return !HasAnyErrors();
 }
 
 #endif

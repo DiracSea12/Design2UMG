@@ -9,6 +9,7 @@ interface RestRect { x: number; y: number; width: number; height: number }
 type RestTransform = [[number, number, number], [number, number, number]];
 interface RestGradientStop { color: RestColor; position: number }
 interface RestPaint {
+  [key: string]: any;
   type: Paint['type'];
   visible?: boolean;
   opacity?: number;
@@ -18,7 +19,7 @@ interface RestPaint {
   gradientTransform?: RestTransform;
   gradientHandlePositions?: Array<{ x: number; y: number }>;
   gradientStops?: RestGradientStop[];
-  imageRef?: string;
+  imageRef?: string | null;
   scaleMode?: ImagePaint['scaleMode'];
   rotation?: number;
   filters?: ImageFilters;
@@ -26,6 +27,7 @@ interface RestPaint {
   imageTransform?: RestTransform;
 }
 interface RestEffect {
+  [key: string]: any;
   type: Effect['type'];
   visible?: boolean;
   blendMode?: string;
@@ -43,18 +45,8 @@ interface RestComponentPropertyReferences {
   characters?: string;
   mainComponent?: string;
 }
-interface PaintExportFields {
-  readonly type: Paint['type'];
-  readonly boundVariables?: SolidPaint['boundVariables'];
-}
-interface EffectExportFields {
-  readonly type: Effect['type'];
-  readonly blendMode?: BlendMode;
-  readonly opacity?: number;
-  readonly showShadowBehindNode?: boolean;
-  readonly boundVariables?: DropShadowEffect['boundVariables'];
-}
 interface RestNode {
+  [key: string]: any;
   id: string;
   name: string;
   type: string;
@@ -140,10 +132,6 @@ interface RestNode {
   textTruncation?: string;
   maxLines?: number | null;
   interactions?: readonly Reaction[];
-  design2umgRenderFallbackImageRef?: string;
-  design2umgRenderFallbackScope?: string;
-  design2umgRenderFallbackSource?: string;
-  design2umgRenderFallbackReason?: string;
 }
 
 interface RestExportNodeEnvelope { document?: RestNode | null }
@@ -156,10 +144,6 @@ interface RestExportResponse {
 
 function colorToRest(c: RGB | RGBA, opacity = 1): RestColor {
   return { r: c.r, g: c.g, b: c.b, a: 'a' in c ? c.a * opacity : opacity };
-}
-
-function rectToRest(bb: { x: number; y: number; width: number; height: number }): RestRect {
-  return { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
 }
 
 function mapBlendMode(bm: string): string {
@@ -194,23 +178,25 @@ function applyTransform(transform: RestTransform, x: number, y: number): { x: nu
   };
 }
 
-function gradientTransformToHandlePositions(transform: RestTransform): Array<{ x: number; y: number }> {
-  const inverse = invertTransform(transform);
-  if (!inverse) return [];
+function multiplyTransforms(left: RestTransform, right: RestTransform): RestTransform {
   return [
-    applyTransform(inverse, 0, 0.5),
-    applyTransform(inverse, 1, 0.5),
-    applyTransform(inverse, 0, 1),
+    [left[0][0] * right[0][0] + left[0][1] * right[1][0],
+      left[0][0] * right[0][1] + left[0][1] * right[1][1],
+      left[0][0] * right[0][2] + left[0][1] * right[1][2] + left[0][2]],
+    [left[1][0] * right[0][0] + left[1][1] * right[1][0],
+      left[1][0] * right[0][1] + left[1][1] * right[1][1],
+      left[1][0] * right[0][2] + left[1][1] * right[1][2] + left[1][2]],
   ];
 }
 
-function cloneJsonSafe<T>(value: T): T | undefined {
-  if (value === undefined) return undefined;
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch {
-    return undefined;
-  }
+function gradientTransformToHandlePositions(transform: RestTransform, type: GradientPaint['type']): Array<{ x: number; y: number }> {
+  const inverse = invertTransform(transform);
+  if (!inverse) return [];
+  return [
+    applyTransform(inverse, type === 'GRADIENT_LINEAR' ? 0 : 0.5, 0.5),
+    applyTransform(inverse, 1, 0.5),
+    applyTransform(inverse, type === 'GRADIENT_LINEAR' ? 0 : 0.5, 1),
+  ];
 }
 
 function documentationLinksToRest(links: readonly DocumentationLink[] | undefined): Array<{ uri: string }> | undefined {
@@ -218,26 +204,10 @@ function documentationLinksToRest(links: readonly DocumentationLink[] | undefine
   return links.map(link => ({ uri: link.uri }));
 }
 
-function exposedInstancesToRest(instances: readonly BaseNode[] | undefined): Array<{ id: string; name: string; type: string }> | undefined {
-  if (!instances || instances.length === 0) return undefined;
-  return instances.map(instance => ({
-    id: instance.id,
-    name: instance.name || instance.id,
-    type: instance.type,
-  }));
-}
-
 function setIfDefined<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | null | undefined): void {
   if (value !== undefined && value !== null) {
     target[key] = value;
   }
-}
-
-function makeRenderFallbackKey(nodeId: string): string {
-  const sanitized = (nodeId || '')
-    .replace(/[^a-zA-Z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return `render_${sanitized || 'node'}`;
 }
 
 function indexRestNodes(node: RestNode | null | undefined, out = new Map<string, RestNode>()): Map<string, RestNode> {
@@ -249,175 +219,37 @@ function indexRestNodes(node: RestNode | null | undefined, out = new Map<string,
   return out;
 }
 
-function hasVisibleChildNodes(node: SceneNode): boolean {
-  if (!('children' in node)) return false;
-  return (node.children || []).some(child => child.visible !== false);
-}
-
-function hasNodeReactions(node: SceneNode): boolean {
-  return 'reactions' in node && Array.isArray((node as any).reactions) && (node as any).reactions.length > 0;
-}
-
-function isExcludedRenderFallbackNodeType(node: SceneNode): boolean {
-  return node.type === 'TEXT'
-    || node.type === 'INSTANCE'
-    || node.type === 'COMPONENT'
-    || node.type === 'COMPONENT_SET'
-    || node.type === 'SECTION';
-}
-
-function getRenderFallbackReasons(node: SceneNode): string[] {
-  if (!('fills' in node) || node.fills === figma.mixed) {
-    return [];
-  }
-
-  const reasons = new Set<string>();
-  for (const fill of node.fills as readonly Paint[]) {
-    if (fill.type !== 'IMAGE' || fill.visible === false) {
-      continue;
-    }
-
-    const imagePaint = fill as ImagePaint;
-    if (imagePaint.filters && Object.keys(imagePaint.filters).length > 0) {
-      reasons.add('image_filters');
-    }
-
-    const blendMode = String(imagePaint.blendMode || 'NORMAL').toUpperCase();
-    if (blendMode !== 'NORMAL' && blendMode !== 'PASS_THROUGH') {
-      reasons.add(`image_blend_${blendMode.toLowerCase()}`);
-    }
-  }
-
-  return Array.from(reasons.values());
-}
-
-function shouldExportNodeRenderFallback(node: SceneNode): { use: boolean; reason: string } {
-  if (isExcludedRenderFallbackNodeType(node)) {
-    return { use: false, reason: '' };
-  }
-  if (hasVisibleChildNodes(node)) {
-    return { use: false, reason: '' };
-  }
-  if (hasNodeReactions(node)) {
-    return { use: false, reason: '' };
-  }
-
-  const reasons = getRenderFallbackReasons(node);
-  if (reasons.length === 0) {
-    return { use: false, reason: '' };
-  }
-
-  return {
-    use: true,
-    reason: reasons.join('+'),
-  };
-}
-
-function attachRenderFallbackMetadata(restNode: RestNode | undefined, imageRef: string, reason: string): void {
-  if (!restNode) return;
-  restNode.design2umgRenderFallbackImageRef = imageRef;
-  restNode.design2umgRenderFallbackScope = 'full';
-  restNode.design2umgRenderFallbackSource = 'figma_render_png';
-  restNode.design2umgRenderFallbackReason = reason;
-}
-
 // ── Fill Serialization ──
 
 function serializePaint(paint: Paint): RestPaint {
-  const out: RestPaint = {
-    type: paint.type,
-    visible: paint.visible !== false,
-    opacity: paint.opacity ?? 1,
-    blendMode: mapBlendMode(paint.blendMode || 'NORMAL'),
-  };
-
-  setIfDefined(out, 'boundVariables', cloneJsonSafe((paint as PaintExportFields).boundVariables));
-
-  if (paint.type === 'SOLID' && 'color' in paint) {
-    out.color = colorToRest(paint.color, paint.opacity);
+  // Paints and effects are data records, unlike SceneNode host objects.
+  const out = copySourceValue(paint) as RestPaint;
+  out.visible = paint.visible !== false;
+  out.opacity = paint.opacity ?? 1;
+  out.blendMode = mapBlendMode(paint.blendMode || 'NORMAL');
+  if (paint.type === 'SOLID') out.color = colorToRest(paint.color);
+  if ('gradientTransform' in paint) {
+    const transform = toRestTransform(paint.gradientTransform);
+    if (transform) out.gradientHandlePositions = gradientTransformToHandlePositions(transform, paint.type);
   }
-
-  if (paint.type === 'GRADIENT_LINEAR' || paint.type === 'GRADIENT_RADIAL' ||
-      paint.type === 'GRADIENT_ANGULAR' || paint.type === 'GRADIENT_DIAMOND') {
-    const gp = paint;
-    const gradientTransform = toRestTransform(gp.gradientTransform);
-    if (gradientTransform) {
-      out.gradientTransform = gradientTransform;
-      out.gradientHandlePositions = gradientTransformToHandlePositions(gradientTransform);
-    } else {
-      out.gradientHandlePositions = [];
-    }
-    out.gradientStops = gp.gradientStops.map(s => ({
-      color: colorToRest(s.color),
-      position: s.position,
-    }));
+  if ('gradientStops' in paint) {
+    out.gradientStops = paint.gradientStops.map(stop => ({ ...copySourceValue(stop), color: colorToRest(stop.color) }));
   }
-
-  if (paint.type === 'IMAGE' && 'imageHash' in paint) {
-    // Plugin API: imageHash → REST API: imageRef
-    const imagePaint = paint;
-    out.imageRef = imagePaint.imageHash || '';
-    out.scaleMode = imagePaint.scaleMode || 'FILL';
-    setIfDefined(out, 'rotation', imagePaint.rotation);
-    setIfDefined(out, 'filters', cloneJsonSafe(imagePaint.filters));
-    if (out.scaleMode === 'TILE') {
-      setIfDefined(out, 'scalingFactor', imagePaint.scalingFactor);
-    }
-    const imageTransform = toRestTransform(imagePaint.imageTransform);
-    if (out.scaleMode === 'CROP' && imageTransform) {
-      out.imageTransform = imageTransform;
-    }
+  if (paint.type === 'IMAGE') {
+    out.imageRef = paint.imageHash;
+    delete out.imageHash;
   }
-
   return out;
 }
-
-// ── Effect Serialization ──
 
 function serializeEffect(effect: Effect): RestEffect {
-  const out: RestEffect = {
-    type: effect.type,
-    visible: effect.visible !== false,
-  };
-  setIfDefined(out, 'blendMode', mapBlendMode((effect as EffectExportFields).blendMode || 'NORMAL'));
-  setIfDefined(out, 'opacity', (effect as EffectExportFields).opacity);
-  if ('radius' in effect) out.radius = effect.radius;
-  if ('offset' in effect) out.offset = effect.offset;
-  if ('color' in effect) out.color = colorToRest(effect.color);
-  if ('spread' in effect) out.spread = effect.spread;
-  setIfDefined(out, 'showShadowBehindNode', (effect as EffectExportFields).showShadowBehindNode);
-  setIfDefined(out, 'boundVariables', cloneJsonSafe((effect as EffectExportFields).boundVariables));
+  const out = copySourceValue(effect) as RestEffect;
+  out.visible = effect.visible !== false;
+  if ('blendMode' in effect) out.blendMode = mapBlendMode(effect.blendMode);
   return out;
 }
 
-// ── Text Style Aggregation ──
-
-function buildTextStyle(node: TextNode, first?: StyledTextSegment): Record<string, any> {
-  if (!first && [node.fontName, node.fontWeight, node.fontSize, node.textCase,
-    node.textDecoration, node.letterSpacing, node.lineHeight].includes(figma.mixed)) {
-    throw new Error(`Text ${node.id}: mixed style has no resolved character segment`);
-  }
-  const fontName = node.fontName !== figma.mixed ? node.fontName : first!.fontName;
-  const fontSize = node.fontSize !== figma.mixed ? node.fontSize : first!.fontSize;
-  const spacing = node.letterSpacing !== figma.mixed ? node.letterSpacing : first!.letterSpacing;
-  const height = node.lineHeight !== figma.mixed ? node.lineHeight : first!.lineHeight;
-  const style: Record<string, any> = {
-    fontFamily: fontName.family, fontStyle: fontName.style, fontPostScriptName: '',
-    fontWeight: node.fontWeight !== figma.mixed ? node.fontWeight : first!.fontWeight,
-    fontSize, textAlignHorizontal: node.textAlignHorizontal || 'LEFT',
-    textAlignVertical: node.textAlignVertical || 'TOP',
-    textCase: node.textCase !== figma.mixed ? node.textCase : first!.textCase,
-    textDecoration: node.textDecoration !== figma.mixed ? node.textDecoration : first!.textDecoration,
-    letterSpacing: spacing.unit === 'PERCENT' ? spacing.value * fontSize / 100 : spacing.value,
-    paragraphSpacing: node.paragraphSpacing, paragraphIndent: node.paragraphIndent,
-    lineHeightUnit: height.unit === 'PERCENT' ? 'FONT_SIZE_%' : height.unit,
-    lineHeightPx: height.unit === 'PIXELS' ? height.value : 0,
-  };
-  if (height.unit === 'PERCENT') style.lineHeightPercentFontSize = height.value;
-  return style;
-}
-
-// ── Node Serialization ──
+// ── Source Geometry ──
 
 function copyGeometryPaths(node: SceneNode, out: RestNode): void {
   if ('fillGeometry' in node) {
@@ -430,239 +262,26 @@ function copyGeometryPaths(node: SceneNode, out: RestNode): void {
 
 function retainRestGeometryPaths(node: SceneNode, restNodesById: Map<string, RestNode>): void {
   const out = restNodesById.get(node.id);
-  if (out) copyGeometryPaths(node, out);
+  if (out) {
+    copyGeometryPaths(node, out);
+    if ('width' in node && 'height' in node) out.size = { x: node.width, y: node.height };
+    if (!out.relativeTransform && 'relativeTransform' in node) {
+      const absolute = toRestTransform(node.absoluteTransform);
+      if (!absolute) throw new Error(`Source absolute transform is unavailable for ${node.id}`);
+      const parent = node.parent;
+      if (parent && 'absoluteTransform' in parent) {
+        const parentAbsolute = toRestTransform(parent.absoluteTransform);
+        const inverse = parentAbsolute && invertTransform(parentAbsolute);
+        if (!inverse) throw new Error(`Parent absolute transform is unavailable for ${node.id}`);
+        out.relativeTransform = multiplyTransforms(inverse, absolute);
+      } else {
+        out.relativeTransform = absolute;
+      }
+    }
+  }
   if ('children' in node) {
     for (const child of node.children) retainRestGeometryPaths(child, restNodesById);
   }
-}
-
-function serializeNode(node: SceneNode): RestNode | null {
-  if (!node.visible && node.type !== 'COMPONENT' && node.type !== 'INSTANCE') return null;
-
-  const out: RestNode = {
-    id: node.id,
-    name: node.name,
-    type: node.type,
-    visible: node.visible,
-  };
-  if ('reactions' in node) {
-    if (node.reactions.some(reaction => !Array.isArray(reaction.actions))) {
-      throw new Error(`Manual export has no action list for an interaction on ${node.name}. Use the official JSON export.`);
-    }
-    out.interactions = cloneJsonSafe(node.reactions);
-  }
-
-  // absoluteBoundingBox — Plugin API provides this directly
-  if ('absoluteBoundingBox' in node && node.absoluteBoundingBox) {
-    out.absoluteBoundingBox = rectToRest(node.absoluteBoundingBox);
-  }
-
-  // absoluteRenderBounds — includes stroke/effect expansion
-  if ('absoluteRenderBounds' in node) {
-    const rb = (node as any).absoluteRenderBounds;
-    out.absoluteRenderBounds = rb ? rectToRest(rb) : null;
-  }
-
-  // relativeTransform — used for flip detection
-  if ('relativeTransform' in node) {
-    const t = (node as any).relativeTransform as Transform;
-    out.relativeTransform = [[t[0][0], t[0][1], t[0][2]], [t[1][0], t[1][1], t[1][2]]];
-  }
-
-  // rotation
-  if ('rotation' in node) {
-    out.rotation = (node as any).rotation;
-  }
-
-  // isMask
-  if ('isMask' in node) {
-    out.isMask = (node as any).isMask;
-  }
-  if ((node as any).isMask && 'maskType' in node) {
-    setIfDefined(out, 'maskType', (node as any).maskType);
-  }
-
-  // Size
-  if ('width' in node) {
-    out.size = { x: (node as any).width, y: (node as any).height };
-  }
-
-  // Fills & Strokes
-  if ('fills' in node && node.fills !== figma.mixed) {
-    out.fills = node.fills.map(serializePaint);
-  }
-  if ('strokes' in node) {
-    out.strokes = node.strokes.map(serializePaint);
-  }
-
-  copyGeometryPaths(node, out);
-
-  // Stroke weight
-  if ('strokeWeight' in node) {
-    out.strokeWeight = (node as any).strokeWeight !== figma.mixed ? (node as any).strokeWeight : 1;
-    out.strokeAlign = (node as any).strokeAlign || 'INSIDE';
-  }
-
-  // Individual stroke weights → aggregate to object
-  if ('strokeTopWeight' in node) {
-    const n = node as any;
-    out.individualStrokeWeights = {
-      top: n.strokeTopWeight ?? 0,
-      right: n.strokeRightWeight ?? 0,
-      bottom: n.strokeBottomWeight ?? 0,
-      left: n.strokeLeftWeight ?? 0,
-    };
-  }
-
-  // Effects
-  if ('effects' in node) {
-    out.effects = node.effects.map(serializeEffect);
-  }
-
-  // Corner radius
-  if ('cornerRadius' in node) {
-    const cr = (node as any).cornerRadius;
-    if (cr !== figma.mixed) out.cornerRadius = cr;
-  }
-  if ('topLeftRadius' in node) {
-    const n = node as any;
-    out.rectangleCornerRadii = [n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius];
-  }
-
-  // Opacity & blend
-  if ('opacity' in node) out.opacity = node.opacity;
-  if ('blendMode' in node) out.blendMode = mapBlendMode(node.blendMode);
-
-  // Clips
-  if ('clipsContent' in node) out.clipsContent = (node as any).clipsContent;
-  setIfDefined(out, 'boundVariables', cloneJsonSafe((node as any).boundVariables));
-  setIfDefined(out, 'componentPropertyReferences', cloneJsonSafe((node as any).componentPropertyReferences));
-  setIfDefined(out, 'explicitVariableModes', cloneJsonSafe((node as any).explicitVariableModes));
-  setIfDefined(out, 'resolvedVariableModes', cloneJsonSafe((node as any).resolvedVariableModes));
-
-  // Constraints
-  if ('constraints' in node) {
-    const c = (node as any).constraints;
-    out.constraints = { vertical: c.vertical, horizontal: c.horizontal };
-  }
-
-  // Auto Layout
-  if ('layoutMode' in node && (node as any).layoutMode !== 'NONE') {
-    const n = node as any;
-    out.layoutMode = n.layoutMode;
-    out.primaryAxisSizingMode = n.primaryAxisSizingMode;
-    out.counterAxisSizingMode = n.counterAxisSizingMode;
-    out.primaryAxisAlignItems = n.primaryAxisAlignItems;
-    out.counterAxisAlignItems = n.counterAxisAlignItems;
-    out.paddingLeft = n.paddingLeft;
-    out.paddingRight = n.paddingRight;
-    out.paddingTop = n.paddingTop;
-    out.paddingBottom = n.paddingBottom;
-    out.itemSpacing = n.itemSpacing;
-    setIfDefined(out, 'counterAxisSpacing', n.counterAxisSpacing);
-    setIfDefined(out, 'counterAxisAlignContent', n.counterAxisAlignContent);
-    setIfDefined(out, 'layoutWrap', n.layoutWrap);
-    setIfDefined(out, 'strokesIncludedInLayout', n.strokesIncludedInLayout);
-    setIfDefined(out, 'itemReverseZIndex', n.itemReverseZIndex);
-    setIfDefined(out, 'gridRowCount', n.gridRowCount);
-    setIfDefined(out, 'gridColumnCount', n.gridColumnCount);
-    setIfDefined(out, 'gridRowGap', n.gridRowGap);
-    setIfDefined(out, 'gridColumnGap', n.gridColumnGap);
-    setIfDefined(out, 'gridRowsSizing', n.gridRowsSizing);
-    setIfDefined(out, 'gridColumnsSizing', n.gridColumnsSizing);
-    setIfDefined(out, 'gridChildHorizontalAlign', n.gridChildHorizontalAlign);
-    setIfDefined(out, 'gridChildVerticalAlign', n.gridChildVerticalAlign);
-  }
-
-  // Layout child properties
-  if ('layoutAlign' in node) out.layoutAlign = (node as any).layoutAlign;
-  if ('layoutGrow' in node) out.layoutGrow = (node as any).layoutGrow;
-  if ('layoutSizingHorizontal' in node) out.layoutSizingHorizontal = (node as any).layoutSizingHorizontal;
-  if ('layoutSizingVertical' in node) out.layoutSizingVertical = (node as any).layoutSizingVertical;
-  if ('layoutPositioning' in node) out.layoutPositioning = (node as any).layoutPositioning;
-  if ('minWidth' in node) setIfDefined(out, 'minWidth', (node as any).minWidth);
-  if ('maxWidth' in node) setIfDefined(out, 'maxWidth', (node as any).maxWidth);
-  if ('minHeight' in node) setIfDefined(out, 'minHeight', (node as any).minHeight);
-  if ('maxHeight' in node) setIfDefined(out, 'maxHeight', (node as any).maxHeight);
-  if ('gridRowSpan' in node) setIfDefined(out, 'gridRowSpan', (node as any).gridRowSpan);
-  if ('gridColumnSpan' in node) setIfDefined(out, 'gridColumnSpan', (node as any).gridColumnSpan);
-  if ('gridColumnAnchorIndex' in node) setIfDefined(out, 'gridColumnAnchorIndex', (node as any).gridColumnAnchorIndex);
-  if ('gridRowAnchorIndex' in node) setIfDefined(out, 'gridRowAnchorIndex', (node as any).gridRowAnchorIndex);
-
-  // Component reference
-  if (node.type === 'INSTANCE') {
-    const instanceNode = node as InstanceNode;
-    if (instanceNode.mainComponent) {
-      out.componentId = instanceNode.mainComponent.id;
-      setIfDefined(out, 'mainComponentKey', instanceNode.mainComponent.key);
-      const componentSet = instanceNode.mainComponent.parent;
-      if (componentSet && componentSet.type === 'COMPONENT_SET') {
-        out.componentSetId = componentSet.id;
-      out.componentSetKey = componentSet.key;
-      }
-    }
-    setIfDefined(out, 'componentProperties', cloneJsonSafe(instanceNode.componentProperties));
-    setIfDefined(out, 'variantProperties', cloneJsonSafe(instanceNode.variantProperties));
-    setIfDefined(out, 'overrides', cloneJsonSafe(instanceNode.overrides));
-    setIfDefined(out, 'exposedInstances', exposedInstancesToRest(instanceNode.exposedInstances));
-    setIfDefined(out, 'isExposedInstance', instanceNode.isExposedInstance);
-  }
-
-  // Text
-  if (node.type === 'TEXT') {
-    const tn = node as TextNode;
-    out.characters = tn.characters;
-    const segments = tn.characters ? tn.getStyledTextSegments([
-      'fontName', 'fontWeight', 'fontStyle', 'fontSize', 'fills', 'lineHeight',
-      'letterSpacing', 'textDecoration', 'textCase', 'hyperlink',
-    ]) : [];
-    out.style = buildTextStyle(tn, segments[0] as StyledTextSegment | undefined);
-    if (segments.length > 1) {
-      out.characterStyleOverrides = new Array(tn.characters.length);
-      out.styleOverrideTable = {};
-      const styleIds = new Map<string, number>();
-      for (const segment of segments) {
-        const row: Record<string, any> = {
-          fontFamily: segment.fontName.family, fontStyle: segment.fontName.style,
-          fontWeight: segment.fontWeight, fontSize: segment.fontSize,
-          italic: segment.fontStyle === 'ITALIC',
-          fills: segment.fills.map(serializePaint), textDecoration: segment.textDecoration,
-          letterSpacing: segment.letterSpacing.unit === 'PERCENT'
-            ? segment.letterSpacing.value * segment.fontSize / 100 : segment.letterSpacing.value,
-          lineHeightUnit: segment.lineHeight.unit === 'PERCENT' ? 'FONT_SIZE_%' : segment.lineHeight.unit,
-        };
-        if (segment.lineHeight.unit === 'PIXELS') row.lineHeightPx = segment.lineHeight.value;
-        if (segment.lineHeight.unit === 'PERCENT') row.lineHeightPercentFontSize = segment.lineHeight.value;
-        if (segment.textCase !== out.style.textCase) row.textCase = segment.textCase;
-        if (segment.hyperlink) row.hyperlink = segment.hyperlink.type === 'URL'
-          ? { type: 'URL', url: segment.hyperlink.value } : { type: 'NODE', nodeID: segment.hyperlink.value };
-        const signature = JSON.stringify(row);
-        let id = styleIds.get(signature);
-        if (id === undefined) {
-          id = styleIds.size + 1;
-          styleIds.set(signature, id);
-          out.styleOverrideTable[String(id)] = row;
-        }
-        out.characterStyleOverrides.fill(id, segment.start, segment.end);
-      }
-      if (tn.fills === figma.mixed) out.fills = segments[0].fills.map(serializePaint);
-    }
-    out.textAutoResize = tn.textAutoResize || 'NONE';
-    setIfDefined(out, 'textTruncation', (tn as any).textTruncation);
-    setIfDefined(out, 'maxLines', (tn as any).maxLines);
-  }
-
-  // Children
-  if ('children' in node) {
-    const children: RestNode[] = [];
-    for (const child of (node as any).children) {
-      const serialized = serializeNode(child);
-      if (serialized) children.push(serialized);
-    }
-    out.children = children;
-  }
-
-  return out;
 }
 
 function findNodeById(node: unknown, targetId: string): RestNode | null {
@@ -706,16 +325,216 @@ function unwrapRestExportResponse(response: unknown, targetId: string): RestNode
   return null;
 }
 
-async function exportOfficialRestNode(node: SceneNode): Promise<RestNode | null> {
-  if (!('exportAsync' in node)) return null;
+/** Read data properties explicitly: JSON.stringify on a SceneNode drops host getters. */
+function sourcePropertyNames(value: object): Set<string> {
+  const names = new Set<string>();
+  for (let current: object | null = value; current && current !== Object.prototype;
+    current = Object.getPrototypeOf(current)) {
+    for (const key of Object.getOwnPropertyNames(current)) {
+      if (key !== 'constructor') names.add(key);
+    }
+  }
+  return names;
+}
+
+function copySourceValue(value: any, ancestors = new Set<object>()): any {
+  if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : { type: 'NON_FINITE_NUMBER', value: String(value) };
+  }
+  if (value === figma.mixed) return { type: 'MIXED' };
+  if (typeof value !== 'object') throw new Error(`Source value is not JSON data (${typeof value})`);
+  // Node references carry identity; the actual node trees are exported separately.
+  if (typeof value.getPluginData === 'function' && 'parent' in value) {
+    return { id: value.id, name: value.name, type: value.type };
+  }
+  if (ancestors.has(value)) throw new Error('Source data contains a circular reference');
+  ancestors.add(value);
   try {
-    const response = await (node as any).exportAsync({ format: 'JSON_REST_V1' });
-    const document = unwrapRestExportResponse(response, node.id);
-    if (document) retainRestGeometryPaths(node, indexRestNodes(document));
+    if (Array.isArray(value)) return value.map(entry => copySourceValue(entry, ancestors));
+    const result: Record<string, any> = {};
+    for (const key of sourcePropertyNames(value)) {
+      const entry = value[key];
+      if (entry !== undefined && typeof entry !== 'function') result[key] = copySourceValue(entry, ancestors);
+    }
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+const motionFields = ['animationStyles', 'animations', 'manualKeyframeTracks', 'timelines'] as const;
+interface ExportDiagnostic { nodeId: string; field: string; message: string }
+
+function capturePluginData(source: BaseNode, includeMotion = false): { data: Record<string, any>; diagnostics: ExportDiagnostic[] } {
+  const raw: Record<string, any> = {};
+  const diagnostics: ExportDiagnostic[] = [];
+  const keys = sourcePropertyNames(source);
+  // Motion properties may be present in the API contract but hidden by account gates.
+  if (includeMotion) for (const field of motionFields) keys.add(field);
+  for (const field of keys) {
+    if (field === 'children' || field === 'parent') continue;
+    if (field === 'componentPropertyDefinitions' && source.type === 'COMPONENT' && isVariantComponent(source)) continue;
+    try {
+      const value = (source as any)[field];
+      if (typeof value === 'function') continue;
+      if (value === undefined) {
+        if ((motionFields as readonly string[]).includes(field)) {
+          diagnostics.push({ nodeId: source.id, field, message: 'Motion API is unavailable; data was not read' });
+        }
+        continue;
+      }
+      raw[field] = copySourceValue(value);
+    } catch (error) {
+      diagnostics.push({ nodeId: source.id, field, message: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { data: raw, diagnostics };
+}
+
+function pluginNodeTypeToRest(type: SceneNode['type']): string {
+  return type === 'POLYGON' ? 'REGULAR_POLYGON' : type;
+}
+
+async function mergePluginSourceNode(source: SceneNode, out: RestNode): Promise<void> {
+  if (out.id !== source.id || out.type !== pluginNodeTypeToRest(source.type)) {
+    throw new Error(`REST export changed source identity ${source.id} (${source.type}) to ${out.id} (${out.type})`);
+  }
+  const { data: raw, diagnostics } = capturePluginData(source, true);
+  out.visible = source.visible;
+  if (source.type === 'TEXT') {
+    raw.styledTextSegments = copySourceValue(source.getStyledTextSegments([
+      'fontSize', 'fontName', 'fontWeight', 'fontStyle', 'textDecoration', 'textDecorationStyle',
+      'textDecorationOffset', 'textDecorationThickness', 'textDecorationColor', 'textDecorationSkipInk',
+      'textCase', 'lineHeight', 'letterSpacing', 'fills', 'textStyleId', 'fillStyleId', 'listOptions',
+      'listSpacing', 'indentation', 'paragraphIndent', 'paragraphSpacing', 'textWrapStyle', 'hyperlink',
+      'openTypeFeatures', 'boundVariables', 'textStyleOverrides',
+    ]));
+  }
+  out.design2umgPluginData = raw;
+  if (diagnostics.length) out.design2umgExportDiagnostics = diagnostics;
+  for (const field of motionFields) {
+    if (Object.prototype.hasOwnProperty.call(raw, field)) out[field] = raw[field];
+    else delete out[field];
+  }
+  out.design2umgMotionTimeUnit = 'SECONDS';
+  if ('reactions' in source) out.interactions = pluginReactionsToRest(source.reactions);
+  if ('fills' in source && source.fills !== figma.mixed) {
+    out.fills = source.fills.map((paint, index) => ({ ...out.fills?.[index], ...serializePaint(paint) }));
+  }
+  if ('strokes' in source) {
+    out.strokes = source.strokes.map((paint, index) => ({ ...out.strokes?.[index], ...serializePaint(paint) }));
+  }
+  if ('effects' in source) {
+    out.effects = source.effects.map((effect, index) => ({ ...out.effects?.[index], ...serializeEffect(effect) }));
+  }
+  if ('children' in source) {
+    const sourceChildren = Array.from(source.children);
+    const officialChildren = out.children || [];
+    const describe = (children: readonly { id: string; name?: string; type: string; visible?: boolean }[]) =>
+      children.map(child => ({ id: child.id, name: child.name ?? null, type: child.type, visible: child.visible ?? null }));
+    const context = `on ${source.id} (${source.name}); sourceChildren=${JSON.stringify(describe(sourceChildren))}; `
+      + `restChildren=${JSON.stringify(describe(officialChildren))}`;
+    const sourceIds = new Set(sourceChildren.map(child => child.id));
+    const childrenById = new Map(officialChildren.map(child => [child.id, child]));
+    if (childrenById.size !== officialChildren.length || officialChildren.some(child => !sourceIds.has(child.id))) {
+      throw new Error(`REST export changed source children or order ${context}`);
+    }
+    const children: RestNode[] = [];
+    for (const child of sourceChildren) {
+      try {
+        // Every missing subtree must come from that exact source child's official export.
+        const document = childrenById.get(child.id) || await readOfficialRestNode(child);
+        await mergePluginSourceNode(child, document);
+        children.push(document);
+      } catch (error) {
+        throw new Error(`REST child ${child.id} (${child.name}) ${context}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (JSON.stringify(children.map(child => child.id)) !== JSON.stringify(sourceChildren.map(child => child.id))) {
+      throw new Error(`REST export changed source children or order ${context}`);
+    }
+    out.children = children;
+  }
+}
+
+async function readOfficialRestNode(node: SceneNode): Promise<RestNode> {
+  const response = await node.exportAsync({ format: 'JSON_REST_V1' });
+  const document = unwrapRestExportResponse(response, node.id);
+  if (!document || document.id !== node.id || document.type !== pluginNodeTypeToRest(node.type)) {
+    throw new Error(`Official JSON did not contain source identity ${node.id} (${node.type}); `
+      + `received ${document?.id ?? 'null'} (${document?.type ?? 'null'})`);
+  }
+  return document;
+}
+
+async function exportOfficialRestNode(node: SceneNode): Promise<RestNode> {
+  try {
+    const document = await readOfficialRestNode(node);
+    await mergePluginSourceNode(node, document);
+    const nodes = indexRestNodes(document);
+    validatePrototypeInteractions(node, nodes);
+    retainRestGeometryPaths(node, nodes);
     return document;
   } catch (error) {
-    console.warn(`JSON_REST_V1 export failed for ${node.name}:`, error);
-    return null;
+    throw new Error(`JSON_REST_V1 ${node.id} (${node.name}): ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function pluginReactionsToRest(reactions: readonly Reaction[]): Reaction[] {
+  if (!Array.isArray(reactions) || reactions.some(reaction => !Array.isArray(reaction.actions))) {
+    throw new Error('Source interaction has no action list');
+  }
+  const result = copySourceValue(reactions) as Reaction[];
+  function convert(actions: readonly any[]): void {
+    for (const action of actions) {
+      if (!action) continue;
+      if (action.transition && typeof action.transition.duration === 'number') {
+        action.transition.duration *= 1000;
+      }
+      for (const block of action.conditionalBlocks || []) convert(block.actions || []);
+    }
+  }
+  for (const reaction of result) {
+    // The normalized contract uses actions; the deprecated source mirror stays in the raw snapshot.
+    delete reaction.action;
+    if (reaction.trigger && reaction.trigger.type === 'AFTER_TIMEOUT') {
+      (reaction.trigger as { timeout: number }).timeout *= 1000;
+    }
+    convert(reaction.actions || []);
+  }
+  return result;
+}
+
+function validatePrototypeInteractions(source: SceneNode, nodes: Map<string, RestNode>): void {
+  function interactionJson(interactions: readonly any[]): string {
+    function actions(entries: readonly any[]): void {
+      for (const action of entries) {
+        if (!action) continue;
+        if (action.type === 'NODE') {
+          if (typeof action.navigation !== 'string' || !action.navigation) {
+            throw new Error(`NODE action on ${source.id} is missing required navigation`);
+          }
+        }
+        for (const block of action.conditionalBlocks || []) actions(block.actions || []);
+      }
+    }
+    for (const interaction of interactions) {
+      if (interaction.trigger) actions(interaction.actions || []);
+    }
+    return JSON.stringify(interactions, (_key, value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      const ordered: Record<string, unknown> = {};
+      for (const key of Object.keys(value).sort()) ordered[key] = value[key];
+      return ordered;
+    });
+  }
+  if ('reactions' in source && interactionJson(pluginReactionsToRest(source.reactions))
+    !== interactionJson(nodes.get(source.id)?.interactions || [])) {
+    throw new Error(`REST export lost prototype destinations or changed interaction data on ${source.id}`);
+  }
+  if ('children' in source) {
+    for (const child of source.children) validatePrototypeInteractions(child, nodes);
   }
 }
 
@@ -731,17 +550,42 @@ interface RestComponentMeta {
   componentPropertyDefinitions?: ComponentPropertyDefinitions;
   variantGroupProperties?: ComponentSetNode['variantGroupProperties'];
   documentationLinks?: Array<{ uri: string }>;
+  design2umgExportDiagnostics?: ExportDiagnostic[];
 }
 
 function isVariantComponent(component: ComponentNode): boolean {
   return !!(component.parent && component.parent.type === 'COMPONENT_SET');
 }
 
-function getExportableComponentPropertyDefinitions(component: ComponentNode): ComponentPropertyDefinitions | undefined {
-  if (isVariantComponent(component)) {
-    return undefined;
+function componentMetadata(node: ComponentNode | ComponentSetNode): RestComponentMeta {
+  const metadata: RestComponentMeta = {
+    key: node.key, name: node.name, description: node.description || '', remote: !!node.remote,
+    documentationLinks: documentationLinksToRest(node.documentationLinks),
+  };
+  if (node.type === 'COMPONENT' && node.parent?.type === 'COMPONENT_SET') metadata.componentSetId = node.parent.id;
+  const fields = node.type === 'COMPONENT_SET' ? ['componentPropertyDefinitions', 'variantGroupProperties']
+    : isVariantComponent(node) ? [] : ['componentPropertyDefinitions'];
+  const diagnostics: ExportDiagnostic[] = [];
+  for (const field of fields) {
+    try {
+      (metadata as any)[field] = copySourceValue((node as any)[field]);
+    } catch (error) {
+      diagnostics.push({ nodeId: node.id, field, message: error instanceof Error ? error.message : String(error) });
+    }
   }
-  return cloneJsonSafe(component.componentPropertyDefinitions);
+  if (diagnostics.length) metadata.design2umgExportDiagnostics = diagnostics;
+  return metadata;
+}
+
+function registerReferencedComponent(
+  component: ComponentNode,
+  components: Record<string, RestComponentMeta>,
+  componentSets: Record<string, RestComponentMeta>
+): void {
+  components[component.id] = componentMetadata(component);
+  if (component.parent?.type === 'COMPONENT_SET') {
+    componentSets[component.parent.id] = componentMetadata(component.parent);
+  }
 }
 
 function collectReferencedComponents(
@@ -749,45 +593,12 @@ function collectReferencedComponents(
   components: Record<string, RestComponentMeta>,
   componentSets: Record<string, RestComponentMeta>
 ): void {
-  const registerComponent = (component: ComponentNode) => {
-    components[component.id] = {
-      key: component.key,
-      name: component.name,
-      description: component.description || '',
-      remote: !!component.remote,
-      componentSetId: component.parent && component.parent.type === 'COMPONENT_SET' ? component.parent.id : undefined,
-      componentPropertyDefinitions: getExportableComponentPropertyDefinitions(component),
-      documentationLinks: documentationLinksToRest(component.documentationLinks),
-    };
-
-    if (component.parent && component.parent.type === 'COMPONENT_SET') {
-      const componentSet = component.parent;
-      componentSets[componentSet.id] = {
-        key: componentSet.key,
-        name: componentSet.name,
-        description: componentSet.description || '',
-        remote: !!componentSet.remote,
-        componentPropertyDefinitions: cloneJsonSafe(componentSet.componentPropertyDefinitions),
-        variantGroupProperties: cloneJsonSafe(componentSet.variantGroupProperties),
-        documentationLinks: documentationLinksToRest(componentSet.documentationLinks),
-      };
-    }
-  };
-
   if (node.type === 'COMPONENT') {
-    registerComponent(node);
+    registerReferencedComponent(node, components, componentSets);
   } else if (node.type === 'COMPONENT_SET') {
-    componentSets[node.id] = {
-      key: node.key,
-      name: node.name,
-      description: node.description || '',
-      remote: !!node.remote,
-      componentPropertyDefinitions: cloneJsonSafe(node.componentPropertyDefinitions),
-      variantGroupProperties: cloneJsonSafe(node.variantGroupProperties),
-      documentationLinks: documentationLinksToRest(node.documentationLinks),
-    };
+    componentSets[node.id] = componentMetadata(node);
   } else if (node.type === 'INSTANCE' && node.mainComponent) {
-    registerComponent(node.mainComponent);
+    registerReferencedComponent(node.mainComponent, components, componentSets);
   }
 
   if ('children' in node) {
@@ -800,31 +611,8 @@ function collectReferencedComponents(
 async function collectImages(
   node: SceneNode,
   images: Map<string, Uint8Array>,
-  scale: number,
-  onProgress: (text: string) => void,
-  restNodesById?: Map<string, RestNode>
+  onProgress: (text: string) => void
 ): Promise<void> {
-  const renderFallback = shouldExportNodeRenderFallback(node);
-  if (renderFallback.use && 'exportAsync' in node) {
-    const imageRef = makeRenderFallbackKey(node.id);
-    if (!images.has(imageRef)) {
-      try {
-        const bytes = await (node as any).exportAsync({
-          format: 'PNG',
-          constraint: { type: 'SCALE', value: scale },
-        });
-        images.set(imageRef, bytes);
-        onProgress(`Render: ${node.name}`);
-      } catch (e) {
-        throw new Error(`Failed to export render image ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-
-    if (images.has(imageRef)) {
-      attachRenderFallbackMetadata(restNodesById?.get(node.id), imageRef, renderFallback.reason);
-    }
-  }
-
   // Image fills
   if ('fills' in node && node.fills !== figma.mixed) {
     for (const fill of node.fills as readonly Paint[]) {
@@ -866,28 +654,10 @@ async function collectImages(
     }
   }
 
-  // Vector nodes → export as PNG
-  const vectorTypes = ['VECTOR', 'BOOLEAN_OPERATION', 'STAR', 'LINE', 'ELLIPSE', 'POLYGON'];
-  if (vectorTypes.includes(node.type) && 'exportAsync' in node) {
-    const vecKey = `vec_${node.id.replace(/[:/]/g, '_')}`;
-    if (!images.has(vecKey)) {
-      try {
-        const bytes = await (node as any).exportAsync({
-          format: 'PNG',
-          constraint: { type: 'SCALE', value: scale },
-        });
-        images.set(vecKey, bytes);
-        onProgress(`Vector: ${node.name}`);
-      } catch (e) {
-        throw new Error(`Failed to export vector ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-  }
-
   // Recurse children
   if ('children' in node) {
     for (const child of (node as any).children) {
-      await collectImages(child, images, scale, onProgress, restNodesById);
+      await collectImages(child, images, onProgress);
     }
   }
 }
@@ -918,6 +688,7 @@ interface ComponentDependencyIdentity {
 interface ComponentDependencyBundle {
   schemaVersion: number;
   definitions: Array<ComponentDependencyIdentity & { document: RestNode }>;
+  sourceNodes?: RestNode[];
   instances: Record<string, ComponentDependencyIdentity>;
   errors: Array<{ kind: string; nodeId: string; message: string }>;
 }
@@ -939,8 +710,10 @@ interface ExportDocumentPayload {
   name: string;
   version: string;
   schemaVersion: number;
+  design2umgPrototypeDurationUnit: 'MILLISECONDS';
   fileKey?: string;
   design2umgComponentDependencies: ComponentDependencyBundle;
+  design2umgPrototypePages: RestNode[];
   components?: Record<string, RestComponentMeta>;
   componentSets?: Record<string, RestComponentMeta>;
 }
@@ -948,20 +721,82 @@ interface ExportDocumentPayload {
 interface ExportRequestMessage {
   type: string;
   scale?: number;
-  exportPath?: string;
+  rootNodeId?: string;
+  sequence?: number;
+  error?: string;
+}
+
+interface PreparedExport {
+  warning: string;
+  json: string;
+  images: Map<string, Uint8Array>;
+  reference: Uint8Array;
+}
+
+type ExportTransferMessage =
+  | { type: 'export-start'; warning: string; fileCount: number }
+  | { type: 'export-file'; name: string; kind: 'text' | 'binary'; length: number }
+  | { type: 'export-text'; data: string }
+  | { type: 'export-bytes'; data: Uint8Array }
+  | { type: 'export-file-end' }
+  | { type: 'export-complete' };
+
+const exportChunkLength = 1024 * 1024;
+
+async function transferExport(prepared: PreparedExport, send: (message: ExportTransferMessage) => Promise<void>): Promise<void> {
+  await send({ type: 'export-start', warning: prepared.warning, fileCount: prepared.images.size + 2 });
+  async function textFile(name: string, text: string): Promise<void> {
+    await send({ type: 'export-file', name, kind: 'text', length: text.length });
+    for (let start = 0; start < text.length;) {
+      let end = Math.min(start + exportChunkLength, text.length);
+      // Each UI TextEncoder call must receive both halves of a UTF-16 surrogate pair.
+      if (end < text.length && text.charCodeAt(end - 1) >= 0xD800 && text.charCodeAt(end - 1) <= 0xDBFF
+        && text.charCodeAt(end) >= 0xDC00 && text.charCodeAt(end) <= 0xDFFF) end--;
+      await send({ type: 'export-text', data: text.slice(start, end) });
+      start = end;
+    }
+    await send({ type: 'export-file-end' });
+  }
+  async function binaryFile(name: string, bytes: Uint8Array): Promise<void> {
+    await send({ type: 'export-file', name, kind: 'binary', length: bytes.length });
+    for (let start = 0; start < bytes.length; start += exportChunkLength) {
+      await send({ type: 'export-bytes', data: bytes.length <= exportChunkLength
+        ? bytes : bytes.subarray(start, Math.min(start + exportChunkLength, bytes.length)) });
+    }
+    await send({ type: 'export-file-end' });
+  }
+  await textFile('design.json', prepared.json);
+  prepared.json = '';
+  await binaryFile('reference.png', prepared.reference);
+  prepared.reference = new Uint8Array(0);
+  for (const [key, bytes] of prepared.images) {
+    await binaryFile('images/' + key + '.png', bytes);
+    prepared.images.delete(key);
+  }
+  await send({ type: 'export-complete' });
 }
 
 async function collectComponentDependencyImages(
-  bundle: ComponentDependencyBundle, images: Map<string, Uint8Array>
+  bundle: ComponentDependencyBundle, images: Map<string, Uint8Array>, pages: RestNode[] = []
 ): Promise<void> {
   const hashes = new Set<string>();
-  function collect(node: RestNode): void {
-    for (const paint of [...(node.fills || []), ...(node.strokes || [])]) {
-      if (paint.type === 'IMAGE' && typeof paint.imageRef === 'string') hashes.add(paint.imageRef);
+  function collect(value: any): void {
+    if (!value || typeof value !== 'object') return;
+    if (value.type === 'IMAGE') {
+      const hash = value.imageRef ?? value.imageHash;
+      if (typeof hash === 'string' && hash) hashes.add(hash);
     }
-    for (const child of node.children || []) collect(child);
+    if (value.type === 'VIDEO' && value.videoHash) {
+      throw new Error(`Video resource ${value.videoHash} cannot be read by the current Plugin API`);
+    }
+    if (value.type === 'SHADER' && value.id) {
+      throw new Error(`Shader resource ${value.id} has no readable shader source in the current Plugin API`);
+    }
+    for (const entry of Object.values(value)) collect(entry);
   }
   for (const definition of bundle.definitions) collect(definition.document);
+  for (const node of bundle.sourceNodes || []) collect(node);
+  for (const page of pages) collect(page);
   for (const hash of hashes) {
     if (images.has(hash)) continue;
     try {
@@ -979,12 +814,58 @@ async function collectComponentDependencyImages(
 
 // Component definitions are separate from the selected layout tree. Instance nodes
 // retain their resolved appearance; definitions supply reusable defaults and dependencies.
-async function collectComponentDependencies(root: SceneNode): Promise<ComponentDependencyBundle> {
+async function collectComponentDependencies(
+  root: SceneNode, pages: RestNode[] = [],
+  components: Record<string, RestComponentMeta> = {}, componentSets: Record<string, RestComponentMeta> = {}
+): Promise<ComponentDependencyBundle> {
   const result: ComponentDependencyBundle = {
-    schemaVersion: 1, definitions: [], instances: {}, errors: [],
+    schemaVersion: 1, definitions: [], sourceNodes: [], instances: {}, errors: [],
   };
   const active = new Set<string>();
   const completed = new Set<string>();
+  const runtimeIds = new Set<string>();
+  const scanned = new Set<SceneNode>();
+  const targets: Array<{ origin: SceneNode; destinationId: string; navigation: string; fileLocal: boolean }> = [];
+
+  function collectTargets(node: SceneNode, fileLocal: boolean): void {
+    if (scanned.has(node)) return;
+    scanned.add(node);
+    function actions(entries: readonly any[]): void {
+      for (const action of entries) {
+        if (!action) continue;
+        for (const block of action.conditionalBlocks || []) actions(block.actions || []);
+        if (action.type !== 'NODE') continue;
+        const navigation = action.navigation;
+        if (typeof navigation !== 'string' || !navigation) {
+          throw new Error(`NODE action on ${node.id} is missing required navigation`);
+        }
+        if (!['CHANGE_TO', 'NAVIGATE', 'OVERLAY', 'SWAP', 'OPEN_OVERLAY', 'SWAP_OVERLAY'].includes(navigation)) continue;
+        if (action.destinationId === null) continue;
+        targets.push({ origin: node, destinationId: action.destinationId, navigation, fileLocal });
+      }
+    }
+    if ('reactions' in node) {
+      for (const reaction of node.reactions) {
+        if (reaction.trigger) actions(reaction.actions || []);
+      }
+    }
+    function paints(value: any): void {
+      if (!value || typeof value !== 'object') return;
+      if (value.type === 'PATTERN') {
+        targets.push({ origin: node, destinationId: value.sourceNodeId, navigation: 'PATTERN', fileLocal });
+      }
+      for (const entry of Object.values(value)) paints(entry);
+    }
+    if ('fills' in node && node.fills !== figma.mixed) paints(node.fills);
+    if ('strokes' in node) paints(node.strokes);
+    if (node.type === 'TEXT' && typeof node.getStyledTextSegments === 'function') {
+      paints(node.getStyledTextSegments(['fills']).map(segment => segment.fills));
+    }
+    for (const field of motionFields) {
+      // Access restrictions are recorded by mergePluginSourceNode; they do not mean an empty animation.
+      try { paints((node as any)[field]); } catch { /* unavailable Motion source */ }
+    }
+  }
 
   function identity(component: ComponentNode): ComponentDependencyIdentity {
     const set = component.parent?.type === 'COMPONENT_SET' ? component.parent : undefined;
@@ -1003,16 +884,13 @@ async function collectComponentDependencies(root: SceneNode): Promise<ComponentD
     if (completed.has(token)) return;
     active.add(token);
     try {
+      if (!component.remote) registerReferencedComponent(component, components, componentSets);
+      collectTargets(component, !component.remote);
       // Node ids are file-local. Remote definitions can contain the same node id
       // as another definition or the selected file, so resolve each tree separately.
       const instances: Record<string, ComponentDependencyIdentity> = {};
-      await visitChildren(component, instances);
-      const exported = await component.exportAsync({ format: 'JSON_REST_V1' });
-      const document = unwrapRestExportResponse(exported, component.id);
-      if (!document || document.id !== component.id || document.type !== 'COMPONENT') {
-        throw new Error('Component export did not contain its complete definition');
-      }
-      retainRestGeometryPaths(component, indexRestNodes(document));
+      await visitChildren(component, instances, !component.remote);
+      const document = await exportOfficialRestNode(component);
       applyComponentIdentities(document, instances);
       result.definitions.push({ ...source, document });
     } catch (error) {
@@ -1024,13 +902,15 @@ async function collectComponentDependencies(root: SceneNode): Promise<ComponentD
     }
   }
 
-  async function visitChildren(node: SceneNode, instances: Record<string, ComponentDependencyIdentity>): Promise<void> {
+  async function visitChildren(node: SceneNode, instances: Record<string, ComponentDependencyIdentity>, fileLocal: boolean): Promise<void> {
     if ('children' in node) {
-      for (const child of node.children) await visit(child, instances);
+      for (const child of node.children) await visit(child, instances, fileLocal);
     }
   }
 
-  async function visit(node: SceneNode, instances: Record<string, ComponentDependencyIdentity>): Promise<void> {
+  async function visit(node: SceneNode, instances: Record<string, ComponentDependencyIdentity>, fileLocal: boolean): Promise<void> {
+    if (instances === result.instances) runtimeIds.add(node.id);
+    collectTargets(node, fileLocal);
     if (node.type === 'INSTANCE') {
       try {
         const main = await node.getMainComponentAsync();
@@ -1043,13 +923,62 @@ async function collectComponentDependencies(root: SceneNode): Promise<ComponentD
       }
     } else if (node.type === 'COMPONENT') {
       await visitDefinition(node);
-      return;
     }
     // Resolved instance children may contain a component swap absent from the main definition.
-    await visitChildren(node, instances);
+    await visitChildren(node, instances, fileLocal);
   }
 
-  await visit(root, result.instances);
+  await visit(root, result.instances, true);
+  for (let index = 0; index < targets.length; index++) {
+    const { origin, destinationId, navigation, fileLocal } = targets[index];
+    try {
+      if (!destinationId) throw new Error(`${navigation} destination is missing`);
+      if (fileLocal && navigation !== 'CHANGE_TO' && runtimeIds.has(destinationId)) continue;
+      let target: BaseNode | null | undefined;
+      if (navigation === 'CHANGE_TO') {
+        let scope: BaseNode | null = origin;
+        while (scope && scope.type !== 'INSTANCE' && scope.type !== 'COMPONENT_SET') scope = scope.parent;
+        if (scope?.type === 'INSTANCE') {
+          const main = await scope.getMainComponentAsync();
+          if (!main || main.parent?.type !== 'COMPONENT_SET') {
+            throw new Error(`CHANGE_TO destination ${destinationId} has no accessible source component set`);
+          }
+          scope = main.parent;
+        }
+        if (scope?.type === 'COMPONENT_SET') {
+          target = scope.children.find(child => child.id === destinationId);
+          if (!target) throw new Error(`CHANGE_TO destination ${destinationId} is unavailable in source component set ${scope.id}`);
+        } else if (fileLocal && !scope) {
+          target = await figma.getNodeByIdAsync(destinationId);
+        } else {
+          throw new Error(`CHANGE_TO destination ${destinationId} has no accessible source component set`);
+        }
+      } else if (fileLocal) {
+        target = await figma.getNodeByIdAsync(destinationId);
+      } else {
+        throw new Error(`Remote ${navigation} destination ${destinationId} cannot be resolved in this file`);
+      }
+      if (!target || target.type === 'PAGE' || target.type === 'DOCUMENT'
+        || (navigation !== 'PATTERN' && (navigation === 'CHANGE_TO' ? target.type !== 'COMPONENT'
+          : target.type !== 'FRAME' && target.type !== 'INSTANCE' && target.type !== 'COMPONENT'))) {
+        const actualTarget = target ? { id: target.id, type: target.type, name: target.name } : null;
+        throw new Error(`${navigation} destination ${destinationId} is missing or has the wrong node type; `
+          + `actualTarget=${JSON.stringify(actualTarget)}`);
+      }
+      if (target.type === 'COMPONENT' && (navigation === 'CHANGE_TO' || navigation === 'PATTERN')) {
+        await visitDefinition(target);
+      } else {
+        await visit(target, result.instances, true);
+        const document = await exportOfficialRestNode(target);
+        applyComponentIdentities(document, result.instances);
+        if (navigation === 'PATTERN') result.sourceNodes!.push(document);
+        else pages.push(document);
+      }
+    } catch (error) {
+      result.errors.push({ kind: 'prototype_destination_unavailable', nodeId: origin.id,
+        message: `${origin.id}: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
   return result;
 }
 
@@ -1064,96 +993,164 @@ function applyComponentIdentities(node: RestNode, identities: Record<string, Com
   for (const child of node.children || []) applyComponentIdentities(child, identities);
 }
 
+/** Definitions used by source bindings are separate from the resolved layout values. */
+async function collectSourceDataDependencies(trees: RestNode[]): Promise<Record<string, any>> {
+  const result: Record<string, Record<string, any>> = { variables: {}, variableCollections: {}, styles: {} };
+  const pending: Array<{ kind: string; id: string }> = [];
+  const queued = new Set<string>();
+  function enqueue(kind: string, id: unknown): void {
+    if (typeof id !== 'string' || !id || queued.has(`${kind}:${id}`)) return;
+    queued.add(`${kind}:${id}`);
+    pending.push({ kind, id });
+  }
+  function scan(value: any): void {
+    if (!value || typeof value !== 'object') return;
+    if (value.type === 'VARIABLE_ALIAS') enqueue('variables', value.id);
+    for (const [key, entry] of Object.entries(value)) {
+      if (key === 'variableId') enqueue('variables', entry);
+      if (key === 'variableCollectionId' || key === 'parentVariableCollectionId' || key === 'rootVariableCollectionId') {
+        enqueue('variableCollections', entry);
+      }
+      if (key.endsWith('StyleId')) enqueue('styles', entry);
+      if ((key === 'explicitVariableModes' || key === 'resolvedVariableModes') && entry && typeof entry === 'object') {
+        for (const id of Object.keys(entry)) enqueue('variableCollections', id);
+      }
+      scan(entry);
+    }
+  }
+  // REST style references use a different identity space from Plugin API style ids.
+  for (const tree of trees) {
+    for (const node of indexRestNodes(tree).values()) scan(node.design2umgPluginData);
+  }
+  for (let index = 0; index < pending.length; index++) {
+    const { kind, id } = pending[index];
+    const source = kind === 'variables' ? await figma.variables.getVariableByIdAsync(id)
+      : kind === 'variableCollections' ? await figma.variables.getVariableCollectionByIdAsync(id)
+      : await figma.getStyleByIdAsync(id);
+    if (!source) throw new Error(`Source ${kind} ${id} is unavailable`);
+    result[kind][id] = copySourceValue(source);
+    scan(result[kind][id]);
+  }
+  return result;
+}
+
+// Source trees leave scope before the acknowledged UI transfer starts.
+async function prepareExport(root: SceneNode, scale: number): Promise<PreparedExport> {
+  let page: BaseNode | null = root.parent;
+  while (page && page.type !== 'PAGE') page = page.parent;
+  figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
+  const serialized = await exportOfficialRestNode(root);
+
+  const components: Record<string, RestComponentMeta> = {};
+  const componentSets: Record<string, RestComponentMeta> = {};
+  collectReferencedComponents(root, components, componentSets);
+  const prototypePages: RestNode[] = [];
+  const componentDependencies = await collectComponentDependencies(root, prototypePages, components, componentSets);
+  if (componentDependencies.errors.length > 0) {
+    throw new Error(componentDependencies.errors.map(error => error.message).join('\n'));
+  }
+  applyComponentIdentities(serialized, componentDependencies.instances);
+
+  const document: ExportDocumentPayload = {
+    design2umgPrototypeDurationUnit: 'MILLISECONDS',
+    document: {
+      id: '0:0',
+      name: figma.root.name,
+      type: 'DOCUMENT',
+      children: [{
+        id: page?.id || figma.currentPage.id,
+        name: page?.name || figma.currentPage.name,
+        type: 'CANVAS',
+        children: [serialized],
+      }],
+    },
+    name: figma.root.name,
+    version: '0',
+    schemaVersion: 0,
+    fileKey: figma.fileKey,
+    design2umgComponentDependencies: componentDependencies,
+    design2umgPrototypePages: prototypePages,
+  };
+  if (Object.keys(components).length > 0) {
+    document.components = components;
+  }
+  if (Object.keys(componentSets).length > 0) {
+    document.componentSets = componentSets;
+  }
+
+  const sourceTrees = [serialized, ...prototypePages, ...componentDependencies.definitions.map(entry => entry.document),
+    ...(componentDependencies.sourceNodes || [])];
+  const documentSource = capturePluginData(figma.root);
+  const pageSource = page ? capturePluginData(page) : undefined;
+  (document.document as any).design2umgPluginData = documentSource.data;
+  if (pageSource) (document.document.children[0] as any).design2umgPluginData = pageSource.data;
+  const sourceDependencies = await collectSourceDataDependencies(sourceTrees);
+  (document as any).design2umgSourceDataDependencies = sourceDependencies;
+  figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
+  const images = new Map<string, Uint8Array>();
+  await collectImages(root, images, (text) => {
+    figma.ui.postMessage({ type: 'progress', percent: 50, text });
+  });
+  await collectComponentDependencyImages(componentDependencies, images, [serialized, ...prototypePages,
+    { id: 'source-data-dependencies', type: 'SOURCE_DATA', name: 'Source definitions', sourceDependencies }]);
+  if (componentDependencies.errors.length > 0) {
+    throw new Error(componentDependencies.errors.map(error => error.message).join('\n'));
+  }
+
+  const diagnostics: ExportDiagnostic[] = [...documentSource.diagnostics, ...(pageSource?.diagnostics || [])];
+  for (const tree of sourceTrees) {
+    for (const node of indexRestNodes(tree).values()) diagnostics.push(...(node.design2umgExportDiagnostics || []));
+  }
+  for (const metadata of [...Object.values(components), ...Object.values(componentSets)]) {
+    diagnostics.push(...(metadata.design2umgExportDiagnostics || []));
+  }
+  const warning = diagnostics.length
+    ? `${diagnostics.length} source API field(s) could not be read. See design2umgExportDiagnostics in design.json.` : '';
+  (document as any).design2umgExportDiagnostics = diagnostics;
+  figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
+  const reference = await exportReferencePng(root, scale);
+
+  figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
+
+  return { warning, json: JSON.stringify(document, null, 2), images, reference };
+}
+
 // ── Main Export Flow ──
 if (typeof figma !== 'undefined') {
-  figma.showUI(__html__, { width: 360, height: 200 });
+  figma.showUI(__html__, { width: 400, height: 250 });
+  let sequence = 0;
+  let pending: { sequence: number; resolve: () => void; reject: (error: Error) => void } | undefined;
+  const send = (message: ExportTransferMessage): Promise<void> => new Promise((resolve, reject) => {
+    const current = ++sequence;
+    pending = { sequence: current, resolve, reject };
+    try {
+      figma.ui.postMessage({ ...message, sequence: current });
+    } catch (error) {
+      pending = undefined;
+      reject(error);
+    }
+  });
 
   figma.ui.onmessage = async (msg: ExportRequestMessage) => {
+    if (msg.type === 'export-ack') {
+      if (pending && pending.sequence === msg.sequence) {
+        const completed = pending;
+        pending = undefined;
+        if (msg.error) completed.reject(new Error(msg.error));
+        else completed.resolve();
+      }
+      return;
+    }
     if (msg.type !== 'export') return;
-
-    const selection = figma.currentPage.selection;
-    if (selection.length === 0) {
-      figma.ui.postMessage({ type: 'error', text: 'No frame selected. Please select a frame first.' });
-      return;
-    }
-
-    const root = selection[0];
-    if (root.type !== 'FRAME' && root.type !== 'COMPONENT' && root.type !== 'INSTANCE') {
-      figma.ui.postMessage({ type: 'error', text: 'Please select a Frame, Component, or Instance.' });
-      return;
-    }
-
     const scale = msg.scale || 2;
-
     try {
-      figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
-      const official = await exportOfficialRestNode(root);
-      const serialized = official || serializeNode(root);
-      const warning = official ? '' : 'Official JSON export failed. Manual export may omit unsupported fields; verify interactions and appearance.';
-      if (!serialized) {
-        figma.ui.postMessage({ type: 'error', text: 'Failed to serialize selected node.' });
-        return;
+      const rootId = msg.rootNodeId?.trim();
+      const root = rootId ? await figma.getNodeByIdAsync(rootId) : figma.currentPage.selection[0];
+      if (!root || (root.type !== 'FRAME' && root.type !== 'COMPONENT_SET' && root.type !== 'COMPONENT' && root.type !== 'INSTANCE')) {
+        throw new Error('Select a Frame, Component Set, Component, or Instance, or enter its root node ID.');
       }
-
-      const components: Record<string, RestComponentMeta> = {};
-      const componentSets: Record<string, RestComponentMeta> = {};
-      collectReferencedComponents(root, components, componentSets);
-      const componentDependencies = await collectComponentDependencies(root);
-      applyComponentIdentities(serialized, componentDependencies.instances);
-
-      const document: ExportDocumentPayload = {
-        document: {
-          id: '0:0',
-          name: figma.root.name,
-          type: 'DOCUMENT',
-          children: [{
-            id: figma.currentPage.id,
-            name: figma.currentPage.name,
-            type: 'CANVAS',
-            children: [serialized],
-          }],
-        },
-        name: figma.root.name,
-        version: '0',
-        schemaVersion: 0,
-        fileKey: figma.fileKey,
-        design2umgComponentDependencies: componentDependencies,
-      };
-      if (Object.keys(components).length > 0) {
-        document.components = components;
-      }
-      if (Object.keys(componentSets).length > 0) {
-        document.componentSets = componentSets;
-      }
-
-      figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
-      const images = new Map<string, Uint8Array>();
-      const restNodesById = indexRestNodes(serialized);
-      await collectImages(root, images, scale, (text) => {
-        figma.ui.postMessage({ type: 'progress', percent: 50, text });
-      }, restNodesById);
-      await collectComponentDependencyImages(componentDependencies, images);
-
-      figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
-      const reference = await exportReferencePng(root, scale);
-
-      figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
-
-      const imageEntries: Array<{ name: string; data: number[] }> = [];
-      for (const [key, bytes] of images) {
-        imageEntries.push({ name: key, data: Array.from(bytes) });
-      }
-
-      figma.ui.postMessage({
-        type: 'done',
-        warning,
-        text: `Exported ${images.size} image(s). Saving...`,
-        json: JSON.stringify(document, null, 2),
-        images: imageEntries,
-        reference: Array.from(reference),
-        exportPath: msg.exportPath,
-      });
-
+      const prepared = await prepareExport(root, scale);
+      await transferExport(prepared, send);
     } catch (e: any) {
       figma.ui.postMessage({ type: 'error', text: `Export failed: ${e.message || e}` });
     }
@@ -1167,20 +1164,19 @@ if (typeof figma !== 'undefined') {
 declare const module: { exports?: Record<string, unknown> };
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    attachRenderFallbackMetadata,
     indexRestNodes,
-    makeRenderFallbackKey,
     serializePaint,
     serializeEffect,
-    buildTextStyle,
-    serializeNode,
     exportOfficialRestNode,
+    pluginReactionsToRest,
+    copySourceValue,
     unwrapRestExportResponse,
     collectReferencedComponents,
     collectComponentDependencies,
     collectComponentDependencyImages,
+    collectSourceDataDependencies,
     collectImages,
     exportReferencePng,
-    shouldExportNodeRenderFallback,
+    transferExport,
   };
 }

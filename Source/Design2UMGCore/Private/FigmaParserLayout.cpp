@@ -20,6 +20,29 @@ using DesignJsonUtils::TryGetNumber;
 
 namespace
 {
+	bool TryReadTransform(const TSharedPtr<FJsonObject>& NodeObj, FRelativeTransform& Out)
+	{
+		const auto* Matrix = GetArray(NodeObj, TEXT("relativeTransform"));
+		if (!Matrix || Matrix->Num() != 2 || (*Matrix)[0]->Type != EJson::Array || (*Matrix)[1]->Type != EJson::Array)
+			return false;
+		const auto& Row0 = (*Matrix)[0]->AsArray();
+		const auto& Row1 = (*Matrix)[1]->AsArray();
+		return Row0.Num() == 3 && Row1.Num() == 3
+			&& Row0[0]->TryGetNumber(Out.A) && Row0[1]->TryGetNumber(Out.B) && Row0[2]->TryGetNumber(Out.X)
+			&& Row1[0]->TryGetNumber(Out.C) && Row1[1]->TryGetNumber(Out.D) && Row1[2]->TryGetNumber(Out.Y);
+	}
+
+	bool TryReadLocalSize(const TSharedPtr<FJsonObject>& NodeObj, FVector2D& Out)
+	{
+		const auto Size = GetObject(NodeObj, TEXT("size"));
+		double Width = 0.0, Height = 0.0;
+		if (!Size || !Size->TryGetNumberField(TEXT("x"), Width) || !Size->TryGetNumberField(TEXT("y"), Height)
+			|| Width < 0.0 || Height < 0.0 || (Width == 0.0 && Height == 0.0))
+			return false;
+		Out = FVector2D(Width, Height);
+		return true;
+	}
+
 	// Geometry inference is only used when the source omits its wrap rule.
 	constexpr int32 WrappedHorizontalLayoutMinChildren = 6;
 	constexpr int32 WrappedHorizontalLayoutMinFillChildren = 4;
@@ -218,6 +241,16 @@ namespace
 	}
 }
 
+bool TryGetRelativeTransform(const TSharedPtr<FJsonObject>& NodeObj, FRelativeTransform& Out)
+{
+	return TryReadTransform(NodeObj, Out);
+}
+
+bool TryGetLocalGeometry(const TSharedPtr<FJsonObject>& NodeObj, FLocalGeometry& Out)
+{
+	return TryReadLocalSize(NodeObj, Out.Size) && TryGetRelativeTransform(NodeObj, Out.Transform);
+}
+
 bool HasAutoLayout(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	if (IsWrapLayout(NodeObj) || IsLikelyWrappedHorizontalLayout(NodeObj))
@@ -277,7 +310,8 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	}
 
 	FigmaParserMetadata::CaptureLayoutMetadataExtensions(NodeObj, OutNode.Metadata);
-	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("itemReverseZIndex"));
+	OutNode.LayoutData.bReversePaintOrder = (Mode == TEXT("HORIZONTAL") || Mode == TEXT("VERTICAL"))
+		&& GetBool(NodeObj, TEXT("itemReverseZIndex"), false);
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("isExposedInstance"));
 	// Preserve the source-shaped Figma key as an explicit metadata alias.
 	AddBoolExtensionIfPresent(NodeObj, OutNode.Metadata, TEXT("strokesIncludedInLayout"));
@@ -306,7 +340,7 @@ void ParseLayout(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 	ParseFigmaGridLayout(NodeObj, OutNode);
 }
 
-void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout)
+void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObject>& ParentObj, FDesignNode& OutNode, bool bParentHasAutoLayout, const FLocalGeometry* LocalGeometry)
 {
 	FNodeBounds VisualBounds;
 	FNodeBounds LayoutBounds;
@@ -321,8 +355,9 @@ void ParseSize(const TSharedPtr<FJsonObject>& NodeObj, const TSharedPtr<FJsonObj
 		? (bHasLayoutBounds ? LayoutBounds : VisualBounds)
 		: (bHasVisualBounds ? VisualBounds : LayoutBounds);
 
-	const float Width = EffectiveBounds.W;
-	const float Height = EffectiveBounds.H;
+	if (LocalGeometry) OutNode.Transform.LayoutBoundsSize = LocalGeometry->Size;
+	const float Width = LocalGeometry ? LocalGeometry->Size.X : EffectiveBounds.W;
+	const float Height = LocalGeometry ? LocalGeometry->Size.Y : EffectiveBounds.H;
 	const FString SizingH = GetString(NodeObj, TEXT("layoutSizingHorizontal"), TEXT("FIXED"));
 	const FString SizingV = GetString(NodeObj, TEXT("layoutSizingVertical"), TEXT("FIXED"));
 
@@ -377,12 +412,33 @@ void ParsePosition(
 	const TSharedPtr<FJsonObject>& ParentObj,
 	const FNodeBounds* ParentCoordinateBounds,
 	FDesignNode& OutNode,
-	bool bParentHasAutoLayout)
+	bool bParentHasAutoLayout,
+	bool bParentTransformedCoordinates,
+	const FLocalGeometry* LocalGeometry)
 {
-	if (bParentHasAutoLayout
-		&& !GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase))
+	const bool bFlowPosition = bParentHasAutoLayout
+		&& !GetString(NodeObj, TEXT("layoutPositioning")).Equals(TEXT("ABSOLUTE"), ESearchCase::IgnoreCase);
+	if (bFlowPosition) OutNode.Transform.ClearPosition();
+	const auto SetSourcePosition = [&](float X, float Y)
 	{
-		OutNode.Transform.ClearPosition();
+		OutNode.Transform.SourceLayoutPosition = FVector2D(X, Y);
+		if (!bFlowPosition) OutNode.Transform.SetPosition(X, Y);
+	};
+
+	if (ParentObj && LocalGeometry)
+	{
+		const FVector2D& LocalSize = LocalGeometry->Size;
+		const FRelativeTransform& Relative = LocalGeometry->Transform;
+		// UMG rotates around the center, while Figma's matrix is based at local zero.
+		FVector2D Position(Relative.X + (Relative.A * LocalSize.X + Relative.B * LocalSize.Y - LocalSize.X) * 0.5,
+			Relative.Y + (Relative.C * LocalSize.X + Relative.D * LocalSize.Y - LocalSize.Y) * 0.5);
+		if (!bParentTransformedCoordinates && ParentCoordinateBounds)
+		{
+			FNodeBounds ParentLayoutBounds;
+			if (TryReadBounds(GetObject(ParentObj, TEXT("absoluteBoundingBox")), ParentLayoutBounds))
+				Position += FVector2D(ParentLayoutBounds.X - ParentCoordinateBounds->X, ParentLayoutBounds.Y - ParentCoordinateBounds->Y);
+		}
+		SetSourcePosition(Position.X, Position.Y);
 		return;
 	}
 
@@ -396,11 +452,12 @@ void ParsePosition(
 
 	if (bHasChildBounds && bHasParentBounds)
 	{
-		OutNode.Transform.SetPosition(ChildBounds.X - ParentBounds.X, ChildBounds.Y - ParentBounds.Y);
+		SetSourcePosition(ChildBounds.X - ParentBounds.X, ChildBounds.Y - ParentBounds.Y);
 	}
 	else if (bHasChildBounds)
 	{
-		OutNode.Transform.SetPosition(ChildBounds.X, ChildBounds.Y);
+		if (!ParentObj) SetSourcePosition(ChildBounds.X, ChildBounds.Y);
+		else if (!bFlowPosition) OutNode.Transform.SetPosition(ChildBounds.X, ChildBounds.Y);
 	}
 }
 

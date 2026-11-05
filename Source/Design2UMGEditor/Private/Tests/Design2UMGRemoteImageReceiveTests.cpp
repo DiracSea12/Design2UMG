@@ -25,6 +25,7 @@
 #include "IImageWrapperModule.h"
 #include "Interfaces/IPv4/IPv4Endpoint.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Base64.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopeLock.h"
@@ -1171,6 +1172,53 @@ bool FRemoteImageReceiveSharedInvalidUrlCachesProcessingFailureTest::RunTest(con
 		Report.Contains(TEXT("reused cached processing failure")));
 	return true;
 }
+
+#if WITH_FREEIMAGE_LIB
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRemoteImageGifFirstFrameDecodeTest,
+	"Design2UMG.RemoteImages.GifFirstFrameDecode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRemoteImageGifFirstFrameDecodeTest::RunTest(const FString&)
+{
+	TArray<uint8> Bytes;
+	if (!TestTrue(TEXT("Two-frame GIF fixture decodes from base64"), FBase64::Decode(
+		TEXT("R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAgACAAAIBgABCAQQEAAh+QQBCgABACwAAAAAAgACAIEAAP8AAAAAAAAAAAAIBgABCAQQEAA7"), Bytes))) return false;
+	DesignImageResources::FImageResourceLimits Limits = MakeLimits(1024, 1024);
+	DesignImageResources::FImageOperationBudget Budget(Limits);
+	int32 Width = 0, Height = 0;
+	TArray64<uint8> Raw;
+	FString Error;
+	if (!TestTrue(TEXT("GIF first frame decodes"), FImagePayloadIO::DecodeToBGRA8(Bytes, Limits, Width, Height, Raw, Error, &Budget))) return false;
+	TestEqual(TEXT("GIF width"), Width, 2);
+	TestEqual(TEXT("GIF height"), Height, 2);
+	if (!TestEqual(TEXT("BGRA buffer size"), Raw.Num(), int64(16))) return false;
+	TestTrue(TEXT("First frame is red, not the second blue frame"), Raw[0] == 0 && Raw[1] == 0 && Raw[2] == 255 && Raw[3] == 255);
+	TArray<uint8> Transparent;
+	if (!TestTrue(TEXT("Transparent GIF fixture decodes from base64"), FBase64::Decode(
+		TEXT("R0lGODlhAgACAIEAAAAAAP8AAAAAAAAAACH5BAEAAAAALAAAAAACAAIAAAgGAAEEGBgQADs="), Transparent))) return false;
+	if (!TestTrue(TEXT("Transparent GIF decodes"), FImagePayloadIO::DecodeToBGRA8(Transparent, Limits, Width, Height, Raw, Error, &Budget))) return false;
+	TestEqual(TEXT("Transparent palette entry keeps its alpha"), Raw[3], uint8(0));
+	TestTrue(TEXT("Opaque palette entry keeps its color"), Raw[6] == 255 && Raw[7] == 255);
+	TArray<uint8> OffsetFrame;
+	if (!TestTrue(TEXT("Offset GIF fixture decodes from base64"), FBase64::Decode(
+		TEXT("R0lGODlhBAAEAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwBAAEAAgACAAAIBgABCAQQEAAh+QQBCgABACwAAAAAAgACAIEAAP8AAAAAAAAAAAAIBgABCAQQEAA7"), OffsetFrame))) return false;
+	if (!TestTrue(TEXT("Offset first frame decodes to the logical canvas"), FImagePayloadIO::DecodeToBGRA8(OffsetFrame, Limits, Width, Height, Raw, Error, &Budget))) return false;
+	TestTrue(TEXT("GIF logical canvas dimensions are preserved"), Width == 4 && Height == 4 && Raw.Num() == 64);
+	if (Raw.Num() == 64)
+	{
+		TestTrue(TEXT("Offset frame content is placed at its authored origin"), Raw[22] == 255 && Raw[23] == 255);
+		TestTrue(TEXT("Opaque GIF retains its global background outside the frame"), Raw[2] == 255 && Raw[3] == 255);
+	}
+	TArray<uint8> TransparentOffset;
+	if (!TestTrue(TEXT("Transparent offset GIF fixture decodes from base64"), FBase64::Decode(
+		TEXT("R0lGODlhBAAEAIEAAAAAAP8AAAAAAAAAACH5BAEAAAAALAEAAQACAAIAAAgGAAEEGBgQADs="), TransparentOffset))) return false;
+	if (!TestTrue(TEXT("Transparent offset first frame decodes"), FImagePayloadIO::DecodeToBGRA8(TransparentOffset, Limits, Width, Height, Raw, Error, &Budget))) return false;
+	TestTrue(TEXT("Transparent GIF retains canvas and transparent frame pixels"), Width == 4 && Height == 4 && Raw.Num() == 64 && Raw[3] == 0 && Raw[23] == 0);
+	Bytes[6] = 0xff;
+	Bytes[7] = 0xff;
+	TestFalse(TEXT("GIF logical dimensions are checked before decoding"), FImagePayloadIO::DecodeToBGRA8(Bytes, Limits, Width, Height, Raw, Error, &Budget));
+	return true;
+}
+#endif
 
 // Local decoding and remote reception share one operation budget.
 

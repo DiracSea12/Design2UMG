@@ -4,6 +4,7 @@
 #include "UMGRetainerCapture.h"
 
 #include "Design2UMGGeneratedNameSuffixes.h"
+#include "DesignRoundedContour.h"
 #include "ImageFillUtils.h"
 #include "Design2UMGLog.h"
 #include "UMGPropertyKeys.h"
@@ -316,10 +317,6 @@ namespace
 			return false;
 		}
 
-		const bool bSquareNode =
-			Node->Transform.Width.Value > 0.0f
-			&& Node->Transform.Height.Value > 0.0f
-			&& FMath::IsNearlyEqual(Node->Transform.Width.Value, Node->Transform.Height.Value, 1.0f);
 		if (Fill.Image.Mode == EDesignImageMode::Fit && !Fill.Image.bFitCropToNode)
 		{
 			Layer.Type = UMGWidgetTypes::ScaleBox;
@@ -331,12 +328,10 @@ namespace
 			const FString FillImageSuffix = Design2UMGGeneratedNameSuffixes::FillImage(FillIndex);
 			ImageChild.Id = Widget.Id + FillImageSuffix;
 			ImageChild.Name = Widget.Name + FillImageSuffix;
+			ImageChild.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Center;
+			ImageChild.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Center;
 			ImageChild.Brush.Image.TexturePath = Fill.Image.Url;
 			ApplyMultiFillImageChildOpacity(ImageChild, Fill, Options);
-			if (bSquareNode)
-			{
-				AddTextureSizeHints(ImageChild, Node);
-			}
 			Layer.Children.Add(MoveTemp(ImageChild));
 			return true;
 		}
@@ -364,8 +359,10 @@ namespace VisualMapperFillTransfer
             {TEXT("HUE"), TEXT("hue")}, {TEXT("SATURATION"), TEXT("saturation")},
             {TEXT("COLOR"), TEXT("color")}, {TEXT("LUMINOSITY"), TEXT("luminosity")}
         };
+        FString FigmaMode = Mode;
+        FigmaMode.ReplaceInline(TEXT("-"), TEXT("_"));
         for (const auto& Pair : FigmaModes)
-            if (Mode.Equals(Pair.Key, ESearchCase::CaseSensitive))
+            if (FigmaMode.Equals(Pair.Key, ESearchCase::CaseSensitive))
                 return Pair.Value;
         return Mode;
     }
@@ -522,7 +519,49 @@ namespace VisualMapperFillTransfer
 		}
 	}
 
-    FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount)
+	bool PrepareSourceContourPaint(FUMGWidgetNode& Widget, const FUMGEffectData& Contour, int32 PaintLayerCount, FString& Error)
+	{
+		if (PaintLayerCount == 0) return true;
+		FUMGSourcePaintGeometry Source;
+		Source.Geometry.FillPaths = Contour.GeometryMaskPaths.GetValue();
+		Source.Geometry.StrokePaths = TArray<FDesignGeometryPath>();
+		Source.FillPaints = TArray<FUMGSurfacePaint>();
+		FUMGSurfacePaint Stroke;
+		Stroke.Color = FLinearColor::Transparent;
+		Source.StrokePaint = Stroke;
+		for (int32 Index = 0; Index < PaintLayerCount; ++Index)
+		{
+			const auto& Layer = Widget.Children[Index];
+			if ((Layer.Type != UMGWidgetTypes::Image && Layer.Type != UMGWidgetTypes::Border) || Layer.Brush.Shader.IsSet()
+				|| (!Layer.Render.PaintBlendMode.Get(FString()).IsEmpty() && Layer.Render.PaintBlendMode.GetValue() != TEXT("normal")))
+			{ Error = TEXT("source contour raster paint requires native normal-blend Image/Border paint layers"); return false; }
+			FUMGSurfacePaint Paint;
+			Paint.Color = Layer.Brush.BrushColor.Get(FLinearColor::White);
+			Paint.Color.A *= Layer.Render.RenderOpacity.Get(1.0f);
+			Paint.Image = Layer.Brush.Image;
+			Paint.Gradient = Layer.Brush.Gradient;
+			Source.FillPaints->Add(MoveTemp(Paint));
+		}
+		FUMGWidgetNode Paint;
+		Paint.Type = UMGWidgetTypes::Image;
+		Paint.Id = Widget.Id + TEXT("__contour_paints");
+		Paint.Name = Widget.Name + TEXT("__contour_paints");
+		Paint.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+		Paint.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+		Paint.Effect.GeometryMaskPaths = Contour.GeometryMaskPaths;
+		Paint.Effect.GeometryMaskSize = Contour.GeometryMaskSize;
+		Paint.Path.CanvasSize = Contour.GeometryMaskSize;
+		Paint.Path.ViewBox = FVector4(0, 0, Contour.GeometryMaskSize->X, Contour.GeometryMaskSize->Y);
+		Paint.Path.Geometry = Contour.GeometryMaskPaths.GetValue()[0].Path;
+		Paint.Path.SourcePaintGeometry = MoveTemp(Source);
+		Paint.Path.FillColor = FLinearColor::White;
+		Paint.Brush.BrushColor = FLinearColor::White;
+		Widget.Children.RemoveAt(0, PaintLayerCount);
+		Widget.Children.Insert(MoveTemp(Paint), 0);
+		return true;
+	}
+
+    FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount, bool bFillPaintHandled)
     {
         if (!Node->Visual.Stroke.HasStroke() || !Node->Visual.Stroke.Fill.IsSet())
             return MoveTemp(Widget);
@@ -531,7 +570,7 @@ namespace VisualMapperFillTransfer
         const bool bShaderStroke = StrokeFill.Type == EDesignFillType::Shader;
         const bool bShaderFill = Node->Visual.Fills.ContainsByPredicate(
             [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; });
-        const bool bSeparatePaint = bShaderStroke || bShaderFill || NonNormalBlend(StrokeFill.BlendMode);
+        const bool bSeparatePaint = bFillPaintHandled || bShaderStroke || bShaderFill || NonNormalBlend(StrokeFill.BlendMode);
         // Generated shadow/fill layers precede the original content surface.
         FUMGWidgetNode* StrokeCarrier = &Widget;
         if (PaintLayerCount > 0 && Widget.Children.IsValidIndex(PaintLayerCount))
@@ -568,7 +607,7 @@ namespace VisualMapperFillTransfer
         TArray<FDesignGeometryPath> Paths;
         bool bUsesSourceStrokeGeometry = false;
         const bool bRectangularShape = Node->Type == EDesignNodeType::Rectangle || Node->Type == EDesignNodeType::Frame;
-        const bool bCanonicalOutline = Node->Visual.Stroke.Thickness.bUniform &&
+        const bool bCanonicalOutline = Node->Visual.CornerRadius.Smoothing == 0.0f && Node->Visual.Stroke.Thickness.bUniform &&
             (bRectangularShape || Node->Type == EDesignNodeType::Line) &&
             (!bHasSourceStrokePaths || (bRectangularShape && StrokeFill.Type == EDesignFillType::Gradient && !bSeparatePaint));
         const float Thickness = Node->Visual.Stroke.Thickness.Uniform;
@@ -580,6 +619,41 @@ namespace VisualMapperFillTransfer
         const FVector4 Radii(FMath::Clamp(RawRadii.X, 0.0f, RadiusLimit), FMath::Clamp(RawRadii.Y, 0.0f, RadiusLimit),
                              FMath::Clamp(RawRadii.Z, 0.0f, RadiusLimit), FMath::Clamp(RawRadii.W, 0.0f, RadiusLimit));
 
+        if (VisualMapper::RequiresSourceContour(*Node) && !bHasSourceStrokePaths)
+        {
+            FUMGPathData Mask;
+            Mask.CanvasSize = FVector2D(Node->Shape.ViewBox->Z, Node->Shape.ViewBox->W);
+            Mask.ViewBox = Node->Shape.ViewBox;
+            const auto& FillPaths = Node->Shape.PaintGeometry.FillPaths.GetValue();
+            FString Geometry;
+            for (const auto& Path : FillPaths) Geometry += Path.Path + TEXT(" ");
+            Mask.Geometry = MoveTemp(Geometry);
+            Mask.FillColor = FLinearColor::Transparent;
+            Mask.StrokeColor = FLinearColor::White;
+            if (Node->Visual.Stroke.Thickness.bUniform)
+            {
+                Mask.StrokeThickness = Thickness;
+                Mask.StrokeAlignment = Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside ? TEXT("inner")
+                    : (Node->Visual.Stroke.Align == EDesignStrokeAlign::Outside ? TEXT("outer") : TEXT("center"));
+            }
+            else
+            {
+                FDesignGeometryPath Region;
+                FString Error;
+                // BuildSourceContour validates this supported source edge junction before conversion.
+                if (!DesignRoundedContour::BuildInsideStroke(Mask.CanvasSize.GetValue(), Node->Visual.CornerRadius,
+                        Node->Visual.Stroke.Thickness, Region, Error))
+                {
+                    UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
+                    return MoveTemp(Widget);
+                }
+                Mask.Geometry = Region.Path;
+                Mask.FillRule = Region.FillRule;
+                Mask.FillColor = FLinearColor::White;
+                Mask.StrokeColor.Reset();
+            }
+            StrokeMask = MoveTemp(Mask);
+        }
         if (StrokeMask.IsSet())
         {
             Paths = {{StrokeMask->Geometry.GetValue(), StrokeMask->FillRule.Get(TEXT("nonzero"))}};
@@ -701,8 +775,8 @@ namespace VisualMapperFillTransfer
                 Paint.Image = PaintOwner.Brush.Image;
                 if (bFitImage)
                 {
-                    // Generated FIT fill slots stretch their image to the entire paint box.
-                    Paint.Image.CropFitMode = TEXT("Stretch");
+                    // The generated FIT ScaleBox centers its image at its own aspect ratio.
+                    Paint.Image.CropFitMode = TEXT("Fit");
                     Paint.Color.A *= PaintOwner.Render.RenderOpacity.Get(1.0f);
                 }
                 return Paint;
@@ -804,6 +878,11 @@ namespace VisualMapperFillTransfer
         if (!bStrokeOnly)
         {
             PrepareMultiFillContentWidget(Widget);
+            if (VisualMapper::RequiresSourceContour(*Node))
+            {
+                Widget.Id = Overlay.Id + TEXT("__contourstroke_content");
+                Widget.Name = Overlay.Name + TEXT("__contourstroke_content");
+            }
             Overlay.Children.Add(MoveTemp(Widget));
         }
         for (int32 Index = 0; Index < Paths.Num(); ++Index)
@@ -812,6 +891,7 @@ namespace VisualMapperFillTransfer
             FUMGWidgetNode Layer;
             Layer.Type = UMGWidgetTypes::Image;
             const FString Suffix = FString::Printf(TEXT("_stroke%d"), Index);
+            Layer.WidgetStyle.Visibility = TEXT("HitTestInvisible");
             Layer.Id = Overlay.Id + Suffix;
             Layer.Name = Overlay.Name + Suffix;
             Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
@@ -918,6 +998,7 @@ namespace VisualMapperFillTransfer
             Layer.Name = Overlay.Name;
             Layer.Bounds = Overlay.Bounds;
             Layer.Slot = Overlay.Slot;
+            Layer.WidgetStyle.Visibility = Widget.WidgetStyle.Visibility;
             auto PaintBlendMode = MoveTemp(Layer.Render.PaintBlendMode);
             Layer.Render = MoveTemp(Overlay.Render);
             Layer.Render.PaintBlendMode = MoveTemp(PaintBlendMode);
@@ -935,7 +1016,7 @@ namespace VisualMapperFillTransfer
     {
         if (OutPaintLayerCount) *OutPaintLayerCount = 0;
         const bool BackdropLayers = RequiresBackdropLayers(Widget, Node);
-        if (!Node.IsValid() || (!BackdropLayers && Node->Visual.Fills.Num() <= 1 && !Node->Visual.Fills.ContainsByPredicate(
+        if (!Node.IsValid() || (!VisualMapper::RequiresSourceContour(*Node) && !BackdropLayers && Node->Visual.Fills.Num() <= 1 && !Node->Visual.Fills.ContainsByPredicate(
             [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; })))
         {
             return MoveTemp(Widget);
@@ -974,7 +1055,7 @@ namespace VisualMapperFillTransfer
                 continue;
             }
 
-            if (!Layer.Path.Geometry.IsSet() && Node->Visual.CornerRadius.HasRadius())
+            if (!VisualMapper::RequiresSourceContour(*Node) && !Layer.Path.Geometry.IsSet() && Node->Visual.CornerRadius.HasRadius())
             {
                 VisualMapper::ApplyRoundedCorner(Layer, Node->Visual.CornerRadius, Node->Transform.Width.Value,
                                                  Node->Transform.Height.Value);

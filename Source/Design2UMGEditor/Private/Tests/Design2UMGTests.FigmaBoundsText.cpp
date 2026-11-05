@@ -256,26 +256,25 @@ bool FFigmaExpandedContainerRenderBoundsUseLayoutSpaceTest::RunTest(const FStrin
 	TestEqual(TEXT("Child Y remains relative to layout bounds"), Child->Transform.Y, 12.0f);
 	return true;
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest,
-	"Design2UMG.FigmaParser.ClippedSyntheticVectorRasterUsesVisibleBounds",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedNativeVectorKeepsLayoutBoundsTest,
+	"Design2UMG.FigmaParser.ClippedNativeVectorKeepsLayoutBounds",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest::RunTest(const FString& Parameters)
+bool FFigmaClippedNativeVectorKeepsLayoutBoundsTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(MakeContainerNode(TEXT("0:2"), TEXT("Viewport"), TEXT("FRAME"), 0, 0, 1600, 920,
 		MakeContainerNode(TEXT("0:3"), TEXT("ClippingFrame"), TEXT("FRAME"), 0, 0, 1600, 1200, FString::Printf(
 			TEXT("%s,%s,%s"),
 			*MakeLeafNode(TEXT("0:4"), TEXT("BackgroundShape"), TEXT("ELLIPSE"), -701, -148, 1700, 1700,
-				FString::Printf(TEXT(",\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
+				FString::Printf(TEXT(",\"fillGeometry\":[{\"path\":\"M1700 850A850 850 0 1 1 0 850A850 850 0 1 1 1700 850Z\"}],\"absoluteRenderBounds\":%s,\"fills\":[%s]"),
 					*MakeBoundsJson(0, 0, 999, 920), *MakeSolidFillJson(0.5, 0.2, 1))),
-			*MakeLeafNode(TEXT("0:5"), TEXT("RasterizedBackgroundShape"), TEXT("ELLIPSE"), -701, -148, 1700, 1700,
-				TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":999,\"height\":920},\"fills\":["
+			*MakeLeafNode(TEXT("0:5"), TEXT("GradientBackgroundShape"), TEXT("ELLIPSE"), -701, -148, 1700, 1700,
+				TEXT(",\"fillGeometry\":[{\"path\":\"M1700 850A850 850 0 1 1 0 850A850 850 0 1 1 1700 850Z\"}],\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":999,\"height\":920},\"fills\":["
 					 "{\"type\":\"GRADIENT_LINEAR\",\"visible\":true,\"gradientStops\":["
 					 "{\"position\":0,\"color\":{\"r\":0.8,\"g\":0.2,\"b\":1,\"a\":1}},"
-					 "{\"position\":1,\"color\":{\"r\":0.5,\"g\":0.1,\"b\":1,\"a\":1}}]},"
-					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_clipped_shape\",\"scaleMode\":\"FILL\"}]")),
-			*MakeLeafNode(TEXT("0:6"), TEXT("RasterizedStroke"), TEXT("VECTOR"), 0, 100, 599, 1,
-				TEXT(",\"absoluteRenderBounds\":{\"x\":0,\"y\":100.15,\"width\":560,\"height\":0.7},\"fills\":["
-					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_unclipped_stroke\",\"scaleMode\":\"FILL\"}]"))),
+					 "{\"position\":1,\"color\":{\"r\":0.5,\"g\":0.1,\"b\":1,\"a\":1}}]}]")),
+			*MakeLeafNode(TEXT("0:6"), TEXT("VectorStroke"), TEXT("VECTOR"), 0, 100, 599, 1,
+				TEXT(",\"fillGeometry\":[{\"path\":\"M0 0L599 0L599 1Z\"}],\"absoluteRenderBounds\":{\"x\":0,\"y\":100.15,\"width\":560,\"height\":0.7},\"fills\":["
+					 "{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":1,\"b\":1,\"a\":1}}]"))),
 		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":1600,\"height\":920}")),
 		TEXT(",\"clipsContent\":true,\"absoluteRenderBounds\":{\"x\":0,\"y\":0,\"width\":1600,\"height\":920}")));
 
@@ -292,24 +291,24 @@ bool FFigmaClippedSyntheticVectorRasterUsesVisibleBoundsTest::RunTest(const FStr
 	const TSharedPtr<FDesignNode>& Viewport = Doc.Children[0];
 	const TSharedPtr<FDesignNode>& ClippingFrame = Viewport->Children[0];
 	const TSharedPtr<FDesignNode>& BackgroundShape = ClippingFrame->Children[0];
-	const TSharedPtr<FDesignNode>& RasterizedBackgroundShape = ClippingFrame->Children[1];
-	const TSharedPtr<FDesignNode>& RasterizedStroke = ClippingFrame->Children[2];
+	const TSharedPtr<FDesignNode>& GradientBackgroundShape = ClippingFrame->Children[1];
+	const TSharedPtr<FDesignNode>& VectorStroke = ClippingFrame->Children[2];
 	TestTrue(TEXT("Viewport keeps clipping"), Viewport->LayoutData.ExplicitClip.Get(false));
 	TestTrue(TEXT("Nested frame keeps clipping"), ClippingFrame->LayoutData.ExplicitClip.Get(false));
-	TestEqual(TEXT("Ordinary clipped leaf keeps visible X"), BackgroundShape->Transform.X, 0.0f);
-	TestEqual(TEXT("Ordinary clipped leaf keeps visible Y"), BackgroundShape->Transform.Y, 0.0f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps layout X"), BackgroundShape->Transform.X, -701.0f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps layout Y"), BackgroundShape->Transform.Y, -148.0f);
 	TestTrue(TEXT("Clipped leaf width fixed"), BackgroundShape->Transform.Width.IsFixed());
 	TestTrue(TEXT("Clipped leaf height fixed"), BackgroundShape->Transform.Height.IsFixed());
-	TestEqual(TEXT("Ordinary clipped leaf keeps visible width"), BackgroundShape->Transform.Width.Value, 999.0f);
-	TestEqual(TEXT("Ordinary clipped leaf keeps visible height"), BackgroundShape->Transform.Height.Value, 920.0f);
-	TestEqual(TEXT("Pre-rasterized leaf keeps visible X"), RasterizedBackgroundShape->Transform.X, 0.0f);
-	TestEqual(TEXT("Pre-rasterized leaf keeps visible Y"), RasterizedBackgroundShape->Transform.Y, 0.0f);
-	TestEqual(TEXT("Pre-rasterized leaf keeps raster width"), RasterizedBackgroundShape->Transform.Width.Value, 999.0f);
-	TestEqual(TEXT("Pre-rasterized leaf keeps raster height"), RasterizedBackgroundShape->Transform.Height.Value, 920.0f);
-	TestEqual(TEXT("Unclipped vector raster keeps render X"), RasterizedStroke->Transform.X, 0.0f);
-	TestEqual(TEXT("Unclipped vector raster keeps render Y"), RasterizedStroke->Transform.Y, 100.15f);
-	TestEqual(TEXT("Unclipped vector raster keeps render width"), RasterizedStroke->Transform.Width.Value, 560.0f);
-	TestEqual(TEXT("Unclipped vector raster keeps render height"), RasterizedStroke->Transform.Height.Value, 0.7f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps layout width"), BackgroundShape->Transform.Width.Value, 1700.0f);
+	TestEqual(TEXT("Ordinary clipped leaf keeps layout height"), BackgroundShape->Transform.Height.Value, 1700.0f);
+	TestEqual(TEXT("Gradient leaf keeps layout X"), GradientBackgroundShape->Transform.X, -701.0f);
+	TestEqual(TEXT("Gradient leaf keeps layout Y"), GradientBackgroundShape->Transform.Y, -148.0f);
+	TestEqual(TEXT("Gradient leaf keeps layout width"), GradientBackgroundShape->Transform.Width.Value, 1700.0f);
+	TestEqual(TEXT("Gradient leaf keeps layout height"), GradientBackgroundShape->Transform.Height.Value, 1700.0f);
+	TestEqual(TEXT("Unclipped vector keeps layout X"), VectorStroke->Transform.X, 0.0f);
+	TestEqual(TEXT("Unclipped vector keeps layout Y"), VectorStroke->Transform.Y, 100.0f);
+	TestEqual(TEXT("Unclipped vector keeps layout width"), VectorStroke->Transform.Width.Value, 599.0f);
+	TestEqual(TEXT("Unclipped vector keeps layout height"), VectorStroke->Transform.Height.Value, 1.0f);
 	return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaClippedContainerOffsetsChildrenFromVisibleOriginTest,

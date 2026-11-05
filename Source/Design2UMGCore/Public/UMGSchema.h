@@ -93,6 +93,9 @@ struct DESIGN2UMGCORE_API FUMGWidgetNode
 	/** Set only by LayoutMapper::ApplyJustifyContent: this child-less Spacer was synthesized to express justify-content, not mapped from a source node. Plain member like Children (UHT recursion limit); the JSON serializer/parser bridge it as "SyntheticJustifySpacer". */
 	bool bSyntheticJustifySpacer = false;
 
+	/** Explicit native source-paint child; collapsed target endpoints do not contribute to source desired size. */
+	int32 SourceVisualChildIndex = INDEX_NONE;
+
 	bool HasSourceData() const;
 	const FUMGSourceNodeData& Source() const;
 	FUMGSourceNodeData& MutableSource();

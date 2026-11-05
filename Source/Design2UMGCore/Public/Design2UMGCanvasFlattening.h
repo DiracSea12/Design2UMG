@@ -18,7 +18,7 @@ namespace Design2UMGCanvasFlattening
 	/**
 	 * Flatten bare, point-anchored CanvasPanel children into their parent by translating slots.
 	 * Remove empty bare canvases. Splice descendants at the removed node's position to retain
-	 * paint order; visual/effect wrappers remain intact.
+	 * paint order; visual/effect wrappers and explicitly referenced widget identities remain intact.
 	 */
-	DESIGN2UMGCORE_API void FlattenBareNestedCanvasPanels(FUMGWidgetNode& Root, FFlattenStats& OutStats);
+	DESIGN2UMGCORE_API void FlattenBareNestedCanvasPanels(FUMGWidgetNode& Root, const TSet<FString>& ReferencedWidgetIds, FFlattenStats& OutStats);
 }

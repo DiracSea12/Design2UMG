@@ -51,8 +51,7 @@ bool FFigmaGridWrapMetadataTest::RunTest(const FString& Parameters)
 	const FString* LayoutPositioning = GridNode->Metadata.Find(TEXT("layoutPositioning"));
 	TestTrue(TEXT("layoutPositioning preserved"), LayoutPositioning && *LayoutPositioning == TEXT("ABSOLUTE"));
 	TestTrue(TEXT("layoutPositioning semantic flag"), GridNode->LayoutData.bAbsoluteLayoutPositioning);
-	const FString* ItemReverseZIndex = GridNode->Metadata.Find(TEXT("itemReverseZIndex"));
-	TestTrue(TEXT("itemReverseZIndex preserved"), ItemReverseZIndex && *ItemReverseZIndex == TEXT("true"));
+	TestFalse(TEXT("GRID does not enable H/V reverse paint order"), GridNode->LayoutData.bReversePaintOrder);
 	const FString* StrokesIncludedInLayout = GridNode->Metadata.Find(TEXT("strokesIncludedInLayout"));
 	TestTrue(TEXT("strokesIncludedInLayout preserved"), StrokesIncludedInLayout && *StrokesIncludedInLayout == TEXT("true"));
 	TestTrue(TEXT("boundVariables preserved"), GridNode->Metadata.Contains(TEXT("boundVariables.itemSpacing")));

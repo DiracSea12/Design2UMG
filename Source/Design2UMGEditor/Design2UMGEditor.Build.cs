@@ -58,6 +58,7 @@ public class Design2UMGEditor : ModuleRules
 			// float/2D-transform tracks) for wired Navigate bindings.
 			"MovieScene",
 			"MovieSceneTracks",
+			"MovieSceneTools",
 			"ImageCore",
 			"ImageWrapper",
 			"FreeImage",

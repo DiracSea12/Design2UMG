@@ -97,9 +97,14 @@ static bool LooksLikeExternalPrototypeLink(const FString& Value)
 
 // Collapses the raw Type/Navigation keyword pair (plus the external-link look
 // of DestinationId) into one terminal intent, applying the same precedence the
-// consumer's match chain used: Back, then OpenLink, then Overlay, then Navigate.
+// consumer's match chain used: CloseOverlay, Back, OpenLink, Overlay, then Navigate.
 static EDesignPrototypeActionIntent ResolvePrototypeActionIntent(const FDesignPrototypeAction& Action)
 {
+	if (Action.Type.Equals(TEXT("CLOSE"), ESearchCase::IgnoreCase))
+	{
+		return EDesignPrototypeActionIntent::CloseOverlay;
+	}
+
 	if (IsPrototypeBackKeyword(Action.Type) || IsPrototypeBackKeyword(Action.Navigation))
 	{
 		return EDesignPrototypeActionIntent::Back;
@@ -162,6 +167,8 @@ static void ParsePrototypeActions(const TSharedPtr<FJsonObject>& InteractionObj,
 
 	for (const TSharedPtr<FJsonValue>& AV : *Actions)
 	{
+		if (!AV || AV->Type != EJson::Object)
+			continue;
 		const TSharedPtr<FJsonObject> AObj = AV->AsObject();
 		if (!AObj.IsValid())
 			continue;
@@ -239,6 +246,13 @@ static TArray<FString> ParsePrototypeTriggerKeyCodes(const TSharedPtr<FJsonObjec
 			{
 				KeyCodes.AddUnique(KeyCodeString.ToUpper());
 			}
+			else if (KeyCodeValue->Type == EJson::Number)
+			{
+				double KeyCode = 0;
+				if (KeyCodeValue->TryGetNumber(KeyCode) && FMath::IsFinite(KeyCode)
+					&& KeyCode >= 0 && KeyCode <= MAX_int32 && FMath::FloorToDouble(KeyCode) == KeyCode)
+					KeyCodes.AddUnique(FString::FromInt(static_cast<int32>(KeyCode)));
+			}
 		}
 	}
 
@@ -270,6 +284,9 @@ static void ParsePrototypeInteractions(const TSharedPtr<FJsonObject>& Obj, TArra
 			Interaction.TriggerJson = DesignJsonUtils::ToPrettyString(TriggerField);
 
 		const TSharedPtr<FJsonObject> TriggerObject = DesignJsonUtils::GetObject(IObj, TEXT("trigger"));
+		if (!TriggerObject.IsValid())
+			continue;
+		Interaction.TriggerDevice = DesignJsonUtils::GetString(TriggerObject, TEXT("device")).ToUpper();
 		Interaction.TriggerKeyCodes = ParsePrototypeTriggerKeyCodes(TriggerObject);
 		const FString TriggerType = DesignJsonUtils::GetString(TriggerObject, TEXT("type"));
 		if (!TriggerType.IsEmpty())
@@ -301,6 +318,9 @@ static void ParseFlowStartingPoints(const TSharedPtr<FJsonObject>& Obj, TArray<F
 
 void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignPrototypeNodeData& OutData)
 {
+	OutData.AnimationSource = MakeShared<FJsonObject>();
+	OutData.AnimationSource->Values = NodeObj->Values;
+	OutData.AnimationSource->RemoveField(TEXT("children"));
 	const FString TransitionNodeId = DesignJsonUtils::GetString(NodeObj, TEXT("transitionNodeID"));
 	if (!TransitionNodeId.IsEmpty())
 		OutData.TransitionNodeId = TransitionNodeId;
@@ -327,6 +347,8 @@ void ParsePrototypeNodeData(const TSharedPtr<FJsonObject>& NodeObj, FDesignProto
 
 void MergePrototypeDocumentData(const TSharedPtr<FJsonObject>& SourceObj, FDesignSourceDocumentData& OutData)
 {
+	const FString DurationUnit = DesignJsonUtils::GetString(SourceObj, TEXT("design2umgPrototypeDurationUnit"));
+	if (!DurationUnit.IsEmpty()) OutData.PrototypeDurationUnit = DurationUnit;
 	const FString StartNodeId = DesignJsonUtils::GetString(SourceObj, TEXT("prototypeStartNodeID"));
 	if (!StartNodeId.IsEmpty())
 		OutData.PrototypeStartNodeId = StartNodeId;

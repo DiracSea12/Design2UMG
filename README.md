@@ -220,11 +220,17 @@ Design2UMG.PenConvert <nodes.json> <vars.json> [TargetNodeId] [--preview|--no-pr
 
 Figma 原型连线会转换成以下内容：
 
-- 交互触发节点包一层 `Button`，多页面流程合成一个 `WidgetSwitcher` 根节点。
+- 受支持的交互触发节点包一层 `Button`，多页面流程合成一个 `WidgetSwitcher` 根节点。
 - 支持的单步鼠标动作（跳转、打开链接、弹层、返回）和键盘动作（跳转、打开链接），会直接连成原生蓝图节点。
 - 支持的页面过渡会生成 `UWidgetAnimation`。
 
-多步流程、条件分支、拖拽以及暂不支持的触发/动作组合不会连线，会在诊断报告中列出。这不是通用的交互图编译器，详见 [已知限制](KNOWN_LIMITATIONS.md#interaction-and-animation)。
+多步流程、条件分支、拖拽以及暂不支持的触发/动作组合不会连线，会在诊断报告中列出。被拒绝的动画不会为该动作生成执行按钮，也不会经该动作将目标纳入运行时依赖导航页；同稿其他受支持动作仍可生成。这不是通用的交互图编译器，详见 [已知限制](KNOWN_LIMITATIONS.md#interaction-and-animation)。
+
+当前已实现有限的基础控件动画：按真实起止树生成可编辑的 UE 原生 `UWidgetAnimation`，覆盖位置、旋转、透明度和单一纯色。尺寸变化仅限无子项、无圆角、无描边或特效的实心矩形，且必须能准确等价为渲染缩放；不做复杂布局重排。同名子项须保持层级和绘制顺序，使用当前动作自己的时长及可精确表达的曲线；不可表达时明确诊断并拒绝动作，不瞬切或近似补齐。
+
+点击和 `MOUSE_ENTER` 播放后不自动恢复；`ON_HOVER` 的受支持 `CHANGE_TO` 动画在移出时反向播放；页面进入后的 `AFTER_TIMEOUT` 按明确延时播放。新版 Plugin 导出会把秒制 `duration/timeout` 转为毫秒并标记单位；HTTP 来源尚未核实的时间单位会阻止新属性动画，不影响既有静态导入。`SMART_ANIMATE` 弹层不支持，普通无动画弹层仍保留。
+
+有限定向功能验证已完成，包括保存后新进程重开、原生输入与自动播放，以及一份真实 Toggle 恢复包的点击移动/纯色播放。四份动画稿均有新鲜完整导出包，并已验证真实静态生成、重载及渲染；Loading 另已验证 `AFTER_TIMEOUT` 原生播放，其余动画限制、来源和已有警告见 [已知限制](KNOWN_LIMITATIONS.md#interaction-and-animation)。完整视觉及 `no_regression` 结论以同输入、同标准图的逐项回归证据为准，定向功能验证不代表全量验收。通用变量/条件/多步状态机、完整扫雷、独立交互自动评分及任意 Figma/Pencil 代码层程序直接转换 UMG 均不在支持范围，见 [不做范围](KNOWN_LIMITATIONS.md#explicit-non-goals)。
 
 ## 插件设置
 

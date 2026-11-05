@@ -62,7 +62,8 @@ enum class EDesignPrototypeActionIntent : uint8
 	Navigate,
 	Overlay,
 	Back,
-	OpenLink
+	OpenLink,
+	CloseOverlay
 };
 
 /**
@@ -115,6 +116,7 @@ struct FDesignPrototypeInteraction
 
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
+	UPROPERTY() FString TriggerDevice;
 	UPROPERTY() TArray<FString> TriggerKeyCodes;
 	UPROPERTY() TArray<FDesignPrototypeAction> Actions;
 };
@@ -133,6 +135,10 @@ struct FDesignPrototypeNodeData
 {
 	GENERATED_BODY()
 
+	TSharedPtr<class FJsonObject> AnimationSource;
+	/** Set by conversion when an animated prototype transition targets this node. */
+	bool bAnimatedSurface = false;
+
 	UPROPERTY() FString TransitionNodeId;
 	UPROPERTY() FDesignPrototypeTransitionData Transition;
 	UPROPERTY() TArray<FDesignPrototypeInteraction> Interactions;
@@ -144,8 +150,12 @@ struct FDesignSourceDocumentData
 {
 	GENERATED_BODY()
 
+	UPROPERTY() FString PrototypeDurationUnit;
+
 	/** Imported document roots participate in reference lookup, not source frame selection or layout. */
 	TArray<TSharedPtr<FDesignNode>> ImportedNodes;
+	/** Figma prototype destination pages, separate from the selected source roots. */
+	TArray<TSharedPtr<FDesignNode>> PrototypePages;
 
 	UPROPERTY() FString SourceFilePath;
 	UPROPERTY() FString ComponentsJson;
@@ -194,5 +204,7 @@ struct FDesignSourceNodeData
 	FDesignPencilNodeData Pencil;
 	FDesignComponentInstanceData ComponentInstance;
 	FDesignPrototypeNodeData Prototype;
+	/** Source paint extent relative to the normalized root layout origin. */
+	TOptional<FBox2D> ExportBounds;
 	FString SourceNodeType;
 };

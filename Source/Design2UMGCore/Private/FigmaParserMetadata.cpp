@@ -4,9 +4,12 @@
 
 #include "Design2UMGLog.h"
 #include "DesignJsonUtils.h"
+#include "UMGValueParser.h"
+#include "VisualMapperStrokeSupport.h"
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "FigmaParserInternal.h"
+#include "FigmaParserLayoutBounds.h"
 #include "ParserSharedSemantics.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -153,49 +156,127 @@ namespace
 
 		return false;
 	}
+
+	bool HasVisiblePaint(const FDesignFill& Fill)
+	{
+		if (!Fill.bEnabled || Fill.IsNone() || Fill.Opacity <= 0) return false;
+		if (Fill.IsColor()) return FUMGValueParser::ParseColor(Fill.SolidColor).A > 0;
+		if (Fill.Type == EDesignFillType::Gradient)
+		{
+			return Fill.Gradient.Colors.ContainsByPredicate([](const FDesignGradientStop& Stop)
+			{
+				return FUMGValueParser::ParseColor(Stop.Color).A > 0;
+			});
+		}
+		return true;
+	}
+
+	FBox2D ReadSourceBounds(const FDesignNode& Node, const TCHAR* Field)
+	{
+		FigmaParserInternal::FNodeBounds Bounds;
+		if (!FigmaParserInternal::TryReadBounds(DesignJsonUtils::GetObject(Node.Source().Prototype.AnimationSource, Field), Bounds))
+		{
+			return FBox2D(ForceInit);
+		}
+		return FBox2D(FVector2D(Bounds.X, Bounds.Y), FVector2D(Bounds.X + Bounds.W, Bounds.Y + Bounds.H));
+	}
+
+	FBox2D IntersectPaintBounds(const FBox2D& Paint, const FBox2D& Clip)
+	{
+		if (!Paint.bIsValid || !Clip.bIsValid || !Paint.Intersect(Clip)) return FBox2D(ForceInit);
+		return FBox2D(FVector2D(FMath::Max(Paint.Min.X, Clip.Min.X), FMath::Max(Paint.Min.Y, Clip.Min.Y)),
+			FVector2D(FMath::Min(Paint.Max.X, Clip.Max.X), FMath::Min(Paint.Max.Y, Clip.Max.Y)));
+	}
+
+	FBox2D ResolvePaintBounds(const FDesignNode& Node, const FVector2D& ParentX, const FVector2D& ParentY)
+	{
+		if (!Node.Transform.bEnabled || Node.Transform.Opacity <= 0) return FBox2D(ForceInit);
+		const FVector2D LocalX = FVector2D(Node.Transform.bFlipX ? -1 : 1, 0).GetRotated(Node.Transform.Rotation);
+		const FVector2D LocalY = FVector2D(0, Node.Transform.bFlipY ? -1 : 1).GetRotated(Node.Transform.Rotation);
+		const FVector2D AxisX = ParentX * LocalX.X + ParentY * LocalX.Y;
+		const FVector2D AxisY = ParentX * LocalY.X + ParentY * LocalY.Y;
+		const FBox2D Layout = ReadSourceBounds(Node, TEXT("absoluteBoundingBox"));
+		const bool bFill = Node.Visual.Fills.ContainsByPredicate(HasVisiblePaint);
+		const FDesignStroke& Stroke = Node.Visual.Stroke;
+		const bool bStroke = Stroke.HasStroke() && Stroke.Fill.IsSet() && HasVisiblePaint(Stroke.Fill.GetValue());
+		const bool bEffectPaint = Node.Visual.Effects.ContainsByPredicate([](const FDesignEffect& Effect)
+		{
+			return Effect.bEnabled && ((Effect.Type == EDesignEffectType::Shadow
+				&& FUMGValueParser::ParseColor(Effect.Shadow.Color).A > 0)
+				|| (Effect.Type == EDesignEffectType::BackgroundBlur && Effect.Radius > 0));
+		});
+		FBox2D Bounds(ForceInit);
+		if ((bFill || bStroke || bEffectPaint) && Layout.bIsValid)
+		{
+			Bounds = Layout;
+			if (bStroke && Stroke.Align != EDesignStrokeAlign::Inside)
+			{
+				FMargin Insets = VisualMapperStrokeSupport::GetStrokeHalfInsets(Stroke.Thickness);
+				if (Stroke.Align == EDesignStrokeAlign::Outside) Insets = Insets * 2.0f;
+				FBox2D Padding(ForceInit);
+				for (int32 Corner = 0; Corner < 4; ++Corner)
+				{
+					Padding += AxisX * ((Corner & 1) ? Insets.Right : -Insets.Left)
+						+ AxisY * ((Corner & 2) ? Insets.Bottom : -Insets.Top);
+				}
+				Bounds = FBox2D(Layout.Min + Padding.Min, Layout.Max + Padding.Max);
+			}
+		}
+
+		// Leaf render bounds include source glyph/vector geometry, stroke and effects.
+		// Container render bounds also contain layout aggregates, so they cannot identify its own paint.
+		if (!Node.IsContainer())
+		{
+			const FBox2D Render = ReadSourceBounds(Node, TEXT("absoluteRenderBounds"));
+			if ((bFill || bStroke || bEffectPaint) && Render.bIsValid)
+			{
+				return Render;
+			}
+		}
+		for (const TSharedPtr<FDesignNode>& Child : Node.Children)
+		{
+			FBox2D ChildBounds = ResolvePaintBounds(*Child, AxisX, AxisY);
+			if (Node.LayoutData.ExplicitClip.Get(false) || Node.Visual.GeometryMask.HasMask())
+			{
+				ChildBounds = IntersectPaintBounds(ChildBounds, Layout);
+			}
+			Bounds += ChildBounds;
+		}
+		if (!Bounds.bIsValid) return Bounds;
+		const FBox2D Content = Bounds;
+		double BlurVariance = 0;
+		for (const FDesignEffect& Effect : Node.Visual.Effects)
+		{
+			if (!Effect.bEnabled) continue;
+			if (Effect.Type == EDesignEffectType::Shadow && !Effect.Shadow.bInner
+				&& FUMGValueParser::ParseColor(Effect.Shadow.Color).A > 0)
+			{
+				// Match the existing native effect extent: three sigma plus spread.
+				const FVector2D Radius(Effect.Shadow.Blur * 1.5 + FMath::Max(0.0f, Effect.Shadow.Spread));
+				const FVector2D Offset = AxisX * Effect.Shadow.OffsetX + AxisY * Effect.Shadow.OffsetY;
+				Bounds += FBox2D(Content.Min + Offset - Radius, Content.Max + Offset + Radius);
+			}
+			else if (Effect.Type == EDesignEffectType::Blur) BlurVariance += FMath::Square(Effect.Radius * 0.5);
+		}
+		if (BlurVariance > 0)
+		{
+			const FVector2D Radius(3 * FMath::Sqrt(BlurVariance));
+			Bounds = FBox2D(Bounds.Min - Radius, Bounds.Max + Radius);
+		}
+		return Bounds;
+	}
 }
 
 namespace FigmaParserMetadata
 {
-	void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, FDesignNode& OutNode)
+	FBox2D CalculateExportBounds(const FDesignNode& Root, const FVector2D& SourceOrigin)
 	{
-		if (!Obj.IsValid())
-		{
-			return;
-		}
-
-		const FString ImageRef = GetString(Obj, TEXT("design2umgRenderFallbackImageRef"));
-		if (!ImageRef.IsEmpty())
-		{
-			OutNode.Visual.RenderFallback.ImageRef = ImageRef;
-		}
-
-		const FString Scope = GetString(Obj, TEXT("design2umgRenderFallbackScope"));
-		if (Scope.Equals(TEXT("subtree"), ESearchCase::IgnoreCase))
-		{
-			OutNode.Visual.RenderFallback.Scope = EDesignRenderFallbackScope::Subtree;
-		}
-		else if (!Scope.IsEmpty() && !Scope.Equals(TEXT("full"), ESearchCase::IgnoreCase))
-		{
-			OutNode.Visual.RenderFallback.Scope = EDesignRenderFallbackScope::Unsupported;
-		}
-
-		for (const TCHAR* Key : {
-			 TEXT("design2umgRenderFallbackImageRef"),
-			 TEXT("design2umgRenderFallbackScope"),
-			 TEXT("design2umgRenderFallbackSource"),
-			 TEXT("design2umgRenderFallbackReason") })
-		{
-			const FString Value = GetString(Obj, Key);
-			if (!Value.IsEmpty())
-			{
-				OutNode.Metadata.Add(Key, Value);
-			}
-		}
-
-		OutNode.Visual.RenderFallback.bSuppressedBySourceSemantics =
-			OutNode.Source().ComponentInstance.bIsInstance
-			|| OutNode.Source().Prototype.Interactions.Num() > 0;
+		FBox2D Result(FVector2D::ZeroVector, FVector2D(Root.Transform.Width.Value, Root.Transform.Height.Value));
+		const FBox2D Paint = ResolvePaintBounds(Root, FVector2D(1, 0), FVector2D(0, 1));
+		// Figma exports whole pixels; overflow under half a pixel does not widen the export.
+		const auto Snap = [](const FVector2D& Point) { return FVector2D(FMath::RoundToDouble(Point.X), FMath::RoundToDouble(Point.Y)); };
+		if (Paint.bIsValid) Result += FBox2D(Snap(Paint.Min - SourceOrigin), Snap(Paint.Max - SourceOrigin));
+		return Result;
 	}
 
 	void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions)

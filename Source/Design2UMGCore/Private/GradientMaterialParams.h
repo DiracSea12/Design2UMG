@@ -20,6 +20,7 @@ namespace Design2UMGGradientMaterialParams
 	struct FGradientParams
 	{
 		bool bRadial = false;
+		bool bAngular = false;
 		bool bHasLinearEndpoints = false;
 		FVector2D StartPoint = FVector2D::ZeroVector;
 		FVector2D EndPoint = FVector2D(1.0f, 0.0f);
@@ -54,11 +55,13 @@ namespace Design2UMGGradientMaterialParams
 			Params.Size.Y,
 			Params.Rotation);
 
+		const FString Coordinates = Params.bRadial || Params.bAngular
+			? RadialParams
+			: FString::Printf(TEXT("%s\"Rotation\":%.4f"), *LinearParams, Params.Rotation);
+
 		if (Params.Stops.Num() > 2)
 		{
-			FString Stops = Params.bRadial
-				? FString::Printf(TEXT("{%s,\"Stops\":["), *RadialParams)
-				: FString::Printf(TEXT("{%s\"Rotation\":%.4f,\"Stops\":["), *LinearParams, Params.Rotation);
+			FString Stops = FString::Printf(TEXT("{%s,\"Stops\":["), *Coordinates);
 			for (int32 Index = 0; Index < Params.Stops.Num(); ++Index)
 			{
 				if (Index > 0)
@@ -84,9 +87,8 @@ namespace Design2UMGGradientMaterialParams
 		}
 
 		return FString::Printf(
-			TEXT("{%s\"Rotation\":%.4f,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
-			*LinearParams,
-			Params.Rotation,
+			TEXT("{%s,\"ColorStart\":\"%s\",\"ColorEnd\":\"%s\"}"),
+			*Coordinates,
 			*StartColor,
 			*EndColor);
 	}

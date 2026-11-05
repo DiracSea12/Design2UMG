@@ -34,13 +34,8 @@ bool FPenExtendedFieldsTest::RunTest(const FString& Parameters)
 					"type": "mesh_gradient",
 					"columns": 2,
 					"rows": 3,
-					"colors": [
-						{"color": "#FF0000", "position": 0.0},
-						{"color": "#00FF00", "position": 1.0}
-					],
-					"points": [
-						{"x": 0.25, "y": 0.75, "color": "#FF0000", "in": [0.1, 0.2], "out": {"x": 0.3, "y": 0.4}}
-					]
+					"colors": ["#FF0000", "#00FF00", "#FF0000", "#00FF00", "#FF0000", "#00FF00"],
+					"points": [[0, 0], [1, 0], {"position": [0, 0.5], "topHandle": [0, -0.1], "bottomHandle": [0, 0.1]}, [1, 0.5], [0, 1], [1, 1]]
 				}
 			},
 			{

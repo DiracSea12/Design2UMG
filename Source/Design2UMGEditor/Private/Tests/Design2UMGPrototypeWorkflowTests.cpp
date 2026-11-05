@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "Misc/AutomationTest.h"
+#include "UMGWidgetTreeBuilder.h"
 #include "DesignImportPlanning.h"
 #include "Design2UMGConverter.h"
 #include "Design2UMGTestUtils.h"
@@ -17,7 +18,12 @@
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
-#include "Components/WidgetSwitcher.h"
+#include "Components/Border.h"
+#include "Components/Image.h"
+#include "Components/CanvasPanel.h"
+#include "Animation/UMGSequenceTickManager.h"
+#include "Framework/Application/SlateApplication.h"
+#include "TimerManager.h"
 #include "Editor.h"
 #include "Engine/LatentActionManager.h"
 #include "Misc/EngineVersionComparison.h"
@@ -48,18 +54,38 @@ namespace
 			FString::Printf(TEXT("%s,%s"),
 				*MakeContainerNode(TEXT("1:1"), TEXT("PageOne"), TEXT("FRAME"), 0, 0, 360, 240, CtaButtonJson),
 				*PageTwoJson),
-			TEXT(",\"prototypeStartNodeID\":\"1:1\""));
+			TEXT(",\"prototypeStartNodeID\":\"1:1\",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\""));
 	}
 
-	UWidgetSwitcher* FindPrototypeSwitcherWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
+	UCanvasPanel* FindPrototypePageHostWidget(UUserWidget* WidgetInstance, const FUMGWidgetData& Data)
 	{
 		const FUMGPrototypeNavigationData& NavigationData = Data.PrototypeNavigation();
-		if (!WidgetInstance || !WidgetInstance->WidgetTree || NavigationData.SwitcherWidgetName.IsEmpty())
+		if (!WidgetInstance || !WidgetInstance->WidgetTree || NavigationData.PageHostWidgetName.IsEmpty())
 		{
 			return nullptr;
 		}
 
-		return Cast<UWidgetSwitcher>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.SwitcherWidgetName)));
+		return Cast<UCanvasPanel>(WidgetInstance->WidgetTree->FindWidget(FName(*NavigationData.PageHostWidgetName)));
+	}
+
+	int32 CurrentPage(UUserWidget* Instance)
+	{
+		const auto* Property = FindFProperty<FIntProperty>(Instance->GetClass(), TEXT("__d2u_current_page"));
+		return Property ? Property->GetPropertyValue_InContainer(Instance) : INDEX_NONE;
+	}
+
+	void TickPrototype(UUserWidget* Instance, float Seconds)
+	{
+		// A timer set after this frame's timer tick stays pending until the next one; activate it first.
+		++GFrameCounter;
+		Instance->GetWorld()->GetTimerManager().Tick(0.0f);
+		++GFrameCounter;
+		UUMGSequenceTickManager::Get(Instance)->OnWidgetTicked(Instance);
+		FSlateApplication::Get().OnPreTick().Broadcast(Seconds);
+		Instance->GetWorld()->GetLatentActionManager().BeginFrame();
+		Instance->GetWorld()->GetLatentActionManager().ProcessLatentActions(Instance, Seconds);
+		Instance->GetWorld()->GetTimerManager().Tick(Seconds);
+		FSlateApplication::Get().OnPostTick().Broadcast(Seconds);
 	}
 
 	/** Structural purity contract: no plugin-custom (Design2UMG*) extension may be baked into a generated asset. */
@@ -96,6 +122,53 @@ namespace
 		return CountDesign2UMGExtensions(UWidgetBlueprintExtension::GetExtensions(&Blueprint));
 #endif
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeRootPaintPlaybackTest,
+	"Design2UMG.WidgetBlueprint.FigmaPrototypeRootPaintPlayback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFigmaPrototypeRootPaintPlaybackTest::RunTest(const FString&)
+{
+	const FString Action = TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"navigation\":\"NAVIGATE\",\"destinationId\":\"B\",\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":300,\"easing\":{\"type\":\"LINEAR\"}}}]}]");
+	const FString A = MakeContainerNode(TEXT("A"), TEXT("Card"), TEXT("FRAME"), 0, 0, 160, 100, FString(),
+		TEXT(",\"opacity\":0.8,\"fills\":[") + MakeSolidFillJson(1, 0, 0) + TEXT("]") + Action);
+	const FString B = MakeContainerNode(TEXT("B"), TEXT("Card"), TEXT("FRAME"), 0, 0, 160, 100, FString(),
+		TEXT(",\"opacity\":0.4,\"fills\":[") + MakeSolidFillJson(0, 0, 1) + TEXT("]"));
+	FDesignDocument Document;
+	if (!TestTrue(TEXT("Interactive source paint fixture parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(A,
+		FString::Printf(TEXT(",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\",\"design2umgPrototypePages\":[%s]"), *B)), Document))) return false;
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/RootPaintPlayback");
+	DeleteGeneratedAssetsAtPath(Folder);
+	ON_SCOPE_EXIT { DeleteGeneratedAssetsAtPath(Folder); };
+	FUMGPrototypeNavigationData Navigation;
+	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, Folder, nullptr, nullptr, &Navigation);
+	if (!TestNotNull(TEXT("Interactive source paint fixture builds"), Blueprint)
+		|| !TestTrue(TEXT("Interactive source paint fixture compiles"), FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &Navigation).IsSuccess())) return false;
+	if (!TestTrue(*FString::Printf(TEXT("Root paint has native animation: %s"), *Navigation.ClickBindings[0].Transition.Diagnostic),
+		!Navigation.ClickBindings[0].Transition.WidgetAnimationName.IsEmpty())) return false;
+	UUserWidget* Instance = CreateWidget<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass.Get());
+	if (!TestNotNull(TEXT("Interactive source paint instantiates"), Instance)) return false;
+	const TSharedRef<SWidget> Slate = Instance->TakeWidget();
+	ON_SCOPE_EXIT { Instance->RemoveFromParent(); };
+	// The root trigger carries its design name; graph wiring resolves it by that base name.
+	auto* Button = FUMGWidgetTreeBuilder::FindUniqueTreeWidget<UButton>(Instance->WidgetTree, TEXT("Card"));
+	if (!TestNotNull(TEXT("The source root remains the real input Button"), Button)) return false;
+	UWidget* Visual = Button->GetChildAt(0);
+	const auto ReadColor = [&]
+	{
+		if (auto* Border = Cast<UBorder>(Visual)) return Border->GetBrushColor() * Border->Background.TintColor.GetSpecifiedColor();
+		if (auto* Image = Cast<UImage>(Visual)) return Image->GetBrush().TintColor.GetSpecifiedColor() * Image->GetColorAndOpacity();
+		return FLinearColor::Transparent;
+	};
+	TestTrue(TEXT("Initial root visual has its authored red paint"), ReadColor().Equals(FLinearColor::Red, 0.001f));
+	Button->OnClicked.Broadcast();
+	TickPrototype(Instance, 0);
+	TickPrototype(Instance, 0.15f);
+	const FLinearColor Middle = ReadColor();
+	TestTrue(TEXT("Click animates the actual visual owner's paint"), Middle.R > 0 && Middle.R < 1 && Middle.B > 0 && Middle.B < 1);
+	TestTrue(TEXT("Root opacity still animates on the whole input Button"), Button->GetRenderOpacity() > 0.4f && Button->GetRenderOpacity() < 0.8f);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaPrototypeGraphNavigationWorkflowTest,
@@ -149,42 +222,37 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	}
 
 	WidgetInstance->TakeWidget();
-	UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(WidgetInstance, Data);
-	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("cta_button")));
-	TestTrue(TEXT("Navigation switcher exists"), Switcher != nullptr);
+	UCanvasPanel* PageHost = FindPrototypePageHostWidget(WidgetInstance, Data);
+	UButton* TriggerButton = Cast<UButton>(WidgetInstance->WidgetTree->FindWidget(TEXT("CTA")));
+	TestTrue(TEXT("Navigation page host exists"), PageHost != nullptr);
 	TestTrue(TEXT("Navigation trigger button exists"), TriggerButton != nullptr);
-	if (!Switcher || !TriggerButton)
+	if (!PageHost || !TriggerButton)
 	{
 		DeleteGeneratedAssetsAtPath(OutputPath);
 		return false;
 	}
 
-	TestEqual(TEXT("Navigation initial page index"), Switcher->GetActiveWidgetIndex(), 0);
+	TestEqual(TEXT("Navigation initial page index"), CurrentPage(WidgetInstance), 0);
 	TriggerButton->OnClicked.Broadcast();
-	// The wired chain plays the outgoing fade first; the page switch sits behind the latent Delay,
-	// so right after the broadcast the switcher must still show the initial page.
-	TestEqual(TEXT("Page switch waits for the transition delay"), Switcher->GetActiveWidgetIndex(), 0);
+	// Both real pages participate in the shared clip; the current-page identity changes only at completion.
+	TestEqual(TEXT("Page switch waits for the transition delay"), CurrentPage(WidgetInstance), 0);
 
-	// Pump the latent action manager past the phase duration (the same clock the world tick would
-	// advance): the Delay fires, the resume runs SetActiveWidgetIndex + PlayAnimation(in) inline.
+	// Advance the native animation and timer clocks past the source transition duration.
 	if (World)
 	{
-		World->GetLatentActionManager().ProcessLatentActions(WidgetInstance, 0.5f);
+		TickPrototype(WidgetInstance, 0.5f);
 	}
 	TestEqual(TEXT("Wired click switches to the bound page after the transition delay"),
-		Switcher->GetActiveWidgetIndex(), 1);
+		CurrentPage(WidgetInstance), 1);
 
-	// The compiled class exposes each generated animation as a named object property whose value is
-	// the compiled *_INST clone the widget actually plays; read it back from the live instance to
-	// prove both the property wiring and the playing state.
-	const FObjectProperty* IncomingAnimationProperty = FindFProperty<FObjectProperty>(
-		GeneratedClass, FName(TEXT("__d2u_nav_anim_000_in")));
-	UWidgetAnimation* IncomingAnimation = IncomingAnimationProperty
-		? Cast<UWidgetAnimation>(IncomingAnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance))
-		: nullptr;
-	TestNotNull(TEXT("Instance carries the incoming animation property"), IncomingAnimation);
-	TestTrue(TEXT("Incoming fade animation is playing after the switch"),
-		IncomingAnimation && WidgetInstance->IsAnimationPlaying(IncomingAnimation));
+	const FName AnimationName(*NavigationData.ClickBindings[0].Transition.WidgetAnimationName);
+	const FObjectProperty* AnimationProperty = FindFProperty<FObjectProperty>(GeneratedClass, AnimationName);
+	UWidgetAnimation* Animation = AnimationProperty
+		? Cast<UWidgetAnimation>(AnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance)) : nullptr;
+	TestNotNull(TEXT("Instance carries the single page transition animation"), Animation);
+	TestFalse(TEXT("The shared clip stops after page commit"), Animation && WidgetInstance->IsAnimationPlaying(Animation));
+	TestTrue(TEXT("The outgoing page is collapsed after commit"), PageHost->GetChildAt(0)->GetVisibility() == ESlateVisibility::Collapsed);
+	TestTrue(TEXT("The committed page is visible"), PageHost->GetChildAt(1)->GetVisibility() != ESlateVisibility::Collapsed);
 
 	WidgetInstance->RemoveFromParent();
 	DeleteGeneratedAssetsAtPath(OutputPath);
@@ -223,13 +291,13 @@ bool FPreviewContextPrototypeGenerationTest::RunTest(const FString& Parameters)
         if (!TestNotNull(TEXT("Prototype instantiates"), Instance)) continue;
         Instance->TakeWidget();
         ON_SCOPE_EXIT { Instance->RemoveFromParent(); };
-        UWidgetSwitcher* Switcher = FindPrototypeSwitcherWidget(Instance, Data);
-        UButton* Trigger = Cast<UButton>(Instance->WidgetTree->FindWidget(TEXT("cta_button")));
-        if (!TestNotNull(TEXT("Switcher survives preview"), Switcher) || !TestNotNull(TEXT("Trigger survives preview"), Trigger)) continue;
-        TestEqual(TEXT("Initial page retained"), Switcher->GetActiveWidgetIndex(), 0);
+        UCanvasPanel* PageHost = FindPrototypePageHostWidget(Instance, Data);
+        UButton* Trigger = Cast<UButton>(Instance->WidgetTree->FindWidget(TEXT("CTA")));
+        if (!TestNotNull(TEXT("PageHost survives preview"), PageHost) || !TestNotNull(TEXT("Trigger survives preview"), Trigger)) continue;
+        TestEqual(TEXT("Initial page retained"), CurrentPage(Instance), 0);
         Trigger->OnClicked.Broadcast();
-        World->GetLatentActionManager().ProcessLatentActions(Instance, 1.0f);
-        TestEqual(TEXT("Real click reaches target after preview"), Switcher->GetActiveWidgetIndex(), 1);
+        TickPrototype(Instance, 1.0f);
+        TestEqual(TEXT("Real click reaches target after preview"), CurrentPage(Instance), 1);
     }
     return true;
 }

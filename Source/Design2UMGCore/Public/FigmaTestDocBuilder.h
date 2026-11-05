@@ -94,4 +94,25 @@ namespace Design2UMGCoreTests
 				 "{\"id\":\"0:1\",\"name\":\"Page 1\",\"type\":\"CANVAS\",\"children\":[%s]}]}%s}"),
 			*CanvasChildrenJson, *RootExtraFields);
 	}
+
+	inline FString MakeNativeWidgetAnimationDocument()
+	{
+		const FString Target = MakeContainerNode(TEXT("target"), TEXT("On"), TEXT("COMPONENT"), 0, 0, 120, 100,
+			MakeLeafNode(TEXT("target_surface"), TEXT("Surface"), TEXT("RECTANGLE"), 50, 30, 40, 80,
+				TEXT(",\"size\":{\"x\":80,\"y\":40},\"relativeTransform\":[[0,-1,90],[1,0,30]],\"rotation\":1.5707963267948966,\"opacity\":0.4,\"fills\":[{\"type\":\"SOLID\",\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}}]")));
+		TArray<FString> Instances;
+		const TCHAR* Triggers[] = { TEXT("{\"type\":\"ON_CLICK\"}"), TEXT("{\"type\":\"MOUSE_ENTER\",\"delay\":0}"),
+			TEXT("{\"type\":\"AFTER_TIMEOUT\",\"timeout\":50}"), TEXT("{\"type\":\"ON_HOVER\"}") };
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			const FString Id = FString::Printf(TEXT("instance_%d"), Index);
+			const FString SurfaceId = Id + TEXT("_surface");
+			Instances.Add(MakeContainerNode(*Id, *Id, TEXT("INSTANCE"), Index * 140, 0, 120, 100,
+				MakeLeafNode(*SurfaceId, TEXT("Surface"), TEXT("RECTANGLE"), Index * 140 + 10, 10, 40, 20,
+					TEXT(",\"size\":{\"x\":40,\"y\":20},\"relativeTransform\":[[1,0,10],[0,1,10]],\"opacity\":1,\"fills\":[{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}}]")),
+				FString::Printf(TEXT(",\"componentId\":\"base\",\"interactions\":[{\"trigger\":%s,\"actions\":[{\"type\":\"NODE\",\"navigation\":\"CHANGE_TO\",\"destinationId\":\"target\",\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":400,\"easing\":{\"type\":\"EASE_OUT\"}}}]}]"), Triggers[Index])));
+		}
+		return MakeFigmaDocJson(MakeContainerNode(TEXT("page"), TEXT("Page"), TEXT("FRAME"), 0, 0, 580, 120,
+			FString::Join(Instances, TEXT(","))), FString::Printf(TEXT(",\"fileKey\":\"native-animation-contract\",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\",\"design2umgComponentDependencies\":{\"schemaVersion\":1,\"definitions\":[{\"id\":\"target\",\"key\":\"target\",\"document\":%s}],\"instances\":{},\"errors\":[]}"), *Target));
+	}
 }

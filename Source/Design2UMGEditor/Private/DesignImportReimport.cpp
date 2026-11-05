@@ -198,7 +198,7 @@ namespace DesignImportPipeline
 		if (!FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(PreparedRoot, PrepareFailureReason)
 			|| !RetainerCaptureBounds::Prepare(PreparedRoot, PrepareFailureReason)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(PreparedRoot, PrepareFailureReason)
-			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(PreparedRoot, PreparedMaterials, PrepareFailureReason)
+			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(PreparedRoot, PreparedMaterials, PrepareFailureReason, Budget)
 			|| !FPreBuildResourceNormalizer::NormalizeGeneratedTextures(
 				PreparedRoot, PackagePath, AssetName, PrepareFailureReason, Budget))
 		{

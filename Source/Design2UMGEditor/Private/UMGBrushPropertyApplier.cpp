@@ -18,6 +18,7 @@
 #include "Components/RetainerBox.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
 
 namespace
 {
@@ -75,98 +76,10 @@ namespace
 			Node.WidgetStyle.WidthOverride.Get(DefaultSize.X),
 			Node.WidgetStyle.HeightOverride.Get(DefaultSize.Y));
 	}
-}
 
-namespace UMGBrushPropertyApplier
-{
-	void ApplyImageProps(UWidget* Widget, const FUMGWidgetNode& Node)
+	bool ApplyBrushCorners(FSlateBrush& Brush, const FUMGWidgetNode& Node)
 	{
-		UImage* Image = CastChecked<UImage>(Widget);
-
-		if (Node.Text.Color.IsSet())
-		{
-			Image->SetColorAndOpacity(Node.Text.Color.GetValue());
-		}
-
-		if (Node.Brush.BrushColor.IsSet())
-		{
-			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
-		}
-
-		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
-		bool bBrushModified = false;
-		if (Node.WidgetStyle.WidthOverride.IsSet())
-		{
-			Brush.ImageSize.X = Node.WidgetStyle.WidthOverride.GetValue();
-			bBrushModified = true;
-		}
-		if (Node.WidgetStyle.HeightOverride.IsSet())
-		{
-			Brush.ImageSize.Y = Node.WidgetStyle.HeightOverride.GetValue();
-			bBrushModified = true;
-		}
-
-		if (bBrushModified)
-		{
-			if (Brush.Tiling == ESlateBrushTileType::Both && ResolveImageMode(Node).IsEmpty())
-			{
-				Brush.Tiling = ESlateBrushTileType::NoTile;
-			}
-			Image->SetBrush(Brush);
-			if (Brush.ImageSize.X > 0 && Brush.ImageSize.Y > 0)
-			{
-				Image->SetDesiredSizeOverride(Brush.ImageSize);
-			}
-		}
-	}
-
-	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
-	{
-		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
-		if (!Budget) Budget = &LocalBudget;
-		UBorder* Border = CastChecked<UBorder>(Widget);
-		Border->SetPadding(FMargin(0.0f));
-		FSlateBrush Brush = Border->Background;
-        if(Node.Brush.Shader.IsSet())
-        {
-            if(auto Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString())))
-            {Brush.SetResourceObject(Material);Brush.DrawAs=ESlateBrushDrawType::Image;Brush.ImageSize=Node.Brush.Shader->Size;Border->SetBrush(Brush);}
-            return;
-        }
 		bool bBrushChanged = false;
-
-		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
-		UTexture2D* GeneratedTexture = nullptr;
-		FDesignPathRasterRequest PathRequest;
-		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap, &PathRequest)
-			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
-		{
-			Brush.SetResourceObject(GeneratedTexture);
-			Brush.DrawAs = ESlateBrushDrawType::Image;
-			Brush.ImageSize = FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY());
-			if (Node.Path.HasPaintGeometry())
-			{
-				const auto UV = PathRequest.GetCanvasUVTransform();
-				Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
-				Brush.ImageSize = FVector2D(PathRequest.CanvasBounds.Size());
-			}
-			bBrushChanged = true;
-		}
-		else
-		{
-			const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(FString());
-			if (!TexturePath.IsEmpty())
-			{
-				if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
-				{
-					Brush.SetResourceObject(Texture);
-					Brush.DrawAs = ESlateBrushDrawType::Image;
-					Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-					bBrushChanged = true;
-				}
-			}
-		}
-
 		if (Node.Brush.DrawAs.IsSet())
 		{
 			Brush.DrawAs = Node.Brush.DrawAs.GetValue();
@@ -212,6 +125,115 @@ namespace UMGBrushPropertyApplier
 			}
 			bBrushChanged = true;
 		}
+
+		return bBrushChanged;
+	}
+}
+
+namespace UMGBrushPropertyApplier
+{
+	void ApplyImageProps(UWidget* Widget, const FUMGWidgetNode& Node)
+	{
+		UImage* Image = CastChecked<UImage>(Widget);
+
+		if (Node.Text.Color.IsSet())
+		{
+			Image->SetColorAndOpacity(Node.Text.Color.GetValue());
+		}
+
+		if (Node.Brush.BrushColor.IsSet())
+		{
+			Image->SetBrushTintColor(FSlateColor(Node.Brush.BrushColor.GetValue()));
+		}
+
+		FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
+		bool bBrushModified = false;
+		if (Node.Brush.DrawAs.IsSet() && Node.Brush.DrawAs.GetValue() == ESlateBrushDrawType::RoundedBox)
+		{
+			bBrushModified = ApplyBrushCorners(Brush, Node);
+		}
+		if (Node.WidgetStyle.WidthOverride.IsSet())
+		{
+			Brush.ImageSize.X = Node.WidgetStyle.WidthOverride.GetValue();
+			bBrushModified = true;
+		}
+		if (Node.WidgetStyle.HeightOverride.IsSet())
+		{
+			Brush.ImageSize.Y = Node.WidgetStyle.HeightOverride.GetValue();
+			bBrushModified = true;
+		}
+
+		if (bBrushModified)
+		{
+			if ((Node.WidgetStyle.WidthOverride.IsSet() || Node.WidgetStyle.HeightOverride.IsSet())
+				&& Brush.Tiling == ESlateBrushTileType::Both && ResolveImageMode(Node).IsEmpty())
+			{
+				Brush.Tiling = ESlateBrushTileType::NoTile;
+			}
+			Image->SetBrush(Brush);
+			if ((Node.WidgetStyle.WidthOverride.IsSet() || Node.WidgetStyle.HeightOverride.IsSet())
+				&& Brush.ImageSize.X > 0 && Brush.ImageSize.Y > 0)
+			{
+				Image->SetDesiredSizeOverride(Brush.ImageSize);
+			}
+		}
+	}
+
+	void ApplyBorderProps(UWidget* Widget, const FUMGWidgetNode& Node, DesignImageResources::FImageOperationBudget* Budget, const TMap<FString, UTexture2D*>* TextureMap)
+	{
+		DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
+		if (!Budget) Budget = &LocalBudget;
+		UBorder* Border = CastChecked<UBorder>(Widget);
+		Border->SetPadding(FMargin(0.0f));
+		FSlateBrush Brush = Border->Background;
+        const FString MaterialPath = Node.Brush.MaterialRef.Get(FString());
+        if (Node.Brush.Shader.IsSet() || FPackageName::IsValidObjectPath(MaterialPath))
+        {
+            if (auto* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialPath))
+            {
+                Brush.SetResourceObject(Material);
+                Brush.DrawAs = ESlateBrushDrawType::Image;
+                Brush.ImageSize = Node.Brush.Shader.IsSet()
+                    ? Node.Brush.Shader->Size : FVector2D(Node.Bounds.W, Node.Bounds.H);
+                Border->SetBrush(Brush);
+            }
+            return;
+        }
+		bool bBrushChanged = false;
+
+		const bool bExplicitEmptyMaterialRef = Node.Brush.MaterialRef.IsSet() && Node.Brush.MaterialRef.GetValue().IsEmpty();
+		UTexture2D* GeneratedTexture = nullptr;
+		FDesignPathRasterRequest PathRequest;
+		if (FWidgetResourceBinder::TryResolveProceduralTexture(Node, Border, GeneratedTexture, nullptr, Budget, TextureMap, &PathRequest)
+			== FWidgetResourceBinder::EProceduralTextureResult::Resolved)
+		{
+			Brush.SetResourceObject(GeneratedTexture);
+			Brush.DrawAs = ESlateBrushDrawType::Image;
+			Brush.ImageSize = FVector2D(GeneratedTexture->GetSizeX(), GeneratedTexture->GetSizeY());
+			if (Node.Path.HasPaintGeometry())
+			{
+				const auto UV = PathRequest.GetCanvasUVTransform();
+				Design2UMGWidgetPropertyAccess::SetUVRegion(Brush, FBox2f(FVector2f(UV.TX, UV.TY), FVector2f(UV.TX + UV.A, UV.TY + UV.D)));
+				Brush.ImageSize = FVector2D(PathRequest.CanvasBounds.Size());
+			}
+			bBrushChanged = true;
+		}
+		else
+		{
+			const FString TexturePath = bExplicitEmptyMaterialRef ? FString() : Node.Brush.Image.TexturePath.Get(FString());
+			if (!TexturePath.IsEmpty())
+			{
+				if (UTexture2D* Texture = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind))
+				{
+					Brush.SetResourceObject(Texture);
+					Brush.DrawAs = ESlateBrushDrawType::Image;
+					Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+					bBrushChanged = true;
+				}
+			}
+		}
+
+		bBrushChanged |= ApplyBrushCorners(Brush, Node);
 
 		if (Node.Brush.OutlineThickness.IsSet())
 		{

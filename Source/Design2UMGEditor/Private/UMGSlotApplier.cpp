@@ -41,6 +41,7 @@ namespace
 		CS->SetAlignment(FVector2D(S.Alignment.X, S.Alignment.Y));
 		CS->SetOffsets(FMargin(S.Offsets.Left, S.Offsets.Top, S.Offsets.Right, S.Offsets.Bottom));
 		CS->SetAutoSize(S.bAutoSize);
+		CS->SetZOrder(S.ZOrder);
 	}
 
 	// Shared logic for VBox/HBox slots.

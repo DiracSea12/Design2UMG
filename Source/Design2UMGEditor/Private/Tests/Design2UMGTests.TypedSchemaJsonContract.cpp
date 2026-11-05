@@ -10,8 +10,12 @@
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGValueParsing.h"
 #include "UMGWidgetTreeBuilder.h"
+#include "WidgetLayoutAdapter.h"
 #include "Design2UMGTestUtils.h"
 #include "Components/EditableTextBox.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/TextBlock.h"
 #include "UObject/UObjectGlobals.h"
 
 #if WITH_AUTOMATION_WORKER
@@ -96,7 +100,8 @@ bool FSlotJsonTypedCompatibilityTest::RunTest(const FString& Parameters)
 				"HAlign": "center",
 				"VerticalAlignment": "top",
 				"VAlign": "bottom",
-				"SizeRule": "fill"
+				"SizeRule": "fill",
+				"ZOrder": 3
 			}
 		}
 	})");
@@ -113,11 +118,27 @@ bool FSlotJsonTypedCompatibilityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("HAlign short key is ignored; HorizontalAlignment wins"), Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Left);
 	TestTrue(TEXT("VAlign short key is ignored; VerticalAlignment wins"), Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Top);
 	TestTrue(TEXT("Lowercase SizeRule parses as Fill"), Slot.SizeRule == EUMGSlotSizeRule::Fill);
+	TestEqual(TEXT("Canvas paint rank parses"), Slot.ZOrder, 3);
 
 	const FString SerializationCycleJson = FUMGJsonSerializer::Serialize(Parsed);
 	TestTrue(TEXT("Serializer keeps canonical horizontal alignment"), SerializationCycleJson.Contains(TEXT("\"HorizontalAlignment\": \"Left\"")));
 	TestTrue(TEXT("Serializer keeps canonical vertical alignment"), SerializationCycleJson.Contains(TEXT("\"VerticalAlignment\": \"Top\"")));
 	TestTrue(TEXT("Serializer keeps canonical size rule"), SerializationCycleJson.Contains(TEXT("\"SizeRule\": \"Fill\"")));
+
+	FUMGWidgetData RoundTrip;
+	if (!TestTrue(TEXT("Canvas paint rank round-trips"), FUMGJsonParser::ParseJson(SerializationCycleJson, RoundTrip, &ParseError))) return false;
+	TestEqual(TEXT("Serialized paint rank remains exact"), RoundTrip.RootWidget.Slot.ZOrder, 3);
+	auto* Canvas = NewObject<UCanvasPanel>(GetTransientPackage());
+	auto* Child = NewObject<UTextBlock>(GetTransientPackage());
+	auto* CanvasSlot = Canvas->AddChildToCanvas(Child);
+	FUMGSlotData PaintSlot;
+	PaintSlot.ZOrder = RoundTrip.RootWidget.Slot.ZOrder;
+	TestFalse(TEXT("Paint rank alone does not change slot geometry policy"), FWidgetLayoutAdapter::HasMeaningfulSlot(PaintSlot));
+	FUMGWidgetTreeBuilder::ApplySlotProperties(CanvasSlot, PaintSlot);
+	TestEqual(TEXT("Native Canvas slot receives the explicit paint rank"), CanvasSlot->GetZOrder(), 3);
+	PaintSlot.ZOrder = 0;
+	FUMGWidgetTreeBuilder::ApplySlotProperties(CanvasSlot, PaintSlot);
+	TestEqual(TEXT("Native Canvas slot restores the source paint rank"), CanvasSlot->GetZOrder(), 0);
 
 	FUMGSlotData UnknownAlignmentSlot;
 	UnknownAlignmentSlot.HorizontalAlignment = FUMGValueParser::ParseSlotHorizontalAlignment(TEXT("Diagonal"));
@@ -344,6 +365,34 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	Root.Effect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
 	Root.Effect.GeometryMaskSize = FVector2D(100.0f, 80.0f);
 	Root.Effect.GeometryMaskCornerRadii = FVector4(4.0f, 8.0f, 12.0f, 16.0f);
+	Root.Effect.GeometryMaskPaths = TArray<FDesignGeometryPath>{{TEXT("M4 0H96Q100 0 100 4V76Q100 80 96 80H4Q0 80 0 76V4Q0 0 4 0Z"), TEXT("nonzero")}};
+	Root.Effect.SharedCapture.Emplace();
+	auto& CaptureSource = Root.Effect.SharedCapture->Source;
+	CaptureSource.Size = Root.Effect.GeometryMaskSize.GetValue();
+	CaptureSource.bClipContent = true;
+	CaptureSource.CornerRadii = Root.Effect.GeometryMaskCornerRadii.GetValue();
+	CaptureSource.ClipPaths = Root.Effect.GeometryMaskPaths;
+	CaptureSource.OwnPaint.Geometry.FillPaths = CaptureSource.ClipPaths;
+	CaptureSource.OwnPaint.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{TEXT("M-2 -2H102V82H-2Z M0 0V80H100V0Z"), TEXT("evenodd")}};
+	CaptureSource.OwnPaint.StrokeAlignment = TEXT("outer");
+	FUMGSurfacePaint EndpointPaint;
+	EndpointPaint.Color = FLinearColor::White;
+	CaptureSource.OwnPaint.FillPaints = TArray<FUMGSurfacePaint>{EndpointPaint};
+	CaptureSource.OwnPaint.StrokePaint = EndpointPaint;
+	CaptureSource.BoxShadows.Add({TEXT("normal"), FVector2D(2, -3), 4, 0, FLinearColor::Black, true});
+	CaptureSource.CoverageTexture = TEXT("/Game/SharedCapture/Coverage.Coverage");
+	CaptureSource.PaintTexture = TEXT("/Game/SharedCapture/Fill.Fill");
+	CaptureSource.PaintRect = FVector4(0, 0, 100, 80);
+	CaptureSource.StrokeTexture = TEXT("/Game/SharedCapture/Stroke.Stroke");
+	CaptureSource.StrokeRect = FVector4(-2, -2, 104, 84);
+	auto& CaptureTarget = Root.Effect.SharedCapture->Targets.Add_GetRef(CaptureSource);
+	CaptureTarget.DestinationWidgetId = TEXT("endpoint-target");
+	CaptureTarget.Size = FVector2D(60, 40);
+	CaptureTarget.bClipContent = false;
+	CaptureTarget.Shape = EUMGGeometryMaskShape::Rectangle;
+	CaptureTarget.ClipPaths.Reset();
+	CaptureTarget.CornerRadii = FVector4(0, 0, 0, 0);
+	CaptureTarget.BoxShadows[0].Offset = FVector2D(-4, 1);
 	Root.Shadow.ShadowOffset = FVector2D(2.0f, -3.0f);
 	Root.Shadow.ShadowBlur = 12.5f;
 	Root.Shadow.BoxShadows = {
@@ -446,6 +495,10 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	TestTrue(TEXT("Root effect mask shape survives serialization"), ParsedRoot.Effect.GeometryMaskShape.IsSet() && ParsedRoot.Effect.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::RoundedRectangle);
 	TestTrue(TEXT("Root effect mask size survives serialization"), ParsedRoot.Effect.GeometryMaskSize.IsSet() && ParsedRoot.Effect.GeometryMaskSize.GetValue().Equals(Root.Effect.GeometryMaskSize.GetValue(), 0.0001f));
 	TestTrue(TEXT("Root effect mask radii serialization"), ParsedRoot.Effect.GeometryMaskCornerRadii.IsSet() && ParsedRoot.Effect.GeometryMaskCornerRadii.GetValue().Equals(Root.Effect.GeometryMaskCornerRadii.GetValue(), 0.0001f));
+	TestTrue(TEXT("Source contour paths and winding survive serialization"), ParsedRoot.Effect.GeometryMaskPaths.IsSet()
+		&& ParsedRoot.Effect.GeometryMaskPaths->Num() == 1
+		&& ParsedRoot.Effect.GeometryMaskPaths.GetValue()[0].Path == Root.Effect.GeometryMaskPaths.GetValue()[0].Path
+		&& ParsedRoot.Effect.GeometryMaskPaths.GetValue()[0].FillRule == TEXT("nonzero"));
 	TestTrue(TEXT("Root shadow offset survives serialization"), ParsedRoot.Shadow.ShadowOffset.IsSet() && ParsedRoot.Shadow.ShadowOffset.GetValue().Equals(Root.Shadow.ShadowOffset.GetValue(), 0.0001f));
 	TestTrue(TEXT("Root shadow blur survives serialization"), ParsedRoot.Shadow.ShadowBlur.IsSet() && FMath::IsNearlyEqual(ParsedRoot.Shadow.ShadowBlur.GetValue(), Root.Shadow.ShadowBlur.GetValue()));
 	TestEqual(TEXT("Root box shadow layer count survives serialization"), ParsedRoot.Shadow.BoxShadows.Num(), Root.Shadow.BoxShadows.Num());
@@ -466,6 +519,40 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	TestTrue(TEXT("Root render scale survives serialization"), ParsedRoot.Render.RenderTransformScale.IsSet() && ParsedRoot.Render.RenderTransformScale.GetValue().Equals(Root.Render.RenderTransformScale.GetValue(), 0.0001f));
 	TestTrue(TEXT("Root render pivot survives serialization"), ParsedRoot.Render.RenderTransformPivot.IsSet() && ParsedRoot.Render.RenderTransformPivot.GetValue().Equals(Root.Render.RenderTransformPivot.GetValue(), 0.0001f));
 	TestTrue(TEXT("Root render translation survives serialization"), ParsedRoot.Render.RenderTranslation.IsSet() && ParsedRoot.Render.RenderTranslation.GetValue().Equals(Root.Render.RenderTranslation.GetValue(), 0.0001f));
+	if (!TestTrue(TEXT("Shared capture source and target survive serialization"), ParsedRoot.Effect.SharedCapture.IsSet()
+		&& ParsedRoot.Effect.SharedCapture->Targets.Num() == 1)) return false;
+	const auto& ParsedCapture = ParsedRoot.Effect.SharedCapture.GetValue();
+	TestTrue(TEXT("Shared capture source clip and native geometry survive serialization"),
+		ParsedCapture.Source.Size == CaptureSource.Size && ParsedCapture.Source.bClipContent
+		&& ParsedCapture.Source.Shape == CaptureSource.Shape && ParsedCapture.Source.CornerRadii == CaptureSource.CornerRadii
+		&& ParsedCapture.Source.ClipPaths.IsSet() && ParsedCapture.Source.ClipPaths->Num() == 1
+		&& ParsedCapture.Source.ClipPaths.GetValue()[0].Path == CaptureSource.ClipPaths.GetValue()[0].Path
+		&& ParsedCapture.Source.ClipPaths.GetValue()[0].FillRule == TEXT("nonzero"));
+	TestTrue(TEXT("Complete source own-paint regions survive serialization"),
+		ParsedCapture.Source.OwnPaint.Geometry.FillPaths.IsSet() && ParsedCapture.Source.OwnPaint.Geometry.FillPaths->Num() == 1
+		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.IsSet() && ParsedCapture.Source.OwnPaint.Geometry.StrokePaths->Num() == 1
+		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.GetValue()[0].Path == CaptureSource.OwnPaint.Geometry.StrokePaths.GetValue()[0].Path
+		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.GetValue()[0].FillRule == TEXT("evenodd")
+		&& ParsedCapture.Source.OwnPaint.StrokeAlignment == TEXT("outer")
+		&& ParsedCapture.Source.OwnPaint.FillPaints.IsSet() && ParsedCapture.Source.OwnPaint.FillPaints->Num() == 1
+		&& ParsedCapture.Source.OwnPaint.FillPaints.GetValue()[0].Color == FLinearColor::White
+		&& ParsedCapture.Source.OwnPaint.StrokePaint.IsSet() && ParsedCapture.Source.OwnPaint.StrokePaint->Color == FLinearColor::White);
+	TestTrue(TEXT("Shared capture persisted resource domains survive serialization"),
+		ParsedCapture.Source.CoverageTexture == CaptureSource.CoverageTexture && ParsedCapture.Source.PaintTexture == CaptureSource.PaintTexture
+		&& ParsedCapture.Source.PaintRect == CaptureSource.PaintRect && ParsedCapture.Source.StrokeTexture == CaptureSource.StrokeTexture
+		&& ParsedCapture.Source.StrokeRect == CaptureSource.StrokeRect);
+	const auto& ParsedTarget = ParsedCapture.Targets[0];
+	TestTrue(TEXT("Target identity and explicit clip-off remain distinct from source"),
+		ParsedTarget.DestinationWidgetId == CaptureTarget.DestinationWidgetId && ParsedTarget.Size == CaptureTarget.Size
+		&& !ParsedTarget.bClipContent && ParsedTarget.Shape == EUMGGeometryMaskShape::Rectangle
+		&& !ParsedTarget.ClipPaths.IsSet() && ParsedTarget.CornerRadii == CaptureTarget.CornerRadii);
+	TestTrue(TEXT("Both endpoint shadow payloads survive serialization"),
+		ParsedCapture.Source.BoxShadows.Num() == 1 && ParsedTarget.BoxShadows.Num() == 1
+		&& ParsedCapture.Source.BoxShadows[0].BlendMode == TEXT("normal")
+		&& ParsedCapture.Source.BoxShadows[0].Offset == CaptureSource.BoxShadows[0].Offset
+		&& ParsedTarget.BoxShadows[0].Offset == CaptureTarget.BoxShadows[0].Offset
+		&& ParsedTarget.BoxShadows[0].Blur == 4 && ParsedTarget.BoxShadows[0].Spread == 0
+		&& ParsedTarget.BoxShadows[0].Color == FLinearColor::Black && ParsedTarget.BoxShadows[0].bShowShadowBehindNode);
 	TestEqual(TEXT("Root clipping survives serialization"), ParsedRoot.Render.Clipping.GetValue(), Root.Render.Clipping.GetValue());
 
 	TestEqual(TEXT("Child count survives serialization"), ParsedRoot.Children.Num(), Root.Children.Num());

@@ -1398,7 +1398,7 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 
 ### 3.15 Prototype Navigation And Transition
 
-当前产品口径：`Prototype Basic` 已作为插件正式支持能力收口，但正式承诺范围只覆盖“页面切换 + typed trigger/action runtime contract + 基础过渡近似”。
+当前原型能力以 [交互与动画限制](../KNOWN_LIMITATIONS.md#interaction-and-animation) 为准：保留支持的单步导航与切页动画，已实现有限基础控件属性动画；定向功能验证不代表全量验收，完整视觉及 `no_regression` 结论以同输入、同标准图的逐项回归证据为准。
 
 当前导入与验证边界如下：
 
@@ -1409,31 +1409,46 @@ UTexture2D* GenerateGradientTexture(const FPenGradient& Gradient, int32 Width, i
 
 这意味着：
 
-- 正式支持的是：多页面导出后的切页交互、基础 hover / press / drag / keyboard trigger、`OVERLAY/BACK/OPEN_LINK` 轻量 contract、基础 fade / slide 过渡。
-- 不正式承诺的是：完整 Figma Prototype 复刻、通用状态机 / 事件图编译、完整 overlay layer system、完整 Smart Animate 图层级匹配、通用动画 authoring。
+- 现有可生成的是：支持的单步点击 / hover / press 导航、打开链接、弹层和返回，以及单步键盘导航 / 打开链接；支持的切页过渡生成基础 fade / slide 动画。
+- 已放弃且本轮不恢复的是：通用变量计算、条件与多步复杂状态逻辑编译、完整扫雷、独立交互自动评分；它们不是已发布能力。这不影响静态设计变量/主题解析或 Pencil 既有 QuickJS 导入脚本工作器。
+- 不承诺完整 Figma Prototype 复刻、完整浮层系统、任意 Smart Animate 图层匹配，也不把任意 Figma/Pencil 代码层程序直接转换成 UMG。
 
-当前 Figma prototype 主链已经覆盖最小可交付闭环：
+当前 Figma prototype 主链：
 
 - 顶层多页面 Frame 会收敛为 `WidgetSwitcher`
-- `ON_CLICK/ON_HOVER/ON_PRESS/ON_DRAG + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK` 会把触发节点包装为透明 `Button`
-- `ON_KEY_DOWN / ON_KEY_UP` 会进入 typed trigger contract，并通过焦点约束下的输入路由触发
-- `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL` 会进入 typed step program，并在运行时顺序执行
-- 运行时通过 Blueprint extension 绑定点击事件，而不是把平台逻辑塞回共享转换主流程
-- `OVERLAY/BACK` 当前以 `base WidgetSwitcher + overlay host + runtime history stack` 的轻量 contract 落地，不引入独立浮层状态机
+- 支持的单步 `ON_CLICK/ON_HOVER/ON_PRESS + NAVIGATE/SWAP/OVERLAY/BACK/OPEN_LINK` 会包装透明 `Button`，并生成原生蓝图事件连线
+- `ON_KEY_DOWN / ON_KEY_UP` 仅对支持的单步导航 / 打开链接生成原生蓝图事件，仍受焦点和来源页面约束
+- `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL`、多步流程和拖拽可以保留在源交互数据中，但不会成为可执行的通用原型逻辑；未支持项明确诊断
+- 当前直接生成原生蓝图节点，不依赖插件运行时生成类扩展
+- `OVERLAY/BACK` 使用原生蓝图控制 overlay host 和导航历史，不引入独立浮层状态机
+- 源数据包收集到额外页只说明数据可用，不表示这些页面的运行时交互已受支持
 
-基础过渡当前采用“可维护近似”策略：
+既有切页过渡采用整页近似：
 
-- `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE`：映射为 switcher 淡出切页再淡入
-- `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH`：映射为 switcher 基础位移过渡
+- 既有 switcher 整页 fade / slide 不等于逐控件 Smart Animate，不能把整页近似描述为已支持源动画语义
 - `duration` 与 `easing` 会进入 typed navigation binding，并驱动运行时过渡节奏
-- 当前生成器会为切页过渡补一对最小 `UWidgetAnimation` 资产（`out` / `in`）；运行时对 fade 类过渡优先播放资产动画，slide 类过渡继续走 ticker 近似以匹配 live switcher 尺寸
+- 当前生成器为支持的切页过渡创建 `UWidgetAnimation` 子对象（`out` / `in`），支持的鼠标导航连线通过原生蓝图播放
+
+基础控件属性动画契约：
+
+- 根据真实起止树生成原生 `UWidgetAnimation`，位置/旋转写入 `RenderTransform`，透明度写入 `RenderOpacity`，单一纯色写入对应原生控件颜色属性；控件和播放节点均使用引擎原生能力，轨道可在控件蓝图中编辑并保存重开
+- 子项按同名、同层级、同数量、同绘制顺序配对，不猜测任意图层对应；类型或未支持属性变化、缺少目标/起止值、局部尺寸或旋转矩阵不足时诊断并拒绝动作
+- 尺寸变化仅在无子项、无圆角、无描边或特效的实心矩形上等价为渲染缩放，不用缩放冒充布局重排
+- 每条轨道使用当前 action 自己的正时长，曲线支持 `LINEAR`、`EASE_IN/OUT/IN_AND_OUT` 和可由原生加权曲线精确表达的 `CUSTOM_CUBIC_BEZIER`；不支持的曲线明确拒绝，不采样近似
+- 点击和 `MOUSE_ENTER` 播放后不自动恢复；`MOUSE_ENTER` 要求显式 `delay=0` 且无 deprecated 行为。受支持 `CHANGE_TO` 的 `ON_HOVER` 移出时反向播放；hover 切页因无法保留反向语义而拒绝
+- 页面进入后按 `AFTER_TIMEOUT` 的显式非负延时自动播放；页面离开、重新进入和销毁时须清理本生成链的计时与动画，不能影响项目自己的计时器
+- 新版 Plugin 导出将 reaction `duration/timeout` 从秒转为毫秒，并标记 `design2umgPrototypeDurationUnit=MILLISECONDS`；HTTP 来源时间单位尚未核实，拒绝新属性动画，既有静态导入仍可使用
+- `SMART_ANIMATE` 弹层不支持，须诊断并拒绝整个动作；被拒绝的动画不会为该动作生成执行按钮，也不会经该动作将目标纳入运行时依赖导航页，同稿其他受支持动作仍可生成。普通受支持的无动画弹层仍保留，不以瞬切绕过属性动画准入
+
+验证边界：有限定向功能验证已完成，覆盖保存资产后新进程重开、原生 Slate 输入、自动触发、悬停反向、属性求值及生命周期；一份真实 Toggle 恢复包通过点击移动/纯色的中间与终点播放验证。四份动画稿均有新鲜完整导出包，已验证真实静态生成、重载及渲染；Loading 另已验证 `AFTER_TIMEOUT` 原生播放。其余动画限制、来源及已有警告见 [交互与动画限制](../KNOWN_LIMITATIONS.md#interaction-and-animation)。完整视觉及 `no_regression` 结论以同输入、同标准图的逐项回归证据为准，定向功能验证不代表全量验收。
+
+Pencil 既有 QuickJS 工作器仍用于导入时展开受支持的脚本节点，不承担原型业务逻辑。预览告警保留原始诊断；预览文案通过随插件打包的 `Resources/PreviewWindowText.csv` 加载，文案源依赖须随发布包一起保留。
 
 当前边界：
 
-- 不生成完整通用 `UWidgetAnimation` authoring 链；当前只覆盖切页 fade / slide 的两段式资产生成
+- 不承诺通用动画创作系统、复杂布局重排或图片/渐变动画；有限属性轨道不等于完整 Smart Animate
 - keyboard trigger 仍依赖 prototype widget 获得 Slate focus；当前没有做脱离焦点系统的全局输入图编排
-- conditional flow 当前使用轻量 session-local variable store，只服务于生成 prototype runtime contract，不扩展为完整跨格式状态系统
-- `SMART_ANIMATE` 仅落到基础 fade 近似，不做图层级 match/layer morph
+- 不以整页 fade / slide 代替逐控件 Smart Animate 并宣称支持；也不承诺任意图层匹配或形变
 - 当前没有完整 overlay layer semantics；`OVERLAY` 已脱离 switcher 直接切页，改为独立 overlay host，但仍没有通用锚定 / dismiss / placement 系统
 
 ### 3.15A Widget Class Override

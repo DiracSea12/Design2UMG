@@ -64,6 +64,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeSlot(const FUMGSlotData& Sl
 		J->SetStringField(TEXT("SizeRule"), FUMGValueParser::FormatSlotSizeRule(Slot.SizeRule));
 	if (!FMath::IsNearlyEqual(Slot.FillWeight, 1.0f))
 		J->SetNumberField(TEXT("FillWeight"), Slot.FillWeight);
+	if (Slot.ZOrder != 0)
+		J->SetNumberField(TEXT("ZOrder"), Slot.ZOrder);
 	if (Slot.Row != 0)
 		J->SetNumberField(TEXT("Row"), Slot.Row);
 	if (Slot.Column != 0)
@@ -95,6 +97,8 @@ TSharedRef<FJsonObject> FUMGJsonSerializer::SerializeWidgetNode(const FUMGWidget
 	if (!Node.Id.IsEmpty())
 		J->SetStringField(TEXT("Id"), Node.Id);
 	J->SetStringField(TEXT("Name"), Node.Name);
+	if (Node.SourceVisualChildIndex != INDEX_NONE)
+		J->SetNumberField(TEXT("SourceVisualChildIndex"), Node.SourceVisualChildIndex);
 	if (Node.bSyntheticJustifySpacer)
 		J->SetBoolField(TEXT("SyntheticJustifySpacer"), true);
 
@@ -380,6 +384,39 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 	}
 
 	TSharedRef<FJsonObject> EJ = MakeShared<FJsonObject>();
+	if (E.SharedCapture.IsSet())
+	{
+		const auto WriteEndpoint = [](const FUMGSharedCaptureEndpoint& Endpoint)
+		{
+			auto Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("DestinationWidgetId"), Endpoint.DestinationWidgetId);
+			Object->SetBoolField(TEXT("ClipContent"), Endpoint.bClipContent);
+			FUMGEffectData Clip;
+			Clip.GeometryMaskSize = Endpoint.Size;
+			Clip.GeometryMaskShape = Endpoint.Shape;
+			Clip.GeometryMaskCornerRadii = Endpoint.CornerRadii;
+			Clip.GeometryMaskPaths = Endpoint.ClipPaths;
+			Object->SetObjectField(TEXT("Clip"), SerializeEffectPayload(Clip));
+			FUMGPathData Path;
+			Path.SourcePaintGeometry = Endpoint.OwnPaint;
+			Object->SetObjectField(TEXT("OwnPaint"), SerializePathPayload(Path));
+			FUMGShadowData Shadow;
+			Shadow.BoxShadows = Endpoint.BoxShadows;
+			if (const auto Value = SerializeShadowPayload(Shadow)) Object->SetObjectField(TEXT("Shadow"), Value);
+			Object->SetStringField(TEXT("CoverageTexture"), Endpoint.CoverageTexture);
+			Object->SetStringField(TEXT("PaintTexture"), Endpoint.PaintTexture);
+			Object->SetStringField(TEXT("PaintRect"), Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Endpoint.PaintRect, 6));
+			Object->SetStringField(TEXT("StrokeTexture"), Endpoint.StrokeTexture);
+			Object->SetStringField(TEXT("StrokeRect"), Design2UMGWidgetNodeAccess::SerializeWidgetVector4(Endpoint.StrokeRect, 6));
+			return Object;
+		};
+		auto Capture = MakeShared<FJsonObject>();
+		Capture->SetObjectField(TEXT("Source"), WriteEndpoint(E.SharedCapture->Source));
+		TArray<TSharedPtr<FJsonValue>> Targets;
+		for (const auto& Endpoint : E.SharedCapture->Targets) Targets.Add(MakeShared<FJsonValueObject>(WriteEndpoint(Endpoint)));
+		Capture->SetArrayField(TEXT("Targets"), Targets);
+		EJ->SetObjectField(UMGPropertyKeys::SharedCapture, Capture);
+	}
 	if(E.Shader.IsSet()) EJ->SetObjectField(TEXT("Shader"),DesignShaderJson::Serialize(E.Shader.GetValue()));
 	if (E.BlurStrength.IsSet())
 		EJ->SetNumberField(UMGPropertyKeys::BlurStrength, E.BlurStrength.GetValue());
@@ -411,7 +448,7 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 			UMGPropertyKeys::GeometryMaskShape,
 			E.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Ellipse
 				? TEXT("Ellipse")
-				: TEXT("RoundedRectangle"));
+				: (E.GeometryMaskShape.GetValue() == EUMGGeometryMaskShape::Rectangle ? TEXT("Rectangle") : TEXT("RoundedRectangle")));
 	}
 	if (E.GeometryMaskSize.IsSet())
 	{
@@ -424,6 +461,18 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeEffectPayload(const FUMGEff
 		EJ->SetStringField(
 			UMGPropertyKeys::GeometryMaskCornerRadii,
 			Design2UMGWidgetNodeAccess::SerializeWidgetVector4(E.GeometryMaskCornerRadii.GetValue(), 6));
+	}
+	if (E.GeometryMaskPaths.IsSet())
+	{
+		TArray<TSharedPtr<FJsonValue>> Paths;
+		for (const auto& Path : E.GeometryMaskPaths.GetValue())
+		{
+			auto Object = MakeShared<FJsonObject>();
+			Object->SetStringField(TEXT("Path"), Path.Path);
+			Object->SetStringField(TEXT("FillRule"), Path.FillRule);
+			Paths.Add(MakeShared<FJsonValueObject>(Object));
+		}
+		EJ->SetArrayField(UMGPropertyKeys::GeometryMaskPaths, Paths);
 	}
 	if (E.RenderingPhase.IsSet())
 	{
@@ -614,6 +663,10 @@ TSharedPtr<FJsonObject> FUMGJsonSerializer::SerializeScrollBoxPayload(const FUMG
 	if (ScrollBox.ScrollBarVisibility.IsSet())
 	{
 		ScrollBoxObject->SetStringField(UMGPropertyKeys::ScrollBarVisibility, ScrollBox.ScrollBarVisibility.GetValue());
+	}
+	if (ScrollBox.ScrollOffset.IsSet())
+	{
+		ScrollBoxObject->SetNumberField(UMGPropertyKeys::ScrollOffset, ScrollBox.ScrollOffset.GetValue());
 	}
 	return ScrollBoxObject;
 }

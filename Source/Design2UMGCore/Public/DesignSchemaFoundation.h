@@ -128,17 +128,6 @@ enum class EDesignOverflow : uint8
 };
 
 /**
- * Supported render-fallback replacement scope.
- */
-UENUM()
-enum class EDesignRenderFallbackScope : uint8
-{
-	Leaf,
-	Subtree,
-	Unsupported
-};
-
-/**
  * Gradient type enumeration.
  */
 UENUM()
@@ -452,6 +441,10 @@ struct FDesignStroke
 	UPROPERTY()
 	EDesignStrokeAlign Align = EDesignStrokeAlign::Inside;
 
+	/** Whether the stroke reserves space around the node's content; otherwise it only paints over the edge. */
+	UPROPERTY()
+	bool bIncludedInLayout = true;
+
 	UPROPERTY()
 	FDesignStrokeThickness Thickness;
 
@@ -502,6 +495,9 @@ struct FDesignCornerRadius
 
 	UPROPERTY()
 	bool bUniform = true;
+
+	UPROPERTY()
+	float Smoothing = 0.0f;
 
 	UPROPERTY()
 	float Uniform = 0.0f;

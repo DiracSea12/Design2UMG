@@ -37,6 +37,16 @@ namespace
 
 namespace DesignImportDialogs
 {
+	FDesignDocument CopyForAnalysis(const FDesignDocument& Document)
+	{
+		// Metadata is owned by the copy constructor; nodes must be copied separately.
+		FDesignDocument Working = Document;
+		for (auto& Child : Working.Children) Child = RefExpander::DeepCopyNode(Child);
+		if (Working.HasSourceDocumentData())
+			for (auto& Imported : Working.MutableSourceDocument().ImportedNodes) Imported = RefExpander::DeepCopyNode(Imported);
+		return Working;
+	}
+
 	FImportAnalysisResult AnalyzeForPreview(FDesignDocument& Document, const FImportAnalysisInput& Input)
 	{
 		if (FApp::IsUnattended() || !FSlateApplication::IsInitialized())
@@ -44,11 +54,7 @@ namespace DesignImportDialogs
 
 		auto Analyze = [&Document, &Input]()
 		{
-			// Metadata is owned by the copy constructor; nodes must be copied separately.
-			FDesignDocument Working = Document;
-			for (auto& Child : Working.Children) Child = RefExpander::DeepCopyNode(Child);
-			if (Working.HasSourceDocumentData())
-				for (auto& Imported : Working.MutableSourceDocument().ImportedNodes) Imported = RefExpander::DeepCopyNode(Imported);
+			FDesignDocument Working = CopyForAnalysis(Document);
 			FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Working, Input);
 			if (Analysis.ErrorMessage.IsEmpty()) Document = MoveTemp(Working);
 			return Analysis;
@@ -142,7 +148,8 @@ namespace DesignImportDialogs
 		FOnPreviewConfirmed OnConfirmed,
 		FOnPreviewCancelled OnCancelled,
 		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot,
-		const FDesignImageImportResult& InitialImageResult)
+		const FDesignImageImportResult& InitialImageResult,
+		FOnPreviewReconvert OnReconvert)
 	{
 		if (!FSlateApplication::IsInitialized())
 		{
@@ -164,7 +171,8 @@ namespace DesignImportDialogs
 			.Warnings(Data.Warnings)
 			.InitialMaterializationSettingsSnapshot(InitialMaterializationSettingsSnapshot)
 			.OnConfirmed(MoveTemp(OnConfirmed))
-			.OnCancelled(MoveTemp(OnCancelled));
+			.OnCancelled(MoveTemp(OnCancelled))
+			.OnReconvert(MoveTemp(OnReconvert));
 		Window->SetContent(Preview);
 		TWeakPtr<SDesign2UMGPreviewWindow> WeakPreview = Preview;
 		Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda([WeakPreview](const TSharedRef<SWindow>&)

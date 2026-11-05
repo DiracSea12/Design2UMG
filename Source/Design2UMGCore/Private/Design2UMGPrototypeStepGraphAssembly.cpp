@@ -2,6 +2,7 @@
 
 #include "Design2UMGPrototypeStepGraphAssembly.h"
 #include "DesignSchemaSourceExtensions.h"
+#include "DesignJsonUtils.h"
 
 namespace Design2UMGPrototypeStepGraphAssembly
 {
@@ -14,7 +15,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 	};
 
 	FString ResolvePrototypeActionDestinationId(
-		const TSharedPtr<FDesignNode>& Node,
 		const FDesignPrototypeAction& Action)
 	{
 		if (!Action.DestinationId.IsEmpty())
@@ -27,7 +27,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			return Action.TransitionNodeId;
 		}
 
-		return Node.IsValid() ? Node->Source().Prototype.TransitionNodeId : FString();
+		return FString();
 	}
 
 	const TCHAR* DescribePrototypeActionKind(const EUMGPrototypeNavigationAction Kind)
@@ -40,6 +40,8 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			return TEXT("overlay");
 		case EUMGPrototypeNavigationAction::Back:
 			return TEXT("back");
+		case EUMGPrototypeNavigationAction::CloseOverlay:
+			return TEXT("close overlay");
 		case EUMGPrototypeNavigationAction::OpenLink:
 			return TEXT("open link");
 		default:
@@ -47,64 +49,16 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		}
 	}
 
-	FDesignPrototypeTransitionData ResolvePrototypeTransitionSource(
-		const TSharedPtr<FDesignNode>& Node,
-		const FDesignPrototypeAction& Action)
-	{
-		FDesignPrototypeTransitionData Resolved;
-		if (Node.IsValid() && Node->Source().Prototype.Transition.HasAny())
-		{
-			Resolved = Node->Source().Prototype.Transition;
-		}
-
-		if (!Action.Transition.HasAny())
-		{
-			return Resolved;
-		}
-
-		if (!Action.Transition.Type.IsEmpty())
-		{
-			Resolved.Type = Action.Transition.Type;
-		}
-
-		if (!Action.Transition.Direction.IsEmpty())
-		{
-			Resolved.Direction = Action.Transition.Direction;
-		}
-
-		if (Action.Transition.Duration.IsSet())
-		{
-			Resolved.Duration = Action.Transition.Duration;
-		}
-
-		if (!Action.Transition.EasingType.IsEmpty())
-		{
-			Resolved.EasingType = Action.Transition.EasingType;
-		}
-
-		if (!Action.Transition.EasingJson.IsEmpty())
-		{
-			Resolved.EasingJson = Action.Transition.EasingJson;
-		}
-
-		if (Action.Transition.MatchLayers.IsSet())
-		{
-			Resolved.MatchLayers = Action.Transition.MatchLayers;
-		}
-
-		return Resolved;
-	}
-
 	FUMGPrototypeTransitionData BuildPrototypeTransition(
-		const TSharedPtr<FDesignNode>& Node,
 		const FDesignPrototypeAction& Action)
 	{
-		const FDesignPrototypeTransitionData Source = ResolvePrototypeTransitionSource(Node, Action);
+		const FDesignPrototypeTransitionData& Source = Action.Transition;
 
 		FUMGPrototypeTransitionData Transition;
 		Transition.Type = Source.Type.ToUpper();
 		Transition.Direction = Source.Direction.ToUpper();
 		Transition.EasingType = Source.EasingType.ToUpper();
+		Transition.EasingJson = Source.EasingJson;
 		if (Source.MatchLayers.IsSet())
 		{
 			Transition.HasMatchLayers = Source.MatchLayers.GetValue();
@@ -118,14 +72,10 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		{
 			Transition.DurationSeconds = FMath::Max(0.0f, Source.Duration.GetValue() / 1000.0f);
 		}
-		else if (!Transition.Type.IsEmpty())
+		if (!Transition.Type.IsEmpty() && (!Source.Duration.IsSet() || !FMath::IsFinite(Source.Duration.GetValue())
+			|| Source.Duration.GetValue() <= 0 || Transition.EasingType.IsEmpty()))
 		{
-			Transition.DurationSeconds = 0.2f;
-		}
-
-		if (Transition.Type.IsEmpty() && Transition.DurationSeconds > KINDA_SMALL_NUMBER)
-		{
-			Transition.Type = TEXT("DISSOLVE");
+			Transition.Diagnostic = TEXT("Animated action requires explicit positive duration and easing");
 		}
 
 		return Transition;
@@ -142,8 +92,12 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			return EUMGPrototypeNavigationAction::Overlay;
 		case EUMGPrototypeNavigationStepKind::Back:
 			return EUMGPrototypeNavigationAction::Back;
+		case EUMGPrototypeNavigationStepKind::CloseOverlay:
+			return EUMGPrototypeNavigationAction::CloseOverlay;
 		case EUMGPrototypeNavigationStepKind::OpenLink:
 			return EUMGPrototypeNavigationAction::OpenLink;
+		case EUMGPrototypeNavigationStepKind::AnimateWidget:
+			return EUMGPrototypeNavigationAction::AnimateWidget;
 		case EUMGPrototypeNavigationStepKind::SetVariable:
 			return EUMGPrototypeNavigationAction::SetVariable;
 		case EUMGPrototypeNavigationStepKind::SetVariableMode:
@@ -305,15 +259,27 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		}
 
 		const FString DirectDestinationId = Action.DestinationId;
-		const FString ResolvedNodeDestinationId = ResolvePrototypeActionDestinationId(Node, Action);
+		const FString ResolvedNodeDestinationId = ResolvePrototypeActionDestinationId(Action);
 
 		FUMGPrototypeNavigationStep Step;
-		Step.Transition = BuildPrototypeTransition(Node, Action);
+		Step.Transition = BuildPrototypeTransition(Action);
 
 		bool bMatched = false;
 		// Terminal kinds consume the intent normalized once by the source
 		// parser; destination emptiness stays a consumer-side concern.
-		if (Action.Intent == EDesignPrototypeActionIntent::Back)
+		if (Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase)
+			&& Action.Navigation.Equals(TEXT("CHANGE_TO"), ESearchCase::IgnoreCase))
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::AnimateWidget;
+			Step.TargetPageId = Action.DestinationId;
+			bMatched = true;
+		}
+		else if (Action.Intent == EDesignPrototypeActionIntent::CloseOverlay)
+		{
+			Step.Kind = EUMGPrototypeNavigationStepKind::CloseOverlay;
+			bMatched = true;
+		}
+		else if (Action.Intent == EDesignPrototypeActionIntent::Back)
 		{
 			Step.Kind = EUMGPrototypeNavigationStepKind::Back;
 			bMatched = true;
@@ -358,7 +324,8 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			{
 				Warnings.AddUnique(FString::Printf(
 					TEXT("Prototype action '%s' on node '%s' not supported yet"),
-					*Action.Type,
+					*(Action.Type.Equals(TEXT("NODE"), ESearchCase::IgnoreCase) && !Action.Navigation.IsEmpty()
+						? Action.Type + TEXT("/") + Action.Navigation : Action.Type),
 					Node.IsValid() ? *Node->Id : TEXT("<unknown>")));
 			}
 			return false;
@@ -429,6 +396,12 @@ namespace Design2UMGPrototypeStepGraphAssembly
 				OutSummary.Transition = Step.Transition;
 				OutSummary.bResolved = true;
 				return true;
+			case EUMGPrototypeNavigationStepKind::CloseOverlay:
+				OutSummary.Kind = EUMGPrototypeNavigationAction::CloseOverlay;
+				OutSummary.Payload.Reset();
+				OutSummary.Transition = Step.Transition;
+				OutSummary.bResolved = true;
+				return true;
 			case EUMGPrototypeNavigationStepKind::Back:
 				OutSummary.Kind = EUMGPrototypeNavigationAction::Back;
 				OutSummary.Payload.Reset();
@@ -481,21 +454,31 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		TSet<FString>& InOutSeenBindingKeys,
 		TArray<FString>& Warnings)
 	{
-		if (!Node.IsValid())
+		if (!Node.IsValid() || !Node->Transform.bEnabled)
 		{
 			return;
 		}
 
 		for (const FDesignPrototypeInteraction& Interaction : Node->Source().Prototype.Interactions)
 		{
+			if (Interaction.Actions.Num() > 1 && Interaction.Actions.ContainsByPredicate([](const FDesignPrototypeAction& Action)
+			{
+				return Action.Navigation == TEXT("CHANGE_TO") || Action.Transition.Type == TEXT("SMART_ANIMATE");
+			}))
+			{
+				Warnings.AddUnique(FString::Printf(TEXT("Prototype animation on '%s' requires a single action; compound actions are not partially executed"), *Node->Id));
+				continue;
+			}
 			const FString NormalizedTriggerType = NormalizePrototypeTriggerType(Interaction.TriggerType);
 			const bool bUsesSupportedTrigger =
 				FUMGPrototypeNavigationBinding::IsClickTriggerType(NormalizedTriggerType)
 				|| FUMGPrototypeNavigationBinding::IsHoverTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsMouseEnterTriggerType(NormalizedTriggerType)
 				|| FUMGPrototypeNavigationBinding::IsPressTriggerType(NormalizedTriggerType)
 				|| FUMGPrototypeNavigationBinding::IsDragTriggerType(NormalizedTriggerType)
 				|| FUMGPrototypeNavigationBinding::IsKeyDownTriggerType(NormalizedTriggerType)
-				|| FUMGPrototypeNavigationBinding::IsKeyUpTriggerType(NormalizedTriggerType);
+				|| FUMGPrototypeNavigationBinding::IsKeyUpTriggerType(NormalizedTriggerType)
+				|| FUMGPrototypeNavigationBinding::IsPageOpenTriggerType(NormalizedTriggerType);
 			if (!bUsesSupportedTrigger && Interaction.Actions.Num() > 0)
 			{
 				Warnings.AddUnique(FString::Printf(
@@ -514,7 +497,38 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			}
 			Binding.TriggerType = NormalizedTriggerType;
 			Binding.TriggerJson = Interaction.TriggerJson;
+			Binding.TriggerDevice = Interaction.TriggerDevice;
 			Binding.TriggerKeyCodes = Interaction.TriggerKeyCodes;
+			if (Binding.UsesMouseEnterTrigger())
+			{
+				TSharedPtr<FJsonObject> Trigger;
+				double Delay = 0;
+				if (!DesignJsonUtils::TryParseObject(Interaction.TriggerJson, Trigger)
+					|| !Trigger->TryGetNumberField(TEXT("delay"), Delay) || Delay != 0
+					|| DesignJsonUtils::GetBool(Trigger, TEXT("deprecatedVersion"), false))
+				{
+					Warnings.AddUnique(FString::Printf(TEXT("Prototype MOUSE_ENTER on '%s' requires explicit delay=0 and no deprecatedVersion; action not executed"), *Node->Id));
+					continue;
+				}
+			}
+			if (Binding.UsesPageOpenTrigger())
+			{
+				TSharedPtr<FJsonObject> Trigger;
+				double Timeout = 0;
+				if (!DesignJsonUtils::TryParseObject(Interaction.TriggerJson, Trigger)
+					|| !Trigger->TryGetNumberField(TEXT("timeout"), Timeout) || !FMath::IsFinite(Timeout) || Timeout < 0)
+				{
+					Warnings.AddUnique(FString::Printf(TEXT("Prototype AFTER_TIMEOUT on '%s' requires explicit nonnegative milliseconds"), *Node->Id));
+					continue;
+				}
+				Binding.TriggerDelaySeconds = Timeout / 1000.0;
+			}
+			if (Binding.UsesKeyboardTrigger() && Binding.TriggerDevice != TEXT("KEYBOARD"))
+			{
+				Warnings.AddUnique(FString::Printf(TEXT("Prototype key trigger on '%s' requires device KEYBOARD; received '%s'; action not executed"),
+					*Node->Id, *Binding.TriggerDevice));
+				continue;
+			}
 			if (Binding.UsesKeyboardTrigger() && Binding.TriggerKeyCodes.Num() == 0)
 			{
 				Warnings.AddUnique(FString::Printf(
@@ -579,7 +593,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			}
 
 			OutBindings.Add(Binding);
-			OutTriggerIds.Add(Node->Id);
+			if (!Binding.UsesPageOpenTrigger()) OutTriggerIds.Add(Node->Id);
 			InOutSeenBindingKeys.Add(BindingKey);
 		}
 

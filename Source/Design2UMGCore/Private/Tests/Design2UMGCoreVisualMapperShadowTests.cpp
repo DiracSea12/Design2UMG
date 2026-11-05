@@ -9,6 +9,8 @@
 #include "DesignSourceExportBounds.h"
 #include "UMGSchema.h"
 #include "VisualMapper.h"
+#include "Design2UMGConverterVisualSupport.h"
+#include "UMGTextPaintOwner.h"
 #include "Design2UMGCoreTestHelpers.h"
 
 using namespace Design2UMGCoreTests;
@@ -24,6 +26,9 @@ bool FVisualMapperBoxShadowTextureExtentClampTest::RunTest(const FString& Parame
 	Widget.Type = TEXT("Image");
 	Widget.Id = TEXT("shadow_source");
 	Widget.Name = TEXT("ShadowSource");
+	Widget.Bounds.W = 10;
+	Widget.Bounds.H = 20;
+	Widget.Brush.Image.CropFitMode = TEXT("Fill");
 
 	FUMGBoxShadowLayerData NormalShadow;
 	NormalShadow.Color = FLinearColor::Black;
@@ -31,11 +36,15 @@ bool FVisualMapperBoxShadowTextureExtentClampTest::RunTest(const FString& Parame
 	NormalShadow.Spread = 3.0f;
 	FUMGWidgetNode NormalWrapped = VisualMapper::WrapWithBoxShadow(MoveTemp(Widget), Node, TArray<FUMGBoxShadowLayerData>{ NormalShadow });
 	TestEqual(TEXT("Normal shadow wrapper has shadow and content"), NormalWrapped.Children.Num(), 2);
+	TestEqual(TEXT("Shadow wrapper retains its source visual owner"), NormalWrapped.SourceVisualChildIndex, 1);
 	if (NormalWrapped.Children.Num() != 2)
 	{
 		return false;
 	}
 	TestEqual(TEXT("Unclipped shadow stays in the overlay layout contract"), NormalWrapped.Children[0].Type, FString(TEXT("Image")));
+	TestTrue(TEXT("Image fill keeps its source paint dimensions through the shadow wrapper"),
+		FMath::IsNearlyEqual(NormalWrapped.Children[1].Bounds.W, 10.0f)
+		&& FMath::IsNearlyEqual(NormalWrapped.Children[1].Bounds.H, 20.0f));
 	// Shape grows by spread on both sides (10 + 2*3), then a 3-sigma falloff margin
 	// (1.5 * 2 * 2) is added per side: 16 + 6 = 22 wide, 26 + 6 = 32 tall.
 	TestEqual(TEXT("Normal finite width keeps the rounded result"), NormalWrapped.Children[0].WidgetStyle.WidthOverride.Get(0), 22.0f);
@@ -146,6 +155,57 @@ bool FVisualMapperBoxShadowRenderOwnershipTest::RunTest(const FString& Parameter
 	const auto& UniformShape = UniformWrapped.Children[0].Brush.Shape.GetValue();
 	TestTrue(TEXT("Uniform corner radius normalizes against the spread-grown shape half-min"),
 		UniformShape.CornerRadius.IsSet() && UniformShape.CornerRadius.GetValue() == 0.27f);
+	auto TextNode = MakeFixedNode(EDesignNodeType::Text, 100.0f, 40.0f);
+	FDesignEffect TextShadow;
+	TextShadow.Type = EDesignEffectType::Shadow;
+	TextShadow.Shadow.OffsetX = 1;
+	TextShadow.Shadow.OffsetY = 2;
+	TextShadow.Shadow.Blur = 3;
+	TextNode->Visual.Effects.Add(TextShadow);
+	FUMGWidgetNode PlainText;
+	PlainText.Type = UMGWidgetTypes::TextBlock;
+	VisualMapper::ApplyVisualProperties(PlainText, TextNode);
+	if (!TestEqual(TEXT("A normal blurred text shadow uses the capture stack"), PlainText.Shadow.BoxShadows.Num(), 1)) return false;
+	TestEqual(TEXT("The capture stack retains the source blur radius"), PlainText.Shadow.BoxShadows[0].Blur, 3.0f);
+	TestFalse(TEXT("The captured shadow does not also use a native text shadow"), PlainText.Shadow.ShadowColorAndOpacity.IsSet());
+	FUMGWidgetNode Paint;
+	Paint.Type = UMGWidgetTypes::RetainerBox; Paint.Id = TEXT("paint"); Paint.Bounds.W = 100; Paint.Bounds.H = 40;
+	Paint.Effect.TextPaints = TArray<FUMGSurfacePaint>{FUMGSurfacePaint()};
+	Paint.Shadow.ShadowOffset = FVector2D(1, 2);
+	const FLinearColor ShadowColor(0.1f, 0.3f, 0.2f, 0.4f);
+	Paint.Shadow.ShadowColorAndOpacity = ShadowColor;
+	auto& Glyph = Paint.Children.AddDefaulted_GetRef();
+	Glyph.Type = UMGWidgetTypes::TextBlock; Glyph.Id = TEXT("glyph");
+	auto PaintedShadow = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
+		MoveTemp(Paint), TextNode, FVisualMapperOptions(), false, true);
+	auto* PaintOwner = UMGTextPaintOwner::Find(PaintedShadow);
+	if (!TestNotNull(TEXT("Glyph paint owner remains unique through the shadow capture"), PaintOwner)) return false;
+	TestEqual(TEXT("Glyph paint keeps its logical UV width"), PaintOwner->Bounds.W, 100.0f);
+	const auto& ShadowCapture = PaintedShadow.Children[0];
+	TestEqual(TEXT("Shadow composes outside the glyph-paint material"), ShadowCapture.Type, FString(UMGWidgetTypes::RetainerBox));
+	TestTrue(TEXT("Source shadow color remains independent of glyph paint"), ShadowCapture.Shadow.BoxShadows.Num() == 1
+		&& ShadowCapture.Shadow.BoxShadows[0].Color == ShadowColor);
+	TestTrue(TEXT("Existing shadow capture reserves a gutter"), ShadowCapture.Slot.Padding.Left < 0);
+	const FUMGWidgetNode& ConstTree = PaintedShadow;
+	TestTrue(TEXT("Core and animation consumers resolve the same typed owner"), UMGTextPaintOwner::Find(ConstTree) == PaintOwner);
+	PaintedShadow.Children.AddDefaulted();
+	TestNull(TEXT("A branching subtree does not select an arbitrary text paint"), UMGTextPaintOwner::Find(PaintedShadow));
+	auto PathNode = MakeFixedNode(EDesignNodeType::Path, 100.0f, 40.0f);
+	FUMGWidgetNode PathWidget;
+	PathWidget.Type = UMGWidgetTypes::Image;
+	PathWidget.Id = TEXT("path_shadow");
+	PathWidget.Path.Geometry = TEXT("M0 0L100 0L50 40Z");
+	const auto PathShadow = VisualMapper::WrapWithBoxShadow(MoveTemp(PathWidget), PathNode, {ShadowLayer});
+	if (!TestEqual(TEXT("Vector shadow uses one captured surface"), PathShadow.Children.Num(), 1)) return false;
+	TestEqual(TEXT("Vector shadow captures the painted alpha"), PathShadow.Children[0].Type, FString(UMGWidgetTypes::RetainerBox));
+	TestEqual(TEXT("Captured vector geometry is retained"), PathShadow.Children[0].Children[0].Children[0].Path.Geometry.Get(FString()), FString(TEXT("M0 0L100 0L50 40Z")));
+	auto EllipseNode = MakeFixedNode(EDesignNodeType::Ellipse, 20.0f, 20.0f);
+	EllipseNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FFFFFFFF")));
+	FUMGWidgetNode EllipseWidget;
+	EllipseWidget.Type = UMGWidgetTypes::Image;
+	const auto EllipseShadow = VisualMapper::WrapWithBoxShadow(MoveTemp(EllipseWidget), EllipseNode, {ShadowLayer});
+	if (!TestEqual(TEXT("Opaque ellipse keeps analytic shadow and content"), EllipseShadow.Children.Num(), 2)) return false;
+	TestEqual(TEXT("Opaque ellipse supports spread through its exact analytic silhouette"), EllipseShadow.Children[0].Brush.MaterialRef.Get(FString()), FString(TEXT("ellipseshadow")));
 	return true;
 }
 

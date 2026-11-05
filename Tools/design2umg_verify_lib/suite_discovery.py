@@ -1,6 +1,8 @@
+import hashlib
 import re
 import time
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import design2umg_auto_verify as verify
 from design2umg_verify_lib.diagnostics import emit_diagnostic
@@ -19,12 +21,65 @@ def expand_figma_export_root(root: Path) -> list[str]:
     """Discover exports inside this root only; never search adjacent private corpora."""
     if not root.is_dir():
         raise RuntimeError(f"Figma export root not found: {root}")
-    return [str(path.parent.resolve()) for path in sorted(root.rglob("design.json")) if path.is_file()]
+    return [str(path.parent.resolve()) for path in sorted(root.rglob("design.json"))
+            if path.is_file() and '_figma_archives' not in path.relative_to(root).parts]
 
 
 def resolve_default_figma_export_roots(design_root: Path, explicit_roots: list[str]) -> list[str]:
     roots = [Path(root).resolve() for root in explicit_roots if root] or [design_root.resolve()]
     return list(dict.fromkeys(export for root in roots for export in expand_figma_export_root(root)))
+
+
+def stage_figma_export_archives(design_root: Path, explicit_roots: list[str], output_root: Path) -> tuple[dict[str, str], list[dict]]:
+    roots = list(dict.fromkeys(Path(root).resolve() for root in explicit_roots if root)) or [design_root.resolve()]
+    archive_paths = sorted({path.resolve() for root in roots for path in root.rglob('*.zip') if path.is_file()})
+    fig_paths = sorted({path.resolve() for root in roots for path in root.rglob('*.fig') if path.is_file()})
+    diagnostics = []
+
+    def skipped(reason: str, path: Path, detail: str) -> None:
+        diagnostics.append({'reason': reason, 'path': str(path), 'detail': detail})
+        emit_diagnostic('warning', reason, path, detail)
+
+    for fig_path in fig_paths:
+        skipped('figma_native_requires_export', fig_path,
+                'Native .fig files must first be exported from Figma as design.json and reference.png; not a case.')
+
+    staged: dict[str, str] = {}
+    for archive_path in archive_paths:
+        named_export = 'figma' in archive_path.name.lower()
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                entries = archive.infolist()
+                names = {entry.filename for entry in entries}
+                if not {'design.json', 'reference.png'}.issubset(names):
+                    if named_export or 'design.json' in names:
+                        skipped('incomplete_figma_export_archive', archive_path,
+                                'Archive must contain top-level design.json and reference.png; not a case.')
+                    continue
+
+                identity = hashlib.sha256(str(archive_path).encode('utf-8')).hexdigest()[:16]
+                staged_root = output_root / '_figma_archives' / f'{sanitize_case_name(archive_path.stem)}-{identity}'
+                if staged_root.exists():
+                    raise RuntimeError(f'Archive staging directory already exists: {staged_root}; use a new output root.')
+                staged_root = staged_root.resolve()
+                targets = set()
+                for entry in entries:
+                    name = entry.filename.replace('\\', '/')
+                    relative = PurePosixPath(name)
+                    windows = PureWindowsPath(name)
+                    if relative.is_absolute() or windows.drive or '..' in relative.parts:
+                        raise RuntimeError(f'Unsafe path in Figma export archive {archive_path}: {entry.filename}')
+                    target = (staged_root / relative).resolve()
+                    if not target.is_relative_to(staged_root) or target in targets:
+                        raise RuntimeError(f'Unsafe or duplicate path in Figma export archive {archive_path}: {entry.filename}')
+                    targets.add(target)
+                staged_root.mkdir(parents=True)
+                archive.extractall(staged_root)
+                staged[str(staged_root)] = str(archive_path)
+        except zipfile.BadZipFile as exc:
+            if named_export:
+                skipped('invalid_figma_export_archive', archive_path, str(exc))
+    return staged, diagnostics
 
 
 def sanitize_case_name(value: str) -> str:
@@ -41,7 +96,8 @@ def classify_run_scope(include_pattern: str, exclude_pattern: str) -> str:
     return "full"
 
 
-def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_export_roots: list[str]) -> Path:
+def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_export_roots: list[str],
+                    figma_source_diagnostics: list[dict] | None = None) -> Path:
     run_scope = {
         "scope": classify_run_scope(args.include, args.exclude),
         "include_pattern": args.include,
@@ -49,6 +105,7 @@ def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_
         "discovered_total": len(cases),
         "formal_admissible_candidate": bool(cases) and not bool(args.include or args.exclude),
         "figma_export_roots": effective_figma_export_roots,
+        "figma_source_diagnostics": figma_source_diagnostics or [],
         "case_names": [case["name"] for case in cases],
         "case_inputs": [
             {
@@ -57,6 +114,9 @@ def write_run_scope(output_root: Path, args, cases: list[dict], effective_figma_
                 "source": str(Path(case["source"]).resolve()),
                 "source_signature": verify.build_file_signature(case["source"]),
                 "provided_reference_signature": verify.build_file_signature(case.get("reference_path")),
+                **({"source_archive": case["source_archive"],
+                    "source_archive_signature": verify.build_file_signature(case["source_archive"])}
+                   if case.get("source_archive") else {}),
             }
             for case in cases
         ],

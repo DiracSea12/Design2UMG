@@ -1,11 +1,11 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "FigmaParserStyling.h"
+#include "FigmaParserLayout.h"
 #include "DesignColorUtils.h"
 #include "DesignJsonUtils.h"
 #include "ParserSharedSemantics.h"
 #include "Design2UMGLog.h"
-#include "UMGPropertyKeys.h"
 
 namespace FigmaParserInternal
 {
@@ -33,14 +33,42 @@ namespace
 		return DesignColorUtils::FormatLiteral(FColor(R, G, B, Alpha));
 	}
 
-	bool IsSyntheticVectorRasterFill(const TSharedPtr<FJsonObject>& FillObj)
+	TArray<FVector2D> ReadGradientHandles(const TSharedPtr<FJsonObject>& Paint, bool bLinear)
 	{
-		if (!FillObj.IsValid() || GetString(FillObj, TEXT("type")) != TEXT("IMAGE"))
+		TArray<FVector2D> Handles;
+		if (const auto Field = Paint->TryGetField(TEXT("gradientTransform")); Field.IsValid())
 		{
-			return false;
+			const TArray<TSharedPtr<FJsonValue>>* Matrix = nullptr;
+			FDesignImageTransform Transform;
+			if (!Field->TryGetArray(Matrix) || !ParserSharedSemantics::TryParseImageTransformMatrix(*Matrix,
+				[](const TSharedPtr<FJsonValue>& Value, float& Number) { return Value->Type == EJson::Number && Value->TryGetNumber(Number); }, Transform))
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: Invalid gradientTransform; expected a finite 2x3 matrix."));
+				return Handles;
+			}
+			const double Determinant = double(Transform.A) * Transform.D - double(Transform.B) * Transform.C;
+			if (Determinant == 0)
+			{
+				UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: Singular gradientTransform cannot define gradient coordinates."));
+				return Handles;
+			}
+			// Paint matrices map object coordinates into gradient space; invert to recover handles.
+			for (const FVector2D Point : {FVector2D(bLinear ? 0 : 0.5, 0.5), FVector2D(1, 0.5), FVector2D(bLinear ? 0 : 0.5, 1)})
+			{
+				const double X = Point.X - Transform.TX, Y = Point.Y - Transform.TY;
+				Handles.Emplace((Transform.D * X - Transform.B * Y) / Determinant,
+					(Transform.A * Y - Transform.C * X) / Determinant);
+			}
 		}
-
-		return GetString(FillObj, TEXT("imageRef")).StartsWith(UMGPropertyKeys::VectorRasterImageRefPrefix);
+		else if (const auto* Positions = GetArray(Paint, TEXT("gradientHandlePositions")))
+		{
+			for (const auto& Position : *Positions)
+			{
+				if (const auto Point = Position->AsObject(); Point.IsValid())
+					Handles.Emplace(GetNumber(Point, TEXT("x")), GetNumber(Point, TEXT("y")));
+			}
+		}
+		return Handles;
 	}
 
 	FDesignFill ParseSingleFill(const TSharedPtr<FJsonObject>& FillObj)
@@ -83,44 +111,26 @@ namespace
 				Result.Gradient.GradientType = EDesignGradientType::Angular;
 			}
 
-			const TArray<TSharedPtr<FJsonValue>>* Handles = GetArray(FillObj, TEXT("gradientHandlePositions"));
-			if (Handles && Handles->Num() >= 2)
+			const bool bLinear = Result.Gradient.GradientType == EDesignGradientType::Linear;
+			const TArray<FVector2D> Handles = ReadGradientHandles(FillObj, bLinear);
+			if (Handles.Num() >= 2)
 			{
-				const TSharedPtr<FJsonObject> P0 = (*Handles)[0]->AsObject();
-				const TSharedPtr<FJsonObject> P1 = (*Handles)[1]->AsObject();
-				if (P0.IsValid() && P1.IsValid())
+				const FVector2D Axis = Handles[1] - Handles[0];
+				Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(Axis.Y, Axis.X));
+				if (bLinear)
 				{
-					const float CenterX = GetNumber(P0, TEXT("x"));
-					const float CenterY = GetNumber(P0, TEXT("y"));
-					const float DX = GetNumber(P1, TEXT("x")) - CenterX;
-					const float DY = GetNumber(P1, TEXT("y")) - CenterY;
-					Result.Gradient.Rotation = FMath::RadiansToDegrees(FMath::Atan2(DY, DX));
-
-					if (Result.Gradient.GradientType == EDesignGradientType::Linear)
+					Result.Gradient.StartPoint = Handles[0];
+					Result.Gradient.EndPoint = Handles[1];
+				}
+				else
+				{
+					Result.Gradient.Center = Handles[0];
+					if (Result.Gradient.GradientType == EDesignGradientType::Radial)
 					{
-						Result.Gradient.StartPoint = FVector2D(CenterX, CenterY);
-						Result.Gradient.EndPoint = FVector2D(CenterX + DX, CenterY + DY);
-					}
-					else if (Result.Gradient.GradientType == EDesignGradientType::Radial)
-					{
-						Result.Gradient.Center = FVector2D(CenterX, CenterY);
-						FVector2D Size(FMath::Max(KINDA_SMALL_NUMBER, 2.0f * FMath::Sqrt(DX * DX + DY * DY)), 0.0f);
-						Size.Y = Size.X;
-
-						if (Handles->Num() >= 3)
-						{
-							const TSharedPtr<FJsonObject> P2 = (*Handles)[2]->AsObject();
-							if (P2.IsValid())
-							{
-								const float DYHandleX = GetNumber(P2, TEXT("x")) - CenterX;
-								const float DYHandleY = GetNumber(P2, TEXT("y")) - CenterY;
-								Size.Y = FMath::Max(
-									KINDA_SMALL_NUMBER,
-									2.0f * FMath::Sqrt(DYHandleX * DYHandleX + DYHandleY * DYHandleY));
-							}
-						}
-
-						Result.Gradient.Size = Size;
+						const double Width = FMath::Max(double(KINDA_SMALL_NUMBER), 2 * Axis.Size());
+						const double Height = Handles.Num() >= 3
+							? FMath::Max(double(KINDA_SMALL_NUMBER), 2 * (Handles[2] - Handles[0]).Size()) : Width;
+						Result.Gradient.Size = FVector2D(Width, Height);
 					}
 				}
 			}
@@ -156,6 +166,7 @@ namespace
 			if (ScaleMode == TEXT("FILL"))
 			{
 				Result.Image.Mode = EDesignImageMode::Fill;
+				Result.Image.bFitCropToNode = true;
 			}
 			else if (ScaleMode == TEXT("FIT"))
 			{
@@ -195,33 +206,13 @@ namespace
 	}
 }
 
-FString ExtractSyntheticVectorRasterImageRef(const TArray<TSharedPtr<FJsonValue>>& Fills)
-{
-	for (const TSharedPtr<FJsonValue>& FillVal : Fills)
-	{
-		const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
-		if (!IsSyntheticVectorRasterFill(FillObj) || !GetBool(FillObj, TEXT("visible"), true))
-		{
-			continue;
-		}
-
-		const FString ImageRef = GetString(FillObj, TEXT("imageRef"));
-		if (!ImageRef.IsEmpty())
-		{
-			return ImageRef;
-		}
-	}
-
-	return FString();
-}
-
 TArray<FDesignFill> ParseFills(const TArray<TSharedPtr<FJsonValue>>& Fills)
 {
 	TArray<FDesignFill> Result;
 	for (const TSharedPtr<FJsonValue>& FillVal : Fills)
 	{
 		const TSharedPtr<FJsonObject> FillObj = FillVal->AsObject();
-		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true) || IsSyntheticVectorRasterFill(FillObj))
+		if (!FillObj.IsValid() || !GetBool(FillObj, TEXT("visible"), true))
 		{
 			continue;
 		}
@@ -285,6 +276,8 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 	{
 		Result.Align = EDesignStrokeAlign::Inside;
 	}
+	// Figma strokes overlay content unless an auto layout frame includes them in layout.
+	Result.bIncludedInLayout = HasAutoLayout(NodeObj) && GetBool(NodeObj, TEXT("strokesIncludedInLayout"), false);
 
 	const TSharedPtr<FJsonObject> IndividualWeights = GetObject(NodeObj, TEXT("individualStrokeWeights"));
 	if (IndividualWeights.IsValid())
@@ -307,6 +300,7 @@ FDesignStroke ParseStroke(const TSharedPtr<FJsonObject>& NodeObj)
 FDesignCornerRadius ParseCornerRadius(const TSharedPtr<FJsonObject>& NodeObj)
 {
 	FDesignCornerRadius Result;
+	Result.Smoothing = GetNumber(NodeObj, TEXT("cornerSmoothing"));
 
 	const TArray<TSharedPtr<FJsonValue>>* Radii = GetArray(NodeObj, TEXT("rectangleCornerRadii"));
 	if (Radii && Radii->Num() == 4)

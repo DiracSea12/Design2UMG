@@ -26,6 +26,7 @@ public:
 	};
 	TMap<FString, FComponent> Components;
 	TMap<FString, FString> NodeIdToKey;
+	TSet<FString> InlineAnimationInstanceIds;
 	FString DocumentScope;
 	FString Error;
 

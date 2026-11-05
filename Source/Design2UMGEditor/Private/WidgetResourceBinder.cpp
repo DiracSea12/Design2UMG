@@ -14,6 +14,7 @@
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/PackageName.h"
 
 namespace
 {
@@ -85,12 +86,14 @@ bool FWidgetResourceBinder::BindImageResource(UImage* ImageWidget, const FUMGWid
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
-    if(Node.Brush.Shader.IsSet())
+    const FString MaterialPath = Node.Brush.MaterialRef.Get(FString());
+    if (Node.Brush.Shader.IsSet() || FPackageName::IsValidObjectPath(MaterialPath))
     {
-        UMaterialInterface* Material=LoadObject<UMaterialInterface>(nullptr,*Node.Brush.MaterialRef.Get(FString()));
+        UMaterialInterface* Material=LoadObject<UMaterialInterface>(nullptr,*MaterialPath);
         if(!Material)return false;
         ImageWidget->SetBrushFromMaterial(Material);
-        ImageWidget->SetDesiredSizeOverride(Node.Brush.Shader->Size);
+        ImageWidget->SetDesiredSizeOverride(Node.Brush.Shader.IsSet()
+            ? Node.Brush.Shader->Size : FVector2D(Node.Bounds.W, Node.Bounds.H));
         return true;
     }
 	if (Node.Path.HasPaintGeometry()) return BindPathTexture(ImageWidget, Node, Budget, TextureMap);

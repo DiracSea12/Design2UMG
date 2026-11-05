@@ -5,15 +5,14 @@
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetTreeBuilder.h"
 #include "Components/Button.h"
-#include "Components/Overlay.h"
-#include "Components/WidgetSwitcher.h"
+#include "Components/CanvasPanel.h"
 
 namespace
 {
 	enum class EPreviewRuntimeRole : uint8
 	{
 		Button,
-		Switcher,
+		PageHost,
 		Overlay
 	};
 
@@ -22,7 +21,7 @@ namespace
 	struct FPreviewRuntimeAddressIndex
 	{
 		FAddressCounts Buttons;
-		FAddressCounts Switchers;
+		FAddressCounts PageHosts;
 		FAddressCounts Overlays;
 	};
 
@@ -90,12 +89,9 @@ namespace
 			{
 				AddGeneratedAddressAliases(Address, Index.Buttons);
 			}
-			if (WidgetClass->IsChildOf(UWidgetSwitcher::StaticClass()))
+			if (WidgetClass->IsChildOf(UCanvasPanel::StaticClass()))
 			{
-				AddGeneratedAddressAliases(Address, Index.Switchers);
-			}
-			if (WidgetClass->IsChildOf(UOverlay::StaticClass()))
-			{
+				AddGeneratedAddressAliases(Address, Index.PageHosts);
 				AddGeneratedAddressAliases(Address, Index.Overlays);
 			}
 		}
@@ -114,8 +110,8 @@ namespace
 		{
 		case EPreviewRuntimeRole::Button:
 			return Index.Buttons;
-		case EPreviewRuntimeRole::Switcher:
-			return Index.Switchers;
+		case EPreviewRuntimeRole::PageHost:
+			return Index.PageHosts;
 		case EPreviewRuntimeRole::Overlay:
 			return Index.Overlays;
 		default:
@@ -136,10 +132,10 @@ namespace
 		{
 		case EPreviewRuntimeRole::Button:
 			return WidgetClass->IsChildOf(UButton::StaticClass());
-		case EPreviewRuntimeRole::Switcher:
-			return WidgetClass->IsChildOf(UWidgetSwitcher::StaticClass());
+		case EPreviewRuntimeRole::PageHost:
+			return WidgetClass->IsChildOf(UCanvasPanel::StaticClass());
 		case EPreviewRuntimeRole::Overlay:
-			return WidgetClass->IsChildOf(UOverlay::StaticClass());
+			return WidgetClass->IsChildOf(UCanvasPanel::StaticClass());
 		default:
 			return false;
 		}
@@ -199,7 +195,8 @@ namespace
 
 	bool UsesRuntimeButtonLookup(const FUMGPrototypeNavigationBinding& Binding)
 	{
-		if (!Binding.UsesClickTrigger() && !Binding.UsesHoverTrigger() && !Binding.UsesPressTrigger())
+		if (!Binding.UsesClickTrigger() && !Binding.UsesHoverTrigger() && !Binding.UsesPressTrigger()
+			&& !Binding.UsesMouseEnterTrigger() && !Binding.UsesDragTrigger())
 		{
 			return false;
 		}
@@ -214,6 +211,8 @@ namespace
 		case EUMGPrototypeNavigationStepKind::OpenLink:
 		case EUMGPrototypeNavigationStepKind::Overlay:
 		case EUMGPrototypeNavigationStepKind::Back:
+		case EUMGPrototypeNavigationStepKind::CloseOverlay:
+		case EUMGPrototypeNavigationStepKind::AnimateWidget:
 			return true;
 		default:
 			return false;
@@ -271,34 +270,34 @@ namespace
 			return Node;
 		};
 
-		FUMGWidgetNode* Switcher = nullptr;
+		FUMGWidgetNode* PageHost = nullptr;
 		FUMGWidgetNode* Overlay = nullptr;
 		if (Navigation.HasOverlayBindings())
 		{
 			Overlay = RequireRuntimeReference(
 				Navigation.OverlayHostWidgetId,
 				Navigation.OverlayHostWidgetName,
-				TEXT("Overlay"),
+				TEXT("CanvasPanel"),
 				EPreviewRuntimeRole::Overlay);
 			if (!Overlay)
 			{
 				return false;
 			}
 		}
-		if (Navigation.RequiresSwitcher())
+		if (Navigation.RequiresPageHost())
 		{
-			Switcher = RequireRuntimeReference(
-				Navigation.SwitcherWidgetId,
-				Navigation.SwitcherWidgetName,
-				TEXT("WidgetSwitcher"),
-				EPreviewRuntimeRole::Switcher);
-			if (!Switcher)
+			PageHost = RequireRuntimeReference(
+				Navigation.PageHostWidgetId,
+				Navigation.PageHostWidgetName,
+				TEXT("CanvasPanel"),
+				EPreviewRuntimeRole::PageHost);
+			if (!PageHost)
 			{
 				return false;
 			}
 
 			TArray<FString> Pages;
-			for (const FUMGWidgetNode& Child : Switcher->Children)
+			for (const FUMGWidgetNode& Child : PageHost->Children)
 			{
 				if (Child.Id.IsEmpty())
 				{
@@ -308,12 +307,37 @@ namespace
 				Pages.Add(Child.Id);
 			}
 
-			const int32 ActiveIndex = Switcher->WidgetState.ActiveWidgetIndex.Get(0);
-			if (!Pages.IsValidIndex(ActiveIndex))
+			const FUMGWidgetNode* const* OriginalHost = OriginalNodes.Find(Navigation.PageHostWidgetId);
+			if (!OriginalHost || !(*OriginalHost)->Children.IsValidIndex(Navigation.InitialPageIndex))
 			{
-				Error = TEXT("The active interaction page index is outside the edited page list.");
+				Error = TEXT("The original initial interaction page is unavailable.");
 				return false;
 			}
+			const FString InitialPageId = (*OriginalHost)->Children[Navigation.InitialPageIndex].Id;
+			TFunction<bool(const FUMGWidgetNode&)> ContainsInitialPage = [&](const FUMGWidgetNode& Node)
+			{
+				if (Node.Id == InitialPageId) return true;
+				for (const auto& Child : Node.Children) if (ContainsInitialPage(Child)) return true;
+				return false;
+			};
+			const int32 ActiveIndex = PageHost->Children.IndexOfByPredicate(ContainsInitialPage);
+			if (ActiveIndex == INDEX_NONE)
+			{
+				Error = TEXT("The initial interaction page was removed from the edited page host.");
+				return false;
+			}
+			TArray<FString> DisplayVisibility;
+			for (int32 Index = 0; Index < PageHost->Children.Num(); ++Index)
+			{
+				auto& Page = PageHost->Children[Index];
+				const int32 OriginalIndex = (*OriginalHost)->Children.IndexOfByPredicate(
+					[&](const FUMGWidgetNode& OriginalPage) { return OriginalPage.Id == Page.Id; });
+				const FString Visibility = Navigation.PageDisplayVisibility.IsValidIndex(OriginalIndex)
+					? Navigation.PageDisplayVisibility[OriginalIndex] : TEXT("Visible");
+				DisplayVisibility.Add(Visibility);
+				Page.WidgetStyle.Visibility = Index == ActiveIndex ? Visibility : TEXT("Collapsed");
+			}
+			Navigation.PageDisplayVisibility = MoveTemp(DisplayVisibility);
 			Navigation.InitialPageIndex = ActiveIndex;
 
 			// Only current host children are pages. A former page nested inside another page
@@ -332,7 +356,7 @@ namespace
 			Navigation.PageIds = MoveTemp(Pages);
 		}
 
-		const FPageHostIndex SwitcherPages = BuildPageHostIndex(Switcher);
+		const FPageHostIndex PageHostPages = BuildPageHostIndex(PageHost);
 		const FPageHostIndex OverlayPages = BuildPageHostIndex(Overlay);
 		TSet<FString> LogicalPages;
 		TMap<FString, int32> LogicalPageIndexes;
@@ -349,9 +373,10 @@ namespace
 			&OriginalNodes,
 			&EditedNodes,
 			&RequireStableReference,
-			&SwitcherPages,
+			&PageHostPages,
 			&OverlayPages,
 			&LogicalPageIndexes,
+			&Navigation,
 			&Error](const FString& Id, int32& Index, const bool bOverlay) -> bool
 		{
 			if (!RequireStableReference(Id))
@@ -367,12 +392,15 @@ namespace
 			}
 			Index = *PageIndex;
 
-			const FPageHostIndex& HostPages = bOverlay ? OverlayPages : SwitcherPages;
-			const FString Address = FUMGWidgetTreeBuilder::SanitizeWidgetName(Id, TEXT("CanvasPanel")).ToString();
+			const FPageHostIndex& HostPages = bOverlay ? OverlayPages : PageHostPages;
+			// Graph wiring addresses pages by the widget names BuildRoot recorded.
+			const FString* PageName = Navigation.PageWidgetNames.Find(Id);
+			const FString Address = PageName
+				? FUMGWidgetTreeBuilder::SanitizeWidgetName(*PageName, TEXT("CanvasPanel")).ToString() : FString();
 			const FString MirrorId = Id + Design2UMGPrototypeTokens::OverlayMirrorSuffix();
-			const FString MirrorAddress = FUMGWidgetTreeBuilder::SanitizeWidgetName(
-				MirrorId,
-				TEXT("CanvasPanel")).ToString();
+			const FString MirrorAddress = PageName
+				? FUMGWidgetTreeBuilder::SanitizeWidgetName(*PageName + Design2UMGPrototypeTokens::OverlayMirrorSuffix(), TEXT("CanvasPanel")).ToString()
+				: FString();
 
 			const FUMGWidgetNode* const* BaseTargetNode = HostPages.ChildrenById.Find(Id);
 			const bool bBaseTarget = BaseTargetNode
@@ -417,7 +445,7 @@ namespace
 			{
 				if (!RequireRuntimeReference(
 					Binding.TriggerWidgetId,
-					Binding.TriggerWidgetId,
+					Binding.TriggerWidgetName,
 					TEXT("Button"),
 					EPreviewRuntimeRole::Button))
 				{
@@ -429,7 +457,7 @@ namespace
 				if (OriginalNodes.Contains(MirrorId)
 					&& !RequireRuntimeReference(
 						MirrorId,
-						MirrorId,
+						Binding.TriggerWidgetName + Design2UMGPrototypeTokens::OverlayMirrorSuffix(),
 						TEXT("Button"),
 						EPreviewRuntimeRole::Button))
 				{
@@ -454,7 +482,7 @@ namespace
 				Binding.SourcePageId = *Page;
 			}
 
-			if (!Binding.TargetPageId.IsEmpty()
+			if (Binding.RequiresPageTarget() && !Binding.TargetPageId.IsEmpty()
 				&& !ResolveTarget(
 					Binding.TargetPageId,
 					Binding.TargetPageIndex,

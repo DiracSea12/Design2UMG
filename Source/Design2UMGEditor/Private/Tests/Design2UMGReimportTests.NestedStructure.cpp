@@ -14,7 +14,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/Button.h"
 #include "Components/Widget.h"
-#include "Components/WidgetSwitcher.h"
+#include "Components/CanvasPanel.h"
 #include "Dom/JsonObject.h"
 #include "UObject/Package.h"
 #include "WidgetBlueprint.h"
@@ -417,7 +417,7 @@ bool FSafeReimportNestedRemoveConflictTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// v1's interactive document generates the synthesized switcher
+// v1's interactive document generates the synthesized page host
 // host root (root_pc becomes a top-level instance); in v2, after the interactions vanish, root_pc directly
 // becomes the IR root. Reimport must neither misreport root_pc's nested children as "host-root top-level
 // added" (Keep_1) nor misreport root_pc itself as a move conflict; the deleted nested node N containing project content gets a remove-conflict diagnostic.
@@ -430,7 +430,7 @@ bool FSafeReimportHostRootShapeChangeTest::RunTest(const FString&)
 {
 	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/FixtureReimportHostRootShape");
 
-	// v1: root_pc holds a button with an ON_CLICK interaction (a valid document navigation -> the switcher root is synthesized).
+	// v1: root_pc holds a button with an ON_CLICK interaction (a valid document navigation -> the page host root is synthesized).
 	const auto MakeInteractiveButton = []()
 	{
 		return FString::Printf(
@@ -473,16 +473,16 @@ bool FSafeReimportHostRootShapeChangeTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	// Precondition check: the synthesized switcher root + root_pc are top-level instances.
-	if (!TestTrue(TEXT("v1 host root is the synthetic switcher"),
-			WBP->WidgetTree->RootWidget && WBP->WidgetTree->RootWidget->IsA<UWidgetSwitcher>()))
+	// Precondition check: the synthesized page host root + root_pc are top-level instances.
+	if (!TestTrue(TEXT("v1 host root is the synthetic page host"),
+			WBP->WidgetTree->RootWidget && WBP->WidgetTree->RootWidget->IsA<UCanvasPanel>()))
 	{
 		FixtureWipeOutput(OutputDir);
 		return false;
 	}
-	UWidget* RootPc = WBP->WidgetTree->FindWidget(TEXT("root_pc"));
+	UWidget* RootPc = WBP->WidgetTree->FindWidget(TEXT("RemoveProjChild"));
 	UWidget* N = WBP->WidgetTree->FindWidget(TEXT("N"));
-	if (!TestNotNull(TEXT("root_pc is the page under the switcher"), RootPc)
+	if (!TestNotNull(TEXT("root_pc is the page under the page host"), RootPc)
 		|| !TestNotNull(TEXT("nested N present in v1"), N))
 	{
 		FixtureWipeOutput(OutputDir);

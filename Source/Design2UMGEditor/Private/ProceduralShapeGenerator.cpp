@@ -127,7 +127,7 @@ namespace
 	constexpr TCHAR MaterialParamStopsKey[] = TEXT("Stops");
 	constexpr TCHAR MaterialParamStopPosKey[] = TEXT("Pos");
 
-	bool ReadTexturePixels(UTexture2D* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight)
+	bool ReadTexturePixels(UTexture2D* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, EGammaSpace& OutGamma)
 	{
 		if (!Texture)
 		{
@@ -142,6 +142,7 @@ namespace
 		{
 			FImage BgraImage;
 			SourceImage.CopyTo(BgraImage, ERawImageFormat::BGRA8, SourceImage.GammaSpace);
+			OutGamma = BgraImage.GammaSpace;
 			OutWidth = BgraImage.SizeX;
 			OutHeight = BgraImage.SizeY;
 			const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
@@ -163,6 +164,7 @@ namespace
 			return false;
 		}
 
+		OutGamma = Texture->SRGB ? EGammaSpace::sRGB : EGammaSpace::Linear;
 		FTexture2DMipMap& Mip = PlatformData->Mips[0];
 		OutWidth = Mip.SizeX;
 		OutHeight = Mip.SizeY;
@@ -218,7 +220,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	float TY,
 	int32 OutW,
 	int32 OutH,
-	FString* OutError, DesignImageResources::FImageOperationBudget* Budget, const FString& FitMode, const FIntRect* RasterRegion)
+	FString* OutError, DesignImageResources::FImageOperationBudget* Budget, const FString& FitMode, const FIntRect* RasterRegion, ECropAddressMode AddressMode)
 {
 	DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
 	if (!Budget) Budget = &LocalBudget;
@@ -246,8 +248,10 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	TArray<FColor> SourcePixels;
 	int32 SrcW = 0;
 	int32 SrcH = 0;
-	if (!ReadTexturePixels(Source, SourcePixels, SrcW, SrcH))
+	EGammaSpace Gamma;
+	if (!ReadTexturePixels(Source, SourcePixels, SrcW, SrcH, Gamma))
 	{
+		if (OutError) *OutError = TEXT("Could not read image crop source pixels");
 		return nullptr;
 	}
 	UMGImageCropUtils::FImageSamplingPlan Sampling;
@@ -258,6 +262,30 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	{
 		if (OutError) *OutError = TEXT("Invalid image crop sizing");
 		return nullptr;
+	}
+
+	const FIntPoint OriginalSize(SrcW, SrcH);
+	const auto& Map = Sampling.Transform;
+	const bool bDirectResize = Sampling.bPrefilter && Sampling.PrefilterSize == FIntPoint(OutW, OutH)
+		&& Region.Min == FIntPoint::ZeroValue && Region.Max == FIntPoint(OutW, OutH)
+		&& Map.A == 1.0f && Map.B == 0.0f && Map.TX == 0.0f
+		&& Map.C == 0.0f && Map.D == 1.0f && Map.TY == 0.0f
+		&& Sampling.CropScale == FVector2D(1, 1);
+	const auto Filter = FImageCore::EResizeImageFilter::Default | FImageCore::EResizeImageFilter::Flag_AlphaWeighted;
+	FImage Prefiltered;
+	if (Sampling.bPrefilter && !bDirectResize)
+	{
+		FString BudgetError;
+		const int64 Pixels = static_cast<int64>(Sampling.PrefilterSize.X) * Sampling.PrefilterSize.Y;
+		if (!Budget->ConsumeDecodedPixels(Pixels * sizeof(FLinearColor) / sizeof(FColor), BudgetError))
+		{
+			if (OutError) *OutError = BudgetError;
+			return nullptr;
+		}
+		FImageCore::ResizeImageAllocDest(FImageView(SourcePixels.GetData(), SrcW, SrcH, Gamma), Prefiltered,
+			Sampling.PrefilterSize.X, Sampling.PrefilterSize.Y, ERawImageFormat::RGBA32F, EGammaSpace::Linear, Filter);
+		SrcW = Sampling.PrefilterSize.X;
+		SrcH = Sampling.PrefilterSize.Y;
 	}
 
 	UTexture2D* Result = ProceduralShapeGeneratorAssets::CreateTransientTexture(Region.Width(), Region.Height(), nullptr, Budget);
@@ -281,9 +309,18 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 	TArray<FColor> Pixels;
 	Pixels.SetNumUninitialized(Region.Width() * Region.Height());
 
+	if (bDirectResize)
+	{
+		FImageCore::ResizeImage(FImageView(SourcePixels.GetData(), SrcW, SrcH, Gamma),
+			FImageView(Pixels.GetData(), OutW, OutH, EGammaSpace::sRGB), Filter);
+		ProceduralShapeGeneratorAssets::FillTextureData(Result, Pixels);
+		return Result;
+	}
+	const FLinearColor* FilteredData = Sampling.bPrefilter ? Prefiltered.AsRGBA32F().GetData() : nullptr;
+
 	for (int32 Y = 0; Y < Region.Height(); ++Y)
 	{
-		const float NY = static_cast<float>(Y + Region.Min.Y) / FMath::Max(1, OutH - 1);
+		const float NY = (static_cast<float>(Y + Region.Min.Y) + 0.5f) / OutH;
 		for (int32 X = 0; X < Region.Width(); ++X)
 		{
 			if (X + Region.Min.X < 0 || X + Region.Min.X >= OutW || Y + Region.Min.Y < 0 || Y + Region.Min.Y >= OutH)
@@ -291,7 +328,7 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 				Pixels[Y * Region.Width() + X] = FColor::Transparent;
 				continue;
 			}
-			const float NX = static_cast<float>(X + Region.Min.X) / FMath::Max(1, OutW - 1);
+			const float NX = (static_cast<float>(X + Region.Min.X) + 0.5f) / OutW;
 			const float U = static_cast<float>((NX - 0.5) * Sampling.CropScale.X + 0.5);
 			const float V = static_cast<float>((NY - 0.5) * Sampling.CropScale.Y + 0.5);
 			if (Sampling.bClipToCrop && (U < 0.0f || U > 1.0f || V < 0.0f || V > 1.0f))
@@ -299,24 +336,47 @@ UTexture2D* FProceduralShapeGenerator::ApplyAffineCrop(
 				Pixels[Y * Region.Width() + X] = FColor(0, 0, 0, 0);
 				continue;
 			}
-			const auto& Map = Sampling.Transform;
 			const float SU = Map.A * U + Map.B * V + Map.TX;
 			const float SV = Map.C * U + Map.D * V + Map.TY;
-			const float SX = SU * (SrcW - 1);
-			const float SY = SV * (SrcH - 1);
+			const float SX = SU * SrcW - 0.5f;
+			const float SY = SV * SrcH - 0.5f;
 
-			if (SX < -0.5f || SX >= SrcW || SY < -0.5f || SY >= SrcH)
+			const float SourceX = SU * OriginalSize.X - 0.5f;
+			const float SourceY = SV * OriginalSize.Y - 0.5f;
+			if (AddressMode == ECropAddressMode::Transparent
+				&& (SourceX < -0.5f || SourceX >= OriginalSize.X || SourceY < -0.5f || SourceY >= OriginalSize.Y))
 			{
 				Pixels[Y * Region.Width() + X] = FColor(0, 0, 0, 0);
 				continue;
 			}
 
-			const int32 X0 = FMath::Clamp(FMath::FloorToInt(SX), 0, SrcW - 1);
-			const int32 Y0 = FMath::Clamp(FMath::FloorToInt(SY), 0, SrcH - 1);
+			const float ClampedX = FMath::Clamp(SX, 0.0f, static_cast<float>(SrcW - 1));
+			const float ClampedY = FMath::Clamp(SY, 0.0f, static_cast<float>(SrcH - 1));
+			const int32 X0 = FMath::FloorToInt(ClampedX);
+			const int32 Y0 = FMath::FloorToInt(ClampedY);
 			const int32 X1 = FMath::Min(X0 + 1, SrcW - 1);
 			const int32 Y1 = FMath::Min(Y0 + 1, SrcH - 1);
-			const float FX = SX - FMath::FloorToFloat(SX);
-			const float FY = SY - FMath::FloorToFloat(SY);
+			const float FX = ClampedX - X0;
+			const float FY = ClampedY - Y0;
+
+			if (FilteredData)
+			{
+				// Alpha-weighted ImageCore output is straight, linear RGBA. Interpolate coverage once.
+				const auto Premultiply = [](FLinearColor Color)
+				{
+					return FLinearColor(Color.R * Color.A, Color.G * Color.A, Color.B * Color.A, Color.A);
+				};
+				FLinearColor Color = FMath::Lerp(
+					FMath::Lerp(Premultiply(FilteredData[Y0 * SrcW + X0]), Premultiply(FilteredData[Y0 * SrcW + X1]), FX),
+					FMath::Lerp(Premultiply(FilteredData[Y1 * SrcW + X0]), Premultiply(FilteredData[Y1 * SrcW + X1]), FX), FY);
+				if (Color.A > SMALL_NUMBER)
+				{
+					Color.R /= Color.A; Color.G /= Color.A; Color.B /= Color.A;
+				}
+				else Color = FLinearColor::Transparent;
+				Pixels[Y * Region.Width() + X] = Color.ToFColorSRGB();
+				continue;
+			}
 
 			const FColor& C00 = SrcData[Y0 * SrcW + X0];
 			const FColor& C10 = SrcData[Y0 * SrcW + X1];

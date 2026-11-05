@@ -4,6 +4,9 @@
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGCanvasFlattening.h"
+#include "Design2UMGConverter.h"
+#include "Design2UMGCoreTestHelpers.h"
+#include "Design2UMGCoreTestNodes.h"
 #include "UMGSchema.h"
 #include "UMGSchemaSourceExtensions.h"
 #include "UMGWidgetTypes.h"
@@ -16,6 +19,7 @@ namespace
 		Node.Type = UMGWidgetTypes::CanvasPanel;
 		Node.Name = Name;
 		Node.Id = Name;
+		Node.MutableSource().SourceNodeId = Name;
 		Node.Slot.Offsets.Left = X;
 		Node.Slot.Offsets.Top = Y;
 		return Node;
@@ -27,6 +31,7 @@ namespace
 		Node.Type = UMGWidgetTypes::Image;
 		Node.Name = Name;
 		Node.Id = Name;
+		Node.MutableSource().SourceNodeId = Name;
 		Node.Slot.Offsets.Left = X;
 		Node.Slot.Offsets.Top = Y;
 		Node.Bounds.X = X;
@@ -74,8 +79,15 @@ bool FCanvasFlatteningMergeNestedCanvasTest::RunTest(const FString&)
 	MidChildren.Add(MakeLeaf(TEXT("after"), 40.0f, 50.0f));
 	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
+	FUMGWidgetNode ReferencedRoot = Root;
+	Design2UMGCanvasFlattening::FFlattenStats ReferencedStats;
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(ReferencedRoot, {TEXT("inner")}, ReferencedStats);
+	TestEqual(TEXT("Referenced animation container is not merged"), ReferencedStats.MergedNestedCanvasCount, 0);
+	TestEqual(TEXT("Referenced animation container retains its identity"), ReferencedRoot.Children[0].Children[0].Children[1].Id, FString(TEXT("inner")));
+	TestEqual(TEXT("Referenced animation children retain local coordinates"), ReferencedRoot.Children[0].Children[0].Children[1].Children[0].Slot.Offsets.Left, 5.0f);
+
 	Design2UMGCanvasFlattening::FFlattenStats Stats;
-	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 
 	TestEqual(TEXT("merged one nested canvas"), Stats.MergedNestedCanvasCount, 1);
 	TestEqual(TEXT("removed nothing"), Stats.RemovedEmptyCanvasCount, 0);
@@ -111,7 +123,7 @@ bool FCanvasFlatteningRecursiveCollapseTest::RunTest(const FString&)
 	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 	Design2UMGCanvasFlattening::FFlattenStats Stats;
-	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 
 	// Both outer and inner sit below the preserved depth, so they fold recursively:
 	// the leaf lands directly under mid with the accumulated translation.
@@ -144,7 +156,7 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		TestEqual(TEXT("anchored nested canvas kept"), Stats.MergedNestedCanvasCount, 0);
 		TestEqual(TEXT("child kept"), Root.Children[0].Children[0].Children.Num(), 1);
 	}
@@ -160,7 +172,7 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		TestEqual(TEXT("anchored grandchild blocks merge"), Stats.MergedNestedCanvasCount, 0);
 		TestEqual(TEXT("nested canvas kept"), Root.Children[0].Children[0].Children.Num(), 1);
 	}
@@ -170,17 +182,19 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Box;
 		Box.Type = UMGWidgetTypes::VerticalBox;
 		Box.Name = TEXT("vbox");
+		Box.MutableSource().SourceNodeId = Box.Name;
 		// Mount below the preserved depth so the exemption cannot mask the parent-type rule.
 		FUMGWidgetNode Deep;
 		Deep.Type = UMGWidgetTypes::VerticalBox;
 		Deep.Name = TEXT("deep_vbox");
+		Deep.MutableSource().SourceNodeId = Deep.Name;
 		FUMGWidgetNode Inner = MakeCanvas(TEXT("inner"), 0.0f, 0.0f);
 		Inner.Children.Add(MakeLeaf(TEXT("a"), 0.0f, 0.0f));
 		Deep.Children.Add(MoveTemp(Inner));
 		Box.Children.Add(MoveTemp(Deep));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Box, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Box, {}, Stats);
 		TestEqual(TEXT("non-canvas parent keeps child"), Stats.MergedNestedCanvasCount, 0);
 		TestEqual(TEXT("canvas child kept"), Box.Children[0].Children.Num(), 1);
 	}
@@ -195,7 +209,7 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		TestEqual(TEXT("wrapped canvas kept"), Stats.MergedNestedCanvasCount, 0);
 	}
 
@@ -209,7 +223,7 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		TestEqual(TEXT("mapped candidate kept"), Stats.MergedNestedCanvasCount, 0);
 	}
 
@@ -224,10 +238,50 @@ bool FCanvasFlatteningBlocksUnsafeMergeTest::RunTest(const FString&)
 		FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		TestEqual(TEXT("component instance kept"), Stats.MergedNestedCanvasCount, 0);
 	}
 
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Wrappers generated around one source node do not count as design levels
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCanvasFlatteningSourceLevelDepthTest,
+	"Design2UMG.Unit.CanvasFlattening.SourceLevelDepth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FCanvasFlatteningSourceLevelDepthTest::RunTest(const FString&)
+{
+	// A contour-clipped page: RetainerBox and Overlay wrappers keep the page id, and the
+	// page's own canvas moves below them.
+	FUMGWidgetNode Layout = MakeCanvas(TEXT("page__contour_layout"), 0.0f, 0.0f);
+	Layout.MutableSource().SourceNodeId = TEXT("page");
+	FUMGWidgetNode Group = MakeCanvas(TEXT("group"), 0.0f, 0.0f);
+	FUMGWidgetNode Sub = MakeCanvas(TEXT("sub"), 0.0f, 0.0f);
+	FUMGWidgetNode Relay = MakeCanvas(TEXT("relay"), 4.0f, 0.0f);
+	Relay.Children.Add(MakeLeaf(TEXT("leaf"), 1.0f, 0.0f));
+	Sub.Children.Add(MoveTemp(Relay));
+	Group.Children.Add(MoveTemp(Sub));
+	Layout.Children.Add(MoveTemp(Group));
+	FUMGWidgetNode Content;
+	Content.Type = UMGWidgetTypes::Overlay;
+	Content.Id = TEXT("page__contour_content");
+	Content.Children.Add(MoveTemp(Layout));
+	FUMGWidgetNode Root;
+	Root.Type = UMGWidgetTypes::RetainerBox;
+	Root.Id = TEXT("page");
+	Root.Children.Add(MoveTemp(Content));
+
+	Design2UMGCanvasFlattening::FFlattenStats Stats;
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
+	TestEqual(TEXT("Only the third source level merges"), Stats.MergedNestedCanvasCount, 1);
+	const FUMGWidgetNode& KeptGroup = Root.Children[0].Children[0].Children[0];
+	TestEqual(TEXT("The page's direct child keeps its panel"), KeptGroup.Id, FString(TEXT("group")));
+	TestEqual(TEXT("The page's grandchild keeps its panel"), KeptGroup.Children[0].Id, FString(TEXT("sub")));
+	TestEqual(TEXT("The relay canvas merges into its parent"), KeptGroup.Children[0].Children[0].Id, FString(TEXT("leaf")));
 	return true;
 }
 
@@ -252,7 +306,7 @@ bool FCanvasFlatteningPropagatesCanvasOpacityTest::RunTest(const FString&)
 	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 	Design2UMGCanvasFlattening::FFlattenStats Stats;
-	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 
 	TestEqual(TEXT("canvas merged"), Stats.MergedNestedCanvasCount, 1);
 	const FUMGWidgetNode& Mid = Root.Children[0].Children[0];
@@ -285,7 +339,7 @@ bool FCanvasFlatteningBlocksNonTranslatableRenderTest::RunTest(const FString&)
 	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 	Design2UMGCanvasFlattening::FFlattenStats Stats;
-	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 
 	TestEqual(TEXT("rotated canvas kept"), Stats.MergedNestedCanvasCount, 0);
 	TestEqual(TEXT("both wrappers kept"), Root.Children[0].Children[0].Children.Num(), 2);
@@ -311,7 +365,7 @@ bool FCanvasFlatteningRemoveEmptyCanvasTest::RunTest(const FString&)
 	FUMGWidgetNode Root = MakeScene(MoveTemp(MidChildren));
 
 	Design2UMGCanvasFlattening::FFlattenStats Stats;
-	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+	Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 
 	TestEqual(TEXT("only the plain empty canvas removed"), Stats.RemovedEmptyCanvasCount, 1);
 	TestEqual(TEXT("remaining children"), Root.Children[0].Children[0].Children.Num(), 2);
@@ -349,7 +403,7 @@ bool FCanvasFixedSizeCarrierTest::RunTest(const FString&)
 		if (Boundary == 9) Content.MutableSource().SourceNodeType = TEXT("INSTANCE");
 		Carrier.Children.Add(MoveTemp(Content)); Canvas.Children.Add(MoveTemp(Carrier)); Root.Children.Add(MoveTemp(Canvas));
 		Design2UMGCanvasFlattening::FFlattenStats Stats;
-		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, Stats);
+		Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(Root, {}, Stats);
 		const bool bExpectedFold = Boundary < 2;
 		TestEqual(TEXT("Only supported parent allocation boundary permits folding"), Stats.RemovedRedundantSizeCarrierCount, bExpectedFold ? 1 : 0);
 		const FUMGWidgetNode& Result = Root.Children[0].Children[0];
@@ -361,6 +415,38 @@ bool FCanvasFixedSizeCarrierTest::RunTest(const FString&)
 			TestEqual(TEXT("Explicit canvas width preserved"), Result.Slot.Offsets.Right, 70.f);
 		}
 	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// The preserve-source-nodes setting keeps coordinate-only groups as their own panels
+// ---------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCanvasPreserveSourceNodesTest,
+	"Design2UMG.Unit.CanvasFlattening.PreserveSourceNodes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FCanvasPreserveSourceNodesTest::RunTest(const FString& Parameters)
+{
+	using namespace Design2UMGCoreTests;
+	auto Group = MakeNode(TEXT("group"), EDesignNodeType::Group);
+	Group->Transform.SetPosition(10.0f, 10.0f);
+	auto Leaf = MakeNode(TEXT("leaf"), EDesignNodeType::Rectangle);
+	Leaf->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#2288CC")));
+	Group->Children.Add(Leaf);
+	// Page, section and block are preserved page-level entities; the group below them is coordinate relay.
+	auto Block = MakeNode(TEXT("block"), EDesignNodeType::Frame, FDesignSize::Fixed(200.0f), FDesignSize::Fixed(100.0f));
+	Block->Children.Add(Group);
+	auto Section = MakeNode(TEXT("section"), EDesignNodeType::Frame, FDesignSize::Fixed(300.0f), FDesignSize::Fixed(200.0f));
+	Section->Children.Add(Block);
+	auto Page = MakeNode(TEXT("page"), EDesignNodeType::Frame, FDesignSize::Fixed(400.0f), FDesignSize::Fixed(300.0f));
+	Page->Children.Add(Section);
+	for (const auto& Frame : {Page, Section, Block, Group}) Frame->LayoutData.Layout = EDesignLayout::None;
+	FDesignDocument Document;
+	Document.Children.Add(Page);
+
+	FDesign2UMGConversionSettings Settings = FDesign2UMGConversionSettings::Defaults();
+	TestNull(TEXT("Default conversion merges the coordinate-only group"), FindWidgetByIdRecursive(FDesign2UMGConverter::Convert(Document, Settings).RootWidget, TEXT("group")));
+	Settings.bPreserveSourceNodes = true;
+	TestNotNull(TEXT("Preserved conversion keeps the group panel"), FindWidgetByIdRecursive(FDesign2UMGConverter::Convert(Document, Settings).RootWidget, TEXT("group")));
 	return true;
 }
 

@@ -158,6 +158,7 @@ FString Design2UMGWidgetNodeAccess::SerializeGradientMaterialParams(const FUMGVi
 
 	Design2UMGGradientMaterialParams::FGradientParams Params;
 	Params.bRadial = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Radial"), ESearchCase::IgnoreCase);
+	Params.bAngular = Gradient.Type.IsSet() && Gradient.Type.GetValue().Equals(TEXT("Angular"), ESearchCase::IgnoreCase);
 	const bool bIsLinear = !Gradient.Type.IsSet()
 		|| Gradient.Type.GetValue().Equals(TEXT("Linear"), ESearchCase::IgnoreCase);
 	Params.bHasLinearEndpoints = bIsLinear && Gradient.StartPoint.IsSet() && Gradient.EndPoint.IsSet();
@@ -501,6 +502,7 @@ namespace
 	// Scroll box.
 	AppendVerboseProperty(Dump, UMGPropertyKeys::Orientation, ScrollBox.Orientation);
 	AppendVerboseProperty(Dump, UMGPropertyKeys::ScrollBarVisibility, ScrollBox.ScrollBarVisibility);
+	if (ScrollBox.ScrollOffset.IsSet()) AppendVerboseFloat(Dump, UMGPropertyKeys::ScrollOffset, ScrollBox.ScrollOffset.GetValue());
 	}
 }
 

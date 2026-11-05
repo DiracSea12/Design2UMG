@@ -1,0 +1,42 @@
+Key,SourceString
+PreviewTitle,Design2UMG 预览 — 检查预览与 JSON 后生成
+UMGPreviewFit,UMG 预览（适应窗口）
+UMGPreviewActualSize,UMG 预览（1:1）
+PreviewActualSize,原始大小（1:1）
+FitPreview,适应窗口
+FitPreviewTooltip,切换完整预览与可滚动的原始大小预览。
+PreviewReady,修改 JSON 后自动刷新预览
+JsonEditor,JSON（可编辑）
+FormatJson,格式化
+ConversionWarningsSummary,转换告警：{0} 条
+ImageFailuresSummary,图片解析失败：{0} 张
+OutputPath,输出路径：
+Cancel,取消
+Generate,生成蓝图
+StateSaved,已保存
+StateRestored,已恢复
+StateIndeterminate,不确定
+StateUnchanged,未更改
+StateModified,已修改
+StateRecoveryFailed,恢复失败
+ImageDiagnosticReason,{0}：{1}
+ImageDiagnosticItem,\n  - {0}
+EmptyOutputPath,请填写输出路径。
+RefreshRequiredBeforeGenerate,预览正在刷新或已过期，请刷新成功后再生成。
+NoConfirmationHandler,未开始生成：未绑定确认处理器。
+GenerationMetadataIncomplete,资源已保存，但生成元数据未完成。
+GenerationRollbackIncomplete,生成失败且恢复未完成。重试前请检查资源与内存状态。
+GenerationRecoveryStates,\n资源状态：{0}；元数据状态：{1}；内存状态：{2}。
+GenerationConflict,生成因冲突停止。
+GenerationOutputIncomplete,资源已保存，但请求的输出未全部完成。
+GenerationFailed,生成未完成。
+GenerationAssetPath,\n资源：{0}
+GenerationDegraded,生成已完成，但部分效果有降级。请查看导入诊断。
+InvalidJson,JSON 解析失败，请检查语法。
+MissingRootWidget,缺少必需字段：RootWidget
+RootWidgetNotObject,RootWidget 必须是对象。
+MissingRootWidgetType,RootWidget 缺少必需字段：Type
+Parsing,正在解析 JSON…
+PreviewWidgetMissing,预览构建完成，但没有控件。\n请查看输出日志。
+PreserveSourceNodes,保留所有设计节点（不合并只用于定位的分组）
+PreserveSourceNodesTooltip,勾选后每个设计分组都保留成独立面板，可按设计稿名称找到；不勾选时只负责定位的空分组会合并到上一级，控件树更精简。两种方式画面完全相同。切换后会重新转换并刷新预览。

@@ -560,7 +560,7 @@ float4 d=Texture2DSampleLevel(Destination,DestinationSampler,p,0);
 float4 c=Texture2DSampleLevel(Composition,CompositionSampler,p,0);
 return float4(c.rgb-d.rgb*(1-s.a),s.a);)D2U")
         : TEXT("return Texture2DSampleLevel(Source,SourceSampler,UV,0)*GroupOpacity;");
-    const FString Identity = Code + FillColorTransferCode + FString::Printf(TEXT("|background-pass|%d|%d|true-alpha-canvas-inverse-opacity"), int32(Pass), BlendMode);
+    const FString Identity = Code + FString::Printf(TEXT("|background-pass|%d|%d|true-alpha-canvas-inverse-opacity|linear-composition-output"), int32(Pass), BlendMode);
     const FString Name = TEXT("D2U_PencilBackground_") + FMD5::HashAnsiString(*Identity);
     const FString PackageName = TEXT("/Game/Design2UMG/GeneratedMaterials/") + Name;
     if (auto* Existing = LoadObject<UMaterial>(nullptr, *(PackageName + TEXT(".") + Name), nullptr, LOAD_NoWarn))
@@ -616,22 +616,8 @@ return float4(c.rgb-d.rgb*(1-s.a),s.a);)D2U")
         Opacity->ParameterName = TEXT("D2UGroupOpacity"); Opacity->DefaultValue = 1;
         Input(Program, TEXT("GroupOpacity"), Opacity);
     }
-    UMaterialExpression* Color = Mask(Material.Get(), Program, 3);
-    if (Consumer)
-    {
-        auto* Transfer = Expression<UMaterialExpressionCustom>(Material.Get());
-        Transfer->OutputType = CMOT_Float3; Transfer->Code = FillColorTransferCode;
-        Input(Transfer, TEXT("EncodedRGB"), Color);
-        auto* One = Expression<UMaterialExpressionConstant>(Material.Get()); One->R = 1;
-        Input(Transfer, TEXT("VertexOpacity"), One);
-        auto* OutputRole = Expression<UMaterialExpressionScalarParameter>(Material.Get());
-        OutputRole->ParameterName = TEXT("D2UOutputLinearize"); OutputRole->DefaultValue = 1;
-        auto* Select = Expression<UMaterialExpressionCustom>(Material.Get());
-        Select->OutputType = CMOT_Float3; Select->Code = TEXT("return lerp(EncodedRGB,LinearRGB,OutputLinearize);");
-        Input(Select, TEXT("EncodedRGB"), Color); Input(Select, TEXT("LinearRGB"), Transfer); Input(Select, TEXT("OutputLinearize"), OutputRole);
-        Color = Select;
-    }
-    Material->GetExpressionInputForProperty(MP_EmissiveColor)->Expression = Color;
+    // Every pass reads linear targets (canvas output or decoded captures), so Slate's UI encode alone is the output transfer.
+    Material->GetExpressionInputForProperty(MP_EmissiveColor)->Expression = Mask(Material.Get(), Program, 3);
     UMaterialExpression* Alpha = Mask(Material.Get(), Program, 1, true);
     if (Canvas)
     {

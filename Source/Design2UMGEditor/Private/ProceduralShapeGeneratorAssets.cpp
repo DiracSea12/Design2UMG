@@ -18,21 +18,31 @@ namespace
 	TArray<TWeakObjectPtr<UTexture2D>> GRootedTextures;
 	bool GbHasPendingTextureUpdates = false;
 
-	FLinearColor SampleGradientStops(const TArray<ProceduralShapeGeneratorAssets::FGradientStop>& Stops, float T)
+	FColor InterpolateGradientColor(const FLinearColor& Start, const FLinearColor& End, float T)
+	{
+		// Texture RGB uses the source sRGB encoding; alpha remains linear coverage.
+		FLinearColor EncodedStart = Start.ToFColor(true).ReinterpretAsLinear();
+		FLinearColor EncodedEnd = End.ToFColor(true).ReinterpretAsLinear();
+		EncodedStart.A = Start.A;
+		EncodedEnd.A = End.A;
+		return FMath::Lerp(EncodedStart, EncodedEnd, T).ToFColor(false);
+	}
+
+	FColor SampleGradientStops(const TArray<ProceduralShapeGeneratorAssets::FGradientStop>& Stops, float T)
 	{
 		if (Stops.Num() == 0)
 		{
-			return FLinearColor::Transparent;
+			return FColor::Transparent;
 		}
 
 		if (Stops.Num() == 1)
 		{
-			return Stops[0].Color;
+			return Stops[0].Color.ToFColor(true);
 		}
 
 		if (T <= Stops[0].Position)
 		{
-			return Stops[0].Color;
+			return Stops[0].Color.ToFColor(true);
 		}
 
 		for (int32 Index = 1; Index < Stops.Num(); ++Index)
@@ -42,11 +52,11 @@ namespace
 				const float Span = Stops[Index].Position - Stops[Index - 1].Position;
 				float LocalT = Span > KINDA_SMALL_NUMBER ? (T - Stops[Index - 1].Position) / Span : 0.0f;
 				LocalT = FMath::Clamp(LocalT, 0.0f, 1.0f);
-				return FMath::Lerp(Stops[Index - 1].Color, Stops[Index].Color, LocalT);
+				return InterpolateGradientColor(Stops[Index - 1].Color, Stops[Index].Color, LocalT);
 			}
 		}
 
-		return Stops.Last().Color;
+		return Stops.Last().Color.ToFColor(true);
 	}
 
 	float ComputeRadialGradientDistance(
@@ -619,7 +629,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
-			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
+			return InterpolateGradientColor(ColorStart, ColorEnd, T);
 		}, RasterRegion);
 	}
 
@@ -633,7 +643,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, &Stops](int32 X, int32 Y)
 		{
 			const float T = Width > 1 ? static_cast<float>(X) / (Width - 1) : 0.0f;
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 
@@ -642,7 +652,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, ColorStart, ColorEnd](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
-			return FMath::Lerp(ColorStart, ColorEnd, T).ToFColor(true);
+			return InterpolateGradientColor(ColorStart, ColorEnd, T);
 		}, RasterRegion);
 	}
 
@@ -656,7 +666,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Height, &Stops](int32 X, int32 Y)
 		{
 			const float T = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 
@@ -690,7 +700,7 @@ namespace ProceduralShapeGeneratorAssets
 				FVector2D::DotProduct(Pixel - StartPixel, Direction) / DirectionSizeSquared,
 				0.0f,
 				1.0f);
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 
@@ -718,7 +728,7 @@ namespace ProceduralShapeGeneratorAssets
 			const float NY = Height > 1 ? static_cast<float>(Y) / (Height - 1) : 0.0f;
 			float T = NX * DirX + NY * DirY - TMin;
 			T = TRange > KINDA_SMALL_NUMBER ? FMath::Clamp(T / TRange, 0.0f, 1.0f) : 0.0f;
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 
@@ -743,7 +753,7 @@ namespace ProceduralShapeGeneratorAssets
 			const float Angle = FMath::Atan2(static_cast<float>(V), static_cast<float>(U)) - StartRad;
 			float T = Angle / (2.0f * PI);
 			T -= FMath::FloorToFloat(T);
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 
@@ -760,7 +770,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, ColorCenter, ColorEdge](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
-			return FMath::Lerp(ColorCenter, ColorEdge, T).ToFColor(true);
+			return InterpolateGradientColor(ColorCenter, ColorEdge, T);
 		}, RasterRegion);
 	}
 
@@ -781,7 +791,7 @@ namespace ProceduralShapeGeneratorAssets
 		return GenerateShapeTexture(Width, Height, Outer, Budget, [Width, Height, &CenterNormalized, &SizeScale, RotationDeg, &Stops](int32 X, int32 Y)
 		{
 			const float T = ComputeRadialGradientDistance(X, Y, Width, Height, CenterNormalized, SizeScale, RotationDeg);
-			return SampleGradientStops(Stops, T).ToFColor(true);
+			return SampleGradientStops(Stops, T);
 		}, RasterRegion);
 	}
 

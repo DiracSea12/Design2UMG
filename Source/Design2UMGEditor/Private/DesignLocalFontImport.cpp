@@ -415,7 +415,8 @@ namespace
 				}
 				return true;
 			};
-			return Visit(Targets.Children) && Visit(Targets.SourceDocument().ImportedNodes);
+			return Visit(Targets.Children) && Visit(Targets.SourceDocument().ImportedNodes)
+				&& Visit(Targets.SourceDocument().PrototypePages);
 		};
 		// Only fonts actually resolved for this import supply glyphs through their own native composite selection.
 		ForEachText([&](const FString&, const FString& Family, const FString& PostScript,
@@ -855,6 +856,7 @@ bool Prepare(const FDesignDocument& Document, const FDesign2UMGConversionSetting
 	TArray<FRequest> Requests;
 	Collect(Document.Children, Requests);
 	Collect(Document.SourceDocument().ImportedNodes, Requests);
+	Collect(Document.SourceDocument().PrototypePages, Requests);
 	const bool bHasIcons = Requests.ContainsByPredicate([](const FRequest& Request) { return Request.bIcon; });
 	for (int32 Index = 0; Index < Requests.Num();)
 	{

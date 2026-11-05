@@ -82,6 +82,31 @@ bool FVisualMapperMultiFillIntegrationTest::RunTest(const FString& Parameters)
 		{
 			return Child.Id.EndsWith(Design2UMGGeneratedNameSuffixes::Content());
 		}));
+	FDesignFill FitFill;
+	FitFill.Type = EDesignFillType::Image;
+	FitFill.Image.Mode = EDesignImageMode::Fit;
+	FitFill.Image.Url = TEXT("fit_image");
+	Node->Visual.Fills[1] = FitFill;
+	FUMGWidgetNode FitBase;
+	FitBase.Type = TEXT("Image");
+	FitBase.Id = TEXT("fit_widget");
+	const FUMGWidgetNode FitWrapped = VisualMapper::WrapWithMultiFill(MoveTemp(FitBase), Node, FVisualMapperOptions());
+	if (!TestTrue(TEXT("FIT fill retains a ScaleBox and its image"), FitWrapped.Children.Num() == 2
+		&& FitWrapped.Children[1].Type == TEXT("ScaleBox") && FitWrapped.Children[1].Children.Num() == 1)) return false;
+	const auto& FitImage = FitWrapped.Children[1].Children[0];
+	TestTrue(TEXT("FIT image is centered rather than stretched by its slot"),
+		FitImage.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center
+		&& FitImage.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Center);
+	Node->Transform.SetHeightValue(FDesignSize::Fixed(96.0f));
+	FUMGWidgetNode SquareBase;
+	SquareBase.Type = TEXT("Image");
+	SquareBase.Id = TEXT("fit_square_widget");
+	const FUMGWidgetNode SquareFit = VisualMapper::WrapWithMultiFill(MoveTemp(SquareBase), Node, FVisualMapperOptions());
+	if (!TestTrue(TEXT("Square FIT surface retains its image"), SquareFit.Children.Num() == 2
+		&& SquareFit.Children[1].Children.Num() == 1)) return false;
+	TestTrue(TEXT("FIT image keeps its intrinsic aspect on a square surface"),
+		!SquareFit.Children[1].Children[0].WidgetStyle.WidthOverride.IsSet()
+		&& !SquareFit.Children[1].Children[0].WidgetStyle.HeightOverride.IsSet());
 	return true;
 }
 
@@ -688,7 +713,7 @@ bool FVisualMapperGlyphShadowBlendTransferTest::RunTest(const FString&)
     MixedText.Name = TextNode->Name;
     VisualMapper::ApplyVisualProperties(MixedText, TextNode);
     FUMGWidgetNode MixedGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(MixedText), TextNode, FVisualMapperOptions(), false);
+        MoveTemp(MixedText), TextNode, FVisualMapperOptions(), false, false);
     const FUMGWidgetNode* SharedShadow = nullptr;
     int32 RawGlyphCount = 0;
     int32 IndependentInnerCount = 0;
@@ -725,7 +750,7 @@ bool FVisualMapperGlyphShadowBlendTransferTest::RunTest(const FString&)
     InnerText.Name = TextNode->Name;
     VisualMapper::ApplyVisualProperties(InnerText, TextNode);
     FUMGWidgetNode InnerGlyphGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(InnerText), TextNode, FVisualMapperOptions(), false);
+        MoveTemp(InnerText), TextNode, FVisualMapperOptions(), false, false);
     SharedShadow = nullptr; RawGlyphCount = 0; IndependentInnerCount = 0; RawGlyphHasBlend = false;
     Inspect(InnerGlyphGroup);
     TestTrue(TEXT("Glyph inner-only blend reuses the same capture with no outer layers"),
@@ -766,7 +791,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     InnerShape.Type = TEXT("Border");
     VisualMapper::ApplyVisualProperties(InnerShape, ShapeNode);
     FUMGWidgetNode InnerShapeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(InnerShape), ShapeNode, FVisualMapperOptions(), false);
+        MoveTemp(InnerShape), ShapeNode, FVisualMapperOptions(), false, false);
     TestTrue(TEXT("Ordinary inner shadow passes only its own paint mode"),
         InnerShapeGroup.Effect.EffectMaterial.Get(FString()) == UMGPropertyKeys::RetainerInnerShadowEffectRef
         && InnerShapeGroup.Effect.InnerShadowBlendMode.Get(FString()) == TEXT("screen")
@@ -780,7 +805,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     StrokedShape.Type = TEXT("Border");
     VisualMapper::ApplyVisualProperties(StrokedShape, ShapeNode);
     FUMGWidgetNode StrokeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(StrokedShape), ShapeNode, FVisualMapperOptions(), true);
+        MoveTemp(StrokedShape), ShapeNode, FVisualMapperOptions(), true, false);
     TestTrue(TEXT("Already-native stroke becomes a single independent blended paint"),
         StrokeGroup.Children.Num() == 2 && !StrokeGroup.Children[0].Brush.OutlineThickness.IsSet()
         && StrokeGroup.Children[1].Render.PaintBlendMode.Get(FString()) == TEXT("overlay"));
@@ -794,7 +819,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     VisualMapper::ApplyVisualProperties(LayeredShape, ShapeNode);
     TestTrue(TEXT("Layered fill fixture starts with a native outline"), LayeredShape.Brush.OutlineThickness.IsSet());
     FUMGWidgetNode LayeredStrokeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(LayeredShape), ShapeNode, FVisualMapperOptions(), true);
+        MoveTemp(LayeredShape), ShapeNode, FVisualMapperOptions(), true, false);
     TestTrue(TEXT("Layered fill clears its original outline and preserves child content"),
         LayeredStrokeGroup.Children.Num() == 2 && LayeredStrokeGroup.Children[0].Children.Num() == 2
         && LayeredStrokeGroup.Children[0].Children[0].Render.PaintBlendMode.Get(FString()) == TEXT("multiply")
@@ -816,7 +841,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     StrokeOnlyShape.Render.RenderTransformPivot = FVector2D(.25f, .75f);
     StrokeOnlyShape.Render.RenderTranslation = FVector2D(7.0f, 9.0f);
     FUMGWidgetNode CollapsedStroke = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(StrokeOnlyShape), ShapeNode, FVisualMapperOptions(), true);
+        MoveTemp(StrokeOnlyShape), ShapeNode, FVisualMapperOptions(), true, false);
     TestTrue(TEXT("Stroke-only paint collapses to one image with its independent blend"),
         CollapsedStroke.Type == TEXT("Image") && CollapsedStroke.Children.IsEmpty()
         && CollapsedStroke.Id == ShapeNode->Id && CollapsedStroke.Name == ShapeNode->Name
@@ -835,7 +860,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     StrokeOnlyLine.Render.RenderOpacity = .6f;
     StrokeOnlyLine.Render.RenderTranslation = FVector2D(7.0f, 9.0f);
     FUMGWidgetNode CollapsedLine = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
-        MoveTemp(StrokeOnlyLine), ShapeNode, FVisualMapperOptions(), false);
+        MoveTemp(StrokeOnlyLine), ShapeNode, FVisualMapperOptions(), false, false);
     TestTrue(TEXT("Stroke-only line retains blend, opacity and centered ink offset"),
         CollapsedLine.Type == TEXT("Image") && CollapsedLine.Children.IsEmpty()
         && CollapsedLine.Render.PaintBlendMode.Get(FString()) == TEXT("overlay")
@@ -850,6 +875,17 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     TestTrue(TEXT("Current Figma LIGHTEN adapts while unknown source modes remain errors"),
         VisualMapperFillTransfer::CanonicalPaintBlendMode(TEXT("LIGHTEN")) == TEXT("light")
         && VisualMapperFillTransfer::CanonicalPaintBlendMode(TEXT("unknown-mode")) == TEXT("unknown-mode"));
+    for (const TPair<FString, FString>& Mode : {
+        TPair<FString, FString>(TEXT("LINEAR-BURN"), TEXT("linearBurn")),
+        TPair<FString, FString>(TEXT("COLOR-BURN"), TEXT("colorBurn")),
+        TPair<FString, FString>(TEXT("LINEAR-DODGE"), TEXT("linearDodge")),
+        TPair<FString, FString>(TEXT("COLOR-DODGE"), TEXT("colorDodge")),
+        TPair<FString, FString>(TEXT("SOFT-LIGHT"), TEXT("softLight")),
+        TPair<FString, FString>(TEXT("HARD-LIGHT"), TEXT("hardLight"))})
+    {
+        TestEqual(*Mode.Key, VisualMapperFillTransfer::CanonicalPaintBlendMode(Mode.Key), Mode.Value);
+        TestEqual(*Mode.Key, VisualMapperFillTransfer::CanonicalPaintBlendMode(Mode.Key.Replace(TEXT("-"), TEXT("_"))), Mode.Value);
+    }
 
     return true;
 }

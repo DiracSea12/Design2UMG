@@ -38,6 +38,7 @@ public:
 
 	static void SetBlueprintExportBounds(UWidgetBlueprint* WidgetBlueprint, const TOptional<FBox2D>& Bounds);
 	static FBox2D GetBlueprintExportBounds(UWidgetBlueprint* WidgetBlueprint);
+	static void ApplyAuthoredVisibility(UWidgetTree* WidgetTree);
 
 	static bool RenderWidgetToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize, FString* OutError = nullptr, const TOptional<FVector2D>& RenderSizeOverride = TOptional<FVector2D>(), const TOptional<FVector2D>& RootExportOffset = TOptional<FVector2D>(), TStrongObjectPtr<UUserWidget>* OutRenderedWidget = nullptr, TSharedPtr<SWidget>* OutRenderedSlateWidget = nullptr);
 	static bool RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArray<uint8>& OutPngData, FIntPoint& OutSize);

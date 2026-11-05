@@ -96,6 +96,9 @@ namespace Design2UMGConverterInternal
 		TSet<FString> PrototypeTriggerNodeIds;
 		TMap<FString, FString> PendingIconFontMappings;
 		FUMGPrototypeNavigationData PrototypeNavigation;
+		TSet<FString> IndependentPaintParentIds;
+		TSet<FString> PaintOrderWidgetIds;
+		TMap<FString, int32> AddedLayerPaintRanks;
 		int32 RecursionDepth = 0;
 		int32 ScriptGeneratedNodeCount = 0;
 	};

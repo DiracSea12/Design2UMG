@@ -241,15 +241,18 @@ bool FPencilSdfSavedRuntimeTest::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("SDF other fill after B repaint=%dx%d value=%s"), BFill->SizeX, BFill->SizeY, *OtherFillAfterRepaint.ToString()));
 	if (!TestTrue(TEXT("Other instance retains its own source after repaint"), Read(BEffect, 16, 32).R > 0)) return false;
 	Draw(A, 96);
+	// A size change replaces the target so every sampler rebinds to the new resource.
+	UTextureRenderTarget2D* Resized = SdfTarget(*A.Effect);
+	if (!TestNotNull(TEXT("Resized SDF remains bound"), Resized)) return false;
 	AddInfo(FString::Printf(TEXT("SDF resized capture=%dx%d SDF=%dx%d distance=%g other=%dx%d"),
-		Alpha->SizeX, Alpha->SizeY, AEffect->SizeX, AEffect->SizeY, Read(AEffect, 16, 32).R, BEffect->SizeX, BEffect->SizeY));
-	if (!TestTrue(TEXT("Resize updates the existing per-instance SDF target"), SdfTarget(*A.Effect) == AEffect && AEffect->SizeX == 96 && AEffect->SizeY == 96)
+		Alpha->SizeX, Alpha->SizeY, Resized->SizeX, Resized->SizeY, Read(Resized, 16, 32).R, BEffect->SizeX, BEffect->SizeY));
+	if (!TestTrue(TEXT("Resize binds a per-instance SDF target at the new size"), Resized->IsIn(A.Root.Get()) && Resized->SizeX == 96 && Resized->SizeY == 96)
 		|| !TestTrue(TEXT("Actual object capture also resizes"), Alpha->SizeX == 96 && Alpha->SizeY == 96)
-		|| !TestTrue(TEXT("Resized capture still supplies current signed data"), FMath::IsFinite(Read(AEffect, 16, 32).R) && Read(AEffect, 16, 32).R < 0)
+		|| !TestTrue(TEXT("Resized capture still supplies current signed data"), FMath::IsFinite(Read(Resized, 16, 32).R) && Read(Resized, 16, 32).R < 0)
 		|| !TestTrue(TEXT("Resize does not change the other instance target"), BEffect->SizeX == 128 && BEffect->SizeY == 128 && SdfTarget(*B.Effect) == BEffect)
 		|| !TestEqual(TEXT("Other instance geometry SDF also stays unchanged"), Read(BFill, 16, 16), OtherFill)) return false;
 	AddInfo(FString::Printf(TEXT("Saved SDF asset=%s world=%s gameWorld=%d Designer=0 effect=%s fill=%s before=%g changed=%g fillSigns=(%g,%g) resized=%dx%d"),
-		*AssetPath, *World->GetName(), World->IsGameWorld(), *AEffect->GetPathName(), *AFill->GetPathName(), Before.R, Changed.R, FillInside.R, FillOutside.R, AEffect->SizeX, AEffect->SizeY));
+		*AssetPath, *World->GetName(), World->IsGameWorld(), *Resized->GetPathName(), *AFill->GetPathName(), Before.R, Changed.R, FillInside.R, FillOutside.R, Resized->SizeX, Resized->SizeY));
 	return true;
 }
 

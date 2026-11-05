@@ -220,11 +220,17 @@ Full behavior and failure recovery: [component blueprint generation](Docs/Compon
 
 Figma prototype connections are converted as follows:
 
-- Trigger nodes are wrapped in a `Button`; multi-page flows get a synthesized `WidgetSwitcher` root.
+- Supported trigger nodes are wrapped in a `Button`; multi-page flows get a synthesized `WidgetSwitcher` root.
 - Supported single-step mouse actions (navigate, open link, overlay, back) and keyboard actions (navigate, open link) are wired as native Blueprint graph nodes.
 - Supported page transitions generate `UWidgetAnimation`s.
 
-Multi-step or conditional flows, drag, and unsupported trigger/action combinations stay unwired and are listed in the diagnostic report. This is not a general interaction-graph compiler; see [Known limitations](KNOWN_LIMITATIONS.md#interaction-and-animation).
+Multi-step or conditional flows, drag, and unsupported trigger/action combinations stay unwired and are listed in the diagnostic report. Rejected animations do not create execution buttons or add their target pages to the generated navigation flow; other supported actions in the design remain eligible. This is not a general interaction-graph compiler; see [Known limitations](KNOWN_LIMITATIONS.md#interaction-and-animation).
+
+Limited basic widget animation is implemented as editable engine-native `UWidgetAnimation` tracks for position, rotation, opacity and a single solid color. Size changes are limited to solid rectangles without children, rounded corners, strokes or effects, where native render scale is equivalent; complex layout reflow is unsupported. Real start/end trees must preserve child names, hierarchy and paint order. Tracks use the current action's own duration and precisely representable easing; unsupported changes are diagnosed and refused without an instant switch or approximation.
+
+Click and `MOUSE_ENTER` play forward without automatic restoration. Supported `ON_HOVER` `CHANGE_TO` animation reverses on mouse exit; page-entry `AFTER_TIMEOUT` playback uses its explicit delay. New Plugin exports convert `duration/timeout` from seconds to milliseconds and mark the unit. Unverified HTTP timing blocks the new property animation, while existing static import remains available. `SMART_ANIMATE` overlays are unsupported; ordinary overlays without animation remain available.
+
+Focused functional validation passed, including native input and automatic playback after saving and reopening in a fresh process, plus click-driven movement and solid-color playback from one genuine Toggle recovery package. Four animation designs have fresh complete export packages and have passed real static generation, saved-asset reload and rendering; Loading additionally passed native `AFTER_TIMEOUT` playback. See [Known limitations](KNOWN_LIMITATIONS.md#interaction-and-animation) for remaining animation limits, provenance and retained warnings. Full visual and `no_regression` conclusions require per-case regression evidence against the same inputs and authoritative references; focused functional validation is not full acceptance. General variable/conditional/multi-step state machines, a complete Minesweeper game, a standalone automated interaction score and direct conversion of arbitrary Figma/Pencil code-layer programs into UMG remain outside the scope; see [Explicit non-goals](KNOWN_LIMITATIONS.md#explicit-non-goals).
 
 ## Settings
 

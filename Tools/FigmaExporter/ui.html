@@ -24,12 +24,16 @@
     <label>Scale:</label>
     <input type="text" id="scale" value="2" style="width:40px;flex:none" />
   </div>
-  <button id="exportBtn">Export Selected Frame</button>
+  <div class="row">
+    <label for="rootNodeId">Root node ID:</label>
+    <input type="text" id="rootNodeId" placeholder="Empty = current selection" />
+  </div>
+  <button id="exportBtn">Export Frame</button>
   <div id="progress">
     <div id="progressBar"><div id="progressFill"></div></div>
     <div id="status">Preparing...</div>
   </div>
-  <div class="warn" id="hint">Select a frame in Figma, then click Export.</div>
+  <div class="warn" id="hint">Select a frame or enter its node ID, then click Export.</div>
 
   <script>
     const btn = document.getElementById('exportBtn');
@@ -43,7 +47,8 @@
       btn.disabled = true;
       progressDiv.style.display = 'block';
       hintEl.textContent = '';
-      parent.postMessage({ pluginMessage: { type: 'export', scale } }, '*');
+      const rootNodeId = document.getElementById('rootNodeId').value.trim();
+      parent.postMessage({ pluginMessage: { type: 'export', scale, rootNodeId } }, '*');
     };
 
     // Minimal store-only ZIP builder (no compression, PNGs are already compressed)
@@ -54,16 +59,15 @@
       let offset = 0;
       for (const f of files) {
         const name = enc.encode(f.name);
-        const data = f.data;
-        const crc = crc32(data);
+        const crc = f.crc;
         // Local file header (30 + name.length)
         const lh = new Uint8Array(30 + name.length);
         const lv = new DataView(lh.buffer);
         lv.setUint32(0, 0x04034b50, true);  // signature
         lv.setUint16(4, 20, true);           // version needed
         lv.setUint32(14, crc, true);         // crc32
-        lv.setUint32(18, data.length, true); // compressed size
-        lv.setUint32(22, data.length, true); // uncompressed size
+        lv.setUint32(18, f.size, true);      // compressed size
+        lv.setUint32(22, f.size, true);      // uncompressed size
         lv.setUint16(26, name.length, true); // filename length
         lh.set(name, 30);
         // Central directory entry (46 + name.length)
@@ -73,14 +77,15 @@
         cv.setUint16(4, 20, true);
         cv.setUint16(6, 20, true);
         cv.setUint32(16, crc, true);
-        cv.setUint32(20, data.length, true);
-        cv.setUint32(24, data.length, true);
+        cv.setUint32(20, f.size, true);
+        cv.setUint32(24, f.size, true);
         cv.setUint16(28, name.length, true);
         cv.setUint32(42, offset, true);      // local header offset
         ch.set(name, 46);
-        parts.push(lh, data);
+        parts.push(lh);
+        for (const part of f.parts) parts.push(part);
         central.push(ch);
-        offset += lh.length + data.length;
+        offset += lh.length + f.size;
       }
       const cdOffset = offset;
       let cdSize = 0;
@@ -104,33 +109,70 @@
       for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
       crcTable[i] = c;
     }
-    function crc32(buf) {
-      let crc = 0xFFFFFFFF;
+    function updateCrc32(crc, buf) {
       for (let i = 0; i < buf.length; i++) crc = crcTable[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
-      return (crc ^ 0xFFFFFFFF) >>> 0;
+      return crc;
     }
 
-    function handleDone(msg) {
-      const files = [];
-      const jsonBytes = new TextEncoder().encode(msg.json);
-      files.push({ name: 'design.json', data: jsonBytes });
-      if (!Array.isArray(msg.reference) || msg.reference.length === 0) {
-        throw new Error('Figma reference PNG is missing from the export.');
+    let files = [];
+    let currentFile;
+    let expectedFiles = 0;
+    let warning = '';
+    const encoder = new TextEncoder();
+
+    function receiveExport(msg) {
+      if (msg.type === 'export-start') {
+        files = [];
+        currentFile = undefined;
+        expectedFiles = msg.fileCount;
+        warning = msg.warning;
+      } else if (msg.type === 'export-file') {
+        if (currentFile) throw new Error('The preceding export file is incomplete.');
+        if (msg.kind === 'binary' && msg.length === 0) throw new Error('Figma image bytes are missing: ' + msg.name);
+        currentFile = { name:msg.name, kind:msg.kind, length:msg.length, received:0,
+          size:0, crc:0xFFFFFFFF, parts:[] };
+      } else if (msg.type === 'export-text' || msg.type === 'export-bytes') {
+        if (!currentFile) throw new Error('Export chunk has no file.');
+        let data;
+        if (msg.type === 'export-text') {
+          if (currentFile.kind !== 'text' || typeof msg.data !== 'string') throw new Error('Invalid JSON chunk.');
+          currentFile.received += msg.data.length;
+          data = encoder.encode(msg.data);
+        } else {
+          if (currentFile.kind !== 'binary' || !(msg.data instanceof Uint8Array) || msg.data.length === 0) {
+            throw new Error('Invalid image chunk.');
+          }
+          currentFile.received += msg.data.length;
+          data = msg.data;
+        }
+        currentFile.parts.push(data);
+        currentFile.size += data.length;
+        currentFile.crc = updateCrc32(currentFile.crc, data);
+      } else if (msg.type === 'export-file-end') {
+        if (!currentFile || currentFile.received !== currentFile.length) throw new Error('Export file length is incomplete.');
+        currentFile.crc = (currentFile.crc ^ 0xFFFFFFFF) >>> 0;
+        files.push(currentFile);
+        currentFile = undefined;
+      } else if (msg.type === 'export-complete') {
+        if (currentFile || files.length !== expectedFiles) throw new Error('Export files are incomplete.');
+        statusEl.textContent = 'Creating ZIP...';
+        const zip = buildZip(files);
+        files = [];
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(zip);
+        a.download = 'figma_export.zip';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        progressFill.style.width = '100%';
+        statusEl.textContent = warning ? 'Done with warning' : 'Done!';
+        hintEl.textContent = warning || 'Downloaded figma_export.zip — extract and import in UE5.';
+        hintEl.style.color = warning ? '#e6a23c' : '#1bc47d';
+        btn.disabled = false;
       }
-      files.push({ name: 'reference.png', data: new Uint8Array(msg.reference) });
-      for (const img of (msg.images || [])) {
-        files.push({ name: 'images/' + img.name + '.png', data: new Uint8Array(img.data) });
+      if (currentFile) {
+        statusEl.textContent = `Receiving ${currentFile.name}: ${currentFile.received} / ${currentFile.length}`;
+        progressFill.style.width = (80 + 15 * (files.length + currentFile.received / currentFile.length) / expectedFiles) + '%';
       }
-      const zip = buildZip(files);
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(zip);
-      a.download = 'figma_export.zip';
-      a.click();
-      URL.revokeObjectURL(a.href);
-      statusEl.textContent = msg.warning ? 'Done with warning' : 'Done!';
-      hintEl.textContent = msg.warning || 'Downloaded figma_export.zip — extract and import in UE5.';
-      hintEl.style.color = msg.warning ? '#e6a23c' : '#1bc47d';
-      btn.disabled = false;
     }
 
     onmessage = (e) => {
@@ -139,11 +181,19 @@
       if (msg.type === 'progress') {
         progressFill.style.width = msg.percent + '%';
         statusEl.textContent = msg.text;
-      } else if (msg.type === 'done') {
-        progressFill.style.width = '100%';
-        statusEl.textContent = msg.text;
-        handleDone(msg);
+      } else if (msg.type.startsWith('export-')) {
+        try {
+          receiveExport(msg);
+          parent.postMessage({ pluginMessage:{ type:'export-ack', sequence:msg.sequence } }, '*');
+        } catch (error) {
+          files = [];
+          currentFile = undefined;
+          const text = error.message || String(error);
+          parent.postMessage({ pluginMessage:{ type:'export-ack', sequence:msg.sequence, error:text } }, '*');
+        }
       } else if (msg.type === 'error') {
+        files = [];
+        currentFile = undefined;
         statusEl.textContent = msg.text;
         btn.disabled = false;
         hintEl.textContent = msg.text;

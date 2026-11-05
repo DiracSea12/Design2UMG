@@ -213,8 +213,8 @@ bool FFigmaSquareLuminosityImageOverlayTest::RunTest(const FString& Parameters)
 
 	const FUMGWidgetNode& ImageChild = FitLayer.Children[0];
 	TestEqual(TEXT("Square image child keeps texture"), GetWidgetProperty(ImageChild, TEXT("TexturePath")), TEXT("img_lum_square"));
-	TestEqual(TEXT("Square image child pins width"), GetWidgetProperty(ImageChild, TEXT("WidthOverride")), TEXT("120.0"));
-	TestEqual(TEXT("Square image child pins height"), GetWidgetProperty(ImageChild, TEXT("HeightOverride")), TEXT("120.0"));
+	TestFalse(TEXT("Square image child leaves width to the fit layer"), HasWidgetProperty(ImageChild, TEXT("WidthOverride")));
+	TestFalse(TEXT("Square image child leaves height to the fit layer"), HasWidgetProperty(ImageChild, TEXT("HeightOverride")));
 	TestTrue(TEXT("Square image child applies opacity fallback"),
 		FMath::IsNearlyEqual(FCString::Atof(*GetWidgetProperty(ImageChild, TEXT("RenderOpacity"))), 0.15f, 0.0001f));
 	return true;

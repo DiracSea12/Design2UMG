@@ -28,8 +28,9 @@ Design2UMG 的目标是让 Unreal Engine 项目的 design-to-UMG 流程更容易
 
 - MCP JSON bridge import 和 live Pencil MCP 调试链。
 - 公开托管的 UE formal validation。
-- 原型逻辑的完整 UEdGraph authoring。
-- 完整 Smart Animate、overlay layer semantics、通用 animation authoring 和 design-system sync。
+- 完整 Smart Animate、完整浮层语义、通用动画创作和 design-system sync 当前不承诺。
+
+通用原型逻辑编译（变量计算、条件和多步复杂状态）、完整扫雷、独立交互自动评分已放弃，本轮不恢复，也不作为已发布能力，详见 [不做范围](../KNOWN_LIMITATIONS.md#explicit-non-goals)。
 
 ## 验证和发布门禁
 
@@ -51,9 +52,9 @@ Design2UMG 的目标是让 Unreal Engine 项目的 design-to-UMG 流程更容易
 | Layout conversion | flex-like layout、anchors、offsets 和 fixer rules |
 | Visual properties | fill、stroke、radius、shadow、blur 近似、gradients 和 SVG paths |
 | Component system | ref expansion、variables 和 themes |
-| Prototype flow | 已有最小 typed/runtime 闭环；更完整语义仍是未来工作 |
+| Prototype flow | 支持的单步动作生成原生蓝图连线；不是通用逻辑编译器 |
 | Multiple input sources | `.pen`、Figma REST、本地 Figma export JSON，加上 bridge/debug utilities |
-| Blueprint logic generation | 以 runtime extension 为主；完整 UEdGraph authoring 不是当前 release 承诺 |
+| Blueprint logic generation | 支持的单步鼠标/键盘动作使用原生蓝图节点，不依赖插件运行时类扩展 |
 
 ## v1.0 公开内容
 
@@ -68,14 +69,12 @@ Design2UMG 的目标是让 Unreal Engine 项目的 design-to-UMG 流程更容易
 
 ## v1.1 候选方向
 
-- Prototype flow 扩展：hover、drag、keyboard、conditional flows 和 overlay semantics。
-- 评估是否加入自动 Blueprint graph generation。
-- 可选 tag-based helper flow。
+- [~] 有限基础控件动画已实现：可编辑的原生 `UWidgetAnimation` 覆盖位置、旋转、透明度与单一纯色；尺寸变化仅限可等价为渲染缩放的无子项、无圆角、无描边或特效实心矩形。真实树按同名子项、层级和绘制顺序配对，使用当前动作自己的时长及可精确表达的曲线。点击/`MOUSE_ENTER` 保留结果，受支持 `ON_HOVER` 状态变化在移出时反向播放，页面进入后的 `AFTER_TIMEOUT` 使用明确延时。不可表达变化和 `SMART_ANIMATE` 弹层明确诊断拒绝，普通无动画弹层仍保留。本轮有限定向功能验证已完成，包含新进程重开及一份真实 Toggle 恢复包的点击移动/纯色播放；完整视觉回归未运行，不代表全量验收。来源、覆盖和已有警告见 [交互与动画限制](../KNOWN_LIMITATIONS.md#interaction-and-animation)。
 - 多 stop gradient 和任意角度 gradient。
 
 ## 后续社区驱动方向
 
-- 更高级的交互语义。
+- 进一步扩展交互需另定范围，不由本轮基础动画工作自动承诺。
 - 响应式适配和 safe-zone 支持。
 - Design token 和 design-system sync。
 - 增量更新 / reimport 行为。

@@ -89,10 +89,6 @@ namespace Design2UMGEditorImportServices
 		TSet<FString> ResolvedLibraryFiles;
 		TMap<FString, FString> ComponentImageUrls;
 		void HandleImagesResolved(const TSharedRef<FDesignDocument>& Document, const bool bImagesResolved);
-		void HandleVectorsExported(
-			const TSharedRef<FDesignDocument>& Document,
-			const bool bVectorsExported,
-			const TMap<FString, FString>& IdToUrl);
 		bool IsCancelled() const;
 
 		// Carries image-reference resolution failure into the final import result.

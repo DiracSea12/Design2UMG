@@ -27,24 +27,6 @@ namespace
 		return FallbackNode;
 	}
 
-	TSharedPtr<FDesignNode> BuildEllipseFallbackPathNode(const TSharedPtr<FDesignNode>& Node, const float Width, const float Height)
-	{
-		const float RadiusX = Width / 2.0f;
-		const float RadiusY = Height / 2.0f;
-		return BuildPathFallbackNode(
-			Node,
-			FString::Printf(
-				TEXT("M 0,%.2f A %.2f,%.2f 0 1,1 %.2f,%.2f A %.2f,%.2f 0 1,1 0,%.2f Z"),
-				RadiusY,
-				RadiusX,
-				RadiusY,
-				Width,
-				RadiusY,
-				RadiusX,
-				RadiusY,
-				RadiusY));
-	}
-
 	TSharedPtr<FDesignNode> BuildLineFallbackPathNode(const TSharedPtr<FDesignNode>& Node)
 	{
 		if (!Node.IsValid())
@@ -238,7 +220,17 @@ namespace
 					: Node->LayoutData.Overflow == EDesignOverflow::VerticalScrolling;
 				Widget.Type = UMGWidgetTypes::ScrollBox;
 				Widget.ScrollBox.Orientation = bStacksVertically ? TEXT("Vertical") : TEXT("Horizontal");
-				Widget.ScrollBox.ScrollBarVisibility = TEXT("Hidden");
+				// Figma scroll frames draw no scrollbar and reserve no space for one.
+				Widget.ScrollBox.ScrollBarVisibility = TEXT("Collapsed");
+				// A scrolled source shifts its content against the scroll axis; that shift is the initial position.
+				double ScrollOffset = 0.0;
+				for (const TSharedPtr<FDesignNode>& Child : Node->Children)
+				{
+					if (!Child.IsValid() || !Child->Transform.bEnabled) continue;
+					const FVector2D Position = Child->Transform.SourceLayoutPosition.Get(FVector2D(Child->Transform.X, Child->Transform.Y));
+					ScrollOffset = FMath::Max(ScrollOffset, -(bStacksVertically ? Position.Y : Position.X));
+				}
+				if (ScrollOffset > 0.0) Widget.ScrollBox.ScrollOffset = static_cast<float>(ScrollOffset);
 			}
 		}
 		return Widget;
@@ -246,32 +238,21 @@ namespace
 
 	FUMGWidgetNode CreateEllipseWidget(const TSharedPtr<FDesignNode>& Node)
 	{
-		if (Node->Shape.InnerRadius > 0.0001f || FMath::Abs(Node->Shape.SweepAngle) < 359.9999f)
+		if (!Node->Shape.Geometry.IsEmpty()
+			|| Node->Shape.InnerRadius > 0.0001f || FMath::Abs(Node->Shape.SweepAngle) < 359.9999f)
 			return PathWidgetBuilder::CreatePathWidget(Node);
 		const float Width = Node->Transform.Width.IsFixed() ? Node->Transform.Width.Value : 0.0f;
 		const float Height = Node->Transform.Height.IsFixed() ? Node->Transform.Height.Value : 0.0f;
 		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
-		if (PrimaryFill.IsImage()
-			&& !Node->Visual.VectorRasterFallbackImageRef.IsEmpty()
-			&& Node->Visual.bRenderBoundsClippedByParent)
-		{
-			return PathWidgetBuilder::CreatePathWidget(Node);
-		}
-
 		const bool bHasGradientFill = HasGradientVisualFill(Node);
-		const bool bHasVectorRasterFallback =
-			bHasGradientFill && !Node->Visual.VectorRasterFallbackImageRef.IsEmpty();
 		const bool bHasStroke = Node->Visual.Stroke.HasStroke();
 
 		if (Width > 0.0f
 			&& Height > 0.0f
 			&& ((PrimaryFill.IsColor() && PrimaryFill.bEnabled && !bHasStroke)
-				|| bHasVectorRasterFallback))
+				|| bHasGradientFill))
 		{
-			if (TSharedPtr<FDesignNode> PathNode = BuildEllipseFallbackPathNode(Node, Width, Height))
-			{
-				return PathWidgetBuilder::CreatePathWidget(PathNode);
-			}
+			return PathWidgetBuilder::CreatePathWidget(Node);
 		}
 
 		FUMGWidgetNode Widget = CreateContainerWidget(Node);

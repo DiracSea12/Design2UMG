@@ -347,6 +347,13 @@ bool FComponentBlueprintSharedInstancesTest::RunTest(const FString&)
 	}
 	TestTrue(TEXT("Write cross-process reload fixture"), FFileHelper::SaveStringToFile(AssetPath,
 		*(FPaths::ProjectSavedDir() / TEXT("Design2UMG/ComponentBlueprintReload.txt")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	Data.MutablePrototypeNavigation().ClickBindings.AddDefaulted_GetRef().Transition.LayoutTargets.Add(
+		{TEXT("Ia;label"), TEXT("Ia;label"), TEXT("Ia;label")});
+	UWidgetBlueprint* LayoutReferenced = DesignImportGeneration::BuildWidgetBlueprint(Data, Folder / TEXT("LayoutReferenced"), &Settings, &Output);
+	if (!TestNotNull(TEXT("Layout-referenced component tree builds"), LayoutReferenced)) return false;
+	TestEqual(TEXT("Only the unreferenced instance remains a shared component"), FindInstances(LayoutReferenced->WidgetTree).Num(), 1);
+	TestTrue(TEXT("Layout measurement can address the referenced instance's native text directly"),
+		FindText(LayoutReferenced->WidgetTree).Contains(TEXT("Confirm")));
 	return true;
 }
 

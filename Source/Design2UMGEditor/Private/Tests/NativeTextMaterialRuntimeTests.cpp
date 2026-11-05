@@ -29,10 +29,15 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Text/SRichTextBlock.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Layout/SBox.h"
+#include "Misc/ScopeExit.h"
 #include "Styling/SlateStyle.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/RetainerBox.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/RichTextBlock.h"
 #include "Engine/DataTable.h"
 #include "Engine/Font.h"
@@ -43,9 +48,270 @@
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "TextureResource.h"
+#include "UMGPrototypeAnimationBuilder.h"
+#include "NativeTextAnimation.h"
+#include "Animation/WidgetAnimation.h"
+#include "Animation/UMGSequenceTickManager.h"
+#include "Components/TextBlock.h"
+#include "MovieScene.h"
+#include "Tracks/MovieSceneFloatTrack.h"
+#include "Animation/MovieSceneMarginTrack.h"
+#include "Animation/MovieSceneMarginSection.h"
+#include "Tracks/MovieSceneIntegerTrack.h"
+#include "Sections/MovieSceneFloatSection.h"
+#include "Sections/MovieSceneIntegerSection.h"
+#include "Channels/MovieSceneFloatChannel.h"
+#include "Channels/MovieSceneIntegerChannel.h"
+#include "Channels/MovieSceneChannelProxy.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Editor.h"
+#include "Engine/LatentActionManager.h"
+#include "UObject/UnrealType.h"
+#include "EdGraphSchema_K2.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_VariableGet.h"
+#include "K2Node_CallFunction.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Tracks/MovieSceneEventTrack.h"
+#include "Sections/MovieSceneEventRepeaterSection.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeTextCanvasOffsetRuntimeTest,
+    "Design2UMG.Text.NativeCanvasOffsetRuntime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FNativeTextCanvasOffsetRuntimeTest::RunTest(const FString&)
+{
+    UPackage* Package = GetTransientPackage();
+    const TStrongObjectPtr<UWidgetBlueprint> Blueprint(Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(
+        UUserWidget::StaticClass(), Package, MakeUniqueObjectName(Package, UWidgetBlueprint::StaticClass(), TEXT("TextOffset")),
+        BPTYPE_Normal, UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass())));
+    if (!TestNotNull(TEXT("Native offset blueprint exists"), Blueprint.Get())) return false;
+    auto* Canvas = Blueprint->WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Canvas"));
+    auto* Text = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
+    Text->SetText(FText::FromString(TEXT("Editable")));
+    Text->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 24));
+    Text->bIsVariable = true;
+    Blueprint->WidgetTree->RootWidget = Canvas;
+    auto* Slot = Canvas->AddChildToCanvas(Text);
+    Slot->SetAutoSize(true);
+    Slot->SetOffsets(FMargin(10, 12, 0, 0));
+    auto* Animation = UMGPrototypeAnimationBuilder::CreateAnimation(Blueprint.Get(), TEXT("OffsetMotion"), 1.0f);
+    const FGuid Guid = Animation->MovieScene->AddPossessable(TEXT("Label Slot"), UCanvasPanelSlot::StaticClass());
+    FWidgetAnimationBinding Binding;
+    Binding.AnimationGuid = Guid;
+    Binding.WidgetName = Text->GetFName();
+    Binding.SlotWidgetName = Canvas->GetFName();
+    Animation->AnimationBindings.Add(Binding);
+    auto* Track = Animation->MovieScene->AddTrack<UMovieSceneMarginTrack>(Guid);
+    Track->SetPropertyNameAndPath(TEXT("Offsets"), TEXT("LayoutData.Offsets"));
+    auto* Section = CastChecked<UMovieSceneMarginSection>(Track->CreateNewSection());
+    Section->SetRange(Animation->MovieScene->GetPlaybackRange());
+    const FFrameNumber End(static_cast<int32>(Animation->MovieScene->GetTickResolution().AsDecimal()));
+    Section->LeftCurve.AddLinearKey(0,10); Section->LeftCurve.AddLinearKey(End,60);
+    Section->TopCurve.AddLinearKey(0,12); Section->TopCurve.AddLinearKey(End,12);
+    Section->RightCurve.AddLinearKey(0,0); Section->RightCurve.AddLinearKey(End,0);
+    Section->BottomCurve.AddLinearKey(0,0); Section->BottomCurve.AddLinearKey(End,0);
+    Track->AddSection(*Section);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint.Get());
+    FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+    if (!TestTrue(TEXT("Native offset blueprint compiles"), Blueprint->Status != BS_Error)) return false;
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!TestNotNull(TEXT("Editor world exists"), World) || !FSlateApplication::IsInitialized()) return false;
+    const TStrongObjectPtr<UUserWidget> Instance(CreateWidget<UUserWidget>(World, Blueprint->GeneratedClass.Get()));
+    if (!TestNotNull(TEXT("Native offset instance exists"), Instance.Get())) return false;
+    const auto Window = SNew(SWindow).Title(FText::FromString(TEXT("Native text slot animation")))
+        .ClientSize(FVector2D(300,100)).FocusWhenFirstShown(false).SupportsMaximize(false).SupportsMinimize(false)
+        [SNew(SBox)[Instance->TakeWidget()]];
+    FSlateApplication::Get().AddWindow(Window, true);
+    ON_SCOPE_EXIT { FSlateApplication::Get().RequestDestroyWindow(Window); };
+    Window->SlatePrepass(); FSlateApplication::Get().Tick(); FSlateApplication::Get().Tick();
+    auto* Label = Cast<UTextBlock>(Instance->WidgetTree->FindWidget(TEXT("Label")));
+    auto* ActualSlot = Label ? Cast<UCanvasPanelSlot>(Label->Slot) : nullptr;
+    const auto* Property = FindFProperty<FObjectProperty>(Instance->GetClass(), TEXT("OffsetMotion"));
+    auto* Runtime = Property ? Cast<UWidgetAnimation>(Property->GetObjectPropertyValue_InContainer(Instance.Get())) : nullptr;
+    if (!TestNotNull(TEXT("Native text label exists"), Label) || !TestNotNull(TEXT("Native Canvas slot exists"), ActualSlot)
+        || !TestNotNull(TEXT("Native offset animation exists"), Runtime)) return false;
+    const FVector2D Before = Label->GetCachedGeometry().GetAbsolutePosition();
+    const FVector2D BeforeSize = Label->GetCachedGeometry().GetLocalSize();
+    Instance->PlayAnimation(Runtime,0,1,EUMGSequencePlayMode::Forward,1,true);
+    for (const float Delta : {0.0f, 0.5f, 0.25f})
+    {
+        ++GFrameCounter;
+        UUMGSequenceTickManager::Get(Instance.Get())->OnWidgetTicked(Instance.Get());
+        FSlateApplication::Get().OnPreTick().Broadcast(Delta);
+        World->GetLatentActionManager().BeginFrame();
+        World->GetLatentActionManager().ProcessLatentActions(Instance.Get(),Delta);
+        FSlateApplication::Get().OnPostTick().Broadcast(Delta);
+    }
+    Window->SlatePrepass(); FSlateApplication::Get().Tick();
+    const FVector2D After = Label->GetCachedGeometry().GetAbsolutePosition();
+    TestTrue(TEXT("Native margin track changes the Canvas slot"), ActualSlot->GetOffsets().Left > 30.0f);
+    TestTrue(TEXT("Canvas setter moves the live Slate text"), After.X > Before.X + 20.0f);
+    TestTrue(TEXT("Auto-sized native text keeps its desired size during movement"),
+        Label->GetCachedGeometry().GetLocalSize().Equals(BeforeSize,0.1));
+    return !HasAnyErrors();
+}
 
 // Capability probe only: an ordinary engine text widget with a native font
 // material. A successful render does not establish Figma gradient fidelity.
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeTextFontAnimationRuntimeTest,
+    "Design2UMG.Text.NativeFontAnimationRuntime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool RunNativeTextFontAnimationProbe(FAutomationTestBase& Test, bool bRefresh)
+{
+    const bool bReload = FPlatformMisc::GetEnvironmentVariable(TEXT("D2U_NATIVE_FONT_PROBE_RELOAD")) == TEXT("1");
+    const FString EvidenceDirectory = FPaths::ProjectSavedDir() / TEXT("Design2UMG/NativeFontAnimationProbe");
+    const FString PackageDirectory = TEXT("/Game/Design2UMGTests/NativeFontAnimation/") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    for (const bool bLetterSpacing : {false, true})
+    {
+        const FString AssetName = bLetterSpacing ? TEXT("NativeFontTracking") : TEXT("NativeFontSize");
+        const FString PackageName = PackageDirectory / AssetName;
+        const FString AssetPointerFile = EvidenceDirectory / (AssetName + TEXT(".txt"));
+        TStrongObjectPtr<UWidgetBlueprint> Blueprint;
+        TArray<FName> RefreshNames;
+        if (bRefresh && bReload)
+        {
+            FString SavedObjectPath;
+            if (!Test.TestTrue(TEXT("Read exact native font asset path from the write process"),
+                FFileHelper::LoadFileToString(SavedObjectPath, *AssetPointerFile))) return false;
+            if (!Test.TestNull(TEXT("Saved native font asset is not already in memory"),
+                FindObject<UWidgetBlueprint>(nullptr, *SavedObjectPath))) return false;
+            Blueprint.Reset(LoadObject<UWidgetBlueprint>(nullptr, *SavedObjectPath));
+            if (!Test.TestNotNull(TEXT("Saved native font animation loads in a fresh process"), Blueprint.Get())) return false;
+        }
+        else
+        {
+            UPackage* Package = bRefresh ? CreatePackage(*PackageName) : GetTransientPackage();
+            Blueprint.Reset(Cast<UWidgetBlueprint>(FKismetEditorUtilities::CreateBlueprint(
+                UUserWidget::StaticClass(), Package, bRefresh ? FName(*AssetName) : MakeUniqueObjectName(Package,
+                    UWidgetBlueprint::StaticClass(), TEXT("FontAnimation")), BPTYPE_Normal,
+                UWidgetBlueprint::StaticClass(), UWidgetBlueprintGeneratedClass::StaticClass())));
+            auto* Text = Blueprint->WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EditableText"));
+            Text->SetText(FText::FromString(TEXT("Wi Wi")));
+            Text->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 48));
+            Text->bIsVariable = true;
+            Blueprint->WidgetTree->RootWidget = Text;
+            auto* Animation = UMGPrototypeAnimationBuilder::CreateAnimation(Blueprint.Get(), TEXT("FontMotion"), 1.0f);
+            const FFrameNumber End(static_cast<int32>(Animation->MovieScene->GetTickResolution().AsDecimal()));
+            const auto Keys = [&](FMovieSceneFloatChannel& Channel, float Start, float Finish)
+            { Channel.AddLinearKey(0, Start); Channel.AddLinearKey(End, Finish); };
+            if (bRefresh)
+            {
+                auto* Destination = NewObject<UTextBlock>();
+                FSlateFontInfo Font = Text->GetFont(); Font.Size = 96; Font.LetterSpacing = 400;
+                Destination->SetFont(Font);
+                FString Error;
+                NativeTextAnimation::FRefreshBuilder Refresh(Blueprint.Get());
+                if (!Test.TestTrue(TEXT("Production native font tracks and persistent refresh endpoint build: ") + Error,
+                    Refresh.AddFontTracks(Animation, Text, Destination, !bLetterSpacing, bLetterSpacing, Keys, Error)))
+                { Test.AddError(Error); return false; }
+                Refresh.Build([&](UWidgetAnimation*, const FString& BuildError) { Test.AddError(BuildError); });
+            }
+            else
+            {
+                const FGuid Binding = UMGPrototypeAnimationBuilder::BindWidget(Animation, Text);
+                auto* Track = Animation->MovieScene->AddTrack<UMovieSceneFloatTrack>(Binding);
+                Track->SetPropertyNameAndPath(TEXT("Size"), TEXT("Font.Size"));
+                auto* Section = CastChecked<UMovieSceneFloatSection>(Track->CreateNewSection());
+                Section->SetRange(Animation->MovieScene->GetPlaybackRange());
+                Keys(*Section->GetChannelProxy().GetChannel<FMovieSceneFloatChannel>(0), 48, 96);
+                Track->AddSection(*Section);
+            }
+            FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint.Get());
+            FKismetEditorUtilities::CompileBlueprint(Blueprint.Get());
+            if (!Test.TestTrue(TEXT("Ordinary native font animation Blueprint compiles"), Blueprint->Status != BS_Error)) return false;
+            if (bRefresh)
+            {
+                const FString FileName = FPackageName::LongPackageNameToFilename(PackageName,FPackageName::GetAssetPackageExtension());
+                IFileManager::Get().MakeDirectory(*FPaths::GetPath(FileName),true);
+                FSavePackageArgs Args; Args.TopLevelFlags=RF_Public|RF_Standalone;
+                Blueprint->SetFlags(RF_Public|RF_Standalone);
+                if (!Test.TestTrue(TEXT("New native font package is fully loaded before save"), Package->IsFullyLoaded())) return false;
+                if (!Test.TestTrue(TEXT("Native font animation asset saves with its generated endpoint"),
+                    UPackage::SavePackage(Package,Blueprint.Get(),*FileName,Args))) return false;
+                IFileManager::Get().MakeDirectory(*EvidenceDirectory,true);
+                if (!Test.TestTrue(TEXT("Record the exact saved native font asset for fresh-process reload"),
+                    FFileHelper::SaveStringToFile(Blueprint->GetPathName(), *AssetPointerFile,
+                        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))) return false;
+            }
+        }
+        UWorld* World = GEditor->GetEditorWorldContext().World();
+        const TStrongObjectPtr<UUserWidget> Instance(CreateWidget<UUserWidget>(World, Blueprint->GeneratedClass.Get()));
+        const TSharedRef<SWidget> Slate = Instance->TakeWidget();
+        auto* Label = CastChecked<UTextBlock>(Instance->WidgetTree->RootWidget);
+        const auto TextSlate = StaticCastSharedPtr<STextBlock>(Label->GetCachedWidget());
+        Slate->SlatePrepass();
+        const FVector2D InitialSize = TextSlate->GetDesiredSize();
+        const auto* Property = FindFProperty<FObjectProperty>(Instance->GetClass(), TEXT("FontMotion"));
+        auto* RuntimeAnimation = Property ? Cast<UWidgetAnimation>(Property->GetObjectPropertyValue_InContainer(Instance.Get())) : nullptr;
+        if (!Test.TestNotNull(TEXT("Compiled instance owns the native font animation"), RuntimeAnimation)) return false;
+        if (bRefresh)
+        {
+            RefreshNames = NativeTextAnimation::RefreshFunctions(Blueprint.Get(), Blueprint->Animations[0]);
+            if (!Test.TestEqual(TEXT("One owned native refresh endpoint"), RefreshNames.Num(),1)) return false;
+            FWidgetAnimationDynamicEvent Finished;
+            Finished.BindUFunction(Instance.Get(),RefreshNames[0]);
+            Instance->BindToAnimationFinished(RuntimeAnimation,Finished);
+        }
+        Instance->PlayAnimation(RuntimeAnimation,0,1,EUMGSequencePlayMode::Forward,1,true);
+        const auto Tick = [&](float Seconds)
+        {
+            ++GFrameCounter;
+            UUMGSequenceTickManager::Get(Instance.Get())->OnWidgetTicked(Instance.Get());
+            FSlateApplication::Get().OnPreTick().Broadcast(Seconds);
+            World->GetLatentActionManager().BeginFrame();
+            World->GetLatentActionManager().ProcessLatentActions(Instance.Get(), Seconds);
+            FSlateApplication::Get().OnPostTick().Broadcast(Seconds);
+        };
+        Tick(0); Tick(0.5f); Tick(0.25f);
+        Slate->SlatePrepass();
+        const FSlateFontInfo ObjectFont = Label->GetFont();
+        const FSlateFontInfo SlateFont = TextSlate->GetFont();
+        Test.AddInfo(FString::Printf(TEXT("Native font production=%d reload=%d: UObject size=%.4f tracking=%d; Slate size=%.4f tracking=%d; width %.4f -> %.4f"),
+            bRefresh,bReload,ObjectFont.Size,ObjectFont.LetterSpacing,SlateFont.Size,SlateFont.LetterSpacing,InitialSize.X,TextSlate->GetDesiredSize().X));
+        if (bRefresh)
+        {
+            Test.TestTrue(TEXT("Continuous native font value reaches Slate"), bLetterSpacing
+                ? ObjectFont.LetterSpacing > 200 && ObjectFont.LetterSpacing < 400 && SlateFont.LetterSpacing == ObjectFont.LetterSpacing
+                : ObjectFont.Size > 48 && FMath::IsNearlyEqual(SlateFont.Size,ObjectFont.Size));
+            Test.TestTrue(TEXT("Editable native text layout responds"),TextSlate->GetDesiredSize().X > InitialSize.X);
+            Instance->StopAnimation(RuntimeAnimation); Tick(0);
+            Test.TestTrue(TEXT("Stop restores the full native and Slate font"),FMath::IsNearlyEqual(Label->GetFont().Size,48.0f)
+                && Label->GetFont().LetterSpacing == 0 && FMath::IsNearlyEqual(TextSlate->GetFont().Size,48.0f)
+                && TextSlate->GetFont().LetterSpacing == 0);
+            Instance->PlayAnimation(RuntimeAnimation,0,1,EUMGSequencePlayMode::Reverse,1,true);
+            Tick(0); Tick(0.25f);
+            Test.TestTrue(TEXT("Reverse playback evaluates the same live font endpoint"),bLetterSpacing
+                ? TextSlate->GetFont().LetterSpacing > 0 : TextSlate->GetFont().Size > 48);
+            Instance->StopAnimation(RuntimeAnimation); Tick(0);
+        }
+        else
+        {
+            Test.TestTrue(TEXT("Direct nested field writes do not call Slate SetFont"),ObjectFont.Size > 48
+                && FMath::IsNearlyEqual(SlateFont.Size,48.0f) && FMath::IsNearlyEqual(TextSlate->GetDesiredSize().X,InitialSize.X));
+            Instance->StopAllAnimations();
+            break;
+        }
+    }
+    return true;
+}
+
+bool FNativeTextFontAnimationRuntimeTest::RunTest(const FString&)
+{
+    return RunNativeTextFontAnimationProbe(*this, false);
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeTextFontAnimationRefreshRuntimeTest,
+    "Design2UMG.Text.NativeFontAnimationRefreshRuntime",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FNativeTextFontAnimationRefreshRuntimeTest::RunTest(const FString&)
+{
+    return RunNativeTextFontAnimationProbe(*this, true);
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNativeTextMaterialRuntimeTest,
     "Design2UMG.Text.NativeFontMaterialRuntime",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

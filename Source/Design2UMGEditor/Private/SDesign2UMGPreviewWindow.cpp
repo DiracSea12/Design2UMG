@@ -8,7 +8,11 @@
 #include "DesignJsonUtils.h"
 #include "DesignPreviewMaterializationService.h"
 #include "Design2UMGNotifications.h"
+#include "Design2UMGSettings.h"
+#include "UMGJsonSerializer.h"
 #include "SPencilFontTool.h"
+#include "Interfaces/IPluginManager.h"
+#include "Internationalization/StringTableRegistry.h"
 
 #include "TimerManager.h"
 #include "Engine/World.h"
@@ -22,6 +26,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/SBoxPanel.h"
 #include "Styling/AppStyle.h"
@@ -53,24 +58,24 @@ namespace
 #endif
 	}
 
-	const TCHAR* DescribeFileState(EDesign2UMGFileState State)
+	FText DescribeFileState(EDesign2UMGFileState State)
 	{
 		switch (State)
 		{
-		case EDesign2UMGFileState::Saved: return TEXT("saved");
-		case EDesign2UMGFileState::Restored: return TEXT("restored");
-		case EDesign2UMGFileState::Indeterminate: return TEXT("indeterminate");
-		default: return TEXT("unchanged");
+		case EDesign2UMGFileState::Saved: return LOCTABLE("Design2UMGPreviewWindow", "StateSaved");
+		case EDesign2UMGFileState::Restored: return LOCTABLE("Design2UMGPreviewWindow", "StateRestored");
+		case EDesign2UMGFileState::Indeterminate: return LOCTABLE("Design2UMGPreviewWindow", "StateIndeterminate");
+		default: return LOCTABLE("Design2UMGPreviewWindow", "StateUnchanged");
 		}
 	}
-	const TCHAR* DescribeMemoryState(EDesign2UMGMemoryState State)
+	FText DescribeMemoryState(EDesign2UMGMemoryState State)
 	{
 		switch (State)
 		{
-		case EDesign2UMGMemoryState::Modified: return TEXT("modified");
-		case EDesign2UMGMemoryState::Restored: return TEXT("restored");
-		case EDesign2UMGMemoryState::RecoveryFailed: return TEXT("recovery failed");
-		default: return TEXT("unchanged");
+		case EDesign2UMGMemoryState::Modified: return LOCTABLE("Design2UMGPreviewWindow", "StateModified");
+		case EDesign2UMGMemoryState::Restored: return LOCTABLE("Design2UMGPreviewWindow", "StateRestored");
+		case EDesign2UMGMemoryState::RecoveryFailed: return LOCTABLE("Design2UMGPreviewWindow", "StateRecoveryFailed");
+		default: return LOCTABLE("Design2UMGPreviewWindow", "StateUnchanged");
 		}
 	}
 
@@ -85,7 +90,6 @@ namespace
 		}
 	};
 }
-#define LOCTEXT_NAMESPACE "SDesign2UMGPreviewWindow"
 
 void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 {
@@ -99,6 +103,7 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 	CachedMaterializationSettingsSnapshot = InArgs._InitialMaterializationSettingsSnapshot;
 	OnConfirmed = InArgs._OnConfirmed;
 	OnCancelled = InArgs._OnCancelled;
+	OnReconvert = InArgs._OnReconvert;
 	PreviewRefreshAnalyzer = InArgs._PreviewRefreshAnalyzer;
 	PreviewMaterializationService = InArgs._PreviewMaterializationService;
 
@@ -112,6 +117,13 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 	}
 
 	CurrentJson = FormatJson(CurrentJson);
+	if (!FStringTableRegistry::Get().FindStringTable(TEXT("Design2UMGPreviewWindow")).IsValid())
+	{
+		FStringTableRegistry::Get().Internal_LocTableFromFile(
+			TEXT("Design2UMGPreviewWindow"), TEXT("SDesign2UMGPreviewWindow"),
+			TEXT("Resources/PreviewWindowText.csv"),
+			IPluginManager::Get().FindPlugin(TEXT("Design2UMG"))->GetBaseDir());
+	}
 
 	ChildSlot
 	[
@@ -122,8 +134,9 @@ void SDesign2UMGPreviewWindow::Construct(const FArguments& InArgs)
 		.Padding(8)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("PreviewTitle", "Design2UMG Preview - Review and edit the generated JSON before creating the Widget Blueprint"))
+			.Text(LOCTABLE("Design2UMGPreviewWindow", "PreviewTitle"))
 			.Font(GetAppStyleFont("BoldFont"))
+			.AutoWrapText(true)
 		]
 
 		+ SVerticalBox::Slot()
@@ -168,14 +181,15 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 				SNew(SHorizontalBox)
 
 				+ SHorizontalBox::Slot()
-				.AutoWidth()
+				.FillWidth(1.0f)
 				[
 					SNew(STextBlock)
 					.Text_Lambda([this]()
 					{
-						return bFitPreviewToWindow ? LOCTEXT("UMGPreviewFit", "UMG Preview (fit to window)") : LOCTEXT("UMGPreviewActualSize", "UMG Preview (1:1)");
+						return bFitPreviewToWindow ? LOCTABLE("Design2UMGPreviewWindow", "UMGPreviewFit") : LOCTABLE("Design2UMGPreviewWindow", "UMGPreviewActualSize");
 					})
 					.Font(GetAppStyleFont("BoldFont"))
+					.AutoWrapText(true)
 				]
 
 				+ SHorizontalBox::Slot()
@@ -192,9 +206,9 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 					})
 					.Text_Lambda([this]()
 					{
-						return bFitPreviewToWindow ? LOCTEXT("PreviewActualSize", "Original size (1:1)") : LOCTEXT("FitPreview", "Fit to window");
+						return bFitPreviewToWindow ? LOCTABLE("Design2UMGPreviewWindow", "PreviewActualSize") : LOCTABLE("Design2UMGPreviewWindow", "FitPreview");
 					})
-					.ToolTipText(LOCTEXT("FitPreviewTooltip", "Switch between the whole design and original size with scrolling."))
+					.ToolTipText(LOCTABLE("Design2UMGPreviewWindow", "FitPreviewTooltip"))
 				]
 			]
 
@@ -212,7 +226,8 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildUMGPreviewPanel()
 					.Padding(8)
 					[
 						SNew(STextBlock)
-						.Text(LOCTEXT("PreviewReady", "Preview refreshes automatically when JSON changes"))
+						.Text(LOCTABLE("Design2UMGPreviewWindow", "PreviewReady"))
+						.AutoWrapText(true)
 						.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
 						.Justification(ETextJustify::Center)
 					]
@@ -236,19 +251,20 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildJsonEditorPanel()
 				SNew(SHorizontalBox)
 
 				+ SHorizontalBox::Slot()
-				.AutoWidth()
+				.FillWidth(1.0f)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("JsonEditor", "JSON Structure (Editable)"))
+					.Text(LOCTABLE("Design2UMGPreviewWindow", "JsonEditor"))
 					.Font(GetAppStyleFont("BoldFont"))
+					.AutoWrapText(true)
 				]
 
 				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
+				.AutoWidth()
 				.HAlign(HAlign_Right)
 				[
 					SNew(SButton)
-					.Text(LOCTEXT("FormatJson", "Format JSON"))
+					.Text(LOCTABLE("Design2UMGPreviewWindow", "FormatJson"))
 					.OnClicked(this, &SDesign2UMGPreviewWindow::OnFormatJsonClicked)
 				]
 			]
@@ -270,17 +286,11 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildJsonEditorPanel()
 TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 {
 	TSharedRef<SVerticalBox> BottomBox = SNew(SVerticalBox);
+	TSharedRef<SVerticalBox> DiagnosticsBox = SNew(SVerticalBox);
 
-	// Degradation warning summary.
 	if (ConversionWarnings.Num() > 0)
 	{
-		FString WarningText = FString::Printf(TEXT("%d element(s) degraded during conversion:"), ConversionWarnings.Num());
-		for (const FString& W : ConversionWarnings)
-		{
-			WarningText += TEXT("\n  - ") + W;
-		}
-
-		BottomBox->AddSlot()
+		DiagnosticsBox->AddSlot()
 		.AutoHeight()
 		.Padding(0, 0, 0, 6)
 		[
@@ -289,16 +299,27 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 			.BorderBackgroundColor(FLinearColor(0.25f, 0.18f, 0.0f, 1.0f))
 			.Padding(FMargin(8, 4))
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(WarningText))
-				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.85f, 0.3f)))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-				.AutoWrapText(true)
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(FText::Format(LOCTABLE("Design2UMGPreviewWindow", "ConversionWarningsSummary"), FText::AsNumber(ConversionWarnings.Num())))
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.85f, 0.3f)))
+					.AutoWrapText(true)
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 0)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(FString::Join(ConversionWarnings, TEXT("\n\n"))))
+					.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.85f, 0.3f)))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+					.AutoWrapText(true)
+				]
 			]
 		];
 	}
 
-	BottomBox->AddSlot()
+	DiagnosticsBox->AddSlot()
 	.AutoHeight()
 	.Padding(0, 0, 0, 6)
 	[
@@ -319,28 +340,20 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 				{
 					return FText::GetEmpty();
 				}
-				FString WarningText = FString::Printf(
-					TEXT("%d image(s) failed to resolve:"), CurrentImageResult->FailedCount);
-				int32 DisplayedCount = 0;
+				FString WarningText = FText::Format(
+					LOCTABLE("Design2UMGPreviewWindow", "ImageFailuresSummary"),
+					FText::AsNumber(CurrentImageResult->FailedCount)).ToString();
 				for (const FDesignImageDiagnostic& Diagnostic : CurrentImageResult->Diagnostics)
 				{
 					if (Diagnostic.Outcome != EDesignImageDiagnosticOutcome::Failed)
 					{
 						continue;
 					}
-					if (DisplayedCount++ >= 32)
-					{
-						continue;
-					}
-					WarningText += TEXT("\n  - ");
-					WarningText += Diagnostic.Message.IsEmpty()
-						? FString::Printf(TEXT("%s: %s"), LexToString(Diagnostic.Category), *Diagnostic.Reason)
+					const FString Detail = Diagnostic.Message.IsEmpty()
+						? FText::Format(LOCTABLE("Design2UMGPreviewWindow", "ImageDiagnosticReason"),
+							FText::FromString(LexToString(Diagnostic.Category)), FText::FromString(Diagnostic.Reason)).ToString()
 						: Diagnostic.Message;
-				}
-				if (DisplayedCount > 32)
-				{
-					WarningText += FString::Printf(
-						TEXT("\n%d more image failure detail(s) omitted"), DisplayedCount - 32);
+					WarningText += FText::Format(LOCTABLE("Design2UMGPreviewWindow", "ImageDiagnosticItem"), FText::FromString(Detail)).ToString();
 				}
 				return FText::FromString(WarningText);
 			})
@@ -350,13 +363,44 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		]
 	];
 
-	BottomBox->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
+	DiagnosticsBox->AddSlot().AutoHeight().Padding(0, 0, 0, 8)
 	[
 		SNew(STextBlock)
 		.Text_Lambda([this]() { return GenerationStatus; })
 		.AutoWrapText(true)
 		.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.2f)))
 	];
+
+	BottomBox->AddSlot().AutoHeight()
+	[
+		SNew(SBox)
+		.MaxDesiredHeight(160.0f)
+		[
+			SNew(SScrollBox)
+			.Clipping(EWidgetClipping::ClipToBounds)
+			+ SScrollBox::Slot()
+			[
+				DiagnosticsBox
+			]
+		]
+	];
+
+	if (OnReconvert.IsBound())
+	{
+		BottomBox->AddSlot()
+		.AutoHeight()
+		.Padding(0, 0, 0, 8)
+		[
+			SNew(SCheckBox)
+			.IsChecked(GetDefault<UDesign2UMGSettings>()->bPreserveSourceNodes ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+			.OnCheckStateChanged(this, &SDesign2UMGPreviewWindow::OnPreserveSourceNodesChanged)
+			.ToolTipText(LOCTABLE("Design2UMGPreviewWindow", "PreserveSourceNodesTooltip"))
+			[
+				SNew(STextBlock)
+				.Text(LOCTABLE("Design2UMGPreviewWindow", "PreserveSourceNodes"))
+			]
+		];
+	}
 
 	BottomBox->AddSlot()
 	.AutoHeight()
@@ -370,7 +414,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 			.Padding(0, 0, 8, 0)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("OutputPath", "Output Path:"))
+				.Text(LOCTABLE("Design2UMGPreviewWindow", "OutputPath"))
 			]
 
 			+ SHorizontalBox::Slot()
@@ -395,7 +439,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		.Padding(4, 0)
 		[
 			SNew(SButton)
-			.Text(LOCTEXT("Cancel", "Cancel"))
+			.Text(LOCTABLE("Design2UMGPreviewWindow", "Cancel"))
 			.OnClicked(this, &SDesign2UMGPreviewWindow::OnCancelClicked)
 		]
 
@@ -404,7 +448,7 @@ TSharedRef<SWidget> SDesign2UMGPreviewWindow::BuildBottomBar()
 		.Padding(4, 0)
 		[
 			SNew(SButton)
-			.Text(LOCTEXT("Generate", "Generate Widget Blueprint"))
+			.Text(LOCTABLE("Design2UMGPreviewWindow", "Generate"))
 			.OnClicked(this, &SDesign2UMGPreviewWindow::OnGenerateClicked)
 			.ButtonStyle(FAppStyle::Get(), "PrimaryButton")
 		]
@@ -462,14 +506,14 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 {
 	if (CurrentOutputPath.IsEmpty())
 	{
-		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("EmptyOutputPath", "Please specify an output path."));
+		FMessageDialog::Open(EAppMsgType::Ok, LOCTABLE("Design2UMGPreviewWindow", "EmptyOutputPath"));
 		return FReply::Handled();
 	}
 
 	if (!CanConfirmLatestSnapshot())
 	{
 		DesignImportDialogs::ShowImportProblem(GenerationStatus.IsEmpty()
-			? LOCTEXT("RefreshRequiredBeforeGenerate", "预览正在刷新或已过期，请刷新成功后再生成。").ToString()
+			? LOCTABLE("Design2UMGPreviewWindow", "RefreshRequiredBeforeGenerate").ToString()
 			: GenerationStatus.ToString());
 		return FReply::Handled();
 	}
@@ -481,7 +525,7 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 	GenerationRequest.GenerationRequest.RuntimeImageResult = GenerationRequest.ApprovedSnapshot.ImageResult;
 	if (!OnConfirmed.IsBound())
 	{
-		GenerationStatus = LOCTEXT("NoConfirmationHandler", "Generation was not started: no confirmation handler is bound.");
+		GenerationStatus = LOCTABLE("Design2UMGPreviewWindow", "NoConfirmationHandler");
 		return FReply::Handled();
 	}
 	const FArtifactGenerationResult Result = OnConfirmed.Execute(GenerationRequest);
@@ -491,22 +535,22 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 		switch (Result.Commit.Status)
 		{
 		case EDesign2UMGCommitStatus::CommittedWithMetadataFailure:
-			Message = TEXT("The asset was saved, but its generation metadata was not completed.");
+			Message = LOCTABLE("Design2UMGPreviewWindow", "GenerationMetadataIncomplete").ToString();
 			break;
 		case EDesign2UMGCommitStatus::RollbackIncomplete:
-			Message = TEXT("Generation failed and recovery is incomplete. Check the asset and in-memory state before retrying.");
-			Message += FString::Printf(TEXT("\nAsset state: %s; metadata state: %s; memory state: %s."),
-				DescribeFileState(Result.Commit.Asset), DescribeFileState(Result.Commit.Manifest), DescribeMemoryState(Result.Commit.Memory));
+			Message = LOCTABLE("Design2UMGPreviewWindow", "GenerationRollbackIncomplete").ToString();
+			Message += FText::Format(LOCTABLE("Design2UMGPreviewWindow", "GenerationRecoveryStates"),
+				DescribeFileState(Result.Commit.Asset), DescribeFileState(Result.Commit.Manifest), DescribeMemoryState(Result.Commit.Memory)).ToString();
 			break;
 		case EDesign2UMGCommitStatus::Conflict:
-			Message = TEXT("Generation stopped because of a conflict.");
+			Message = LOCTABLE("Design2UMGPreviewWindow", "GenerationConflict").ToString();
 			break;
 		default:
-			Message = Result.Commit.IsSuccess() ? TEXT("The asset was committed, but a requested output was not completed.") : TEXT("Generation did not complete.");
+			Message = (Result.Commit.IsSuccess() ? LOCTABLE("Design2UMGPreviewWindow", "GenerationOutputIncomplete") : LOCTABLE("Design2UMGPreviewWindow", "GenerationFailed")).ToString();
 			break;
 		}
 		const FString AssetPath = Result.GeneratedAssetPath.IsEmpty() ? Result.Commit.AssetPath : Result.GeneratedAssetPath;
-		if (!AssetPath.IsEmpty()) Message += TEXT("\nAsset: ") + AssetPath;
+		if (!AssetPath.IsEmpty()) Message += FText::Format(LOCTABLE("Design2UMGPreviewWindow", "GenerationAssetPath"), FText::FromString(AssetPath)).ToString();
 		if (!Result.ErrorMessage.IsEmpty()) Message += TEXT("\n") + Result.ErrorMessage;
 		for (const auto& Diagnostic : Result.ComponentMappingDiagnostics)
 		{
@@ -531,7 +575,7 @@ FReply SDesign2UMGPreviewWindow::OnGenerateClicked()
 			Issues += TEXT("\n") + DesignImportDialogs::FormatImageIssues(GenerationRequest.ApprovedSnapshot.ImageResult);
 		if (Result.Commit.Status == EDesign2UMGCommitStatus::SucceededWithDegradation)
 		{
-			if (Issues.IsEmpty()) Issues = TEXT("Generation completed with degradation. Review the import diagnostics.");
+			if (Issues.IsEmpty()) Issues = LOCTABLE("Design2UMGPreviewWindow", "GenerationDegraded").ToString();
 			FDesign2UMGNotification::Warning(FText::FromString(Issues));
 		}
 		DesignImportDialogs::ShowImportProblem(DesignImportDialogs::FormatImportResult(
@@ -559,6 +603,26 @@ FReply SDesign2UMGPreviewWindow::OnCancelClicked()
 	}
 
 	return FReply::Handled();
+}
+
+void SDesign2UMGPreviewWindow::OnPreserveSourceNodesChanged(ECheckBoxState State)
+{
+	UDesign2UMGSettings* Settings = GetMutableDefault<UDesign2UMGSettings>();
+	Settings->bPreserveSourceNodes = State == ECheckBoxState::Checked;
+	Settings->SaveConfig();
+	FUMGWidgetData Data;
+	FString Error;
+	if (!OnReconvert.Execute(Settings->bPreserveSourceNodes, Data, Error))
+	{
+		GenerationStatus = FText::FromString(FormatPreviewFailure(Error));
+		return;
+	}
+	OriginalData = MakeShared<FUMGWidgetData>(MoveTemp(Data));
+	CurrentJson = FormatJson(FUMGJsonSerializer::Serialize(*OriginalData));
+	if (JsonEditor.IsValid()) JsonEditor->SetText(FText::FromString(CurrentJson));
+	CurrentImageResult.Reset();
+	InvalidateApprovedSnapshot();
+	RefreshUMGPreview();
 }
 
 FReply SDesign2UMGPreviewWindow::OnFormatJsonClicked()
@@ -608,26 +672,26 @@ bool SDesign2UMGPreviewWindow::ValidateJson(const FString& JsonString, FString& 
 	TSharedPtr<FJsonObject> JsonObject;
 	if (!DesignJsonUtils::TryParseObject(JsonString, JsonObject))
 	{
-		OutError = TEXT("Failed to parse JSON. Please check the syntax.");
+		OutError = LOCTABLE("Design2UMGPreviewWindow", "InvalidJson").ToString();
 		return false;
 	}
 
 	if (!JsonObject->HasField(TEXT("RootWidget")))
 	{
-		OutError = TEXT("Missing required field: RootWidget");
+		OutError = LOCTABLE("Design2UMGPreviewWindow", "MissingRootWidget").ToString();
 		return false;
 	}
 
 	const TSharedPtr<FJsonObject>* RootWidget;
 	if (!JsonObject->TryGetObjectField(TEXT("RootWidget"), RootWidget))
 	{
-		OutError = TEXT("RootWidget must be an object");
+		OutError = LOCTABLE("Design2UMGPreviewWindow", "RootWidgetNotObject").ToString();
 		return false;
 	}
 
 	if (!(*RootWidget)->HasField(TEXT("Type")))
 	{
-		OutError = TEXT("RootWidget missing required field: Type");
+		OutError = LOCTABLE("Design2UMGPreviewWindow", "MissingRootWidgetType").ToString();
 		return false;
 	}
 
@@ -750,7 +814,7 @@ void SDesign2UMGPreviewWindow::RefreshUMGPreview()
 		.VAlign(VAlign_Center)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("Parsing", "Parsing JSON..."))
+			.Text(LOCTABLE("Design2UMGPreviewWindow", "Parsing"))
 			.ColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f)))
 		]
 	);
@@ -853,7 +917,7 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 				.Padding(8)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("PreviewWidgetMissing", "Preview materialization completed without a widget.\nCheck the Output Log for details."))
+					.Text(LOCTABLE("Design2UMGPreviewWindow", "PreviewWidgetMissing"))
 					.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.6f, 0.3f)))
 					.AutoWrapText(true)
 				]
@@ -900,5 +964,3 @@ void SDesign2UMGPreviewWindow::DoRefreshPreview(uint64 RequestId, const FString&
 		}
 	}
 }
-
-#undef LOCTEXT_NAMESPACE

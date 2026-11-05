@@ -39,6 +39,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* GeometryMaskCornerRadii = TEXT("GeometryMaskCornerRadii");
 	inline constexpr const TCHAR* GeometryMaskShape = TEXT("GeometryMaskShape");
 	inline constexpr const TCHAR* GeometryMaskSize = TEXT("GeometryMaskSize");
+	inline constexpr const TCHAR* GeometryMaskPaths = TEXT("GeometryMaskPaths");
 	inline constexpr const TCHAR* Height = TEXT("Height");
 	inline constexpr const TCHAR* HeightOverride = TEXT("HeightOverride");
 	inline constexpr const TCHAR* HintText = TEXT("HintText");
@@ -101,6 +102,7 @@ namespace UMGPropertyKeys
 	inline constexpr const TCHAR* RetainRendering = TEXT("RetainRendering");
 	inline constexpr const TCHAR* RichTextStyleRows = TEXT("Design2UMG.RichTextStyleRows");
 	inline constexpr const TCHAR* ScrollBarVisibility = TEXT("ScrollBarVisibility");
+	inline constexpr const TCHAR* ScrollOffset = TEXT("ScrollOffset");
 	inline constexpr const TCHAR* ShadowBlur = TEXT("ShadowBlur");
 	inline constexpr const TCHAR* ShadowColorAndOpacity = TEXT("ShadowColorAndOpacity");
 	inline constexpr const TCHAR* ShadowOffset = TEXT("ShadowOffset");
@@ -132,8 +134,9 @@ namespace UMGPropertyKeys
 	// pipeline (not asset paths), matched case-sensitively on the Editor side.
 	inline constexpr const TCHAR* RetainerForegroundBlurEffectRef = TEXT("d2u.retainer.foreground_blur");
 	inline constexpr const TCHAR* RetainerGeometryMaskEffectRef = TEXT("d2u.retainer.geometry_mask");
+	inline constexpr const TCHAR* RetainerSharedCaptureEffectRef = TEXT("d2u.retainer.shared_capture");
+	inline constexpr const TCHAR* SharedCapture = TEXT("SharedCapture");
+	inline constexpr const TCHAR* RetainerSourceContourEffectRef = TEXT("d2u.retainer.source_contour");
 	inline constexpr const TCHAR* RetainerInnerShadowEffectRef = TEXT("d2u.retainer.inner_shadow");
 	inline constexpr const TCHAR* RetainerSubtreeShadowEffectRef = TEXT("d2u.retainer.subtree_shadow");
-	// Image-ref prefix marking synthetic vector-raster fills baked by local import.
-	inline constexpr const TCHAR* VectorRasterImageRefPrefix = TEXT("vec_");
 }

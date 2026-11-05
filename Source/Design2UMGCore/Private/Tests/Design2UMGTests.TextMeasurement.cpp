@@ -10,7 +10,9 @@
 #include "Fonts/SlateFontInfo.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/SlateTypes.h"
+#include "TextFontResolution.h"
 #include "TextMeasurement.h"
+#include "TextMeasurementRuntimeProbe.h"
 #include "Widgets/Text/STextBlock.h"
 
 #include <limits>
@@ -72,6 +74,22 @@ namespace
 		OutSize = TextWidget->GetDesiredSize();
 		return FMath::IsFinite(OutSize.X) && OutSize.X > 0.0f
 			&& FMath::IsFinite(OutSize.Y) && OutSize.Y > 0.0f;
+	}
+
+	// Unbounded production text keeps the shaped fractional advance, rounded up, with Slate's line height.
+	bool TryMeasureProductionWidth(const TSharedPtr<FDesignNode>& Node, const float FontSize, float& OutWidth)
+	{
+		const auto Font = TextFontResolution::Resolve(Node->Text.FontFamily, Node->Text.FontPostScriptName,
+			Node->Text.FontWeight, Node->Text.FontStyle, nullptr, &Node->Text.PreparedFont);
+		TextMeasurementRuntimeProbe::FTextMeasureRequest Request;
+		Request.Text = TextMeasurement::PrepareRuntimeTextContent(Node->Text.Content);
+		Request.FontSize = FontSize;
+		Request.FontAssetPath = Font.FontAssetPath;
+		Request.TypefaceName = Font.TypefaceName;
+		Request.bRequiresResolvedFontAsset = Font.bRequiresResolvedFontAsset;
+		if (!TextMeasurementRuntimeProbe::TryMeasureIntrinsicWidth(Request, OutWidth)) return false;
+		OutWidth = FMath::CeilToFloat(OutWidth);
+		return true;
 	}
 
 }
@@ -146,10 +164,18 @@ bool FTextMeasurementRuntimeProbeFractionalSizeConsistencyTest::RunTest(const FS
 		return false;
 	}
 	TestFalse(TEXT("The fractional and rounded probes are observably different"), ExactSize.Equals(RoundedSize, 0.01f));
+	float ExactWidth = 0.0f;
+	float RoundedWidth = 0.0f;
+	if (!TestTrue(TEXT("Exact shaped width succeeds"), TryMeasureProductionWidth(Node, ResolvedFontSize, ExactWidth))
+		|| !TestTrue(TEXT("Rounded shaped width succeeds"), TryMeasureProductionWidth(Node, 11.0f, RoundedWidth)))
+	{
+		return false;
+	}
 
 	const FVector2D ProductionSize = TextMeasurement::MeasureTextNodeSize(Node, 0.0f);
 	AddInfo(FString::Printf(TEXT("Fractional measurement: production=%s direct=%s rounded=%s"), *ProductionSize.ToString(), *ExactSize.ToString(), *RoundedSize.ToString()));
-	TestTrue(TEXT("Production measurement uses the resolved fractional size"), ProductionSize.Equals(ExactSize, 0.01f));
+	TestTrue(TEXT("Production measurement uses the resolved fractional size"),
+		ProductionSize.Equals(FVector2D(ExactWidth, ExactSize.Y), 0.01f) && ExactWidth != RoundedWidth);
 
 	const TSharedPtr<FDesignNode> SubpixelNode = MakeTextNode(TEXT("subpixel_probe_consistency"), 0.5f);
 	SubpixelNode->Text.Content = TEXT("Subpixel probe text");
@@ -165,10 +191,15 @@ bool FTextMeasurementRuntimeProbeFractionalSizeConsistencyTest::RunTest(const FS
 	{
 		return false;
 	}
+	float SubpixelWidth = 0.0f;
+	if (!TestTrue(TEXT("Shaped 0.375 point width succeeds"), TryMeasureProductionWidth(SubpixelNode, SubpixelPointSize, SubpixelWidth)))
+	{
+		return false;
+	}
 	const FVector2D ProductionSubpixelSize = TextMeasurement::MeasureTextNodeSize(SubpixelNode, 0.0f);
 	AddInfo(FString::Printf(TEXT("Subpixel measurement: production=%s direct=%s"), *ProductionSubpixelSize.ToString(), *DirectSubpixelSize.ToString()));
 	TestTrue(TEXT("Production probe preserves the 0.375 point size"),
-		ProductionSubpixelSize.Equals(DirectSubpixelSize, 0.01f));
+		ProductionSubpixelSize.Equals(FVector2D(SubpixelWidth, DirectSubpixelSize.Y), 0.01f));
 	return true;
 }
 

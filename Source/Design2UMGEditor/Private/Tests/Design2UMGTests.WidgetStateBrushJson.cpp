@@ -5,6 +5,8 @@
 #include "UObject/Package.h"
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
+#include "Design2UMGConverter.h"
+#include "DesignSchema.h"
 #include "UMGJsonParser.h"
 #include "UMGJsonSerializer.h"
 #include "UMGPropertyKeys.h"
@@ -13,6 +15,7 @@
 #include "Materials/Material.h"
 #include "Serialization/JsonSerializer.h"
 #include "Components/TextBlock.h"
+#include "Components/Border.h"
 #include "Components/Widget.h"
 #include "Components/WidgetSwitcher.h"
 #include "UObject/UObjectGlobals.h"
@@ -20,6 +23,33 @@
 #if WITH_AUTOMATION_WORKER
 
 using namespace Design2UMGTestUtils;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResolvedUniformRoundedCornerTest,
+	"Design2UMG.PropertyApplier.ResolvedUniformRoundedCorner",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FResolvedUniformRoundedCornerTest::RunTest(const FString& Parameters)
+{
+	FDesignDocument Document;
+	TSharedPtr<FDesignNode> Source = MakeShared<FDesignNode>();
+	Source->Type = EDesignNodeType::Frame;
+	Source->Name = TEXT("RoundedColumn");
+	Source->Transform.SetWidthValue(FDesignSize::Fixed(5.0f));
+	Source->Transform.SetHeightValue(FDesignSize::Fixed(116.0f));
+	Source->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#60A5FAFF")));
+	Source->Visual.CornerRadius.bUniform = true;
+	Source->Visual.CornerRadius.Uniform = 32.0f;
+	Document.Children.Add(Source);
+	const FUMGWidgetData Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+	TestEqual(TEXT("Rounded column keeps its source width"), Data.RootWidget.Bounds.W, 5.0f);
+	TestEqual(TEXT("Rounded column keeps its source height"), Data.RootWidget.Bounds.H, 116.0f);
+	TestEqual(TEXT("Uniform radius is limited by the shorter side"), Data.RootWidget.Brush.OutlineCornerRadius.Get(0.0f), 2.5f);
+	UBorder* Border = NewObject<UBorder>(GetTransientPackage());
+	FUMGWidgetTreeBuilder::ApplyWidgetProperties(Border, Data.RootWidget);
+	const FSlateBrush& Brush = Border->Background;
+	TestEqual(TEXT("Resolved corner uses native fixed radius"), Brush.OutlineSettings.RoundingType.GetValue(), ESlateBrushRoundingType::FixedRadius);
+	TestEqual(TEXT("Native brush retains the clamped radius"), static_cast<float>(Brush.OutlineSettings.CornerRadii.X), 2.5f);
+	return !HasAnyErrors();
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetSwitcherUsesTypedStateTest,
 	"Design2UMG.PropertyApplier.WidgetSwitcherUsesTypedState",

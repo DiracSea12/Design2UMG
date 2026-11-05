@@ -38,9 +38,6 @@ public:
 	/** GET /v1/files/:key/images - Official "get file image fills" endpoint (imageRef -> URL map). */
 	void GetFileImages(const FString& FileKey, FOnComplete OnComplete);
 
-	/** GET /v1/images/:key?ids=...&format=png&scale=2 - Export nodes as images. */
-	void ExportImages(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete);
-
 private:
 	FString Token;
 	TSharedRef<class FDesignHttpClientSlot, ESPMode::ThreadSafe> State;

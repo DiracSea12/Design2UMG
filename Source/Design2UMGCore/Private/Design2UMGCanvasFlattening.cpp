@@ -31,7 +31,7 @@ namespace
 		return !OtherStyle.HasAny();
 	}
 
-	void FoldCanvasSizeCarriers(FUMGWidgetNode& Node, bool bDesiredSizeIgnored,
+	void FoldCanvasSizeCarriers(FUMGWidgetNode& Node, bool bDesiredSizeIgnored, const TSet<FString>& ReferencedWidgetIds,
 		Design2UMGCanvasFlattening::FFlattenStats& Stats)
 	{
 		const bool bNativeParent = !(Node.HasSourceData()
@@ -41,8 +41,9 @@ namespace
 			const bool bChildDesiredSizeIgnored = bNativeParent && ((Node.Type == UMGWidgetTypes::CanvasPanel && !Child.Slot.bAutoSize)
 				|| (Node.Type == UMGWidgetTypes::SizeBox && Node.WidgetStyle.WidthOverride.IsSet()
 					&& Node.WidgetStyle.HeightOverride.IsSet() && IsUnpaddedFill(Child.Slot)));
-			FoldCanvasSizeCarriers(Child, bChildDesiredSizeIgnored, Stats);
-			if (bNativeParent && Node.Type == UMGWidgetTypes::CanvasPanel && bDesiredSizeIgnored && IsRedundantSizeCarrier(Child))
+			FoldCanvasSizeCarriers(Child, bChildDesiredSizeIgnored, ReferencedWidgetIds, Stats);
+			if (bNativeParent && Node.Type == UMGWidgetTypes::CanvasPanel && bDesiredSizeIgnored
+				&& !ReferencedWidgetIds.Contains(Child.Id) && IsRedundantSizeCarrier(Child))
 			{
 				FUMGWidgetNode Content = MoveTemp(Child.Children[0]);
 				Content.Slot = Child.Slot;
@@ -54,7 +55,14 @@ namespace
 
 	// Depth 0 is the root's direct children, depth 1 their children. Nodes at or above
 	// this depth are preserved; deeper bare canvases merge into their canvas parent.
+	// Depth counts source design levels: wrappers generated around one source node
+	// (contour, surface, size and button carriers) stay on that node's level.
 	constexpr int32 MaxPreservedDepth = 2;
+
+	FString SourceIdentity(const FUMGWidgetNode& Node)
+	{
+		return Node.HasSourceData() ? Node.Source().SourceNodeId : FString();
+	}
 
 	bool IsBareCanvas(const FUMGWidgetNode& Node)
 	{
@@ -121,18 +129,23 @@ namespace
 		}
 	}
 
-	void FlattenNode(FUMGWidgetNode& Parent, const int32 Depth, Design2UMGCanvasFlattening::FFlattenStats& OutStats)
+	void FlattenNode(FUMGWidgetNode& Parent, const int32 Depth, const FString& LevelSourceId,
+		const TSet<FString>& ReferencedWidgetIds, Design2UMGCanvasFlattening::FFlattenStats& OutStats)
 	{
 		for (int32 ChildIndex = 0; ChildIndex < Parent.Children.Num(); )
 		{
 			FUMGWidgetNode& Child = Parent.Children[ChildIndex];
-			FlattenNode(Child, Depth + 1, OutStats);
+			const FString ChildSourceId = SourceIdentity(Child);
+			const bool bNewLevel = !ChildSourceId.IsEmpty() && ChildSourceId != LevelSourceId;
+			FlattenNode(Child, bNewLevel ? Depth + 1 : Depth, bNewLevel ? ChildSourceId : LevelSourceId,
+				ReferencedWidgetIds, OutStats);
 
 			// The root, the document's top-level frames, and their direct children are all
 			// page/block-level entities (reimport manifests, editor workflows and developer
 			// mounts address them); only deeper nesting is coordinate relay.
 			if (Depth >= MaxPreservedDepth
 				&& Parent.Type == UMGWidgetTypes::CanvasPanel
+				&& !ReferencedWidgetIds.Contains(Child.Id)
 				&& IsBareCanvas(Child))
 			{
 				if (Child.Children.Num() == 0)
@@ -180,11 +193,13 @@ namespace
 	}
 } // namespace
 
-void Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(FUMGWidgetNode& Root, FFlattenStats& OutStats)
+void Design2UMGCanvasFlattening::FlattenBareNestedCanvasPanels(FUMGWidgetNode& Root, const TSet<FString>& ReferencedWidgetIds, FFlattenStats& OutStats)
 {
-	FlattenNode(Root, 0, OutStats);
+	// A generated root wrapper keeps its source node's id, so that node stays the root level.
+	const FString RootSourceId = SourceIdentity(Root);
+	FlattenNode(Root, 0, RootSourceId.IsEmpty() ? Root.Id : RootSourceId, ReferencedWidgetIds, OutStats);
 	// Run after canvas flattening so the parent allocation boundary stays intact.
 	// A collapsed promoted child can change this canvas's desired size; its
 	// parent must ignore that value in both measurement and arrangement.
-	FoldCanvasSizeCarriers(Root, false, OutStats);
+	FoldCanvasSizeCarriers(Root, false, ReferencedWidgetIds, OutStats);
 }

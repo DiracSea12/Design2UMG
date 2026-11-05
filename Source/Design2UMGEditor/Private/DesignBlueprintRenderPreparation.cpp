@@ -92,7 +92,9 @@ namespace
 			else if (!Package->IsDirty())
 			{
 				ResetLoaders(static_cast<UObject*>(Package));
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: resource reload begin (%s): %s"), Description, *PackageName);
 				Package = ReloadPackage(Package, LOAD_None);
+				UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: resource reload end (%s): %s (success=%d)"), Description, *PackageName, Package != nullptr);
 				if (!Package)
 				{
 					OutError = FString::Printf(
@@ -228,10 +230,12 @@ namespace DesignBlueprintRenderPreparation
 		}
 
 		// Template Slate resources belong to this blueprint, not to garbage collection.
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: release template Slate resources begin: %s"), *ObjectPath);
 		if (WidgetBlueprint->WidgetTree)
 		{
 			WidgetBlueprint->WidgetTree->ForEachWidget([](UWidget* Widget) { Widget->ReleaseSlateResources(true); });
 		}
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: release template Slate resources end: %s"), *ObjectPath);
 		const bool bResetTransientState = Preparation && Preparation->bResetTransientRenderState;
 		if (bResetTransientState)
 		{
@@ -239,6 +243,7 @@ namespace DesignBlueprintRenderPreparation
 		}
 
 		FString LocalError;
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: prepare render resources begin: %s"), *ObjectPath);
 		if (Preparation && !PrepareRenderResources(ObjectPath, *Preparation, LocalError))
 		{
 			if (bResetTransientState)
@@ -251,6 +256,7 @@ namespace DesignBlueprintRenderPreparation
 			}
 			return nullptr;
 		}
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: prepare render resources end: %s"), *ObjectPath);
 
 		if (DirtyBlueprint.IsValid())
 		{
@@ -280,9 +286,14 @@ namespace DesignBlueprintRenderPreparation
 			return nullptr;
 		}
 
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: flush async loading begin: %s"), *ObjectPath);
 		FlushAsyncLoading();
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: flush async loading end; reset package loaders begin: %s"), *ObjectPath);
 		ResetLoaders(static_cast<UObject*>(Package));
-		if (!ReloadPackage(Package, LOAD_None))
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: package reload begin (includes Blueprint recompilation): %s"), *PackageName);
+		UPackage* ReloadedPackage = ReloadPackage(Package, LOAD_None);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: package reload end: %s (success=%d)"), *PackageName, ReloadedPackage != nullptr);
+		if (!ReloadedPackage)
 		{
 			if (bResetTransientState)
 			{
@@ -296,13 +307,18 @@ namespace DesignBlueprintRenderPreparation
 			return nullptr;
 		}
 
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: post-reload render flush and garbage collection begin: %s"), *ObjectPath);
 		FlushRenderingCommands();
 		CollectGarbage(RF_NoFlags, true);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: post-reload render flush and garbage collection end: %s"), *ObjectPath);
 		if (bResetTransientState)
 		{
 			ResetTransientRenderState();
 		}
-		if (UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath))
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: load reloaded Blueprint begin: %s"), *ObjectPath);
+		UWidgetBlueprint* ReloadedBlueprint = LoadObject<UWidgetBlueprint>(nullptr, *ObjectPath);
+		UE_LOG(LogDesign2UMG, Verbose, TEXT("RenderPreparation: load reloaded Blueprint end: %s (success=%d)"), *ObjectPath, ReloadedBlueprint != nullptr);
+		if (ReloadedBlueprint)
 		{
 			return ReloadedBlueprint;
 		}

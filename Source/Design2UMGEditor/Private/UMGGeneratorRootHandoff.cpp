@@ -26,7 +26,7 @@ namespace UMGGeneratorRootHandoff
 				Prepared.Root, Prepared.ErrorMessage)
 			|| !RetainerCaptureBounds::Prepare(Prepared.Root, Prepared.ErrorMessage)
 			|| !Design2UMGEffectMaterialBuilder::PrepareSubtreeShadowMaterials(Prepared.Root, Prepared.ErrorMessage)
-			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage))
+			|| !Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Prepared.Root, Prepared.Materials, Prepared.ErrorMessage, Budget))
 		{
 			return Prepared;
 		}

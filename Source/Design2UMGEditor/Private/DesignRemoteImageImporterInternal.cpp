@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignRemoteImageImporterInternal.h"
+#include "Design2UMGLog.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/CriticalSection.h"
@@ -88,7 +89,7 @@ namespace DesignRemoteImageImporterInternal
 			}
 		};
 
-		bool DecodeWebPToBGRA8(const TArray<uint8>& CompressedData,
+		bool DecodeFreeImageToBGRA8(const TArray<uint8>& CompressedData, FREE_IMAGE_FORMAT Format,
 			const DesignImageResources::FImageResourceLimits& Limits,
 			int32& OutWidth, int32& OutHeight, TArray64<uint8>& OutRawData, FString& OutError,
 			DesignImageResources::FImageOperationBudget* OperationBudget,
@@ -97,7 +98,7 @@ namespace DesignRemoteImageImporterInternal
 			static FFreeImageLibrary Library;
 			if (!Library.Handle)
 			{
-				OutError = TEXT("The engine FreeImage library could not be loaded for WebP decoding");
+				OutError = TEXT("The engine FreeImage library could not be loaded for image decoding");
 				return false;
 			}
 			// The native memory-stream API takes writable storage; preserve the caller's bytes.
@@ -105,45 +106,96 @@ namespace DesignRemoteImageImporterInternal
 			FIMEMORY* Stream = FreeImage_OpenMemory(MemoryData.GetData(), MemoryData.Num());
 			if (!Stream)
 			{
-				OutError = TEXT("Could not open WebP image data");
+				OutError = TEXT("Could not open image data");
 				return false;
 			}
 			ON_SCOPE_EXIT { FreeImage_CloseMemory(Stream); };
-			FIBITMAP* Header = FreeImage_LoadFromMemory(FIF_WEBP, Stream, FIF_LOAD_NOPIXELS);
-			if (!Header)
+			if (Format == FIF_GIF)
 			{
-				OutError = TEXT("Failed to parse WebP image header");
-				return false;
+				if (CompressedData.Num() < 10)
+				{
+					OutError = TEXT("Failed to parse GIF image header");
+					return false;
+				}
+				OutWidth = CompressedData[6] | (static_cast<int32>(CompressedData[7]) << 8);
+				OutHeight = CompressedData[8] | (static_cast<int32>(CompressedData[9]) << 8);
 			}
-			OutWidth = FreeImage_GetWidth(Header);
-			OutHeight = FreeImage_GetHeight(Header);
-			FreeImage_Unload(Header);
+			else
+			{
+				FIBITMAP* Header = FreeImage_LoadFromMemory(Format, Stream, FIF_LOAD_NOPIXELS);
+				if (!Header)
+				{
+					OutError = TEXT("Failed to parse image header");
+					return false;
+				}
+				OutWidth = FreeImage_GetWidth(Header);
+				OutHeight = FreeImage_GetHeight(Header);
+				FreeImage_Unload(Header);
+			}
 			if (!FImagePayloadIO::ValidateDimensions(OutWidth, OutHeight, Limits, OutError)
 				|| (OperationBudget && !OperationBudget->ConsumeDecodedPixels(static_cast<int64>(OutWidth) * OutHeight, OutError)))
 			{
 				if (OutFailureCategory) *OutFailureCategory = EDesignImageDiagnosticCategory::Budget;
 				return false;
 			}
+			bool bGifHasTransparency = false;
+			bool bGifHasBackground = false;
+			RGBQUAD GifBackground{};
+			if (Format == FIF_GIF)
+			{
+				FreeImage_SeekMemory(Stream, 0, SEEK_SET);
+				FIBITMAP* FirstFrame = FreeImage_LoadFromMemory(Format, Stream, 0);
+				if (!FirstFrame)
+				{
+					OutError = TEXT("Failed to decode GIF first-frame metadata");
+					return false;
+				}
+				bGifHasTransparency = FreeImage_IsTransparent(FirstFrame) != 0;
+				bGifHasBackground = FreeImage_GetBackgroundColor(FirstFrame, &GifBackground) != 0;
+				FreeImage_Unload(FirstFrame);
+			}
 			FreeImage_SeekMemory(Stream, 0, SEEK_SET);
-			FIBITMAP* Image = FreeImage_LoadFromMemory(FIF_WEBP, Stream, 0);
+			FIBITMAP* Image = FreeImage_LoadFromMemory(Format, Stream, Format == FIF_GIF ? GIF_PLAYBACK : 0);
 			if (!Image)
 			{
-				OutError = TEXT("Failed to decode WebP image pixels");
+				OutError = TEXT("Failed to decode image pixels");
 				return false;
 			}
 			ON_SCOPE_EXIT { FreeImage_Unload(Image); };
+			if (static_cast<int32>(FreeImage_GetWidth(Image)) != OutWidth || static_cast<int32>(FreeImage_GetHeight(Image)) != OutHeight)
+			{
+				OutError = TEXT("Decoded image dimensions do not match its header");
+				return false;
+			}
 			FIBITMAP* Converted = FreeImage_GetBPP(Image) == 32 ? nullptr : FreeImage_ConvertTo32Bits(Image);
 			ON_SCOPE_EXIT { if (Converted) FreeImage_Unload(Converted); };
 			FIBITMAP* Pixels = Converted ? Converted : Image;
 			if (FreeImage_GetBPP(Pixels) != 32)
 			{
-				OutError = TEXT("Could not convert WebP pixels to BGRA8");
+				OutError = TEXT("Could not convert image pixels to BGRA8");
 				return false;
 			}
 			const int64 RowBytes = static_cast<int64>(OutWidth) * Bgra8BytesPerPixel;
 			OutRawData.SetNumUninitialized(RowBytes * OutHeight);
 			for (int32 Y = 0; Y < OutHeight; ++Y)
 				FMemory::Memcpy(OutRawData.GetData() + Y * RowBytes, FreeImage_GetScanLine(Pixels, OutHeight - 1 - Y), RowBytes);
+			if (Format == FIF_GIF && !bGifHasTransparency)
+			{
+				for (int64 Index = 0; Index < static_cast<int64>(OutWidth) * OutHeight; ++Index)
+				{
+					uint8* Pixel = OutRawData.GetData() + Index * Bgra8BytesPerPixel;
+					if (Pixel[3] != 0) continue;
+					if (!bGifHasBackground)
+					{
+						OutError = TEXT("GIF first frame does not cover its canvas and has no global background color");
+						return false;
+					}
+					Pixel[0] = GifBackground.rgbBlue;
+					Pixel[1] = GifBackground.rgbGreen;
+					Pixel[2] = GifBackground.rgbRed;
+					Pixel[3] = 255;
+				}
+			}
 			return true;
 		}
 #endif
@@ -1157,9 +1209,17 @@ namespace DesignRemoteImageImporterInternal
 		if (Format == EImageFormat::Invalid)
 		{
 #if WITH_FREEIMAGE_LIB
+			if (CompressedData.Num() >= 6 && (FMemory::Memcmp(CompressedData.GetData(), "GIF87a", 6) == 0
+				|| FMemory::Memcmp(CompressedData.GetData(), "GIF89a", 6) == 0))
+			{
+				const bool bDecoded = DecodeFreeImageToBGRA8(CompressedData, FIF_GIF, Limits, OutWidth, OutHeight, OutRawData,
+					OutError, OperationBudget, OutFailureCategory);
+				if (bDecoded) UE_LOG(LogDesign2UMG, Warning, TEXT("GIF imported as a static first frame; subsequent frames are not played."));
+				return bDecoded;
+			}
 			if (CompressedData.Num() >= 12 && FMemory::Memcmp(CompressedData.GetData(), "RIFF", 4) == 0
 				&& FMemory::Memcmp(CompressedData.GetData() + 8, "WEBP", 4) == 0)
-				return DecodeWebPToBGRA8(CompressedData, Limits, OutWidth, OutHeight, OutRawData,
+				return DecodeFreeImageToBGRA8(CompressedData, FIF_WEBP, Limits, OutWidth, OutHeight, OutRawData,
 					OutError, OperationBudget, OutFailureCategory);
 #endif
 			OutError = TEXT("Unsupported image format");

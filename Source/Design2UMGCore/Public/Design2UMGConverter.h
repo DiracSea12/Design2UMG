@@ -18,6 +18,7 @@ struct DESIGN2UMGCORE_API FDesign2UMGConversionSettings
 	TMap<FString, FString> IconFontAssetPaths;
 	FString DefaultIconFontAssetPath;
 	FString MissingIconFontPlaceholder;
+	bool bPreserveSourceNodes = false;
 
 	static FDesign2UMGConversionSettings Defaults();
 	static FDesign2UMGConversionSettings FromSettings(const UDesign2UMGSettings* Settings);

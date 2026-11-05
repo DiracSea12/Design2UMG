@@ -437,6 +437,7 @@ bool DesignImageBakeUtils::SaveBGRA8ToPng(
 void DesignImageBakeUtils::ApplyImagePathMap(FDesignDocument& Document, const TMap<FString, FString>& ImageKeyToPath)
 {
 	ApplyImagePathMapRecursive(Document.Children, ImageKeyToPath);
+	ApplyImagePathMapRecursive(Document.MutableSourceDocument().PrototypePages, ImageKeyToPath);
 }
 
 FString DesignImageBakeUtils::ResolveDocumentImageBakeIdentity(const FDesignDocument& Document, const FString& ExplicitSourcePath)
@@ -604,17 +605,20 @@ int32 DesignImageBakeUtils::BakeDocumentLocalImageBlendOverlays(
 {
 	TMap<FString, FString> LocalImagePathMap;
 	CollectLocalImagePathMapRecursive(Document.Children, LocalImagePathMap);
+	CollectLocalImagePathMapRecursive(Document.SourceDocument().PrototypePages, LocalImagePathMap);
 	if (LocalImagePathMap.Num() == 0)
 	{
 		return 0;
 	}
 
 	const FString SourceDocumentIdentity = ResolveDocumentImageBakeIdentity(Document, ExplicitSourcePath);
-	const int32 BakedCount = BakeMappedImageBlendOverlays(
+	int32 BakedCount = BakeMappedImageBlendOverlays(
 		Document.Children,
 		LocalImagePathMap,
 		SourceDocumentIdentity,
 		LogContext);
+	BakedCount += BakeMappedImageBlendOverlays(
+		Document.MutableSourceDocument().PrototypePages, LocalImagePathMap, SourceDocumentIdentity, LogContext);
 	if (BakedCount > 0)
 	{
 		ApplyImagePathMap(Document, LocalImagePathMap);

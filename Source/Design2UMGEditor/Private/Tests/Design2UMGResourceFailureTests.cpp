@@ -100,24 +100,7 @@ namespace
 		return Document;
 	}
 
-	/**
-	 * A vector/raster fallback ref: the node owns an explicit alternative rendering path
-	 * (its own vector geometry), so an unresolved ref here is an allowed substitute.
-	 */
-	TSharedRef<FDesignDocument> MakeDocumentWithVectorRasterFallbackRef(const FString& Ref)
-	{
-		const TSharedRef<FDesignDocument> Document = MakeShared<FDesignDocument>();
-		TSharedPtr<FDesignNode> Node = Design2UMGEditorTests::MakeNode(
-			TEXT("resource_failure_vector"), TEXT("ResourceFailure_Vector"), EDesignNodeType::Path, 64.0f, 64.0f);
-		Node->Visual.VectorRasterFallbackImageRef = Ref;
-		Node->Shape.Geometry = TEXT("M0 0L64 0L64 64Z");
-		FDesignFill Fill;
-		Fill.Type = EDesignFillType::Color;
-		Fill.SolidColor = TEXT("#FFFFFF");
-		Node->Visual.Fills.Add(Fill);
-		Document->Children.Add(Node);
-		return Document;
-	}
+
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureRemoteImageFailureEntersTypedResultTest,
@@ -472,45 +455,25 @@ bool FResourceFailureFigmaMissingImagesObjectIsFailureTest::RunTest(const FStrin
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaEmptyImagesDictionaryIsAllowedSubstituteTest,
-	"Design2UMG.Resources.Failure.FigmaEmptyImagesDictionaryIsAllowedSubstitute",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaNativeVectorNeedsNoImageRequestTest,
+	"Design2UMG.Resources.Failure.FigmaNativeVectorNeedsNoImageRequest",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FResourceFailureFigmaEmptyImagesDictionaryIsAllowedSubstituteTest::RunTest(const FString& Parameters)
+bool FResourceFailureFigmaNativeVectorNeedsNoImageRequestTest::RunTest(const FString& Parameters)
 {
-	// Plain string: the message contains "(s)", which would be read as a regex group
-	// by AddExpectedError's default regex matching.
-	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("requested image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
-
+	const TSharedRef<FDesignDocument> Document = MakeShared<FDesignDocument>();
+	auto Node = Design2UMGEditorTests::MakeNode(TEXT("native_vector"), TEXT("NativeVector"), EDesignNodeType::Path, 64.0f, 64.0f);
+	Node->Shape.Geometry = TEXT("M0 0L64 0L64 64Z");
+	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#FFFFFF")));
+	Document->Children.Add(Node);
 	FScopedHttpTestTransport Transport;
 	FFigmaHttpClient Client([&Transport]() { return Transport.CreateRequest(); });
-
 	bool bCompleted = false;
 	bool bSuccess = false;
-	const auto Document = MakeDocumentWithVectorRasterFallbackRef(TEXT("ref-alpha"));
-	FFigmaImageExporter::ResolveImageRefs(Client, TEXT("resource_failure-file"),
-		Document,
-		[&bCompleted, &bSuccess](const bool bInSuccess)
-		{
-			bCompleted = true;
-			bSuccess = bInSuccess;
-		});
-
-	TestEqual(TEXT("One image-refs request was started"), Transport.Pending.Num(), 1);
-	if (Transport.Pending.Num() != 1)
-	{
-		return false;
-	}
-
-	// meta.images exists but does not contain the requested ref. The ref is a
-	// vector-raster fallback, which owns an explicit alternative rendering path, so
-	// falling back to vector rendering is an allowed substitute, not a hard failure.
-	Transport.Complete(Transport.LastStartedId, TEXT("{\"meta\":{\"images\":{}}}"), 200);
-
-	TestTrue(TEXT("Completion callback fired"), bCompleted);
-	TestTrue(TEXT("An empty images dictionary with an allowed substitute stays success"), bSuccess);
-	TestTrue(TEXT("Missing fallback is removed so the builder uses geometry"),
-		Document->Children[0]->Visual.VectorRasterFallbackImageRef.IsEmpty());
-	TestFalse(TEXT("Substitution preserves vector geometry"), Document->Children[0]->Shape.Geometry.IsEmpty());
+	FFigmaImageExporter::ResolveImageRefs(Client, TEXT("resource_failure-file"), Document,
+		[&](bool bResult) { bCompleted = true; bSuccess = bResult; });
+	TestTrue(TEXT("Native vector resolves immediately without images"), bCompleted && bSuccess);
+	TestEqual(TEXT("No raster export or image request is started"), Transport.Pending.Num(), 0);
+	TestEqual(TEXT("Geometry remains intact"), Node->Shape.Geometry, FString(TEXT("M0 0L64 0L64 64Z")));
 	return true;
 }
 
@@ -521,10 +484,6 @@ bool FResourceFailureFigmaUnresolvedBitmapFillRefIsFailureTest::RunTest(const FS
 {
 	// Plain string: the message contains "(s)", which would be read as a regex group
 	// by AddExpectedError's default regex matching.
-	//
-	// Only the required-ref message is expected here. The two missing-ref cases are
-	// reported separately now, so a required ref is no longer also logged as "will fall
-	// back to vector" - that message would contradict this test's whole point.
 	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 
 	FScopedHttpTestTransport Transport;
@@ -768,15 +727,17 @@ bool FResourceFailureOptionalEmptyRasterAndTextureFallbackTest::RunTest(const FS
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaSubstituteMustCoverEveryUseTest,
-	"Design2UMG.Resources.Failure.FigmaSubstituteMustCoverEveryUse",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FResourceFailureFigmaImagePaintRemainsRequiredTest,
+	"Design2UMG.Resources.Failure.FigmaImagePaintRemainsRequired",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FResourceFailureFigmaSubstituteMustCoverEveryUseTest::RunTest(const FString& Parameters)
+bool FResourceFailureFigmaImagePaintRemainsRequiredTest::RunTest(const FString& Parameters)
 {
 	Design2UMGAutomationTestAdapter::AddExpectedErrorPlain(*this, TEXT("required image ref(s) not resolved"), EAutomationExpectedErrorFlags::Contains, 0);
 	for (int32 CaseIndex = 0; CaseIndex < 3; ++CaseIndex)
 	{
-		const auto Document = MakeDocumentWithVectorRasterFallbackRef(TEXT("shared-ref"));
+		const auto Document = MakeDocumentWithImageRef(TEXT("shared-ref"));
+		Document->Children[0]->Type = EDesignNodeType::Path;
+		Document->Children[0]->Shape.Geometry = TEXT("M0 0L64 0L64 64Z");
 		if (CaseIndex == 0)
 		{
 			Document->Children.Append(MakeDocumentWithImageRef(TEXT("shared-ref"))->Children);
@@ -787,7 +748,6 @@ bool FResourceFailureFigmaSubstituteMustCoverEveryUseTest::RunTest(const FString
 		}
 		else
 		{
-			Document->Children[0]->Visual.Fills.Reset();
 			Document->Children[0]->Visual.Stroke.Thickness.Uniform = 1.0f;
 			Document->Children[0]->Visual.Stroke.Fill.Reset();
 		}
@@ -800,7 +760,7 @@ bool FResourceFailureFigmaSubstituteMustCoverEveryUseTest::RunTest(const FString
 		if (!TestEqual(TEXT("One request is made"), Transport.Pending.Num(), 1)) return false;
 		Transport.Complete(Transport.LastStartedId, TEXT("{\"meta\":{\"images\":{}}}"), 200);
 		TestTrue(TEXT("Missing-reference resolution completes"), bCompleted);
-		TestFalse(FString::Printf(TEXT("Missing ref fails when its substitute is incomplete (case %d)"), CaseIndex), bSucceeded);
+		TestFalse(FString::Printf(TEXT("Image paint remains required regardless of geometry or stroke (case %d)"), CaseIndex), bSucceeded);
 	}
 	return true;
 }

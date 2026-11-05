@@ -189,6 +189,8 @@ bool FUMGJsonExtensionAndLayoutBoundaryContractTest::RunTest(const FString&)
 	Source.RootWidget.Type = TEXT("Border");
 	Source.RootWidget.Name = TEXT("LayoutMarkerRoot");
 	Source.RootWidget.bSyntheticJustifySpacer = true;
+	Source.RootWidget.SourceVisualChildIndex = 0;
+	Source.RootWidget.Children.AddDefaulted_GetRef().Type = TEXT("TextBlock");
 	Source.RootWidget.Slot.FillWeight = 0.0f;
 	Source.RootWidget.Slot.Row = 0;
 	Source.RootWidget.Slot.Column = 4;
@@ -234,6 +236,8 @@ bool FUMGJsonExtensionAndLayoutBoundaryContractTest::RunTest(const FString&)
 		return false;
 	}
 	TestTrue(TEXT("Synthetic-spacer marker roundtrips"), Parsed.RootWidget.bSyntheticJustifySpacer);
+	TestEqual(TEXT("Native source visual child survives the visual JSON bridge"), Parsed.RootWidget.SourceVisualChildIndex, 0);
+	TestEqual(TEXT("Native source visual child survives copying"), FUMGWidgetNode(Parsed.RootWidget).SourceVisualChildIndex, 0);
 	TestEqual(TEXT("Grid column roundtrips"), Parsed.RootWidget.Slot.Column, 4);
 	TestEqual(TEXT("Column span roundtrips"), Parsed.RootWidget.Slot.ColumnSpan, 3);
 	TestEqual(TEXT("Zero fill weight roundtrips"), Parsed.RootWidget.Slot.FillWeight, 0.0f);

@@ -291,6 +291,7 @@ namespace
 		case EUMGPrototypeNavigationAction::Navigate: return TEXT("Navigate");
 		case EUMGPrototypeNavigationAction::Overlay: return TEXT("Overlay");
 		case EUMGPrototypeNavigationAction::Back: return TEXT("Back");
+		case EUMGPrototypeNavigationAction::CloseOverlay: return TEXT("CloseOverlay");
 		case EUMGPrototypeNavigationAction::OpenLink: return TEXT("OpenLink");
 		case EUMGPrototypeNavigationAction::SetVariable: return TEXT("SetVariable");
 		case EUMGPrototypeNavigationAction::SetVariableMode: return TEXT("SetVariableMode");
@@ -306,6 +307,7 @@ namespace
 		case EUMGPrototypeNavigationStepKind::Navigate: return TEXT("Navigate");
 		case EUMGPrototypeNavigationStepKind::Overlay: return TEXT("Overlay");
 		case EUMGPrototypeNavigationStepKind::Back: return TEXT("Back");
+		case EUMGPrototypeNavigationStepKind::CloseOverlay: return TEXT("CloseOverlay");
 		case EUMGPrototypeNavigationStepKind::OpenLink: return TEXT("OpenLink");
 		case EUMGPrototypeNavigationStepKind::SetVariable: return TEXT("SetVariable");
 		case EUMGPrototypeNavigationStepKind::SetVariableMode: return TEXT("SetVariableMode");
@@ -606,6 +608,7 @@ namespace
 		FJsonFields Fields;
 		AddOptionalString(Fields, TEXT("Orientation"), ScrollBox.Orientation);
 		AddOptionalString(Fields, TEXT("ScrollBarVisibility"), ScrollBox.ScrollBarVisibility);
+		AddOptionalFloat(Fields, TEXT("ScrollOffset"), ScrollBox.ScrollOffset);
 		return RenderObject(Fields);
 	}
 
@@ -703,8 +706,22 @@ namespace
 		{
 			AddBool(Fields, TEXT("HasMatchLayers"), Transition.HasMatchLayers.GetValue());
 		}
-		AddString(Fields, TEXT("OutgoingAnimationName"), Transition.OutgoingAnimationName);
-		AddString(Fields, TEXT("IncomingAnimationName"), Transition.IncomingAnimationName);
+		AddString(Fields, TEXT("WidgetAnimationName"), Transition.WidgetAnimationName);
+		AddString(Fields, TEXT("StateHostWidgetId"), Transition.StateHostWidgetId);
+		AddString(Fields, TEXT("SourceStateId"), Transition.SourceStateId);
+		AddString(Fields, TEXT("TargetStateId"), Transition.TargetStateId);
+		AddString(Fields, TEXT("SourceStateWidgetId"), Transition.SourceStateWidgetId);
+		AddString(Fields, TEXT("TargetStateWidgetId"), Transition.TargetStateWidgetId);
+		AddBool(Fields, TEXT("StateInstant"), Transition.bStateInstant);
+		AddBool(Fields, TEXT("Spring"), Transition.bSpring);
+		if (Transition.bSpring)
+		{
+			AddFloat(Fields, TEXT("SpringMass"), Transition.SpringMass);
+			AddFloat(Fields, TEXT("SpringStiffness"), Transition.SpringStiffness);
+			AddFloat(Fields, TEXT("SpringDamping"), Transition.SpringDamping);
+			AddFloat(Fields, TEXT("SpringInitialVelocity"), Transition.SpringInitialVelocity);
+		}
+		AddString(Fields, TEXT("Diagnostic"), Transition.Diagnostic);
 		return RenderObject(Fields);
 	}
 
@@ -731,6 +748,7 @@ namespace
 		AddString(Fields, TEXT("TriggerWidgetId"), Binding.TriggerWidgetId);
 		AddString(Fields, TEXT("TriggerWidgetName"), Binding.TriggerWidgetName);
 		AddString(Fields, TEXT("TriggerType"), Binding.TriggerType);
+		AddString(Fields, TEXT("TriggerDevice"), Binding.TriggerDevice);
 		AddString(Fields, TEXT("TriggerJson"), Binding.TriggerJson);
 		{
 			TArray<FString> KeyCodes;
@@ -757,8 +775,8 @@ namespace
 	FString RenderPrototypeNavigationData(const FUMGPrototypeNavigationData& Navigation)
 	{
 		FJsonFields Fields;
-		AddString(Fields, TEXT("SwitcherWidgetId"), Navigation.SwitcherWidgetId);
-		AddString(Fields, TEXT("SwitcherWidgetName"), Navigation.SwitcherWidgetName);
+		AddString(Fields, TEXT("PageHostWidgetId"), Navigation.PageHostWidgetId);
+		AddString(Fields, TEXT("PageHostWidgetName"), Navigation.PageHostWidgetName);
 		AddString(Fields, TEXT("OverlayHostWidgetId"), Navigation.OverlayHostWidgetId);
 		AddString(Fields, TEXT("OverlayHostWidgetName"), Navigation.OverlayHostWidgetName);
 		AddInt(Fields, TEXT("InitialPageIndex"), Navigation.InitialPageIndex);
@@ -771,6 +789,30 @@ namespace
 			}
 			Fields.Add(FJsonField(TEXT("PageIds"), RenderArray(PageIds)));
 		}
+		{
+			TArray<FString> Visibility;
+			for (const FString& Value : Navigation.PageDisplayVisibility) Visibility.Add(RenderString(Value));
+			Fields.Add(FJsonField(TEXT("PageDisplayVisibility"), RenderArray(Visibility)));
+		}
+		Fields.Add(FJsonField(TEXT("StateHosts"), RenderObjectArray<FUMGPrototypeStateHost>(
+			Navigation.StateHosts, [](const FUMGPrototypeStateHost& Host)
+			{
+				FJsonFields HostFields;
+				AddString(HostFields, TEXT("HostWidgetId"), Host.HostWidgetId);
+				AddString(HostFields, TEXT("InstanceWidgetId"), Host.InstanceWidgetId);
+				AddString(HostFields, TEXT("InitialStateId"), Host.InitialStateId);
+				HostFields.Add(FJsonField(TEXT("States"), RenderObjectArray<FUMGPrototypeStateEntry>(
+					Host.States, [](const FUMGPrototypeStateEntry& State)
+					{
+						FJsonFields StateFields;
+						AddString(StateFields, TEXT("StateId"), State.StateId);
+						AddString(StateFields, TEXT("WidgetId"), State.WidgetId);
+						AddString(StateFields, TEXT("WidgetName"), State.WidgetName);
+						AddString(StateFields, TEXT("Visibility"), State.Visibility);
+						return RenderObject(StateFields);
+					})));
+				return RenderObject(HostFields);
+			})));
 		Fields.Add(FJsonField(
 			TEXT("ClickBindings"),
 			RenderObjectArray<FUMGPrototypeNavigationBinding>(

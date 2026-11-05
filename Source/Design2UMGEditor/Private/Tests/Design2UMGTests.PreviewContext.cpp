@@ -12,11 +12,12 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
-#include "Components/WidgetSwitcher.h"
+#include "Components/CanvasPanel.h"
 #include "Editor.h"
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
 #include "WidgetBlueprint.h"
+#include "UObject/UnrealType.h"
 
 #if WITH_AUTOMATION_WORKER
 namespace
@@ -36,8 +37,8 @@ namespace
 	FUMGWidgetData PreviewContextFixture()
 	{
 		FUMGWidgetData Data;
-		Data.RootWidget = PreviewNode(TEXT("switcher"), TEXT("WidgetSwitcher"));
-		Data.RootWidget.WidgetState.ActiveWidgetIndex = 0;
+		Data.RootWidget = PreviewNode(TEXT("page_host"), TEXT("CanvasPanel"));
+		Data.RootWidget.WidgetStyle.Visibility = TEXT("Visible");
 		FUMGWidgetNode Page = PreviewNode(TEXT("page_a"), TEXT("CanvasPanel"));
 		FUMGWidgetNode Trigger = PreviewNode(TEXT("trigger"), TEXT("Button"));
 		FUMGWidgetNode Label = PreviewNode(TEXT("label"), TEXT("TextBlock"));
@@ -46,15 +47,18 @@ namespace
 		Page.Children.Add(Trigger);
 		Data.RootWidget.Children.Add(Page);
 		Data.RootWidget.Children.Add(PreviewNode(TEXT("page_b"), TEXT("CanvasPanel")));
+		Data.RootWidget.Children.Last().WidgetStyle.Visibility = TEXT("Collapsed");
 		Data.MutableSourceDocument().Provider = TEXT("figma");
 		Data.MutableSourceDocument().DocumentScope = TEXT("preview-context-file");
 		Data.MutableSourceDocument().ComponentsJson = TEXT("{\"component\":{\"key\":\"button-key\"}}");
 		Data.MutableSourceDocument().ComponentDependenciesJson = TEXT("{\"dependency\":{\"id\":\"dependency\"}}");
 		Data.Warnings.Add(TEXT("Original conversion warning"));
 		auto& Navigation = Data.MutablePrototypeNavigation();
-		Navigation.SwitcherWidgetId = TEXT("switcher");
-		Navigation.SwitcherWidgetName = TEXT("switcher");
+		Navigation.PageHostWidgetId = TEXT("page_host");
+		Navigation.PageHostWidgetName = TEXT("page_host");
 		Navigation.PageIds = { TEXT("page_a"), TEXT("page_b") };
+		Navigation.PageWidgetNames = { { TEXT("page_a"), TEXT("page_a") }, { TEXT("page_b"), TEXT("page_b") } };
+		Navigation.PageDisplayVisibility = { TEXT("Visible"), TEXT("Visible") };
 		auto& Binding = Navigation.ClickBindings.AddDefaulted_GetRef();
 		Binding.TriggerWidgetId = TEXT("trigger");
 		Binding.TriggerWidgetName = TEXT("trigger");
@@ -299,25 +303,26 @@ bool FPreviewContextRuntimeAddressRolesTest::RunTest(const FString& Parameters)
 		RefreshContext(OriginalWithUnreferencedPage, Edited).bSucceeded);
 
 	Edited = Original;
-	FUMGWidgetNode CrossTypeSwitcher = CrossTypeName;
-	CrossTypeSwitcher.Id = TEXT("cross_type_switcher");
-	CrossTypeSwitcher.Name = TEXT("switcher_1");
-	Edited.RootWidget.Children[0].Children.Add(CrossTypeSwitcher);
+	FUMGWidgetNode CrossTypePageHost = CrossTypeName;
+	CrossTypePageHost.Id = TEXT("cross_type_page_host");
+	CrossTypePageHost.Name = TEXT("page_host_1");
+	Edited.RootWidget.Children[0].Children.Add(CrossTypePageHost);
 	TestTrue(
-		TEXT("A non-switcher in the switcher suffix family does not break animation or page lookup"),
+		TEXT("A non-page_host in the page_host suffix family does not break animation or page lookup"),
 		RefreshContext(Original, Edited).bSucceeded);
 
 	Edited = Original;
-	FUMGWidgetNode SecondSwitcher = CrossTypeSwitcher;
-	SecondSwitcher.Id = TEXT("second_switcher");
-	SecondSwitcher.Type = TEXT("WidgetSwitcher");
-	Edited.RootWidget.Children[0].Children.Add(SecondSwitcher);
+	FUMGWidgetNode SecondPageHost = CrossTypePageHost;
+	SecondPageHost.Id = TEXT("second_page_host");
+	SecondPageHost.Type = TEXT("CanvasPanel");
+	Edited.RootWidget.Children[0].Children.Add(SecondPageHost);
 	TestFalse(
-		TEXT("A second WidgetSwitcher in the switcher suffix family is rejected"),
+		TEXT("A second CanvasPanel in the page_host suffix family is rejected"),
 		RefreshContext(Original, Edited).bSucceeded);
 
 	FUMGWidgetData KeyboardOriginal = Original;
 	KeyboardOriginal.MutablePrototypeNavigation().ClickBindings[0].TriggerType = TEXT("ON_KEY_DOWN");
+	KeyboardOriginal.MutablePrototypeNavigation().ClickBindings[0].TriggerDevice = TEXT("KEYBOARD");
 	KeyboardOriginal.MutablePrototypeNavigation().ClickBindings[0].TriggerKeyCodes = { TEXT("ENTER") };
 	Edited = KeyboardOriginal;
 	Edited.RootWidget.Children[0].Children.Add(SecondButton);
@@ -335,9 +340,11 @@ bool FPreviewContextNestedPageOwnershipTest::RunTest(const FString& Parameters)
 	FUMGWidgetData Original = PreviewContextFixture();
 	Original.MutableSourceDocument() = FUMGSourceDocumentData();
 	Original.MutablePrototypeNavigation().ClickBindings[0].TriggerType = TEXT("ON_KEY_DOWN");
-	Original.MutablePrototypeNavigation().ClickBindings[0].TriggerKeyCodes = { TEXT("ENTER") };
+	Original.MutablePrototypeNavigation().ClickBindings[0].TriggerDevice = TEXT("KEYBOARD");
+	Original.MutablePrototypeNavigation().ClickBindings[0].TriggerKeyCodes = { TEXT("ENTER"), TEXT("27") };
 	Original.RootWidget.Children.Add(PreviewNode(TEXT("page_c"), TEXT("CanvasPanel")));
 	Original.MutablePrototypeNavigation().PageIds.Add(TEXT("page_c"));
+	Original.MutablePrototypeNavigation().PageWidgetNames.Add(TEXT("page_c"), TEXT("page_c"));
 	FUMGWidgetData Edited = Original;
 	FUMGWidgetNode NestedPage = MoveTemp(Edited.RootWidget.Children[0]);
 	Edited.RootWidget.Children.RemoveAt(0);
@@ -362,17 +369,23 @@ bool FPreviewContextNestedPageOwnershipTest::RunTest(const FString& Parameters)
 		if (!TestNotNull(TEXT("Edited prototype instantiates"), Instance)) return false;
 		Instance->TakeWidget();
 		ON_SCOPE_EXIT { Instance->RemoveFromParent(); };
-		auto* Switcher = Cast<UWidgetSwitcher>(Instance->WidgetTree->FindWidget(FName(*Navigation.SwitcherWidgetName)));
+		auto* PageHost = Cast<UCanvasPanel>(Instance->WidgetTree->FindWidget(FName(*Navigation.PageHostWidgetName)));
 		UFunction* KeyDown = GeneratedClass->FindFunctionByName(TEXT("OnKeyDown"));
-		if (!TestNotNull(TEXT("Current page host exists"), Switcher) || !TestNotNull(TEXT("Keyboard binding is generated"), KeyDown)) return false;
+		if (!TestNotNull(TEXT("Current page host exists"), PageHost) || !TestNotNull(TEXT("Keyboard binding is generated"), KeyDown)) return false;
 		struct FKeyDownParameters { FGeometry Geometry; FKeyEvent KeyEvent; FEventReply Reply; } KeyParameters;
 		KeyParameters.KeyEvent = FKeyEvent(EKeys::Enter, FModifierKeysState(), 0, false, 0, 0);
-		Switcher->SetActiveWidgetIndex(0);
+		const auto* CurrentPage = FindFProperty<FIntProperty>(Instance->GetClass(), TEXT("__d2u_current_page"));
+		if (!TestNotNull(TEXT("Current page state exists"), CurrentPage)) return false;
+		CurrentPage->SetPropertyValue_InContainer(Instance, 0);
 		Instance->ProcessEvent(KeyDown, &KeyParameters);
-		TestEqual(TEXT("Key leaves an unrelated page unchanged"), Switcher->GetActiveWidgetIndex(), 0);
-		Switcher->SetActiveWidgetIndex(1);
+		TestEqual(TEXT("Key leaves an unrelated page unchanged"), CurrentPage->GetPropertyValue_InContainer(Instance), 0);
+		CurrentPage->SetPropertyValue_InContainer(Instance, 1);
 		Instance->ProcessEvent(KeyDown, &KeyParameters);
-		TestEqual(TEXT("Key works on the current containing page"), Switcher->GetActiveWidgetIndex(), 0);
+		TestEqual(TEXT("Key works on the current containing page"), CurrentPage->GetPropertyValue_InContainer(Instance), 0);
+		CurrentPage->SetPropertyValue_InContainer(Instance, 1);
+		KeyParameters.KeyEvent = FKeyEvent(EKeys::Escape, FModifierKeysState(), 0, false, 0, 0);
+		Instance->ProcessEvent(KeyDown, &KeyParameters);
+		TestEqual(TEXT("Numeric source keyboard code 27 maps to the real Escape key"), CurrentPage->GetPropertyValue_InContainer(Instance), 0);
 	}
 	return true;
 }
@@ -382,16 +395,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextOverlayTest,
 bool FPreviewContextOverlayTest::RunTest(const FString& Parameters)
 {
     FUMGWidgetData Original = PreviewContextFixture();
-    FUMGWidgetNode Switcher = MoveTemp(Original.RootWidget);
+    FUMGWidgetNode PageHost = MoveTemp(Original.RootWidget);
     Original.RootWidget = PreviewNode(TEXT("root"), TEXT("Overlay"));
-    Original.RootWidget.Children.Add(MoveTemp(Switcher));
-    FUMGWidgetNode Host = PreviewNode(TEXT("overlay_host"), TEXT("Overlay"));
+    Original.RootWidget.Children.Add(MoveTemp(PageHost));
+    FUMGWidgetNode Host = PreviewNode(TEXT("overlay_host"), TEXT("CanvasPanel"));
     Host.Children.Add(PreviewNode(TEXT("overlay_page"), TEXT("CanvasPanel")));
     Original.RootWidget.Children.Add(MoveTemp(Host));
     auto& Navigation = Original.MutablePrototypeNavigation();
     Navigation.OverlayHostWidgetId = TEXT("overlay_host");
     Navigation.OverlayHostWidgetName = TEXT("overlay_host");
     Navigation.PageIds.Add(TEXT("overlay_page"));
+    Navigation.PageWidgetNames.Add(TEXT("overlay_page"), TEXT("overlay_page"));
     auto& Binding = Navigation.ClickBindings[0];
     Binding.Action = EUMGPrototypeNavigationAction::Overlay;
     Binding.TargetPageId = TEXT("overlay_page");
@@ -413,10 +427,10 @@ bool FPreviewContextOverlayTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Trigger page is reconciled"), Moved.Data.PrototypeNavigation().ClickBindings[0].SourcePageId, FString(TEXT("page_b")));
 
 	FUMGWidgetData MirrorOriginal = PreviewContextFixture();
-	FUMGWidgetNode MirrorSwitcher = MoveTemp(MirrorOriginal.RootWidget);
+	FUMGWidgetNode MirrorPageHost = MoveTemp(MirrorOriginal.RootWidget);
 	MirrorOriginal.RootWidget = PreviewNode(TEXT("root"), TEXT("Overlay"));
-	MirrorOriginal.RootWidget.Children.Add(MoveTemp(MirrorSwitcher));
-	FUMGWidgetNode MirrorHost = PreviewNode(TEXT("overlay_host"), TEXT("Overlay"));
+	MirrorOriginal.RootWidget.Children.Add(MoveTemp(MirrorPageHost));
+	FUMGWidgetNode MirrorHost = PreviewNode(TEXT("overlay_host"), TEXT("CanvasPanel"));
 	const FString MirrorId = FString(TEXT("page_b")) + Design2UMGPrototypeTokens::OverlayMirrorSuffix();
 	FUMGWidgetNode MirrorTarget;
 	MirrorTarget.Id = MirrorId;

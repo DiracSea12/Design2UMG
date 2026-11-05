@@ -51,14 +51,8 @@ bool FPenOfficialFieldParityTest::RunTest(const FString& Parameters)
 					"opacity": 0.42,
 					"rows": 2,
 					"columns": 2,
-					"points": [
-						{"x": 0, "y": 0, "color": "#000000", "in": [-0.1, 0.0], "out": [0.1, 0.0]},
-						{"position": {"x": 1, "y": 1}, "color": "#FFFFFF", "handleIn": [0.9, 1.0], "handleOut": [1.1, 1.0]}
-					],
-					"colors": [
-						{"color": "#000000", "position": 0},
-						{"color": "#FFFFFF", "position": 1}
-					]
+					"points": [[0, 0], [1, 0], {"position": [0, 1], "leftHandle": [-0.1, 0], "rightHandle": [0.1, 0]}, [1, 1]],
+					"colors": ["#000000", "#FFFFFF", "#000000", "#FFFFFF"]
 				}
 			},{
 				"id": "rect1",
@@ -196,7 +190,7 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma grid keys"), Node->Metadata.Contains(TEXT("gridRowCount")) && Node->Metadata.Contains(TEXT("gridColumnsSizing")));
 	TestTrue(TEXT("figma grid child align"), Node->Metadata.Contains(TEXT("gridChildHorizontalAlign")) && Node->Metadata.Contains(TEXT("gridChildVerticalAlign")));
 	TestTrue(TEXT("figma grid span/anchor"), Node->Metadata.Contains(TEXT("gridRowSpan")) && Node->Metadata.Contains(TEXT("gridColumnAnchorIndex")));
-	TestTrue(TEXT("figma bool keys"), Node->Metadata.FindRef(TEXT("itemReverseZIndex")) == TEXT("true"));
+	TestFalse(TEXT("GRID ignores H/V-only reverse paint order"), Node->LayoutData.bReversePaintOrder);
 	TestTrue(TEXT("figma boundVariables"), Node->Metadata.Contains(TEXT("boundVariables.itemSpacing")));
 	TestTrue(TEXT("figma overflowDirection"), Node->Metadata.FindRef(TEXT("overflowDirection")) == TEXT("HORIZONTAL_SCROLLING"));
 	TestTrue(TEXT("figma layoutGrids"), Node->Metadata.Contains(TEXT("layoutGrids")));
@@ -222,7 +216,7 @@ bool FFigmaOfficialFieldParityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("figma wrap cross-axis gap semantic"), Node->LayoutData.WrapCrossAxisGap.IsSet() && FMath::IsNearlyEqual(Node->LayoutData.WrapCrossAxisGap.GetValue(), 6.0f, 0.001f));
 	TestTrue(TEXT("figma layoutWrap metadata"), Node->Metadata.FindRef(TEXT("layoutWrap")) == TEXT("WRAP"));
 	TestTrue(TEXT("figma strokesIncludedInLayout metadata"), Node->Metadata.FindRef(TEXT("strokesIncludedInLayout")) == TEXT("false"));
-	TestTrue(TEXT("figma itemReverseZIndex metadata"), Node->Metadata.FindRef(TEXT("itemReverseZIndex")) == TEXT("true"));
+	TestFalse(TEXT("Paint order has no duplicate metadata owner"), Node->Metadata.Contains(TEXT("itemReverseZIndex")));
 	TestTrue(TEXT("figma boundVariables metadata"), Node->Metadata.Contains(TEXT("boundVariables")));
 	TestEqual(TEXT("figma overflowDirection semantic"), Node->LayoutData.Overflow, EDesignOverflow::HorizontalScrolling);
 	TestTrue(TEXT("figma prototype transitionNodeID typed"), Node->Source().Prototype.TransitionNodeId == TEXT("1:3"));

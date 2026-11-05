@@ -34,6 +34,7 @@ FUMGWidgetNode::FUMGWidgetNode(const FUMGWidgetNode& Other)
 	, Browser(Other.Browser)
 	, Children(Other.Children)
 	, bSyntheticJustifySpacer(Other.bSyntheticJustifySpacer)
+	, SourceVisualChildIndex(Other.SourceVisualChildIndex)
 {
 	if (Other.SourceData)
 	{
@@ -66,6 +67,7 @@ FUMGWidgetNode& FUMGWidgetNode::operator=(const FUMGWidgetNode& Other)
 	Browser = Other.Browser;
 	Children = Other.Children;
 	bSyntheticJustifySpacer = Other.bSyntheticJustifySpacer;
+	SourceVisualChildIndex = Other.SourceVisualChildIndex;
 	SourceData = Other.SourceData ? MakeUnique<FUMGSourceNodeData>(*Other.SourceData) : nullptr;
 
 	return *this;

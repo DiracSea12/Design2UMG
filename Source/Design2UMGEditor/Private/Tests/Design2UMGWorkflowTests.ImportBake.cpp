@@ -138,16 +138,40 @@ bool FFigmaTargetNodeAndImageMappingWorkflowTest::RunTest(const FString& Paramet
 	FUMGWidgetData Data = DesignImportPlanning::AnalyzeImport(Document, FImportAnalysisInput{false}).Data;
 	TestFalse(TEXT("Filtered figma target yields widget name"), Data.WidgetName.IsEmpty());
 
+	const FString DependencyChild = MakeLeafNode(TEXT("dependency_child"), TEXT("Dependency Child"), TEXT("RECTANGLE"), 12, 8, 20, 10);
+	const FString DependencyPage = MakeContainerNode(TEXT("dependency_page"), TEXT("Dependency Page"), TEXT("FRAME"), 0, 0, 80, 60, DependencyChild);
+	const FString DependencyJson = MakeFigmaDocJson(
+		MakeLeafNode(TEXT("main_root"), TEXT("Main Root"), TEXT("RECTANGLE"), 0, 0, 20, 10),
+		FString::Printf(TEXT(",\"design2umgPrototypePages\":[%s]"), *DependencyPage));
+	TestTrue(TEXT("Write prototype dependency fixture"), FFileHelper::SaveStringToFile(DependencyJson, *TempJsonPath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	ErrorMessage.Reset();
+	if (TestTrue(TEXT("Load dependency fixture without node selection"), Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(
+		TempJsonPath, Document, ErrorMessage)) && TestEqual(TEXT("Default import retains its main root"), Document.Children.Num(), 1))
+		TestEqual(TEXT("Default import does not select a dependency"), Document.Children[0]->Id, FString(TEXT("main_root")));
+	ErrorMessage.Reset();
+	if (TestTrue(TEXT("Select nested prototype dependency node"), Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(
+		TempJsonPath, Document, ErrorMessage, TEXT("dependency_child")))
+		&& TestEqual(TEXT("Dependency selection keeps one root"), Document.Children.Num(), 1)
+		&& TestEqual(TEXT("Full prototype dependency inventory remains"), Document.SourceDocument().PrototypePages.Num(), 1))
+	{
+		const auto OriginalChild = Document.SourceDocument().PrototypePages[0]->Children[0];
+		TestEqual(TEXT("Dependency target identity is preserved"), Document.Children[0]->Id, FString(TEXT("dependency_child")));
+		TestTrue(TEXT("Selected dependency node is deep copied"), Document.Children[0] != OriginalChild);
+		TestEqual(TEXT("Selected dependency root is normalized"), Document.Children[0]->Transform.X, 0.0f);
+		TestEqual(TEXT("Source dependency coordinates remain intact"), OriginalChild->Transform.X, 12.0f);
+	}
+
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalVectorExplicitClearWorkflowTest,
-	"Design2UMG.BulkImport.FigmaLocalVectorExplicitClear",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLocalSourcePaintPreservationWorkflowTest,
+	"Design2UMG.BulkImport.FigmaLocalSourcePaintPreservation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Parameters)
+bool FFigmaLocalSourcePaintPreservationWorkflowTest::RunTest(const FString& Parameters)
 {
-	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaVectorExplicitClear"));
+	const FString TempRoot = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Design2UMG"), TEXT("WorkflowTemp"), TEXT("FigmaSourcePaintPreservation"));
 	const FString TempImagesDir = FPaths::Combine(TempRoot, TEXT("images"));
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
 	IFileManager::Get().MakeDirectory(*TempImagesDir, true);
@@ -161,7 +185,7 @@ bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Paramete
 	const FString Json = MakeFigmaDocJson(
 		MakeLeafNode(TEXT("vector_clear"), TEXT("Vector"), TEXT("VECTOR"), 0, 0, 8, 8,
 			TEXT(",\"fills\":[]")));
-	TestTrue(TEXT("Write local vector json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+	TestTrue(TEXT("Write local vector json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 
 	FDesignDocument Document;
 	FString ErrorMessage;
@@ -178,11 +202,71 @@ bool FFigmaLocalVectorExplicitClearWorkflowTest::RunTest(const FString& Paramete
 	}
 
 	const TSharedPtr<FDesignNode>& Node = Document.Children[0];
-	TestFalse(TEXT("Injected vector fill clears explicit fill state"), Node->Visual.bFillExplicitClear);
-	TestEqual(TEXT("Injected vector has one image fill"), Node->Visual.Fills.Num(), 1);
-	if (Node->Visual.Fills.Num() == 1)
+	TestTrue(TEXT("Auxiliary PNG cannot override explicitly empty fill"), Node->Visual.bFillExplicitClear);
+	TestEqual(TEXT("Explicitly empty fill stays empty"), Node->Visual.Fills.Num(), 0);
+
+	const FString NativeRasterPath = TempImagesDir / TEXT("vec_native_path.png");
+	const FString ImageRasterPath = TempImagesDir / TEXT("vec_image_path.png");
+	const FString SourceImagePath = TempImagesDir / TEXT("source_image.png");
+	TestTrue(TEXT("Write auxiliary ellipse raster"), WriteTestPng(TempImagesDir / TEXT("vec_native_ellipse.png"), Pixels, 8, 8));
+	TestTrue(TEXT("Write auxiliary native-path raster"), WriteTestPng(NativeRasterPath, Pixels, 8, 8));
+	TestTrue(TEXT("Write auxiliary image-path raster"), WriteTestPng(ImageRasterPath, Pixels, 8, 8));
+	TestTrue(TEXT("Write genuine image paint"), WriteTestPng(SourceImagePath, Pixels, 8, 8));
+	const FString NativeJson = MakeFigmaDocJson(
+		MakeContainerNode(TEXT("root"), TEXT("Root"), TEXT("FRAME"), 0, 0, 24, 8,
+			MakeLeafNode(TEXT("native_path"), TEXT("NativePath"), TEXT("VECTOR"), 0, 0, 8, 8,
+				TEXT(",\"opacity\":0.5,\"fillGeometry\":[{\"path\":\"M0 0 L8 0 L8 8 L0 8 Z\",\"windingRule\":\"NONZERO\"}],"
+					 "\"strokes\":[{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":1,\"b\":1,\"a\":1}}],\"strokeWeight\":2,"
+					 "\"effects\":[{\"type\":\"DROP_SHADOW\",\"visible\":true,\"radius\":4,\"offset\":{\"x\":0,\"y\":2},\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":0.5}}],"
+					 "\"fills\":[{\"type\":\"GRADIENT_LINEAR\",\"gradientStops\":[{\"position\":0,\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}},{\"position\":1,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}}]}]"))
+			+ TEXT(",") + MakeLeafNode(TEXT("image_path"), TEXT("ImagePath"), TEXT("VECTOR"), 12, 0, 8, 8,
+				TEXT(",\"fillGeometry\":[{\"path\":\"M0 0 L8 0 L8 8 L0 8 Z\",\"windingRule\":\"NONZERO\"}],"
+					 "\"fills\":[{\"type\":\"IMAGE\",\"imageRef\":\"source_image\",\"scaleMode\":\"FILL\"}]"))
+			+ TEXT(",") + MakeLeafNode(TEXT("native_ellipse"), TEXT("NativeEllipse"), TEXT("ELLIPSE"), 0, 0, 8, 8,
+				TEXT(",\"fills\":[{\"type\":\"SOLID\",\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}}]"))));
+	TestTrue(TEXT("Write native path and genuine image fixture"), FFileHelper::SaveStringToFile(
+		NativeJson, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	FDesignDocument NativeDocument;
+	if (!TestTrue(TEXT("Load native paint with auxiliary rasters"), Design2UMGLocalFigmaImport::LoadLocalFigmaDocument(
+		TempJsonPath, NativeDocument, ErrorMessage)) || NativeDocument.Children.Num() != 1
+		|| NativeDocument.Children[0]->Children.Num() != 3)
 	{
-		TestTrue(TEXT("Injected vector fill maps to local png"), FPaths::IsSamePath(Node->Visual.Fills[0].Image.Url, VectorPngPath));
+		IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
+		return false;
+	}
+	const auto& NativeNode = NativeDocument.Children[0]->Children[0];
+	const auto& EllipseNode = NativeDocument.Children[0]->Children[2];
+	TestTrue(TEXT("Native solid ellipse is not replaced by an auxiliary raster"),
+		EllipseNode->Visual.Fills.Num() == 1 && EllipseNode->Visual.Fills[0].IsColor());
+	TestTrue(TEXT("Auxiliary raster does not replace the native gradient"),
+		NativeNode->Visual.Fills.Num() == 1 && NativeNode->Visual.Fills[0].Type == EDesignFillType::Gradient);
+	TestEqual(TEXT("Source stroke width is preserved"), NativeNode->Visual.Stroke.Thickness.Uniform, 2.0f);
+	TestTrue(TEXT("Source shadow remains independent of fill"), NativeNode->Visual.Effects.Num() == 1
+		&& NativeNode->Visual.Effects[0].Type == EDesignEffectType::Shadow
+		&& NativeNode->Visual.Effects[0].Shadow.Blur == 4.0f);
+	TestEqual(TEXT("Native source opacity remains independent of paint"), NativeNode->Transform.Opacity, 0.5f);
+	const auto& ImageNode = NativeDocument.Children[0]->Children[1];
+	TestTrue(TEXT("Genuine image paint is not replaced by its auxiliary raster"), ImageNode->Visual.Fills.Num() == 1
+		&& ImageNode->Visual.Fills[0].IsImage() && FPaths::IsSamePath(ImageNode->Visual.Fills[0].Image.Url, SourceImagePath));
+	const FUMGWidgetData NativeData = FDesign2UMGConverter::Convert(NativeDocument, FDesign2UMGConversionSettings::Defaults());
+	const FUMGWidgetNode* NativeWidget = FindWidgetById(NativeData.RootWidget, TEXT("native_path"));
+	if (TestNotNull(TEXT("Native path survives conversion"), NativeWidget))
+	{
+		const FUMGWidgetNode* NativePaint = nullptr;
+		TArray<const FUMGWidgetNode*> Pending{NativeWidget};
+		while (!Pending.IsEmpty())
+		{
+			const FUMGWidgetNode* Current = Pending.Pop();
+			if (Current->Path.Geometry.IsSet() && !Current->Path.Geometry.GetValue().IsEmpty()) NativePaint = Current;
+			for (const auto& Child : Current->Children) Pending.Add(&Child);
+		}
+		if (TestNotNull(TEXT("Native geometry remains inside the effect wrapper"), NativePaint))
+		{
+			TestTrue(TEXT("Native geometry has no whole-node texture replacement"), NativePaint->Brush.Image.TexturePath.Get(FString()).IsEmpty());
+			TestTrue(TEXT("Path paint does not bake the node opacity"),
+				NativePaint->Path.FillColor.IsSet() && NativePaint->Path.FillColor.GetValue().A == 1.0f);
+		}
+		TestEqual(TEXT("Opacity belongs to the native widget once"), NativeWidget->Render.RenderOpacity.Get(1.0f), 0.5f);
 	}
 
 	IFileManager::Get().DeleteDirectory(*TempRoot, false, true);
@@ -217,7 +301,7 @@ bool FFigmaLocalLuminosityBakeWorkflowTest::RunTest(const FString& Parameters)
 					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_lum\",\"scaleMode\":\"FIT\",\"scalingFactor\":0.5}"
 					 "]"),
 				*MakeBoundsJson(0, 0, 120, 80))));
-	TestTrue(TEXT("Write local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+	TestTrue(TEXT("Write local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 
 	FDesignDocument Document;
 	FString ErrorMessage;
@@ -287,7 +371,7 @@ bool FFigmaLocalLuminosityBakeScalingFactorWorkflowTest::RunTest(const FString& 
 					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_lum\",\"scaleMode\":\"FIT\",\"scalingFactor\":1.0}"
 					 "]"),
 				*MakeBoundsJson(140, 0, 120, 80)))));
-	TestTrue(TEXT("Write scaling local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+	TestTrue(TEXT("Write scaling local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 
 	FDesignDocument Document;
 	FString ErrorMessage;
@@ -356,7 +440,7 @@ bool FFigmaLocalBlendModeBakeWorkflowTest::RunTest(const FString& Parameters)
 		*MakeBlendNodeJson(TEXT("screen_node"), TEXT("Screen"), 140, TEXT("SCREEN"), TEXT("FIT")),
 		*MakeBlendNodeJson(TEXT("overlay_node"), TEXT("Overlay"), 280, TEXT("OVERLAY"), TEXT("FIT")),
 		*MakeBlendNodeJson(TEXT("stretch_screen_node"), TEXT("Stretch Screen"), 420, TEXT("SCREEN"), TEXT("STRETCH"))));
-	TestTrue(TEXT("Write blend local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+	TestTrue(TEXT("Write blend local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 
 	FDesignDocument Document;
 	FString ErrorMessage;
@@ -570,7 +654,7 @@ bool FFigmaLocalLayerBlurBakeWorkflowTest::RunTest(const FString& Parameters)
 						 "],\"effects\":[{\"type\":\"LAYER_BLUR\",\"visible\":true,\"blendMode\":\"NORMAL\",\"radius\":21.75}]"),
 					*MakeBoundsJson(2.25, -1.75, 69.5, 69.5))),
 			FString::Printf(TEXT(",\"absoluteRenderBounds\":%s"), *MakeBoundsJson(0, 0, 160, 120))));
-	TestTrue(TEXT("Write blur local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath));
+	TestTrue(TEXT("Write blur local figma json"), FFileHelper::SaveStringToFile(Json, *TempJsonPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
 
 	FDesignDocument Document;
 	FString ErrorMessage;

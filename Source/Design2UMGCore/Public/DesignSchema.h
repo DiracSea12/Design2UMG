@@ -67,6 +67,7 @@ struct FDesignLayoutNodeData
 	EDesignAlignItems AlignItems = EDesignAlignItems::Start;
 	EDesignOverflow Overflow = EDesignOverflow::None;
 	bool bAbsoluteLayoutPositioning = false;
+	bool bReversePaintOrder = false;
 	// Absolute child coordinates use the expanded visual bounds as their origin.
 	bool bChildPositionsRelativeToVisualBounds = false;
 	TOptional<bool> ExplicitClip;
@@ -99,18 +100,14 @@ struct FDesignLayoutNodeData
 		ExplicitClip = bInClip;
 	}
 
+	int32 ChildPaintRank(int32 ChildIndex, int32 ChildCount) const
+	{
+		return bReversePaintOrder ? ChildCount - 1 - ChildIndex : ChildIndex;
+	}
+
 	bool HasExplicitGap() const      { return ExplicitGap.IsSet(); }
 	bool HasExplicitPadding() const  { return ExplicitPadding.IsSet(); }
 	bool HasExplicitClip() const     { return ExplicitClip.IsSet(); }
-};
-
-struct FDesignRenderFallbackData
-{
-	FString ImageRef;
-	EDesignRenderFallbackScope Scope = EDesignRenderFallbackScope::Leaf;
-	bool bSuppressedBySourceSemantics = false;
-
-	bool HasAny() const { return !ImageRef.IsEmpty(); }
 };
 
 /**
@@ -125,9 +122,6 @@ struct FDesignVisualNodeData
 	FDesignGeometryMask GeometryMask;
 	TArray<FDesignEffect> Effects;
 	bool bEffectsExplicitClear = false;
-	FString VectorRasterFallbackImageRef;
-	bool bRenderBoundsClippedByParent = false;
-	FDesignRenderFallbackData RenderFallback;
 
 	/** Topmost fill in paint order; both parsers append fills in source draw order, so the last entry paints on top. */
 	const FDesignFill& TopmostFill() const
@@ -171,6 +165,8 @@ struct FDesignTransformNodeData
 	FDesignSize Width;
 	FDesignSize Height;
 	TOptional<FVector2D> LayoutBoundsSize;
+	// Parsed source position retained when a flow container supplies runtime placement.
+	TOptional<FVector2D> SourceLayoutPosition;
 	bool bHasWidth = false;
 	bool bHasHeight = false;
 	bool bSourceHasWidth = false;

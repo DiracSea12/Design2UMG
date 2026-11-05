@@ -212,15 +212,15 @@ namespace DesignImportPipeline
 		ScopeRoot = Manifest.SourceRootNodeId.IsEmpty()
 			? &PreparedRoot
 			: SourceIndex.DesignNodesById.FindRef(Manifest.SourceRootNodeId);
-		// The switcher root ID fingerprints its page set, so page edits can change it without
-		// changing document identity. Continue only between switcher-body roots in the matched
+		// The page host root ID fingerprints its page set, so page edits can change it without
+		// changing document identity. Continue only between page host-body roots in the matched
 		// document scope; overlay-host changes and single-page downgrades remain conflicts.
 		bPrototypeHostContinued = !ScopeRoot
-			&& Manifest.SourceRootNodeId.StartsWith(Design2UMGPrototypeTokens::SwitcherRootPrefix())
+			&& Manifest.SourceRootNodeId.StartsWith(Design2UMGPrototypeTokens::PageHostRootPrefix())
 			&& !Manifest.SourceRootNodeId.EndsWith(Design2UMGPrototypeTokens::OverlayRootSuffix())
 			&& Data.HasPrototypeNavigationData()
 			&& Data.PrototypeNavigation().IsValid()
-			&& Data.PrototypeNavigation().SwitcherWidgetId == GetDesignNodeId(Data.RootWidget);
+			&& Data.PrototypeNavigation().PageHostWidgetId == GetDesignNodeId(Data.RootWidget);
 		if (bPrototypeHostContinued)
 		{
 			ScopeRoot = &PreparedRoot;

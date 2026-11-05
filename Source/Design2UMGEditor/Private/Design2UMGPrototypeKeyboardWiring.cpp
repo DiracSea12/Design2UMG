@@ -35,6 +35,12 @@ namespace
 		{
 			return FName(*KeyCode);
 		}
+		uint32 NumericCode;
+		if (LexTryParseString(NumericCode, *KeyCode) && FString::Printf(TEXT("%u"), NumericCode) == KeyCode)
+		{
+			const FKey Key = FInputKeyManager::Get().GetKeyFromCodes(NumericCode, 0);
+			return Key.IsValid() ? Key.GetFName() : NAME_None;
+		}
 		const FString Capitalized = KeyCode.Left(1).ToUpper() + KeyCode.RightChop(1).ToLower();
 		if (FKey(FName(*Capitalized)).IsValid())
 		{
@@ -57,17 +63,16 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 	const FUMGPrototypeNavigationData& NavigationData, const FEngineFunctions& Functions,
 	const FBindingPlan& Plan, const FBindingGraphTargets& Targets, TArray<FString>& OutWarnings)
 {
-	UWidgetSwitcher* Switcher = Plan.Switcher;
-	UOverlay* OverlayHost = Plan.OverlayHost;
+	UCanvasPanel* PageHost = Plan.PageHost;
+	UCanvasPanel* OverlayHost = Plan.OverlayHost;
 	const auto& KeyboardBindings = Plan.KeyboardBindings;
-	FObjectProperty* SwitcherProperty = Targets.SwitcherProperty;
-	FArrayProperty* HistoryProperty = Targets.HistoryProperty;
+	FIntProperty* CurrentPageProperty = Targets.CurrentPageProperty;
 	// Keyboard wiring: one generated function-graph override per event kind. OnKeyDown/OnKeyUp are
 	// BlueprintImplementableEvents returning FEventReply, so they cannot live in the ubergraph; the
 	// engine-standard encoding is an override function graph (the editor's own path for such
 	// functions), with one key-equality Branch per (binding, key code) guarding the step chain.
 	/**
-	 * Build the keyboard guard for the active switcher page or visible overlay page.
+	 * Build the keyboard guard for the active page or visible overlay page.
 	 * Page-less bindings leave OutConditionPin null.
 	 */
 	const auto BuildPageContextCondition = [&](UEdGraph* Graph, const FResolvedBinding& Resolved,
@@ -78,38 +83,23 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 		{
 			return true;
 		}
-		const bool bNeedsSwitcherGate = Resolved.SourceSwitcherPageIndex != INDEX_NONE;
+		const bool bNeedsPageGate = Resolved.SourcePageIndex != INDEX_NONE;
 		const bool bNeedsOverlayGate = Resolved.SourceHostedPageWidgetName != NAME_None;
-		if (!bNeedsSwitcherGate && !bNeedsOverlayGate)
+		if (!bNeedsPageGate && !bNeedsOverlayGate)
 		{
 			// A binding without a resolved tree home is ungated only in a single-page Blueprint.
-			return Switcher == nullptr && OverlayHost == nullptr;
+			return PageHost == nullptr && OverlayHost == nullptr;
 		}
 		if (!Functions.BooleanAND)
 		{
 			return false;
 		}
 
-		UEdGraphPin* SwitcherConditionPin = nullptr;
-		if (bNeedsSwitcherGate)
+		UEdGraphPin* PageConditionPin = nullptr;
+		if (bNeedsPageGate)
 		{
-			if (!SwitcherProperty || !Functions.GetActiveWidgetIndex || !Functions.EqualEqual_IntInt)
-			{
-				return false;
-			}
-			UK2Node_VariableGet* SwitcherGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, SwitcherProperty));
-			UK2Node_CallFunction* ActiveIndexNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
-				[&Functions](UK2Node_CallFunction* Node)
-				{
-					Node->SetFromFunction(Functions.GetActiveWidgetIndex);
-				});
-			Layout.PlacePure(ActiveIndexNode); // BlueprintGetter => BlueprintPure
-			UEdGraphPin* IndexSelfPin = ActiveIndexNode->FindPin(UEdGraphSchema_K2::PN_Self, EGPD_Input);
-			if (!IndexSelfPin)
-			{
-				return false;
-			}
-			SwitcherGet->GetValuePin()->MakeLinkTo(IndexSelfPin);
+			if (!CurrentPageProperty || !Functions.EqualEqual_IntInt) return false;
+			UK2Node_VariableGet* CurrentPageGet = Layout.PlacePure(CreateVariableGet(Graph, WBP, CurrentPageProperty));
 
 			UK2Node_CallFunction* IndexEqualsNode = CreateMarkerNode<UK2Node_CallFunction>(Graph,
 				[&Functions](UK2Node_CallFunction* Node)
@@ -119,15 +109,15 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 			Layout.PlacePure(IndexEqualsNode); // BlueprintPure
 			UEdGraphPin* IndexAPin = IndexEqualsNode->FindPin(TEXT("A"), EGPD_Input);
 			UEdGraphPin* IndexBPin = IndexEqualsNode->FindPin(TEXT("B"), EGPD_Input);
-			UEdGraphPin* ActiveIndexPin = ActiveIndexNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			UEdGraphPin* ActiveIndexPin = CurrentPageGet->GetValuePin();
 			if (!IndexAPin || !IndexBPin || !ActiveIndexPin)
 			{
 				return false;
 			}
 			ActiveIndexPin->MakeLinkTo(IndexAPin);
-			IndexBPin->DefaultValue = FString::FromInt(Resolved.SourceSwitcherPageIndex);
-			SwitcherConditionPin = IndexEqualsNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
-			if (!SwitcherConditionPin)
+			IndexBPin->DefaultValue = FString::FromInt(Resolved.SourcePageIndex);
+			PageConditionPin = IndexEqualsNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue, EGPD_Output);
+			if (!PageConditionPin)
 			{
 				return false;
 			}
@@ -198,7 +188,7 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 			}
 		}
 
-		if (SwitcherConditionPin && OverlayConditionPin)
+		if (PageConditionPin && OverlayConditionPin)
 		{
 			if (!Functions.BooleanOR)
 			{
@@ -217,13 +207,13 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 			{
 				return false;
 			}
-			SwitcherConditionPin->MakeLinkTo(A);
+			PageConditionPin->MakeLinkTo(A);
 			OverlayConditionPin->MakeLinkTo(B);
 			OutConditionPin = OrReturn;
 		}
 		else
 		{
-			OutConditionPin = SwitcherConditionPin ? SwitcherConditionPin : OverlayConditionPin;
+			OutConditionPin = PageConditionPin ? PageConditionPin : OverlayConditionPin;
 		}
 		return OutConditionPin != nullptr;
 	};
@@ -431,13 +421,18 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 					BranchConditionPin->MakeLinkTo(ConditionPin);
 				}
 
+				const int32 TailNodeStart = KeyGraph->Nodes.Num();
 				bool bTailValid = false;
 				if (Step.Kind == EUMGPrototypeNavigationStepKind::Navigate)
 				{
 					bTailValid = AppendNavigateTail(KeyGraph, WBP, Functions,
-						SwitcherProperty, HistoryProperty, Resolved.TargetPageIndex, Layout);
+						Targets, Resolved.TargetPageIndex, Layout);
 				}
-				else
+				else if (Step.Kind == EUMGPrototypeNavigationStepKind::CloseOverlay)
+				{
+					bTailValid = AppendCloseOverlayTail(KeyGraph, WBP, Functions, Targets, Layout);
+				}
+				else if (Step.Kind == EUMGPrototypeNavigationStepKind::OpenLink)
 				{
 					bTailValid = AppendOpenLinkTail(KeyGraph, Functions, Step, Layout);
 				}
@@ -463,14 +458,18 @@ bool WireKeyboardBindings(UWidgetBlueprint* WBP,
 				}
 				if (UEdGraphPin* ThenPin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output))
 				{
-					if (UEdGraphPin* TailExecPin = Layout.ExecChain[1]->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input))
+					if (Layout.ExecChain.Num() == 1) ThenPin->MakeLinkTo(ResultExecPin);
+					else if (UEdGraphPin* TailExecPin = Layout.ExecChain[1]->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input))
 					{
 						ThenPin->MakeLinkTo(TailExecPin);
 					}
 				}
-				if (UEdGraphPin* LastThenPin = Layout.ExecChain.Last()->FindPin(UEdGraphSchema_K2::PN_Then, EGPD_Output))
+				// A typed action can branch internally; every terminal path returns the function reply.
+				for (int32 NodeIndex = TailNodeStart; NodeIndex < KeyGraph->Nodes.Num(); ++NodeIndex)
 				{
-					LastThenPin->MakeLinkTo(ResultExecPin);
+					for (UEdGraphPin* Pin : KeyGraph->Nodes[NodeIndex]->Pins)
+						if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec
+							&& Pin->LinkedTo.IsEmpty()) Pin->MakeLinkTo(ResultExecPin);
 				}
 				PreviousElsePin = BranchNode->FindPin(UEdGraphSchema_K2::PN_Else, EGPD_Output);
 				bAnyBranchWired = true;

@@ -5,6 +5,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -205,6 +206,60 @@ def test_nested_export_discovery_and_unique_names() -> None:
         # Partly collected data is not a runnable case; diagnostics explain the skipped export.
         assert_equal(len(suite_discovery.discover_figma_export_cases(
             suite_discovery.resolve_default_figma_export_roots(root, []), "", "")), 6)
+
+
+def test_figma_export_archives_discovery() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory) / 'inputs'
+        output = Path(directory) / 'output'
+        archive_paths = [root / 'a' / 'screen.zip', root / 'b' / 'screen.zip']
+        for index, path in enumerate(archive_paths):
+            path.parent.mkdir(parents=True)
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('design.json', json.dumps({'document': {'children': []}, 'sample': index}))
+                archive.writestr('reference.png', PNG_1X1)
+                archive.writestr('images/image.png', b'image data')
+        with zipfile.ZipFile(root / 'incomplete.zip', 'w') as archive:
+            archive.writestr('design.json', '{}')
+        (root / 'original.fig').write_bytes(b'native fig file')
+        originals = {path: path.read_bytes() for path in archive_paths}
+        command = [sys.executable, str(Path(suite_verify.__file__)), '--design-root', str(root),
+                   '--output-root', str(output), '--list-cases']
+        result = subprocess.run(command, capture_output=True, text=True)
+        assert_equal(result.returncode, 0)
+        assert 'figma_native_requires_export' in result.stderr
+        assert 'incomplete_figma_export_archive' in result.stderr
+        scope = json.loads(result.stdout)
+        assert_equal(scope['discovered_total'], 4)
+        assert_equal({entry['reason'] for entry in scope['figma_source_diagnostics']},
+                     {'figma_native_requires_export', 'incomplete_figma_export_archive'})
+        assert_equal(len(set(scope['case_names'])), 4)
+        assert_equal({case['source_archive'] for case in scope['case_inputs']},
+                     {str(path.resolve()) for path in archive_paths})
+        for case in scope['case_inputs']:
+            source = Path(case['source'])
+            assert source.is_relative_to(output)
+            assert_equal((source.parent / 'reference.png').read_bytes(), PNG_1X1)
+            assert_equal((source.parent / 'images/image.png').read_bytes(), b'image data')
+            assert_equal(case['source_archive_signature']['sha1'],
+                         verify.build_file_signature(case['source_archive'])['sha1'])
+        assert all(path.read_bytes() == content for path, content in originals.items())
+        # A previous run's extracted files must not be rediscovered as source directories.
+        assert_equal(suite_discovery.resolve_default_figma_export_roots(Path(directory), []), [])
+
+        unsafe_root = Path(directory) / 'unsafe'
+        unsafe_root.mkdir()
+        with zipfile.ZipFile(unsafe_root / 'figma_export.zip', 'w') as archive:
+            archive.writestr('design.json', '{}')
+            archive.writestr('reference.png', PNG_1X1)
+            archive.writestr('../escape.txt', 'escape')
+        try:
+            suite_discovery.stage_figma_export_archives(unsafe_root, [], Path(directory) / 'unsafe-output')
+        except RuntimeError as exc:
+            assert 'Unsafe path' in str(exc)
+        else:
+            raise AssertionError('unsafe archive path must fail')
+        assert not (Path(directory) / 'escape.txt').exists()
 
 
 def test_discovery_and_run_scope_contracts() -> None:
@@ -1622,6 +1677,7 @@ def main() -> None:
     assert "RichTextBlock" in geometry_compare.RUNTIME_TEXT_CLASSES
     test_dynamic_corpus_cardinality_and_scope()
     test_nested_export_discovery_and_unique_names()
+    test_figma_export_archives_discovery()
     test_discovery_and_run_scope_contracts()
     test_completeness_contract()
     test_transparent_rgb_does_not_count_as_visible_change()

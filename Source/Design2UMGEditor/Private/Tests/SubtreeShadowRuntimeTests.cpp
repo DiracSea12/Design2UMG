@@ -141,12 +141,18 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 	FImage Image;
 	FFileHelper::SaveArrayToFile(Png, *(FPaths::ProjectSavedDir() / (TEXT("SubtreeShadow-") + Parameters + TEXT(".png"))));
 	if (!TestTrue(TEXT("PNG decodes"), Design2UMGImageTestUtils::DecodeToBGRA8(Png.GetData(), Png.Num(), Image))) return false;
+	// The unclipped root exports its children's paint, including the three-sigma wide-shadow extent.
+	const int32 ShadowExtent = bWide ? FMath::CeilToInt(Blur * 1.5f) : 0;
+	const FIntPoint Origin(FMath::Min(0, 120 - ShadowExtent), FMath::Min(0, 20 - ShadowExtent));
+	const FIntPoint ExpectedSize(FMath::Max(240, 200 + ShadowExtent) - Origin.X,
+		FMath::Max(120 + TranslateY + (bChildOverflow ? 40 : 0), 100 + ShadowExtent) - Origin.Y);
 	if (!TestTrue(TEXT("Expected output dimensions and pixel format"),
-		Image.SizeX == 240 && Image.SizeY == 120 + TranslateY + (bChildOverflow ? 40 : 0) && Image.Format == ERawImageFormat::BGRA8)) return false;
+		Image.SizeX == ExpectedSize.X && Image.SizeY == ExpectedSize.Y && Image.Format == ERawImageFormat::BGRA8)) return false;
 	const FColor* Pixels = reinterpret_cast<const FColor*>(Image.RawData.GetData());
-	const FColor FirstShadow = Pixels[(30 + TranslateY) * Image.SizeX + 130];
-	const FColor GapShadow = Pixels[(60 + TranslateY) * Image.SizeX + 160];
-	const FColor LastShadow = Pixels[(90 + TranslateY) * Image.SizeX + 190];
+	auto SourcePixel = [&](int32 X, int32 Y) { return Pixels[(Y - Origin.Y) * Image.SizeX + X - Origin.X]; };
+	const FColor FirstShadow = SourcePixel(130, 30 + TranslateY);
+	const FColor GapShadow = SourcePixel(160, 60 + TranslateY);
+	const FColor LastShadow = SourcePixel(190, 90 + TranslateY);
 	int32 CyanCount = 0;
 	int32 CyanMinX = Image.SizeX;
 	int32 CyanMinY = Image.SizeY;
@@ -164,9 +170,9 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 		}
 	}
 	AddInfo(FString::Printf(TEXT("Overlap=%d, source alpha=%d, cyan pixels=%d min=%d,%d"),
-		bOverlapping, Pixels[(30 + TranslateY) * Image.SizeX + 30].A, CyanCount, CyanMinX, CyanMinY));
+		bOverlapping, SourcePixel(30, 30 + TranslateY).A, CyanCount, CyanMinX, CyanMinY));
 	TestTrue(TEXT("Original subtree remains visible"),
-		FMath::Abs(static_cast<int32>(Pixels[(30 + TranslateY) * Image.SizeX + 30].A) - (bOverlapping ? 192 : 255)) <= 2);
+		FMath::Abs(static_cast<int32>(SourcePixel(30, 30 + TranslateY).A) - (bOverlapping ? 192 : 255)) <= 2);
 	AddInfo(FString::Printf(TEXT("Shadow first RGBA=%d,%d,%d,%d; gap alpha=%d; last alpha=%d"),
 		FirstShadow.R, FirstShadow.G, FirstShadow.B, FirstShadow.A, GapShadow.A, LastShadow.A));
 	int32 ExpectedAlpha = bOverlapping ? 96 : 128;
@@ -186,13 +192,13 @@ bool FSubtreeShadowRuntimeTest::RunTest(const FString& Parameters)
 			return Inside / Sum;
 		};
 		int32 MaxError = 0;
-		for (int32 Y = 0; Y < Image.SizeY; Y += 7)
+		for (int32 Y = Origin.Y; Y < Origin.Y + Image.SizeY; Y += 7)
 		{
-			for (int32 X = 110; X < Image.SizeX; X += 7)
+			for (int32 X = 110; X < Origin.X + Image.SizeX; X += 7)
 			{
 				const int32 Expected = FMath::RoundToInt(128.0 * (
 					Interval(X - 100, 20) * Interval(Y, 20) + Interval(X - 100, 80) * Interval(Y, 80)));
-				MaxError = FMath::Max(MaxError, FMath::Abs(int32(Pixels[Y * Image.SizeX + X].A) - Expected));
+				MaxError = FMath::Max(MaxError, FMath::Abs(int32(SourcePixel(X, Y).A) - Expected));
 			}
 		}
 		TestTrue(FString::Printf(TEXT("Wide shadow stays within 2 alpha levels of dense Gaussian, max=%d"), MaxError), MaxError <= 2);

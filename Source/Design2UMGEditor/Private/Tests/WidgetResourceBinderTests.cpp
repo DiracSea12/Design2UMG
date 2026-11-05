@@ -4,6 +4,9 @@
 #include "Misc/AutomationTest.h"
 #include "ProceduralShapeGenerator.h"
 #include "WidgetResourceBinder.h"
+#include "PreBuildResourceNormalizer.h"
+#include "UMGImageCropUtils.h"
+#include "DesignImageResourceLimits.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
 #include "UMGValueParsing.h"
@@ -69,6 +72,70 @@ bool FAffineCropReadsTextureSourcePixels::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FImageCropDownscalePreservesTransparentColors,
+	"Design2UMG.ImageCrop.DownscalePreservesTransparentColors",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FImageCropDownscalePreservesTransparentColors::RunTest(const FString& Parameters)
+{
+	TArray<FColor> SourcePixels;
+	for (int32 Y = 0; Y < 4; ++Y)
+	{
+		for (int32 X = 0; X < 4; ++X)
+		{
+			SourcePixels.Add(X < 2 ? FColor(0, 255, 0, 255) : FColor(255, 0, 0, 0));
+		}
+	}
+	UTexture2D* SourceTexture = NewObject<UTexture2D>();
+	SourceTexture->Source.Init(4, 4, 1, 1, TSF_BGRA8, reinterpret_cast<const uint8*>(SourcePixels.GetData()));
+	UTexture2D* Result = FProceduralShapeGenerator::ApplyAffineCrop(
+		SourceTexture, 1, 0, 0, 0, 1, 0, 1, 1, nullptr, nullptr, TEXT("Fill"));
+	if (!TestNotNull(TEXT("Full image downscale produces a texture"), Result)) return false;
+	FTexturePlatformData* PlatformData = Result->GetPlatformData();
+	if (!TestTrue(TEXT("Downscaled texture has a readable mip"), PlatformData && PlatformData->Mips.Num() > 0)) return false;
+	const FColor* Pixels = static_cast<const FColor*>(PlatformData->Mips[0].BulkData.LockReadOnly());
+	if (!TestNotNull(TEXT("Downscaled mip is readable"), Pixels))
+	{
+		PlatformData->Mips[0].BulkData.Unlock();
+		return false;
+	}
+	TestTrue(TEXT("Transparent RGB does not bleed into the visible color"), Pixels[0].R < 8 && Pixels[0].G > 245);
+	TestTrue(TEXT("Downscale retains partial coverage"), Pixels[0].A > 0 && Pixels[0].A < 255);
+	PlatformData->Mips[0].BulkData.Unlock();
+	FString Error;
+	UTexture2D* Cropped = FProceduralShapeGenerator::ApplyAffineCrop(
+		SourceTexture, 0.75f, 0, 0, 0, 1, 0, 1, 1, &Error);
+	if (!TestNotNull(TEXT("Minifying partial crop produces a texture"), Cropped)) return false;
+	const FColor* CroppedPixels = static_cast<const FColor*>(Cropped->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+	TestTrue(TEXT("Residual crop interpolation does not mix transparent RGB into visible color"), CroppedPixels[0].R < 8 && CroppedPixels[0].G > 245);
+	TestTrue(TEXT("Residual crop preserves partial alpha"), CroppedPixels[0].A > 0 && CroppedPixels[0].A < 255);
+	Cropped->GetPlatformData()->Mips[0].BulkData.Unlock();
+	UMGImageCropUtils::FImageCropRequest Outside;
+	Outside.Transform = FUMGVisualBrushData::FImageTransformData{1, 0, -1, 0, 1, 0};
+	Outside.OutputWidth = Outside.OutputHeight = 1;
+	FSlateBrush Brush;
+	UTexture2D* Clamped = nullptr;
+	if (!TestTrue(TEXT("Minifying UV crop retains clamp addressing"), UMGImageCropUtils::TryApplyCropToBrush(
+		Brush, SourceTexture, Outside, [&Clamped](UTexture2D* Texture) { Clamped = Texture; }))
+		|| !TestNotNull(TEXT("Clamp crop produces a texture"), Clamped)) return false;
+	const FColor* Edge = static_cast<const FColor*>(Clamped->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+	TestTrue(TEXT("UV outside source clamps to coverage instead of becoming transparent"), Edge[0].A > 0);
+	Clamped->GetPlatformData()->Mips[0].BulkData.Unlock();
+	UTexture2D* Transparent = FProceduralShapeGenerator::ApplyAffineCrop(SourceTexture, 1, 0, -1, 0, 1, 0, 1, 1);
+	if (!TestNotNull(TEXT("Existing CPU crop still produces a texture"), Transparent)) return false;
+	const FColor* OutsidePixels = static_cast<const FColor*>(Transparent->GetPlatformData()->Mips[0].BulkData.LockReadOnly());
+	TestEqual(TEXT("Existing CPU crop retains transparent outside addressing"), OutsidePixels[0].A, static_cast<uint8>(0));
+	Transparent->GetPlatformData()->Mips[0].BulkData.Unlock();
+
+	DesignImageResources::FImageResourceLimits Limits;
+	Limits.MaxTotalDecodedBytes = sizeof(FColor);
+	DesignImageResources::FImageOperationBudget Budget(Limits);
+	TestNull(TEXT("Prefilter allocation honors the shared decoded-pixel budget"), FProceduralShapeGenerator::ApplyAffineCrop(
+		SourceTexture, 0.75f, 0, 0, 0, 1, 0, 1, 1, &Error, &Budget));
+	TestFalse(TEXT("Prefilter budget refusal is reported"), Error.IsEmpty());
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAffineCropUsesFigmaImageTransformDirection,
 	"Design2UMG.ImageCrop.UsesFigmaImageTransformDirection",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -105,13 +172,16 @@ bool FAffineCropUsesFigmaImageTransformDirection::RunTest(const FString& Paramet
 		return false;
 	}
 
-	const int32 ExpectedSourceIndices[] = {3, 7, 1, 5};
-	for (int32 Index = 0; Index < UE_ARRAY_COUNT(ExpectedSourceIndices); ++Index)
+	const FColor ExpectedPixels[] = {
+		FColor(34, 35, 36, 255), FColor(64, 65, 66, 255),
+		FColor(19, 20, 21, 255), FColor(49, 50, 51, 255),
+	};
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(ExpectedPixels); ++Index)
 	{
 		TestEqual(
 			*FString::Printf(TEXT("Destination pixel %d samples the expected source UV"), Index),
 			ResultPixels[Index],
-			SourcePixels[ExpectedSourceIndices[Index]]);
+			ExpectedPixels[Index]);
 	}
 	PlatformData->Mips[0].BulkData.Unlock();
 	return true;
@@ -239,6 +309,20 @@ bool FWidgetResourceBinderMaterialRefPriority::RunTest(const FString& Parameters
 		FWidgetResourceBinder::BindImageResource(MaterialImage, Node, nullptr));
 	TestTrue(TEXT("Brush resource is the target UI material"),
 		Design2UMGWidgetPropertyAccess::GetBrush(*MaterialImage).GetResourceObject() == ExpectedMaterial);
+	Node.Brush.Shader.Reset();
+	Node.Brush.Image.TexturePath.Reset();
+	Node.Effect.SurfacePaints = TArray<FUMGSurfacePaint>{FUMGSurfacePaint()};
+	FString Error;
+	TestTrue(TEXT("Typed surface material bypasses procedural texture generation"),
+		FPreBuildResourceNormalizer::NormalizeProceduralTextures(Node, TEXT("/Game/Design2UMG/_TestOutput/SurfacePaint"), TEXT("SurfacePaint"), &Error));
+	TestTrue(TEXT("Surface normalization preserves the material without adding a texture"), Error.IsEmpty()
+		&& Node.Brush.MaterialRef.GetValue() == ExpectedMaterial->GetPathName() && !Node.Brush.Image.TexturePath.IsSet());
+	TestTrue(TEXT("Normalized surface binds its native material"), FWidgetResourceBinder::BindImageResource(MaterialImage, Node, nullptr)
+		&& Design2UMGWidgetPropertyAccess::GetBrush(*MaterialImage).GetResourceObject() == ExpectedMaterial);
+	Node.Brush.MaterialRef = TEXT("MissingSurfaceMaterial");
+	AddExpectedError(TEXT("Required generated texture for node 'TestImage'"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Typed surface paints do not hide an absent material"),
+		FPreBuildResourceNormalizer::NormalizeProceduralTextures(Node, TEXT("/Game/Design2UMG/_TestOutput/SurfacePaint"), TEXT("SurfacePaint"), &Error));
 
 	return true;
 }
@@ -407,6 +491,8 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	FUMGWidgetNode Node;
 	Node.Type = TEXT("Image");
 	Node.Name = TEXT("AffineCropImage");
+	Node.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+	Node.Brush.OutlineCornerRadius = 2.0f;
 	Node.Brush.Image.TexturePath = TextureKey;
 	Node.Brush.Image.Mode = TEXT("Crop");
 	Node.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData{ 1.0f, 0.25f, 0.0f, 0.1f, 1.0f, 0.0f };
@@ -428,6 +514,9 @@ bool FWidgetResourceBinderPreservesAffineCropAfterBinding::RunTest(const FString
 	}
 
 	TestTrue(TEXT("Binder keeps affine-cropped texture instead of original source"), BoundTexture != SourceTexture);
+	const FSlateBrush& RoundedBrush = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget);
+	TestTrue(TEXT("Rounded image retains its brush type after crop"), RoundedBrush.DrawAs == ESlateBrushDrawType::RoundedBox);
+	TestEqual(TEXT("Rounded image retains its radius after crop"), RoundedBrush.OutlineSettings.CornerRadii.X, 2.0);
 	TestEqual(TEXT("Affine crop output width"), BoundTexture->GetSizeX(), 8);
 	TestEqual(TEXT("Affine crop output height"), BoundTexture->GetSizeY(), 6);
 	const auto BrushImageSize = Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).ImageSize;
@@ -473,6 +562,25 @@ bool FWidgetResourceBinderPreservesAxisAlignedCropAfterBinding::RunTest(const FS
 	TestTrue(TEXT("Axis crop preserves UV min Y"), FMath::IsNearlyEqual(UVRegion.Min.Y, 0.10f, 0.0001f));
 	TestTrue(TEXT("Axis crop preserves UV max X"), FMath::IsNearlyEqual(UVRegion.Max.X, 0.75f, 0.0001f));
 	TestTrue(TEXT("Axis crop preserves UV max Y"), FMath::IsNearlyEqual(UVRegion.Max.Y, 0.85f, 0.0001f));
+	Node.WidgetStyle.WidthOverride = 8.0f;
+	Node.WidgetStyle.HeightOverride = 6.0f;
+	UMGImageCropUtils::FImageCropRequest Crop;
+	TestTrue(TEXT("Minifying crop uses the existing typed request"), UMGImageCropUtils::TryBuildCropRequest(Node, Crop));
+	UMGImageCropUtils::FImageSamplingPlan Sampling;
+	TestTrue(TEXT("Source footprint plan builds from original dimensions"), UMGImageCropUtils::TryBuildSamplingPlan(
+		Crop.Transform, Crop.FitMode, FVector2D(32, 24), FVector2D(8, 6), Sampling));
+	TestEqual(TEXT("Each source axis is reduced by its actual footprint"), Sampling.PrefilterSize, FIntPoint(16, 8));
+	TestFalse(TEXT("Minification cannot remain on the UV shortcut"), UMGImageCropUtils::CanUseUvShortcut(Crop, SourceTexture));
+	if (!TestTrue(TEXT("Minifying axis crop binds"), FWidgetResourceBinder::BindImageResource(ImageWidget, Node, &TextureMap))) return false;
+	BoundTexture = Cast<UTexture2D>(Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget).GetResourceObject());
+	if (!TestNotNull(TEXT("Minifying crop has a generated texture"), BoundTexture)) return false;
+	TestTrue(TEXT("Minifying crop materializes instead of mutating source"), BoundTexture != SourceTexture);
+	TestEqual(TEXT("Materialized crop keeps requested width"), BoundTexture->GetSizeX(), 8);
+	TestEqual(TEXT("Materialized crop keeps requested height"), BoundTexture->GetSizeY(), 6);
+	const FBox2f BakedUV = Design2UMGWidgetPropertyAccess::GetUVRegion(Design2UMGWidgetPropertyAccess::GetBrush(*ImageWidget));
+	TestTrue(TEXT("Baked crop uses the complete generated texture UV"),
+		BakedUV.bIsValid && BakedUV.Min == FVector2f::ZeroVector && BakedUV.Max == FVector2f(1, 1));
+
 	return true;
 }
 

@@ -13,15 +13,15 @@ namespace Design2UMGPrototypeTokens
 		return Value;
 	}
 
-	const TCHAR* SwitcherSuffix()
+	const TCHAR* PageHostSuffix()
 	{
-		static const TCHAR* Value = TEXT("switcher");
+		static const TCHAR* Value = TEXT("page_host");
 		return Value;
 	}
 
-	const FString& SwitcherRootPrefix()
+	const FString& PageHostRootPrefix()
 	{
-		static const FString Value = FString::Printf(TEXT("%s%s_"), TokenPrefix(), SwitcherSuffix());
+		static const FString Value = FString::Printf(TEXT("%s%s_"), TokenPrefix(), PageHostSuffix());
 		return Value;
 	}
 
@@ -166,14 +166,13 @@ namespace Design2UMGPrototypeRouting
 		for (const TSharedPtr<FDesignNode>& PageNode : PrototypePages)
 		{
 			CollectPrototypeReservedTokens(PageNode, Context.ReservedTokens);
+			if (PageNode.IsValid() && !PageNode->Id.IsEmpty())
+			{
+				MapNodeIdsToTopLevelPage(PageNode, PageNode->Id, Context.NodeToPageId);
+			}
 		}
 
 		Context.InternalTokenHash = BuildPrototypeInternalTokenHash(PrototypePages);
-
-		if (PrototypePages.Num() <= 1)
-		{
-			return Context;
-		}
 
 		for (int32 PageIndex = 0; PageIndex < PrototypePages.Num(); ++PageIndex)
 		{
@@ -185,7 +184,6 @@ namespace Design2UMGPrototypeRouting
 
 			Context.PageIds.Add(PageNode->Id);
 			Context.PageIdToIndex.Add(PageNode->Id, PageIndex);
-			MapNodeIdsToTopLevelPage(PageNode, PageNode->Id, Context.NodeToPageId);
 		}
 
 		return Context;

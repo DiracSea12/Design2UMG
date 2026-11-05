@@ -455,6 +455,28 @@ FBox2D FUMGWidgetRenderer::GetBlueprintExportBounds(UWidgetBlueprint* WidgetBlue
 	return FBox2D(FVector2D::ZeroVector, GetBlueprintDesignSize(WidgetBlueprint));
 }
 
+void FUMGWidgetRenderer::ApplyAuthoredVisibility(UWidgetTree* WidgetTree)
+{
+	if (!WidgetTree) return;
+	WidgetTree->ForEachWidget([WidgetTree](UWidget* Widget)
+	{
+		if (!Widget) return;
+		if (Widget->GetCachedWidget().IsValid())
+		{
+			// GetVisibility reads Slate's designer override after materialization.
+			PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			const ESlateVisibility AuthoredVisibility = Widget->Visibility;
+			PRAGMA_ENABLE_DEPRECATION_WARNINGS
+			Widget->SetVisibility(AuthoredVisibility);
+		}
+		if (UUserWidget* Nested = Cast<UUserWidget>(Widget))
+		{
+			if (Nested->WidgetTree && Nested->WidgetTree != WidgetTree)
+				ApplyAuthoredVisibility(Nested->WidgetTree);
+		}
+	});
+}
+
 TOptional<FVector2D> FUMGWidgetRenderer::GetBlueprintDesignTimeSize(UWidgetBlueprint* WidgetBlueprint)
 {
 	if (WidgetBlueprint && WidgetBlueprint->GeneratedClass)
@@ -580,6 +602,7 @@ bool FUMGWidgetRenderer::RenderWidgetToPng(
 	};
 
 	TSharedRef<SWidget> SlateWidget = Widget->TakeWidget();
+	ApplyAuthoredVisibility(Widget->WidgetTree);
 	// Retainer dynamic materials exist only after the Slate tree is built.
 	// Offscreen rendering must finish their shaders and refresh the parent
 	// uniforms before drawing; a valid shader map alone does not prepare them.
@@ -949,6 +972,7 @@ bool FUMGWidgetRenderer::RenderWidgetTreeToPng(UWidgetBlueprint* WidgetBP, TArra
 		W->TakeWidget();
 		W->SynchronizeProperties();
 	});
+	ApplyAuthoredVisibility(WidgetBP->WidgetTree);
 
 	UWidget* RootWidget = WidgetBP->WidgetTree->RootWidget;
 	TSharedPtr<SWidget> SlateWidget = RootWidget->GetCachedWidget();

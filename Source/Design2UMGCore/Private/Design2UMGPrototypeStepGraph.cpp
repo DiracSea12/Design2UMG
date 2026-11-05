@@ -3,6 +3,7 @@
 #include "Design2UMGPrototypeStepGraph.h"
 #include "Design2UMGPrototypeRouting.h"
 #include "Design2UMGPrototypeStepGraphAssembly.h"
+#include "Design2UMGPrototypeAnimationSource.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "UMGSchemaSourceExtensions.h"
 
@@ -74,16 +75,7 @@ namespace Design2UMGPrototypeStepGraph
 		}
 
 		Design2UMGPrototypeRouting::FPrototypeRoutingContext RoutingContext = Design2UMGPrototypeRouting::BuildRoutingContext(PrototypePages);
-		if (PrototypePages.Num() > 1)
-		{
-			Analysis.Data.PageIds = RoutingContext.PageIds;
-			Analysis.Data.SwitcherWidgetId = Design2UMGPrototypeRouting::MakeUniquePrototypeInternalToken(
-				RoutingContext.ReservedTokens,
-				RoutingContext.InternalTokenHash,
-				Design2UMGPrototypeTokens::SwitcherSuffix());
-			Analysis.Data.SwitcherWidgetName = Analysis.Data.SwitcherWidgetId;
-			RoutingContext.ReservedTokens.Add(Analysis.Data.SwitcherWidgetId);
-		}
+		Analysis.Data.PageIds = RoutingContext.PageIds;
 
 		TSet<FString> SeenBindingKeys;
 		for (const TSharedPtr<FDesignNode>& PageNode : PrototypePages)
@@ -96,6 +88,30 @@ namespace Design2UMGPrototypeStepGraph
 				Analysis.TriggerNodeIds,
 				SeenBindingKeys,
 				Warnings);
+		}
+
+		Design2UMGPrototypeAnimationSource::Resolve(Document, Analysis.Data, Warnings);
+		Analysis.Data.ClickBindings.RemoveAll([](const FUMGPrototypeNavigationBinding& Binding)
+		{
+			return !Binding.Transition.Diagnostic.IsEmpty();
+		});
+		Analysis.Data.StateHosts.RemoveAll([&Analysis](const FUMGPrototypeStateHost& Host)
+		{
+			return !Analysis.Data.ClickBindings.ContainsByPredicate([&Host](const FUMGPrototypeNavigationBinding& Binding)
+			{ return Binding.Transition.StateHostWidgetId == Host.HostWidgetId; });
+		});
+		Analysis.TriggerNodeIds.Reset();
+		for (const FUMGPrototypeNavigationBinding& Binding : Analysis.Data.ClickBindings)
+		{
+			if (!Binding.UsesPageOpenTrigger()) Analysis.TriggerNodeIds.Add(Binding.TriggerWidgetId);
+		}
+
+		if (Analysis.Data.RequiresPageHost())
+		{
+			Analysis.Data.PageHostWidgetId = Design2UMGPrototypeRouting::MakeUniquePrototypeInternalToken(
+				RoutingContext.ReservedTokens, RoutingContext.InternalTokenHash, Design2UMGPrototypeTokens::PageHostSuffix());
+			Analysis.Data.PageHostWidgetName = Analysis.Data.PageHostWidgetId;
+			RoutingContext.ReservedTokens.Add(Analysis.Data.PageHostWidgetId);
 		}
 
 		if (Analysis.Data.HasOverlayBindings())
@@ -114,14 +130,7 @@ namespace Design2UMGPrototypeStepGraph
 			return Analysis;
 		}
 
-		if (Analysis.Data.RequiresSwitcher() && Analysis.Data.PageIds.Num() < 2)
-		{
-			Analysis.Data = FUMGPrototypeNavigationData();
-			Analysis.TriggerNodeIds.Reset();
-			return Analysis;
-		}
-
-		if (Analysis.Data.RequiresSwitcher())
+		if (Analysis.Data.RequiresPageHost())
 		{
 			Analysis.Data.InitialPageIndex = ResolvePrototypeInitialPageIndex(
 				Document,

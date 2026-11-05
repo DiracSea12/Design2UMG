@@ -28,8 +28,9 @@ The following remain bridge, debug, or future work unless a later release explic
 
 - MCP JSON bridge import and live Pencil MCP debug chains.
 - Full public hosted UE formal validation.
-- Full UEdGraph authoring for prototype logic.
-- Complete Smart Animate, overlay layer semantics, generalized animation authoring, and design-system sync.
+- Complete Smart Animate, overlay layer semantics, generalized animation authoring, and design-system sync are not current commitments.
+
+General prototype-logic compilation (variable calculations, conditions and complex multi-step state), a complete Minesweeper game and a standalone automated interaction score were abandoned and are not being restored or presented as shipped capabilities. See [Explicit non-goals](../KNOWN_LIMITATIONS.md#explicit-non-goals).
 
 ## Validation And Release Gates
 
@@ -51,7 +52,7 @@ The repository does not currently publish a public hosted UE matrix, public host
 | Layout conversion | Ahead of basic references: flex-like layout, anchors, offsets, and fixer rules |
 | Visual properties | Fill, stroke, radius, shadow, blur approximation, gradients, and SVG paths |
 | Component system | Ref expansion, variables, and themes |
-| Prototype flow | Typed navigation data and native Blueprint wiring for supported single-step actions; broader semantics remain future work |
+| Prototype flow | Typed navigation data and native Blueprint wiring for supported single-step actions; not a general logic compiler |
 | Multiple input sources | `.pen`, Figma REST, local Figma export JSON, plus bridge/debug utilities |
 | Blueprint logic generation | Native Blueprint graph wiring for supported mouse/keyboard actions; not a general-purpose interaction graph compiler |
 
@@ -70,11 +71,11 @@ The repository does not currently publish a public hosted UE matrix, public host
 
 ## v1.1 Candidates
 
-- Prototype flow expansion beyond the supported single-step native graph bindings: drag, conditional/multi-step flows, additional keyboard actions, and complete overlay layer semantics.
+- [~] Limited native widget animation is implemented: editable `UWidgetAnimation` tracks for position, rotation, opacity and a single solid color; render-scale size changes only for equivalent solid rectangles without children, rounded corners, strokes or effects. Matching uses real trees with the same child names, hierarchy and paint order, the current action's duration and precisely representable easing. Click/`MOUSE_ENTER` retain their result, supported `ON_HOVER` state changes reverse on exit, and page-entry `AFTER_TIMEOUT` uses an explicit delay. Unsupported changes and `SMART_ANIMATE` overlays are refused with diagnostics; ordinary overlays without animation remain available. Focused functional validation passed, including fresh-process playback and one genuine Toggle recovery package's click-driven movement/solid color. Full visual regression was not run; this is not full acceptance. See [Interaction and animation](../KNOWN_LIMITATIONS.md#interaction-and-animation) for provenance, coverage and retained warnings.
 
 ## Later Community-Driven Areas
 
-- Advanced interaction semantics.
+- Further interaction expansion requires a separate scope decision; it is not promised by the basic animation work.
 - Responsive adaptation and safe-zone support.
 - Design token and design-system sync.
 - Broader reimport coverage beyond the current recorded-instance update boundary.

@@ -17,14 +17,8 @@ namespace Design2UMGConverterVisualSupport
 	};
 
 	bool HasVisualFill(const TSharedPtr<FDesignNode>& Node);
-	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node);
-	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node);
 
 	void ApplyBaseVisualProperties(
-		FUMGWidgetNode& Widget,
-		const TSharedPtr<FDesignNode>& Node);
-
-	void ApplyRenderFallbackVisuals(
 		FUMGWidgetNode& Widget,
 		const TSharedPtr<FDesignNode>& Node);
 
@@ -46,5 +40,5 @@ namespace Design2UMGConverterVisualSupport
 		FUMGWidgetNode Widget,
 		const TSharedPtr<FDesignNode>& Node,
 		const FVisualMapperOptions& VisualMapperOptions,
-		bool bExplicitStrokePainted);
+		bool bExplicitStrokePainted, bool bTextPaintHandled, bool bSourcePaintHandled = false);
 }

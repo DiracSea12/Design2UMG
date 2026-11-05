@@ -14,8 +14,6 @@
 #include "FigmaComponentDependencies.h"
 #include "DesignJsonUtils.h"
 #include "DesignReferenceExpansion.h"
-#include "UMGPropertyKeys.h"
-#include "UMGValueParsing.h"
 #include "UMGSchema.h"
 
 #include "HAL/FileManager.h"
@@ -24,107 +22,6 @@
 
 namespace
 {
-	FString MakeVecKey(const FString& RawId)
-	{
-		return FString(UMGPropertyKeys::VectorRasterImageRefPrefix)
-			+ RawId
-				.Replace(TEXT(":"), TEXT("_"))
-				.Replace(TEXT("/"), TEXT("_"));
-	}
-
-	bool TryResolveVectorPngPath(const FString& NodeId, const FString& ImagesDir, FString& OutVecKey, FString& OutPngPath)
-	{
-		TArray<FString> CandidateIds;
-		CandidateIds.Add(NodeId);
-
-		int32 DelimIndex = INDEX_NONE;
-		if (NodeId.FindLastChar(TEXT(';'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
-		{
-			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
-		}
-
-		if (NodeId.FindLastChar(TEXT('/'), DelimIndex) && DelimIndex + 1 < NodeId.Len())
-		{
-			CandidateIds.Add(NodeId.Mid(DelimIndex + 1));
-		}
-
-		for (const FString& CandidateId : CandidateIds)
-		{
-			const FString VecKey = MakeVecKey(CandidateId);
-			const FString PngPath = ImagesDir / (VecKey + TEXT(".png"));
-			if (FPaths::FileExists(PngPath))
-			{
-				OutVecKey = VecKey;
-				OutPngPath = PngPath;
-				return true;
-			}
-		}
-		return false;
-	}
-
-	bool ShouldSkipTinyVectorPng(const FString& PngPath, float NodeWidth, float NodeHeight)
-	{
-		const int64 FileSize = IFileManager::Get().FileSize(*PngPath);
-		if (FileSize <= 0)
-		{
-			return true;
-		}
-
-		TArray<uint8> Header;
-		if (!FFileHelper::LoadFileToArray(Header, *PngPath) || Header.Num() < 24)
-		{
-			return false;
-		}
-
-		const int32 W = (int32(Header[16]) << 24) | (int32(Header[17]) << 16) | (int32(Header[18]) << 8) | int32(Header[19]);
-		const int32 H = (int32(Header[20]) << 24) | (int32(Header[21]) << 16) | (int32(Header[22]) << 8) | int32(Header[23]);
-
-		const bool bDegenerateImage = (W <= 1 || H <= 1);
-		const bool bTinyImage = (W <= 2 && H <= 2);
-		const bool bSuspiciousPayload = FileSize <= 200;
-		const bool bSizeMismatch = bTinyImage && (NodeWidth > 4.0f || NodeHeight > 4.0f);
-		return bDegenerateImage || (bTinyImage && bSuspiciousPayload) || bSizeMismatch;
-	}
-
-	bool NeedsVectorRasterFallback(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
-		{
-			return true;
-		}
-
-		if (Node->Shape.Geometry.IsEmpty())
-		{
-			return true;
-		}
-
-		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
-		if (PrimaryFill.Type == EDesignFillType::Gradient || PrimaryFill.Type == EDesignFillType::Image)
-		{
-			return true;
-		}
-
-		for (const FDesignFill& Fill : Node->Visual.Fills)
-		{
-			if (!Fill.bEnabled)
-			{
-				continue;
-			}
-
-			if (Fill.Type == EDesignFillType::Gradient || Fill.Type == EDesignFillType::Image)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
 	FString BuildLayerBlurKey(
 		const FString& SourceDocumentIdentity,
 		const FString& SourceImageIdentity,
@@ -366,55 +263,6 @@ namespace
 		return BakedCount;
 	}
 
-	int32 InjectVectorImageFills(TArray<TSharedPtr<FDesignNode>>& Nodes, const FString& ImagesDir, TMap<FString, FString>& OutMapping)
-	{
-		int32 InjectedCount = 0;
-
-		for (TSharedPtr<FDesignNode>& Node : Nodes)
-		{
-			if (!Node.IsValid())
-			{
-				continue;
-			}
-
-			const bool bIsVector =
-				(Node->Type == EDesignNodeType::Path) ||
-				(Node->Type == EDesignNodeType::Line) ||
-				(Node->Type == EDesignNodeType::Ellipse) ||
-				(Node->Type == EDesignNodeType::Polygon);
-
-			if (bIsVector && !Node->Visual.TopmostFill().IsImage() && NeedsVectorRasterFallback(Node))
-			{
-				FString VecKey;
-				FString PngPath;
-				if (TryResolveVectorPngPath(Node->Id, ImagesDir, VecKey, PngPath))
-				{
-					if (ShouldSkipTinyVectorPng(PngPath, Node->Transform.Width.Value, Node->Transform.Height.Value))
-					{
-						continue;
-					}
-
-					FDesignFill ImgFill;
-					ImgFill.Type = EDesignFillType::Image;
-					ImgFill.Image.Url = VecKey;
-					ImgFill.Image.Mode = EDesignImageMode::Fill;
-					Node->Visual.Fills.Empty();
-					Node->Visual.Fills.Add(ImgFill);
-					Node->Visual.bFillExplicitClear = false;
-					if (!OutMapping.Contains(VecKey))
-					{
-						OutMapping.Add(VecKey, PngPath);
-					}
-					++InjectedCount;
-				}
-			}
-
-			InjectedCount += InjectVectorImageFills(Node->Children, ImagesDir, OutMapping);
-		}
-
-		return InjectedCount;
-	}
-
 	TSharedPtr<FDesignNode> FindDesignNodeByIdRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, const FString& TargetNodeId)
 	{
 		for (const TSharedPtr<FDesignNode>& Node : Nodes)
@@ -450,7 +298,11 @@ namespace
 			return true;
 		}
 
-		const TSharedPtr<FDesignNode> Match = FindDesignNodeByIdRecursive(InDocument.Children, TargetNodeId);
+		TSharedPtr<FDesignNode> Match = FindDesignNodeByIdRecursive(InDocument.Children, TargetNodeId);
+		if (!Match.IsValid())
+		{
+			Match = FindDesignNodeByIdRecursive(InDocument.SourceDocument().PrototypePages, TargetNodeId);
+		}
 		if (!Match.IsValid())
 		{
 			OutError = FString::Printf(TEXT("Failed to locate Figma target node '%s'"), *TargetNodeId);
@@ -532,8 +384,6 @@ namespace Design2UMGLocalFigmaImport
 		const FString ImagesDir = FPaths::GetPath(ResolvedSourceFilePath) / TEXT("images");
 		const FString SourceDocumentIdentity = DesignImageBakeUtils::BuildSourceDocumentIdentity(JsonFilePath);
 		TMap<FString, FString> ImageRefToLocalPath;
-		const int32 VecCount = InjectVectorImageFills(ParsedDocument.Children, ImagesDir, ImageRefToLocalPath);
-
 		TSet<FString> ImageRefs;
 		FFigmaParser::CollectImageRefs(ParsedDocument, ImageRefs);
 		for (const FString& Ref : ImageRefs)
@@ -548,15 +398,18 @@ namespace Design2UMGLocalFigmaImport
 				ImageRefToLocalPath.Add(Ref, PngPath);
 			}
 		}
-		const int32 BlendDerivedCount = DesignImageBakeUtils::BakeMappedImageBlendOverlays(
+		int32 BlendDerivedCount = DesignImageBakeUtils::BakeMappedImageBlendOverlays(
 			ParsedDocument.Children,
 			ImageRefToLocalPath,
 			SourceDocumentIdentity,
 			TEXT("LocalFigmaImport"));
-		const int32 LayerBlurDerivedCount = BakeLayerBlurImages(ParsedDocument.Children, ImageRefToLocalPath, SourceDocumentIdentity);
+		BlendDerivedCount += DesignImageBakeUtils::BakeMappedImageBlendOverlays(
+			ParsedDocument.MutableSourceDocument().PrototypePages, ImageRefToLocalPath, SourceDocumentIdentity, TEXT("LocalFigmaImport"));
+		int32 LayerBlurDerivedCount = BakeLayerBlurImages(ParsedDocument.Children, ImageRefToLocalPath, SourceDocumentIdentity);
+		LayerBlurDerivedCount += BakeLayerBlurImages(ParsedDocument.MutableSourceDocument().PrototypePages, ImageRefToLocalPath, SourceDocumentIdentity);
 
-		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d vec_*, %d image fills, %d baked blend overlays, %d baked layer blurs)"),
-			ImageRefToLocalPath.Num(), VecCount, ImageRefToLocalPath.Num() - VecCount, BlendDerivedCount, LayerBlurDerivedCount);
+		UE_LOG(LogDesign2UMG, Log, TEXT("LocalFigmaImport: %d image mappings (%d baked blend overlays, %d baked layer blurs)"),
+			ImageRefToLocalPath.Num(), BlendDerivedCount, LayerBlurDerivedCount);
 
 		FFigmaParser::ApplyImageUrls(ParsedDocument, ImageRefToLocalPath);
 	}

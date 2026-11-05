@@ -4,6 +4,7 @@
 // typed-node applier in GetPropsApplierMap().
 
 #include "UMGPropertyApplierInternal.h"
+#include "Design2UMGInitialScrollWiring.h"
 #include "Design2UMGWidgetMetadata.h"
 #include "Design2UMGWidgetPropertyAccess.h"
 
@@ -43,6 +44,11 @@ namespace
 	{
 		UButton* Button = CastChecked<UButton>(Widget);
 		FButtonStyle Style = Design2UMGWidgetPropertyAccess::GetButtonStyle(*Button);
+		if (Node.WidgetStyle.Padding.IsSet())
+		{
+			Style.NormalPadding = Node.WidgetStyle.Padding.GetValue();
+			Style.PressedPadding = Node.WidgetStyle.Padding.GetValue();
+		}
 		if (Node.WidgetStyle.BackgroundColor.IsSet())
 		{
 			const FLinearColor BackgroundColor = Node.WidgetStyle.BackgroundColor.GetValue();
@@ -100,6 +106,10 @@ namespace
 			{
 				ScrollBox->SetScrollBarVisibility(*Visibility);
 			}
+		}
+		if (Node.ScrollBox.ScrollOffset.IsSet())
+		{
+			Design2UMGInitialScrollWiring::SetInitialOffset(ScrollBox, Node.ScrollBox.ScrollOffset.GetValue());
 		}
 	}
 

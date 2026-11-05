@@ -12,6 +12,7 @@ class UTexture2D;
 struct FDesignPathRasterRequest
 {
 	FUMGPathData Path;
+	TOptional<TArray<FDesignGeometryPath>> SourceContourPaths;
 	FIntPoint Size = FIntPoint::ZeroValue;
 	// Authored paint coordinates stay fixed while the raster stores only ink.
 	FIntPoint PaintSize = FIntPoint::ZeroValue;

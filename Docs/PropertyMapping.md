@@ -154,22 +154,28 @@
 
 ## Prototype (Figma)
 
-`Prototype Basic` 是当前正式支持范围，但它的正式口径只覆盖页面切换型交互和基础过渡近似，不覆盖完整设计器原型语义复刻。
+现有原型能力限于支持的单步动作、基础切页过渡和下述有限属性动画，不覆盖完整设计器原型语义。源数据中的交互记录不等于已生成可执行逻辑；被拒绝的动画不会为该动作生成执行按钮，也不会经该动作将目标纳入运行时依赖导航页，同稿其他受支持动作仍可生成。详见 [交互与动画限制](../KNOWN_LIMITATIONS.md#interaction-and-animation)。
 
 | Figma Prototype | UMG | Notes |
 |-----------------|-----|-------|
 | Top-level multi-page flow | WidgetSwitcher | 顶层 Frame 页面自动收口为 `WidgetSwitcher` |
-| `ON_CLICK + NAVIGATE/SWAP` | Button wrapper + runtime binding | 触发节点包装为透明 `Button`，运行时切页 |
-| `ON_HOVER / ON_PRESS / ON_DRAG` | Button wrapper + runtime binding | 继续复用透明 `Button` 包裹；hover/press 走原生委托，drag 走原生 drag detect 委托 |
-| `ON_KEY_DOWN / ON_KEY_UP` | Typed keyboard binding | 保留触发节点语义，并通过 prototype runtime 的焦点约束输入路由触发 |
-| `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL` | Typed step program | 运行时按顺序执行变量写入、条件分支与终端导航动作 |
-| `ON_CLICK + OVERLAY` | Button wrapper + typed overlay binding | 运行时把目标页挂到独立 overlay host，并维护 overlay stack；不是 switcher page push 伪切页 |
-| `ON_CLICK + BACK` | Button wrapper + typed back binding | 运行时从 prototype history stack 回退上一页 |
-| `ON_CLICK + OPEN_LINK` | Button wrapper + typed open-link binding | 运行时直接打开 URL；自动化测试通过 URL capture hook 验证 |
-| `DISSOLVE` / `SMART_ANIMATE` / `SCROLL_ANIMATE` | Switcher fade | 映射基础透明度过渡，保留时长 / easing |
-| `MOVE_IN` / `MOVE_OUT` / `SLIDE_IN` / `SLIDE_OUT` / `PUSH` | Switcher translation | 映射基础位移过渡，保留方向 / 时长 / easing |
+| `ON_CLICK / ON_HOVER / ON_PRESS` + 单步 `NAVIGATE/SWAP` | Button wrapper + 原生蓝图节点 | 触发节点包装为透明 `Button`，切换目标页 |
+| `ON_CLICK / ON_HOVER / ON_PRESS` + 单步 `OVERLAY/BACK/OPEN_LINK` | 原生蓝图节点 | 显示支持的弹层、返回或打开链接；不是完整浮层系统 |
+| `ON_KEY_DOWN / ON_KEY_UP` + 单步 `NAVIGATE/OPEN_LINK` | 原生蓝图键盘事件 | 依赖控件焦点及来源页面约束，不是全局输入系统 |
+| `ON_DRAG` | 保留源交互数据 | 不生成拖拽动作连线，报告不支持 |
+| `SET_VARIABLE / SET_VARIABLE_MODE / CONDITIONAL`、多步流程 | 保留源交互数据 | 不生成通用变量计算、条件或状态逻辑；不在本轮恢复 |
+| 既有整页淡入淡出 / 位移过渡 | Switcher fade / slide | 整页近似不等于逐控件 Smart Animate |
+| 受支持的单步 `CHANGE_TO / SMART_ANIMATE` | 原生 `UWidgetAnimation` 属性轨道 | 真实起止树中的位置、旋转、透明度、单一纯色；须满足下述配对、时序和属性限制 |
+| 可等价为渲染缩放的尺寸变化 | RenderTransform.Scale | 仅无子项、无圆角、无描边或特效的实心矩形；不重排布局 |
+| `SMART_ANIMATE` + `OVERLAY` | 不生成动作 | 明确诊断拒绝；普通无动画弹层仍保留 |
 
-⚠️ **当前边界**: 当前会为切页 fade / slide 生成最小两段式 `UWidgetAnimation` 资产；运行时对 fade 类过渡优先播放资产动画，slide 类过渡继续走 ticker 近似以匹配 live switcher 尺寸。但它仍不生成完整通用动画 authoring 链；overlay 目前虽已进入独立 overlay host contract，但还不是完整浮层系统；也不复刻完整 Smart Animate 图层配对语义。
+⚠️ **当前边界**：现有生成器为支持的切页 fade / slide 创建 `UWidgetAnimation` 子对象，支持的鼠标导航蓝图连线可播放这些动画；这不是完整 Smart Animate。当前使用原生蓝图节点，不要求插件生成类扩展。
+
+基础属性动画已实现为可编辑、可保存重开的原生 `UWidgetAnimation`。配对要求真实树的同名子项保持层级、数量和绘制顺序；尺寸与局部几何明确，使用当前动作自己的正时长。曲线限 `LINEAR`、`EASE_IN/OUT/IN_AND_OUT` 和可精确表达的自定义三次贝塞尔曲线；不能表达的变化明确诊断并拒绝动作，不瞬切、不采样近似。
+
+点击与 `MOUSE_ENTER` 不自动恢复；`MOUSE_ENTER` 要求显式零延时且无 deprecated 行为。受支持 `CHANGE_TO` 的 `ON_HOVER` 在移出时反向播放，hover 切页因无法保持该语义而拒绝；页面进入后的 `AFTER_TIMEOUT` 使用显式非负延时。新版 Plugin 导出将 `duration/timeout` 从秒换成毫秒并写入 `design2umgPrototypeDurationUnit=MILLISECONDS`；HTTP 来源的时间单位尚未核实，新属性动画拒绝执行，既有静态导入不受此限制。
+
+有限定向功能验证已完成，包含新进程重开、原生播放和一份真实 Toggle 恢复包的点击移动/纯色播放。四份动画稿均有新鲜完整导出包，已验证真实静态生成、重载及渲染；Loading 另已验证 `AFTER_TIMEOUT` 原生播放。其余动画限制、来源与已有警告见 [交互与动画限制](../KNOWN_LIMITATIONS.md#interaction-and-animation)。完整视觉及 `no_regression` 结论以同输入、同标准图的逐项回归证据为准，定向功能验证不代表全量验收。复杂布局重排、图片/渐变动画和任意图层匹配不在范围内；源数据包带有额外页面不等于已支持其运行时交互。
 
 ## Alignment Mapping
 
@@ -208,8 +214,8 @@
 | Legacy `Properties` full removal | Completed for current final consumers: widget appliers, resource binders, and procedural material/image flows now use typed payloads or narrow typed request DTOs instead of a generic property bag |
 | Foreground blur full semantic parity | 当前走 `RetainerBox + EffectMaterial` 近似，不是完整设计器语义还原 |
 | Inner shadow full semantic parity | 当前为单层 `RetainerBox + EffectMaterial` 近似，不是完整设计器/浏览器语义 |
-| Prototype overlay full layer semantics / generalized history graph | 当前 overlay/back 已进入 typed runtime contract，但仍以 `WidgetSwitcher` 页面切换为中心，没有独立浮层系统或通用状态机/事件图生成链 |
-| Full `UWidgetAnimation` asset generation | 当前仅为切页 fade / slide 生成最小两段式动画资产；未进入通用动画 authoring / 蓝图图表生成 |
+| Prototype overlay full layer semantics / generalized history graph | 支持的单步 overlay/back 由原生蓝图节点执行，不承诺完整浮层系统或通用状态机 |
+| General animation authoring / full Smart Animate | 仅实现上述有限基础属性轨道；复杂布局重排、图片/渐变及任意图层匹配不支持；定向功能验证不代表全量验收，完整视觉及 `no_regression` 结论以同输入、同标准图的逐项回归证据为准 |
 | Font metric full semantic parity | 当前字体解析与文本测量已做缓存隔离和同步，但仍是基于 UE 字体资产/Slate 的启发式近似，不是设计器排版引擎逐像素复刻 |
 | Polygon without PathGeometry | 会降级为 Border，并记录 warning |
 | `TEXT_PATH` | 当前只保留普通文本 fallback；没有 text-on-path 的 geometry/shaping 渲染链 |

@@ -345,6 +345,7 @@ bool FUMGJsonParser::ParseWidgetNode(const TSharedPtr<FJsonObject>& JsonObject, 
 
 	// Parse the LayoutMapper justify-spacer marker (absent in older JSON means false).
 	TryGetStrictBoolField(JsonObject, TEXT("SyntheticJustifySpacer"), OutNode.bSyntheticJustifySpacer);
+	TryGetStrictInt32Field(JsonObject, TEXT("SourceVisualChildIndex"), OutNode.SourceVisualChildIndex);
 
 	// Parse Bounds, added in v2.2 for normalized coordinates. Coordinates are
 	// allowed to be negative; only finiteness/float-range is enforced here so a
@@ -796,6 +797,57 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 	const TSharedPtr<FJsonObject>* EffectObject;
 	if (DesignJsonUtils::TryGetObject(NodeObject, TEXT("Effect"), EffectObject))
 	{
+		const TSharedPtr<FJsonObject>* CaptureObject = nullptr;
+		if ((*EffectObject)->TryGetObjectField(UMGPropertyKeys::SharedCapture, CaptureObject))
+		{
+			const auto ReadEndpoint = [](const TSharedPtr<FJsonObject>& Object)
+			{
+				FUMGSharedCaptureEndpoint Endpoint;
+				Object->TryGetStringField(TEXT("DestinationWidgetId"), Endpoint.DestinationWidgetId);
+				Object->TryGetBoolField(TEXT("ClipContent"), Endpoint.bClipContent);
+				const TSharedPtr<FJsonObject>* Value = nullptr;
+				if (Object->TryGetObjectField(TEXT("Clip"), Value))
+				{
+					auto Holder = MakeShared<FJsonObject>();
+					Holder->SetObjectField(TEXT("Effect"), *Value);
+					FUMGEffectData Clip;
+					ParseEffectPayload(Holder, Clip);
+					Endpoint.Size = Clip.GeometryMaskSize.Get(FVector2D::ZeroVector);
+					Endpoint.Shape = Clip.GeometryMaskShape.Get(EUMGGeometryMaskShape::RoundedRectangle);
+					Endpoint.CornerRadii = Clip.GeometryMaskCornerRadii.Get(FVector4(0, 0, 0, 0));
+					Endpoint.ClipPaths = MoveTemp(Clip.GeometryMaskPaths);
+				}
+				if (Object->TryGetObjectField(TEXT("OwnPaint"), Value))
+				{
+					auto Holder = MakeShared<FJsonObject>();
+					Holder->SetObjectField(TEXT("PathData"), *Value);
+					FUMGPathData Path;
+					ParsePathPayload(Holder, Path);
+					if (Path.SourcePaintGeometry.IsSet()) Endpoint.OwnPaint = MoveTemp(Path.SourcePaintGeometry.GetValue());
+				}
+				if (Object->TryGetObjectField(TEXT("Shadow"), Value))
+				{
+					auto Holder = MakeShared<FJsonObject>();
+					Holder->SetObjectField(TEXT("ShadowData"), *Value);
+					FUMGShadowData Shadow;
+					ParseShadowPayload(Holder, Shadow);
+					Endpoint.BoxShadows = MoveTemp(Shadow.BoxShadows);
+				}
+				Object->TryGetStringField(TEXT("CoverageTexture"), Endpoint.CoverageTexture);
+				Object->TryGetStringField(TEXT("PaintTexture"), Endpoint.PaintTexture);
+				Object->TryGetStringField(TEXT("StrokeTexture"), Endpoint.StrokeTexture);
+				FString Rect;
+				if (Object->TryGetStringField(TEXT("PaintRect"), Rect)) TryParseVector4(Rect, Endpoint.PaintRect);
+				if (Object->TryGetStringField(TEXT("StrokeRect"), Rect)) TryParseVector4(Rect, Endpoint.StrokeRect);
+				return Endpoint;
+			};
+			OutEffect.SharedCapture.Emplace();
+			const TSharedPtr<FJsonObject>* Source = nullptr;
+			if ((*CaptureObject)->TryGetObjectField(TEXT("Source"), Source)) OutEffect.SharedCapture->Source = ReadEndpoint(*Source);
+			const TArray<TSharedPtr<FJsonValue>>* Targets = nullptr;
+			if ((*CaptureObject)->TryGetArrayField(TEXT("Targets"), Targets))
+				for (const auto& Target : *Targets) OutEffect.SharedCapture->Targets.Add(ReadEndpoint(Target->AsObject()));
+		}
         const TSharedPtr<FJsonObject>* ShaderObject=nullptr;
         if((*EffectObject)->TryGetObjectField(TEXT("Shader"),ShaderObject))
         {FDesignShaderData Shader;if(DesignShaderJson::Parse(*ShaderObject,Shader)) OutEffect.Shader=MoveTemp(Shader);}
@@ -841,6 +893,10 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 			{
 				OutEffect.GeometryMaskShape = EUMGGeometryMaskShape::Ellipse;
 			}
+			else if (Str.Equals(TEXT("Rectangle"), ESearchCase::IgnoreCase))
+			{
+				OutEffect.GeometryMaskShape = EUMGGeometryMaskShape::Rectangle;
+			}
 			else if (Str.Equals(TEXT("RoundedRectangle"), ESearchCase::IgnoreCase))
 			{
 				OutEffect.GeometryMaskShape = EUMGGeometryMaskShape::RoundedRectangle;
@@ -860,6 +916,18 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 			else
 			{
 				UE_LOG(LogDesign2UMG, Warning, TEXT("FUMGJsonParser: Invalid Effect.GeometryMaskCornerRadii; ignoring value."));
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* ContourPaths = nullptr;
+		if ((*EffectObject)->TryGetArrayField(UMGPropertyKeys::GeometryMaskPaths, ContourPaths))
+		{
+			OutEffect.GeometryMaskPaths.Emplace();
+			for (const auto& Value : *ContourPaths)
+			{
+				FDesignGeometryPath Path;
+				const auto Object = Value->AsObject();
+				if (TryGetStrictStringField(Object, TEXT("Path"), Path.Path) && TryGetStrictStringField(Object, TEXT("FillRule"), Path.FillRule))
+					OutEffect.GeometryMaskPaths->Add(MoveTemp(Path));
 			}
 		}
 		FUMGEffectData::FRenderingPhaseData RenderingPhase = OutEffect.RenderingPhase.Get(FUMGEffectData::FRenderingPhaseData());
@@ -1103,6 +1171,11 @@ void FUMGJsonParser::ParseScrollBoxPayload(const TSharedPtr<FJsonObject>& NodeOb
 		{
 			OutScrollBox.ScrollBarVisibility = Str;
 		}
+		const TSharedPtr<FJsonValue> Offset = DesignJsonUtils::TryGetField(*ScrollBoxObject, UMGPropertyKeys::ScrollOffset);
+		if (Offset.IsValid() && Offset->Type == EJson::Number)
+		{
+			OutScrollBox.ScrollOffset = static_cast<float>(Offset->AsNumber());
+		}
 	}
 }
 
@@ -1173,6 +1246,7 @@ void FUMGJsonParser::ParseSlotData(const TSharedPtr<FJsonObject>& JsonObject, FU
 
 	// Parse Grid-related fields.
 	int32 IntValue;
+	if (TryGetStrictInt32Field(JsonObject, TEXT("ZOrder"), IntValue)) OutSlot.ZOrder = IntValue;
 	if (TryGetStrictInt32Field(JsonObject, TEXT("Row"), IntValue)) OutSlot.Row = IntValue;
 	if (TryGetStrictInt32Field(JsonObject, TEXT("Column"), IntValue)) OutSlot.Column = IntValue;
 	if (TryGetStrictInt32Field(JsonObject, TEXT("RowSpan"), IntValue)) OutSlot.RowSpan = IntValue;

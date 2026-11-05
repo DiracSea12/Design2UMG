@@ -943,6 +943,7 @@ TArray<FString> FFontResolver::FindMissingFonts(const FDesignDocument& Document)
 	// Collect from node tree
 	CollectFontFamilies(Document.Children, UsedFamilies);
 	CollectFontFamilies(Document.SourceDocument().ImportedNodes, UsedFamilies);
+	CollectFontFamilies(Document.SourceDocument().PrototypePages, UsedFamilies);
 
 	if (UsedFamilies.Num() == 0)
 		return {};

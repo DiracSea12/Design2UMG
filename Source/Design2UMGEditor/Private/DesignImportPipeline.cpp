@@ -48,7 +48,8 @@ namespace DesignImportPipeline
 			FUMGWidgetData& Data,
 			const FImportInPlaceAnalysisResult& AnalysisResult,
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument);
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			FOnPreviewReconvert Reconvert = FOnPreviewReconvert());
 		FDesign2UMGImportSettingsSnapshot BuildFallbackImportSettingsSnapshot()
 		{
 			return FDesign2UMGImportSettingsSnapshot::FromSettings(UDesign2UMGSettings::Get());
@@ -218,7 +219,8 @@ namespace DesignImportPipeline
 			FUMGWidgetData& Data,
 			const FImportInPlaceAnalysisResult& AnalysisResult,
 			const FDesignImportRequest& Request,
-			const TOptional<FDesignDocument>& DiagnosticDocument)
+			const TOptional<FDesignDocument>& DiagnosticDocument,
+			FOnPreviewReconvert Reconvert)
 		{
 			FDesignImportExecutionResult Result;
 			if (!AnalysisResult.ErrorMessage.IsEmpty())
@@ -246,7 +248,8 @@ namespace DesignImportPipeline
 						}),
 					TOptional<FDesignPreviewMaterializationSettingsSnapshot>(
 						FDesignPreviewMaterializationSettingsSnapshot::FromGenerationSettings(GenerationSettings)),
-					AnalysisResult.ImageResult))
+					AnalysisResult.ImageResult,
+					MoveTemp(Reconvert)))
 			{
 				Result.bSucceeded = true;
 				Result.bPreviewOpened = true;
@@ -361,8 +364,28 @@ namespace DesignImportPipeline
 	{
 		FImportAnalysisResult OwnedAnalysisResult;
 		const FImportAnalysisResult* AnalysisResult = PrecomputedAnalysis;
+		FOnPreviewReconvert Reconvert;
 		if (!AnalysisResult)
 		{
+			if (Request.bUsePreview)
+			{
+				// The preview converts the untouched source again when its widget-tree mode changes.
+				Reconvert = FOnPreviewReconvert::CreateLambda(
+					[Source = DesignImportDialogs::CopyForAnalysis(Document), Request](bool bPreserveSourceNodes, FUMGWidgetData& OutData, FString& OutError)
+					{
+						FDesign2UMGImportSettingsSnapshot Settings = Request.SettingsSnapshot.IsSet()
+							? Request.SettingsSnapshot.GetValue() : FDesign2UMGImportSettingsSnapshot::FromSettings(GetDefault<UDesign2UMGSettings>());
+						Settings.ConversionSettings.bPreserveSourceNodes = bPreserveSourceNodes;
+						FImportAnalysisInput Input;
+						Input.bResolveImages = Request.bResolveImages;
+						Input.SettingsSnapshot = &Settings;
+						FDesignDocument Working = DesignImportDialogs::CopyForAnalysis(Source);
+						FImportAnalysisResult Analysis = DesignImportPlanning::AnalyzeImport(Working, Input);
+						OutError = Analysis.ErrorMessage;
+						OutData = MoveTemp(Analysis.Data);
+						return OutError.IsEmpty();
+					});
+			}
 			FImportAnalysisInput AnalysisInput;
 			AnalysisInput.bResolveImages = Request.bResolveImages;
 			AnalysisInput.SettingsSnapshot = Request.SettingsSnapshot.IsSet() ? &Request.SettingsSnapshot.GetValue() : nullptr;
@@ -382,7 +405,7 @@ namespace DesignImportPipeline
 			FinalRequest.SettingsSnapshot = AnalysisResult->SettingsSnapshot;
 		}
 		FinalRequest.DiagnosticImageResult = AnalysisResult->ImageResult;
-		return ExecuteWithAnalysis(Data, *AnalysisResult, FinalRequest, TOptional<FDesignDocument>(Document));
+		return ExecuteWithAnalysis(Data, *AnalysisResult, FinalRequest, TOptional<FDesignDocument>(Document), MoveTemp(Reconvert));
 	}
 
 	void WriteImportDiagnosticReport(

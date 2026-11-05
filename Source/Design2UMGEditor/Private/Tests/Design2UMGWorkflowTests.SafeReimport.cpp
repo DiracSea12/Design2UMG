@@ -647,9 +647,9 @@ bool FSafeReimportConflictTest::RunTest(const FString&)
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
 	// Simulate developer customization:
-	// 1) attach a project OnClicked binding to re_link_btn (double-trigger conflict).
+	// 1) attach a project OnClicked binding to the re_link_btn button (double-trigger conflict).
 	FDelegateEditorBinding ProjectBinding;
-	ProjectBinding.ObjectName = TEXT("re_link_btn");
+	ProjectBinding.ObjectName = TEXT("LinkArea");
 	ProjectBinding.PropertyName = TEXT("OnClicked");
 	ProjectBinding.FunctionName = TEXT("HandleLinkClick");
 	WBP->Bindings.Add(ProjectBinding);

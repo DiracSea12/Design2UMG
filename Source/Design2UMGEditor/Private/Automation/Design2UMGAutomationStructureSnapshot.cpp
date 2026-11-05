@@ -26,6 +26,7 @@
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/RichTextBlock.h"
+#include "Components/WidgetSwitcher.h"
 #include "Framework/Text/RichTextMarkupProcessing.h"
 #include "Components/Widget.h"
 #include "Dom/JsonObject.h"
@@ -464,6 +465,12 @@ namespace Design2UMGAutomationStructureSnapshot
 				{
 					TryAddChild(UserWidget->WidgetTree->RootWidget);
 				}
+			}
+
+			if (UWidgetSwitcher* Switcher = Cast<UWidgetSwitcher>(Widget))
+			{
+				TryAddChild(Switcher->GetActiveWidget());
+				return;
 			}
 
 			if (UPanelWidget* PanelWidget = Cast<UPanelWidget>(Widget))

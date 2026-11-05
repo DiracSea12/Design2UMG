@@ -67,6 +67,11 @@ public:
 	UPROPERTY(Config)
 	bool bFirstRunCompleted = false;
 
+	// ========== Widget Tree ==========
+	/** Keep every source group as its own panel instead of merging coordinate-only groups into their parent. */
+	UPROPERTY(Config, EditAnywhere, Category = "Widget Tree", meta = (DisplayName = "Preserve All Source Nodes", ToolTip = "When enabled, groups that only position their children keep their own panel so every design node can be found by name. When disabled, such groups are merged into their parent for a flatter widget tree; rendering is identical either way."))
+	bool bPreserveSourceNodes = false;
+
 	// ========== Generated Textures ==========
 	/** Cumulative new raster allocation allowance for each generation or preview. */
 	UPROPERTY(Config, EditAnywhere, Category = "Generated Textures", meta = (DisplayName = "Generated Texture Budget (MiB)", ClampMin = "1", ToolTip = "Maximum cumulative new image pixel data per generation or preview. Cached reuse is not charged again. Does not limit total editor memory or remote image downloads. Changes apply to the next operation."))

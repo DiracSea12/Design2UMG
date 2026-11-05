@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Figma render-fallback coverage: vector raster fallback, metadata parsing and image-reference remapping, leaf/structured fallback widgets, child-tree preservation.
+// Figma native vector paint and source-image parsing, remapping, and conversion coverage.
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
@@ -13,10 +13,10 @@
 using namespace Design2UMGCoreTests;
 using namespace Design2UMGTestUtils;
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaVectorRasterFallbackTest,
-	"Design2UMG.FigmaParser.VectorRasterFallback",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaNativeGradientGeometryTest,
+	"Design2UMG.FigmaParser.NativeGradientGeometry",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
+bool FFigmaNativeGradientGeometryTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 400, 400,
@@ -26,28 +26,22 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 					 "{\"type\":\"GRADIENT_LINEAR\",\"visible\":true,\"gradientStops\":["
 					 "{\"position\":0.0,\"color\":{\"r\":1,\"g\":0,\"b\":0,\"a\":1}},"
 					 "{\"position\":1.0,\"color\":{\"r\":0,\"g\":0,\"b\":1,\"a\":1}}"
-					 "],\"gradientHandlePositions\":[{\"x\":0,\"y\":0.5},{\"x\":1,\"y\":0.5}]},"
-					 "{\"type\":\"IMAGE\",\"visible\":true,\"imageRef\":\"vec_grad_1\",\"scaleMode\":\"FILL\"}"
+					 "],\"gradientHandlePositions\":[{\"x\":0,\"y\":0.5},{\"x\":1,\"y\":0.5}]}"
 					 "]"))));
 
 	FDesignDocument Doc;
-	TestTrue(TEXT("Figma vector fallback parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
+	TestTrue(TEXT("Figma native gradient parse succeeds"), FFigmaParser::ParseDocument(Json, Doc));
 	if (Doc.Children.Num() == 0 || Doc.Children[0]->Children.Num() == 0)
 	{
 		return false;
 	}
 
 	const TSharedPtr<FDesignNode>& EllipseNode = Doc.Children[0]->Children[0];
-	TestTrue(TEXT("Vector raster fallback captured"), EllipseNode->Visual.VectorRasterFallbackImageRef == TEXT("vec_grad_1"));
-
+	TestTrue(TEXT("Source gradient is preserved"), EllipseNode->Visual.Fills.Num() == 1
+		&& EllipseNode->Visual.Fills[0].Type == EDesignFillType::Gradient);
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
-	TestTrue(TEXT("CollectImageRefs includes vector fallback"), ImageRefs.Contains(TEXT("vec_grad_1")));
-
-	TMap<FString, FString> ImageMap;
-	ImageMap.Add(TEXT("vec_grad_1"), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
-	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestTrue(TEXT("ApplyImageUrls remaps vector fallback"), EllipseNode->Visual.VectorRasterFallbackImageRef == TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	TestEqual(TEXT("Native gradient requires no image resource"), ImageRefs.Num(), 0);
 
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
 	const FUMGWidgetNode* Widget = FindWidgetById(Data.RootWidget, TEXT("ellipse_grad"));
@@ -57,15 +51,15 @@ bool FFigmaVectorRasterFallbackTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("Gradient ellipse uses image fallback"), Widget->Type, TEXT("Image"));
-	TestEqual(TEXT("Gradient ellipse texture path preserved"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_vec_grad_1.T_vec_grad_1"));
+	TestEqual(TEXT("Source contour is retained"), Widget->Path.Geometry.Get(FString()), EllipseNode->Shape.Geometry);
+	TestTrue(TEXT("Native gradient has no texture replacement"), Widget->Brush.Image.TexturePath.Get(FString()).IsEmpty());
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest,
-	"Design2UMG.FigmaParser.RenderFallbackMetadataParsingAndImageRefRemapping",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSourceImageParsingAndRemappingTest,
+	"Design2UMG.FigmaParser.SourceImageParsingAndRemapping",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest::RunTest(const FString& Parameters)
+bool FFigmaSourceImageParsingAndRemappingTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("0:2"), TEXT("Root"), TEXT("FRAME"), 0, 0, 300, 200,
@@ -73,7 +67,7 @@ bool FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest::RunTest(const 
 				FString::Printf(
 					TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
 						 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.2,\"g\":0.2,\"b\":0.2,\"a\":1}},"
-						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
+						 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"gifRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
 						 "],"
 						 "\"design2umgRenderFallbackImageRef\":\"render_202_5356\","
 						 "\"design2umgRenderFallbackScope\":\"full\","
@@ -90,30 +84,39 @@ bool FFigmaRenderFallbackMetadataParsingAndImageRefRemappingTest::RunTest(const 
 	}
 
 	const TSharedPtr<FDesignNode>& RenderNode = Doc.Children[0]->Children[0];
-	TestEqual(TEXT("Render fallback image ref normalized"), RenderNode->Visual.RenderFallback.ImageRef, TEXT("render_202_5356"));
-	TestEqual(TEXT("Render fallback scope normalized"), RenderNode->Visual.RenderFallback.Scope, EDesignRenderFallbackScope::Leaf);
-	TestEqual(TEXT("Render fallback source preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackSource")), TEXT("figma_render_png"));
-	TestEqual(TEXT("Render fallback reason preserved"), RenderNode->Metadata.FindRef(TEXT("design2umgRenderFallbackReason")), TEXT("image_filters+image_blend_luminosity"));
+	TestTrue(TEXT("Non-neutral image filters are diagnosed"), RenderNode->Metadata.Contains(TEXT("figma.imageFiltersUnsupported")));
+	TestTrue(TEXT("GIF static playback is diagnosed"), RenderNode->Metadata.Contains(TEXT("figma.gifStaticFrame")));
+
+	FDesignDocument NeutralDoc;
+	const FString NeutralJson = Json.Replace(TEXT("\"contrast\":0.25"), TEXT("\"contrast\":0"));
+	if (!TestTrue(TEXT("Neutral filter fixture parses"), FFigmaParser::ParseDocument(NeutralJson, NeutralDoc))
+		|| NeutralDoc.Children.IsEmpty() || NeutralDoc.Children[0]->Children.IsEmpty()) return false;
+	TestFalse(TEXT("Neutral image filters are not diagnosed"), NeutralDoc.Children[0]->Children[0]->Metadata.Contains(TEXT("figma.imageFiltersUnsupported")));
+
+	FDesignDocument FillDoc;
+	const FString FillJson = Json.Replace(TEXT("\"scaleMode\":\"FIT\""), TEXT("\"scaleMode\":\"FILL\""));
+	if (!TestTrue(TEXT("Figma FILL fixture parses"), FFigmaParser::ParseDocument(FillJson, FillDoc))
+		|| FillDoc.Children.IsEmpty() || FillDoc.Children[0]->Children.IsEmpty()) return false;
+	TestTrue(TEXT("Figma FILL requests aspect-preserving crop"), FillDoc.Children[0]->Children[0]->Visual.TopmostFill().Image.bFitCropToNode);
 	TestTrue(TEXT("Non-array interactions remain metadata"), RenderNode->Metadata.Contains(TEXT("interactions")));
-	TestFalse(TEXT("Non-array interactions do not suppress render fallback"), RenderNode->Visual.RenderFallback.bSuppressedBySourceSemantics);
 
 	TSet<FString> ImageRefs;
 	FFigmaParser::CollectImageRefs(Doc, ImageRefs);
 	TestTrue(TEXT("CollectImageRefs includes original image"), ImageRefs.Contains(TEXT("img_orig")));
-	TestTrue(TEXT("CollectImageRefs includes render fallback image"), ImageRefs.Contains(TEXT("render_202_5356")));
+	TestFalse(TEXT("CollectImageRefs excludes node render image"), ImageRefs.Contains(TEXT("render_202_5356")));
 
 	TMap<FString, FString> ImageMap;
 	ImageMap.Add(TEXT("img_orig"), TEXT("/Game/Transient/T_img_orig.T_img_orig"));
 	ImageMap.Add(TEXT("render_202_5356"), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
 	FFigmaParser::ApplyImageUrls(Doc, ImageMap);
-	TestEqual(TEXT("ApplyImageUrls remaps render fallback image"), RenderNode->Visual.RenderFallback.ImageRef, TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	TestEqual(TEXT("ApplyImageUrls remaps the original image"), RenderNode->Visual.TopmostFill().Image.Url, TEXT("/Game/Transient/T_img_orig.T_img_orig"));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStructuredLeafRenderFallbackWidgetTest,
-	"Design2UMG.FigmaParser.StructuredLeafRenderFallbackWidget",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaStructuredSourceImageWidgetTest,
+	"Design2UMG.FigmaParser.StructuredSourceImageWidget",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
+bool FFigmaStructuredSourceImageWidgetTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Doc;
 	TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
@@ -145,7 +148,6 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 	LeafFill.bEnabled = true;
 	LeafFill.Image.Url = TEXT("img_avatar");
 	LeafFill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->Visual.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -157,17 +159,17 @@ bool FFigmaStructuredLeafRenderFallbackWidgetTest::RunTest(const FString& Parame
 		return false;
 	}
 
-	TestEqual(TEXT("Structured render fallback converts directly to image"), Widget->Type, TEXT("Image"));
-	TestEqual(TEXT("Structured render fallback keeps texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
+	TestEqual(TEXT("Structured image frame retains its border"), Widget->Type, TEXT("Border"));
+	TestEqual(TEXT("Structured frame keeps source image"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("img_avatar"));
 	TestTrue(TEXT("Structured render fallback keeps design X"), FMath::IsNearlyEqual(Widget->Bounds.X, 10.0f, 0.001f));
 	TestTrue(TEXT("Structured render fallback keeps design Y"), FMath::IsNearlyEqual(Widget->Bounds.Y, 12.0f, 0.001f));
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaLeafRenderFallbackWidgetTest,
-	"Design2UMG.FigmaParser.LeafRenderFallbackWidget",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSourceImageWidgetTest,
+	"Design2UMG.FigmaParser.SourceImageWidget",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
+bool FFigmaSourceImageWidgetTest::RunTest(const FString& Parameters)
 {
 	FDesignDocument Doc;
 	TSharedPtr<FDesignNode> Root = MakeShared<FDesignNode>();
@@ -198,7 +200,6 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 	LeafFill.bEnabled = true;
 	LeafFill.Image.Url = TEXT("img_avatar");
 	LeafFill.Image.Mode = EDesignImageMode::Fit;
-	Leaf->Visual.RenderFallback.ImageRef = TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356");
 	Root->Children.Add(Leaf);
 	Doc.Children.Add(Root);
 
@@ -210,28 +211,19 @@ bool FFigmaLeafRenderFallbackWidgetTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("Leaf render fallback converts directly to image"), Widget->Type, TEXT("Image"));
-	TestEqual(TEXT("Leaf render fallback keeps texture path"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("/Game/Transient/T_render_202_5356.T_render_202_5356"));
-	const FString WidthOverrideValue = GetWidgetProperty(*Widget, TEXT("WidthOverride"));
-	const FString HeightOverrideValue = GetWidgetProperty(*Widget, TEXT("HeightOverride"));
-	const float WidthOverride = FCString::Atof(*WidthOverrideValue);
-	const float HeightOverride = FCString::Atof(*HeightOverrideValue);
-	TestFalse(TEXT("Leaf render fallback exposes typed width override"), WidthOverrideValue.IsEmpty());
-	TestFalse(TEXT("Leaf render fallback exposes typed height override"), HeightOverrideValue.IsEmpty());
-	TestTrue(TEXT("Leaf render fallback keeps design width override"), FMath::IsNearlyEqual(WidthOverride, 26.0f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback keeps design height override"), FMath::IsNearlyEqual(HeightOverride, 26.0f, 0.001f));
+	TestEqual(TEXT("Image frame retains its border"), Widget->Type, TEXT("Border"));
+	TestEqual(TEXT("Frame keeps source image"), GetWidgetProperty(*Widget, TEXT("TexturePath")), TEXT("img_avatar"));
 	TestTrue(TEXT("Leaf render fallback keeps design X"), FMath::IsNearlyEqual(Widget->Bounds.X, 10.0f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback keeps design Y"), FMath::IsNearlyEqual(Widget->Bounds.Y, 12.0f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback widget width uses design bounds"), FMath::IsNearlyEqual(Widget->Bounds.W, 26.0f, 0.001f));
 	TestTrue(TEXT("Leaf render fallback widget height uses design bounds"), FMath::IsNearlyEqual(Widget->Bounds.H, 26.0f, 0.001f));
-	TestTrue(TEXT("Leaf render fallback keeps no structural children"), Widget->Children.Num() == 0);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaRenderFallbackKeepsChildTreeTest,
-	"Design2UMG.FigmaParser.RenderFallbackKeepsChildTree",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaSourceImageKeepsChildTreeTest,
+	"Design2UMG.FigmaParser.SourceImageKeepsChildTree",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
+bool FFigmaSourceImageKeepsChildTreeTest::RunTest(const FString& Parameters)
 {
 	const FString Json = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("render_parent"), TEXT("Card"), TEXT("FRAME"), 0, 0, 260, 160,
@@ -241,7 +233,7 @@ bool FFigmaRenderFallbackKeepsChildTreeTest::RunTest(const FString& Parameters)
 			FString::Printf(
 				TEXT(",\"absoluteRenderBounds\":%s,\"fills\":["
 					 "{\"type\":\"SOLID\",\"visible\":true,\"blendMode\":\"NORMAL\",\"color\":{\"r\":0.2,\"g\":0.2,\"b\":0.2,\"a\":1}},"
-					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
+					 "{\"type\":\"IMAGE\",\"visible\":true,\"blendMode\":\"LUMINOSITY\",\"imageRef\":\"img_orig\",\"gifRef\":\"img_orig\",\"scaleMode\":\"FIT\",\"filters\":{\"contrast\":0.25}}"
 					 "],"
 					 "\"design2umgRenderFallbackImageRef\":\"/Game/Transient/T_render_parent.T_render_parent\","
 					 "\"design2umgRenderFallbackScope\":\"full\","

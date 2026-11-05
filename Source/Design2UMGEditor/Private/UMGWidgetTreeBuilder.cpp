@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "UMGWidgetTreeBuilder.h"
+#include "Design2UMGWidgetNames.h"
 #include "DesignBrowserWidget.h"
 #include "WebBrowser.h"
 #include "DesignImageResourceLimits.h"
@@ -87,52 +88,6 @@ namespace
 		return FIntPoint(
 			FMath::Max(1, InSize.X),
 			FMath::Max(1, InSize.Y));
-	}
-
-	/**
-	 * Rank generated names for deterministic reimport pairing:
-	 * Base -> 0, Base_<N> -> 2N-1, Base_w<N> -> 2N.
-	 * Reject other tails, including overlay mirrors; the two numeric forms remain distinct.
-	 */
-	bool TryParseGeneratedWidgetSuffix(const FString& WidgetName, const FString& BaseName, int32& OutRank)
-	{
-		OutRank = 0;
-		if (WidgetName == BaseName)
-		{
-			return true;
-		}
-		if (!WidgetName.StartsWith(BaseName + TEXT("_")))
-		{
-			return false;
-		}
-
-		const FString Tail = WidgetName.RightChop(BaseName.Len() + 1);
-		if (Tail.IsNumeric())
-		{
-			const int32 SuffixOrdinal = FCString::Atoi(*Tail);
-			if (SuffixOrdinal <= 0)
-			{
-				return false;
-			}
-			OutRank = 2 * SuffixOrdinal - 1;
-			return true;
-		}
-
-		if (Tail.Len() > 1 && FChar::ToLower(Tail[0]) == TCHAR('w'))
-		{
-			const FString Digits = Tail.RightChop(1);
-			if (Digits.IsNumeric())
-			{
-				const int32 SuffixOrdinal = FCString::Atoi(*Digits);
-				if (SuffixOrdinal <= 0)
-				{
-					return false;
-				}
-				OutRank = 2 * SuffixOrdinal;
-				return true;
-			}
-		}
-		return false;
 	}
 
 	FIntPoint ResolveEffectiveDesignSize(const FUMGWidgetNode& SourceNode, const FIntPoint* ExplicitDesignSize)
@@ -484,31 +439,15 @@ void FUMGWidgetTreeBuilder::ApplyWidgetProperties(UWidget* Widget, const FUMGWid
 
 FName FUMGWidgetTreeBuilder::SanitizeWidgetName(const FString& InName, const FString& FallbackPrefix)
 {
-	FString Sanitized = SlugStringForValidName(InName);
-
-	if (Sanitized.IsEmpty())
-	{
-		Sanitized = FallbackPrefix + TEXT("_Widget");
-	}
-
-	// FName parses the "single underscore + digits" shape (e.g. "_127") into NAME_None; digit-leading names
-	// must keep determinism with an alphabetic prefix (otherwise NewObject falls back to auto-naming and reimport's same-name matching breaks).
-	if (Sanitized.Len() > 0 && FChar::IsDigit(Sanitized[0]))
-	{
-		Sanitized = TEXT("W") + Sanitized;
-	}
-
-	return FName(*Sanitized);
+	return Design2UMGWidgetNames::Sanitize(InName, FallbackPrefix);
 }
 
 bool FUMGWidgetTreeBuilder::MatchesWidgetBaseName(const FString& WidgetName, const FString& BaseName)
 {
-	int32 Rank = 0;
-	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank);
+	return Design2UMGWidgetNames::SuffixRank(WidgetName, BaseName) != MAX_int32;
 }
 
 int32 FUMGWidgetTreeBuilder::GetWidgetNameSuffixRank(const FString& WidgetName, const FString& BaseName)
 {
-	int32 Rank = 0;
-	return TryParseGeneratedWidgetSuffix(WidgetName, BaseName, Rank) ? Rank : MAX_int32;
+	return Design2UMGWidgetNames::SuffixRank(WidgetName, BaseName);
 }

@@ -6,9 +6,6 @@
 function colorToRest(c, opacity = 1) {
     return { r: c.r, g: c.g, b: c.b, a: 'a' in c ? c.a * opacity : opacity };
 }
-function rectToRest(bb) {
-    return { x: bb.x, y: bb.y, width: bb.width, height: bb.height };
-}
 function mapBlendMode(bm) {
     return bm.replace(/_/g, '-');
 }
@@ -40,50 +37,35 @@ function applyTransform(transform, x, y) {
         y: transform[1][0] * x + transform[1][1] * y + transform[1][2],
     };
 }
-function gradientTransformToHandlePositions(transform) {
+function multiplyTransforms(left, right) {
+    return [
+        [left[0][0] * right[0][0] + left[0][1] * right[1][0],
+            left[0][0] * right[0][1] + left[0][1] * right[1][1],
+            left[0][0] * right[0][2] + left[0][1] * right[1][2] + left[0][2]],
+        [left[1][0] * right[0][0] + left[1][1] * right[1][0],
+            left[1][0] * right[0][1] + left[1][1] * right[1][1],
+            left[1][0] * right[0][2] + left[1][1] * right[1][2] + left[1][2]],
+    ];
+}
+function gradientTransformToHandlePositions(transform, type) {
     const inverse = invertTransform(transform);
     if (!inverse)
         return [];
     return [
-        applyTransform(inverse, 0, 0.5),
+        applyTransform(inverse, type === 'GRADIENT_LINEAR' ? 0 : 0.5, 0.5),
         applyTransform(inverse, 1, 0.5),
-        applyTransform(inverse, 0, 1),
+        applyTransform(inverse, type === 'GRADIENT_LINEAR' ? 0 : 0.5, 1),
     ];
-}
-function cloneJsonSafe(value) {
-    if (value === undefined)
-        return undefined;
-    try {
-        return JSON.parse(JSON.stringify(value));
-    }
-    catch (_a) {
-        return undefined;
-    }
 }
 function documentationLinksToRest(links) {
     if (!links || links.length === 0)
         return undefined;
     return links.map(link => ({ uri: link.uri }));
 }
-function exposedInstancesToRest(instances) {
-    if (!instances || instances.length === 0)
-        return undefined;
-    return instances.map(instance => ({
-        id: instance.id,
-        name: instance.name || instance.id,
-        type: instance.type,
-    }));
-}
 function setIfDefined(target, key, value) {
     if (value !== undefined && value !== null) {
         target[key] = value;
     }
-}
-function makeRenderFallbackKey(nodeId) {
-    const sanitized = (nodeId || '')
-        .replace(/[^a-zA-Z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '');
-    return `render_${sanitized || 'node'}`;
 }
 function indexRestNodes(node, out = new Map()) {
     if (!node)
@@ -94,161 +76,38 @@ function indexRestNodes(node, out = new Map()) {
     }
     return out;
 }
-function hasVisibleChildNodes(node) {
-    if (!('children' in node))
-        return false;
-    return (node.children || []).some(child => child.visible !== false);
-}
-function hasNodeReactions(node) {
-    return 'reactions' in node && Array.isArray(node.reactions) && node.reactions.length > 0;
-}
-function isExcludedRenderFallbackNodeType(node) {
-    return node.type === 'TEXT'
-        || node.type === 'INSTANCE'
-        || node.type === 'COMPONENT'
-        || node.type === 'COMPONENT_SET'
-        || node.type === 'SECTION';
-}
-function getRenderFallbackReasons(node) {
-    if (!('fills' in node) || node.fills === figma.mixed) {
-        return [];
-    }
-    const reasons = new Set();
-    for (const fill of node.fills) {
-        if (fill.type !== 'IMAGE' || fill.visible === false) {
-            continue;
-        }
-        const imagePaint = fill;
-        if (imagePaint.filters && Object.keys(imagePaint.filters).length > 0) {
-            reasons.add('image_filters');
-        }
-        const blendMode = String(imagePaint.blendMode || 'NORMAL').toUpperCase();
-        if (blendMode !== 'NORMAL' && blendMode !== 'PASS_THROUGH') {
-            reasons.add(`image_blend_${blendMode.toLowerCase()}`);
-        }
-    }
-    return Array.from(reasons.values());
-}
-function shouldExportNodeRenderFallback(node) {
-    if (isExcludedRenderFallbackNodeType(node)) {
-        return { use: false, reason: '' };
-    }
-    if (hasVisibleChildNodes(node)) {
-        return { use: false, reason: '' };
-    }
-    if (hasNodeReactions(node)) {
-        return { use: false, reason: '' };
-    }
-    const reasons = getRenderFallbackReasons(node);
-    if (reasons.length === 0) {
-        return { use: false, reason: '' };
-    }
-    return {
-        use: true,
-        reason: reasons.join('+'),
-    };
-}
-function attachRenderFallbackMetadata(restNode, imageRef, reason) {
-    if (!restNode)
-        return;
-    restNode.design2umgRenderFallbackImageRef = imageRef;
-    restNode.design2umgRenderFallbackScope = 'full';
-    restNode.design2umgRenderFallbackSource = 'figma_render_png';
-    restNode.design2umgRenderFallbackReason = reason;
-}
 // ── Fill Serialization ──
 function serializePaint(paint) {
     var _a;
-    const out = {
-        type: paint.type,
-        visible: paint.visible !== false,
-        opacity: (_a = paint.opacity) !== null && _a !== void 0 ? _a : 1,
-        blendMode: mapBlendMode(paint.blendMode || 'NORMAL'),
-    };
-    setIfDefined(out, 'boundVariables', cloneJsonSafe(paint.boundVariables));
-    if (paint.type === 'SOLID' && 'color' in paint) {
-        out.color = colorToRest(paint.color, paint.opacity);
+    // Paints and effects are data records, unlike SceneNode host objects.
+    const out = copySourceValue(paint);
+    out.visible = paint.visible !== false;
+    out.opacity = (_a = paint.opacity) !== null && _a !== void 0 ? _a : 1;
+    out.blendMode = mapBlendMode(paint.blendMode || 'NORMAL');
+    if (paint.type === 'SOLID')
+        out.color = colorToRest(paint.color);
+    if ('gradientTransform' in paint) {
+        const transform = toRestTransform(paint.gradientTransform);
+        if (transform)
+            out.gradientHandlePositions = gradientTransformToHandlePositions(transform, paint.type);
     }
-    if (paint.type === 'GRADIENT_LINEAR' || paint.type === 'GRADIENT_RADIAL' ||
-        paint.type === 'GRADIENT_ANGULAR' || paint.type === 'GRADIENT_DIAMOND') {
-        const gp = paint;
-        const gradientTransform = toRestTransform(gp.gradientTransform);
-        if (gradientTransform) {
-            out.gradientTransform = gradientTransform;
-            out.gradientHandlePositions = gradientTransformToHandlePositions(gradientTransform);
-        }
-        else {
-            out.gradientHandlePositions = [];
-        }
-        out.gradientStops = gp.gradientStops.map(s => ({
-            color: colorToRest(s.color),
-            position: s.position,
-        }));
+    if ('gradientStops' in paint) {
+        out.gradientStops = paint.gradientStops.map(stop => (Object.assign(Object.assign({}, copySourceValue(stop)), { color: colorToRest(stop.color) })));
     }
-    if (paint.type === 'IMAGE' && 'imageHash' in paint) {
-        // Plugin API: imageHash → REST API: imageRef
-        const imagePaint = paint;
-        out.imageRef = imagePaint.imageHash || '';
-        out.scaleMode = imagePaint.scaleMode || 'FILL';
-        setIfDefined(out, 'rotation', imagePaint.rotation);
-        setIfDefined(out, 'filters', cloneJsonSafe(imagePaint.filters));
-        if (out.scaleMode === 'TILE') {
-            setIfDefined(out, 'scalingFactor', imagePaint.scalingFactor);
-        }
-        const imageTransform = toRestTransform(imagePaint.imageTransform);
-        if (out.scaleMode === 'CROP' && imageTransform) {
-            out.imageTransform = imageTransform;
-        }
+    if (paint.type === 'IMAGE') {
+        out.imageRef = paint.imageHash;
+        delete out.imageHash;
     }
     return out;
 }
-// ── Effect Serialization ──
 function serializeEffect(effect) {
-    const out = {
-        type: effect.type,
-        visible: effect.visible !== false,
-    };
-    setIfDefined(out, 'blendMode', mapBlendMode(effect.blendMode || 'NORMAL'));
-    setIfDefined(out, 'opacity', effect.opacity);
-    if ('radius' in effect)
-        out.radius = effect.radius;
-    if ('offset' in effect)
-        out.offset = effect.offset;
-    if ('color' in effect)
-        out.color = colorToRest(effect.color);
-    if ('spread' in effect)
-        out.spread = effect.spread;
-    setIfDefined(out, 'showShadowBehindNode', effect.showShadowBehindNode);
-    setIfDefined(out, 'boundVariables', cloneJsonSafe(effect.boundVariables));
+    const out = copySourceValue(effect);
+    out.visible = effect.visible !== false;
+    if ('blendMode' in effect)
+        out.blendMode = mapBlendMode(effect.blendMode);
     return out;
 }
-// ── Text Style Aggregation ──
-function buildTextStyle(node, first) {
-    if (!first && [node.fontName, node.fontWeight, node.fontSize, node.textCase,
-        node.textDecoration, node.letterSpacing, node.lineHeight].includes(figma.mixed)) {
-        throw new Error(`Text ${node.id}: mixed style has no resolved character segment`);
-    }
-    const fontName = node.fontName !== figma.mixed ? node.fontName : first.fontName;
-    const fontSize = node.fontSize !== figma.mixed ? node.fontSize : first.fontSize;
-    const spacing = node.letterSpacing !== figma.mixed ? node.letterSpacing : first.letterSpacing;
-    const height = node.lineHeight !== figma.mixed ? node.lineHeight : first.lineHeight;
-    const style = {
-        fontFamily: fontName.family, fontStyle: fontName.style, fontPostScriptName: '',
-        fontWeight: node.fontWeight !== figma.mixed ? node.fontWeight : first.fontWeight,
-        fontSize, textAlignHorizontal: node.textAlignHorizontal || 'LEFT',
-        textAlignVertical: node.textAlignVertical || 'TOP',
-        textCase: node.textCase !== figma.mixed ? node.textCase : first.textCase,
-        textDecoration: node.textDecoration !== figma.mixed ? node.textDecoration : first.textDecoration,
-        letterSpacing: spacing.unit === 'PERCENT' ? spacing.value * fontSize / 100 : spacing.value,
-        paragraphSpacing: node.paragraphSpacing, paragraphIndent: node.paragraphIndent,
-        lineHeightUnit: height.unit === 'PERCENT' ? 'FONT_SIZE_%' : height.unit,
-        lineHeightPx: height.unit === 'PIXELS' ? height.value : 0,
-    };
-    if (height.unit === 'PERCENT')
-        style.lineHeightPercentFontSize = height.value;
-    return style;
-}
-// ── Node Serialization ──
+// ── Source Geometry ──
 function copyGeometryPaths(node, out) {
     if ('fillGeometry' in node) {
         out.fillGeometry = node.fillGeometry.map(p => ({ path: p.data, windingRule: p.windingRule }));
@@ -259,243 +118,31 @@ function copyGeometryPaths(node, out) {
 }
 function retainRestGeometryPaths(node, restNodesById) {
     const out = restNodesById.get(node.id);
-    if (out)
+    if (out) {
         copyGeometryPaths(node, out);
+        if ('width' in node && 'height' in node)
+            out.size = { x: node.width, y: node.height };
+        if (!out.relativeTransform && 'relativeTransform' in node) {
+            const absolute = toRestTransform(node.absoluteTransform);
+            if (!absolute)
+                throw new Error(`Source absolute transform is unavailable for ${node.id}`);
+            const parent = node.parent;
+            if (parent && 'absoluteTransform' in parent) {
+                const parentAbsolute = toRestTransform(parent.absoluteTransform);
+                const inverse = parentAbsolute && invertTransform(parentAbsolute);
+                if (!inverse)
+                    throw new Error(`Parent absolute transform is unavailable for ${node.id}`);
+                out.relativeTransform = multiplyTransforms(inverse, absolute);
+            }
+            else {
+                out.relativeTransform = absolute;
+            }
+        }
+    }
     if ('children' in node) {
         for (const child of node.children)
             retainRestGeometryPaths(child, restNodesById);
     }
-}
-function serializeNode(node) {
-    var _a, _b, _c, _d;
-    if (!node.visible && node.type !== 'COMPONENT' && node.type !== 'INSTANCE')
-        return null;
-    const out = {
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        visible: node.visible,
-    };
-    if ('reactions' in node) {
-        if (node.reactions.some(reaction => !Array.isArray(reaction.actions))) {
-            throw new Error(`Manual export has no action list for an interaction on ${node.name}. Use the official JSON export.`);
-        }
-        out.interactions = cloneJsonSafe(node.reactions);
-    }
-    // absoluteBoundingBox — Plugin API provides this directly
-    if ('absoluteBoundingBox' in node && node.absoluteBoundingBox) {
-        out.absoluteBoundingBox = rectToRest(node.absoluteBoundingBox);
-    }
-    // absoluteRenderBounds — includes stroke/effect expansion
-    if ('absoluteRenderBounds' in node) {
-        const rb = node.absoluteRenderBounds;
-        out.absoluteRenderBounds = rb ? rectToRest(rb) : null;
-    }
-    // relativeTransform — used for flip detection
-    if ('relativeTransform' in node) {
-        const t = node.relativeTransform;
-        out.relativeTransform = [[t[0][0], t[0][1], t[0][2]], [t[1][0], t[1][1], t[1][2]]];
-    }
-    // rotation
-    if ('rotation' in node) {
-        out.rotation = node.rotation;
-    }
-    // isMask
-    if ('isMask' in node) {
-        out.isMask = node.isMask;
-    }
-    if (node.isMask && 'maskType' in node) {
-        setIfDefined(out, 'maskType', node.maskType);
-    }
-    // Size
-    if ('width' in node) {
-        out.size = { x: node.width, y: node.height };
-    }
-    // Fills & Strokes
-    if ('fills' in node && node.fills !== figma.mixed) {
-        out.fills = node.fills.map(serializePaint);
-    }
-    if ('strokes' in node) {
-        out.strokes = node.strokes.map(serializePaint);
-    }
-    copyGeometryPaths(node, out);
-    // Stroke weight
-    if ('strokeWeight' in node) {
-        out.strokeWeight = node.strokeWeight !== figma.mixed ? node.strokeWeight : 1;
-        out.strokeAlign = node.strokeAlign || 'INSIDE';
-    }
-    // Individual stroke weights → aggregate to object
-    if ('strokeTopWeight' in node) {
-        const n = node;
-        out.individualStrokeWeights = {
-            top: (_a = n.strokeTopWeight) !== null && _a !== void 0 ? _a : 0,
-            right: (_b = n.strokeRightWeight) !== null && _b !== void 0 ? _b : 0,
-            bottom: (_c = n.strokeBottomWeight) !== null && _c !== void 0 ? _c : 0,
-            left: (_d = n.strokeLeftWeight) !== null && _d !== void 0 ? _d : 0,
-        };
-    }
-    // Effects
-    if ('effects' in node) {
-        out.effects = node.effects.map(serializeEffect);
-    }
-    // Corner radius
-    if ('cornerRadius' in node) {
-        const cr = node.cornerRadius;
-        if (cr !== figma.mixed)
-            out.cornerRadius = cr;
-    }
-    if ('topLeftRadius' in node) {
-        const n = node;
-        out.rectangleCornerRadii = [n.topLeftRadius, n.topRightRadius, n.bottomRightRadius, n.bottomLeftRadius];
-    }
-    // Opacity & blend
-    if ('opacity' in node)
-        out.opacity = node.opacity;
-    if ('blendMode' in node)
-        out.blendMode = mapBlendMode(node.blendMode);
-    // Clips
-    if ('clipsContent' in node)
-        out.clipsContent = node.clipsContent;
-    setIfDefined(out, 'boundVariables', cloneJsonSafe(node.boundVariables));
-    setIfDefined(out, 'componentPropertyReferences', cloneJsonSafe(node.componentPropertyReferences));
-    setIfDefined(out, 'explicitVariableModes', cloneJsonSafe(node.explicitVariableModes));
-    setIfDefined(out, 'resolvedVariableModes', cloneJsonSafe(node.resolvedVariableModes));
-    // Constraints
-    if ('constraints' in node) {
-        const c = node.constraints;
-        out.constraints = { vertical: c.vertical, horizontal: c.horizontal };
-    }
-    // Auto Layout
-    if ('layoutMode' in node && node.layoutMode !== 'NONE') {
-        const n = node;
-        out.layoutMode = n.layoutMode;
-        out.primaryAxisSizingMode = n.primaryAxisSizingMode;
-        out.counterAxisSizingMode = n.counterAxisSizingMode;
-        out.primaryAxisAlignItems = n.primaryAxisAlignItems;
-        out.counterAxisAlignItems = n.counterAxisAlignItems;
-        out.paddingLeft = n.paddingLeft;
-        out.paddingRight = n.paddingRight;
-        out.paddingTop = n.paddingTop;
-        out.paddingBottom = n.paddingBottom;
-        out.itemSpacing = n.itemSpacing;
-        setIfDefined(out, 'counterAxisSpacing', n.counterAxisSpacing);
-        setIfDefined(out, 'counterAxisAlignContent', n.counterAxisAlignContent);
-        setIfDefined(out, 'layoutWrap', n.layoutWrap);
-        setIfDefined(out, 'strokesIncludedInLayout', n.strokesIncludedInLayout);
-        setIfDefined(out, 'itemReverseZIndex', n.itemReverseZIndex);
-        setIfDefined(out, 'gridRowCount', n.gridRowCount);
-        setIfDefined(out, 'gridColumnCount', n.gridColumnCount);
-        setIfDefined(out, 'gridRowGap', n.gridRowGap);
-        setIfDefined(out, 'gridColumnGap', n.gridColumnGap);
-        setIfDefined(out, 'gridRowsSizing', n.gridRowsSizing);
-        setIfDefined(out, 'gridColumnsSizing', n.gridColumnsSizing);
-        setIfDefined(out, 'gridChildHorizontalAlign', n.gridChildHorizontalAlign);
-        setIfDefined(out, 'gridChildVerticalAlign', n.gridChildVerticalAlign);
-    }
-    // Layout child properties
-    if ('layoutAlign' in node)
-        out.layoutAlign = node.layoutAlign;
-    if ('layoutGrow' in node)
-        out.layoutGrow = node.layoutGrow;
-    if ('layoutSizingHorizontal' in node)
-        out.layoutSizingHorizontal = node.layoutSizingHorizontal;
-    if ('layoutSizingVertical' in node)
-        out.layoutSizingVertical = node.layoutSizingVertical;
-    if ('layoutPositioning' in node)
-        out.layoutPositioning = node.layoutPositioning;
-    if ('minWidth' in node)
-        setIfDefined(out, 'minWidth', node.minWidth);
-    if ('maxWidth' in node)
-        setIfDefined(out, 'maxWidth', node.maxWidth);
-    if ('minHeight' in node)
-        setIfDefined(out, 'minHeight', node.minHeight);
-    if ('maxHeight' in node)
-        setIfDefined(out, 'maxHeight', node.maxHeight);
-    if ('gridRowSpan' in node)
-        setIfDefined(out, 'gridRowSpan', node.gridRowSpan);
-    if ('gridColumnSpan' in node)
-        setIfDefined(out, 'gridColumnSpan', node.gridColumnSpan);
-    if ('gridColumnAnchorIndex' in node)
-        setIfDefined(out, 'gridColumnAnchorIndex', node.gridColumnAnchorIndex);
-    if ('gridRowAnchorIndex' in node)
-        setIfDefined(out, 'gridRowAnchorIndex', node.gridRowAnchorIndex);
-    // Component reference
-    if (node.type === 'INSTANCE') {
-        const instanceNode = node;
-        if (instanceNode.mainComponent) {
-            out.componentId = instanceNode.mainComponent.id;
-            setIfDefined(out, 'mainComponentKey', instanceNode.mainComponent.key);
-            const componentSet = instanceNode.mainComponent.parent;
-            if (componentSet && componentSet.type === 'COMPONENT_SET') {
-                out.componentSetId = componentSet.id;
-                out.componentSetKey = componentSet.key;
-            }
-        }
-        setIfDefined(out, 'componentProperties', cloneJsonSafe(instanceNode.componentProperties));
-        setIfDefined(out, 'variantProperties', cloneJsonSafe(instanceNode.variantProperties));
-        setIfDefined(out, 'overrides', cloneJsonSafe(instanceNode.overrides));
-        setIfDefined(out, 'exposedInstances', exposedInstancesToRest(instanceNode.exposedInstances));
-        setIfDefined(out, 'isExposedInstance', instanceNode.isExposedInstance);
-    }
-    // Text
-    if (node.type === 'TEXT') {
-        const tn = node;
-        out.characters = tn.characters;
-        const segments = tn.characters ? tn.getStyledTextSegments([
-            'fontName', 'fontWeight', 'fontStyle', 'fontSize', 'fills', 'lineHeight',
-            'letterSpacing', 'textDecoration', 'textCase', 'hyperlink',
-        ]) : [];
-        out.style = buildTextStyle(tn, segments[0]);
-        if (segments.length > 1) {
-            out.characterStyleOverrides = new Array(tn.characters.length);
-            out.styleOverrideTable = {};
-            const styleIds = new Map();
-            for (const segment of segments) {
-                const row = {
-                    fontFamily: segment.fontName.family, fontStyle: segment.fontName.style,
-                    fontWeight: segment.fontWeight, fontSize: segment.fontSize,
-                    italic: segment.fontStyle === 'ITALIC',
-                    fills: segment.fills.map(serializePaint), textDecoration: segment.textDecoration,
-                    letterSpacing: segment.letterSpacing.unit === 'PERCENT'
-                        ? segment.letterSpacing.value * segment.fontSize / 100 : segment.letterSpacing.value,
-                    lineHeightUnit: segment.lineHeight.unit === 'PERCENT' ? 'FONT_SIZE_%' : segment.lineHeight.unit,
-                };
-                if (segment.lineHeight.unit === 'PIXELS')
-                    row.lineHeightPx = segment.lineHeight.value;
-                if (segment.lineHeight.unit === 'PERCENT')
-                    row.lineHeightPercentFontSize = segment.lineHeight.value;
-                if (segment.textCase !== out.style.textCase)
-                    row.textCase = segment.textCase;
-                if (segment.hyperlink)
-                    row.hyperlink = segment.hyperlink.type === 'URL'
-                        ? { type: 'URL', url: segment.hyperlink.value } : { type: 'NODE', nodeID: segment.hyperlink.value };
-                const signature = JSON.stringify(row);
-                let id = styleIds.get(signature);
-                if (id === undefined) {
-                    id = styleIds.size + 1;
-                    styleIds.set(signature, id);
-                    out.styleOverrideTable[String(id)] = row;
-                }
-                out.characterStyleOverrides.fill(id, segment.start, segment.end);
-            }
-            if (tn.fills === figma.mixed)
-                out.fills = segments[0].fills.map(serializePaint);
-        }
-        out.textAutoResize = tn.textAutoResize || 'NONE';
-        setIfDefined(out, 'textTruncation', tn.textTruncation);
-        setIfDefined(out, 'maxLines', tn.maxLines);
-    }
-    // Children
-    if ('children' in node) {
-        const children = [];
-        for (const child of node.children) {
-            const serialized = serializeNode(child);
-            if (serialized)
-                children.push(serialized);
-        }
-        out.children = children;
-    }
-    return out;
 }
 function findNodeById(node, targetId) {
     if (!node || typeof node !== 'object')
@@ -537,70 +184,278 @@ function unwrapRestExportResponse(response, targetId) {
     }
     return null;
 }
-async function exportOfficialRestNode(node) {
-    if (!('exportAsync' in node))
-        return null;
+/** Read data properties explicitly: JSON.stringify on a SceneNode drops host getters. */
+function sourcePropertyNames(value) {
+    const names = new Set();
+    for (let current = value; current && current !== Object.prototype; current = Object.getPrototypeOf(current)) {
+        for (const key of Object.getOwnPropertyNames(current)) {
+            if (key !== 'constructor')
+                names.add(key);
+        }
+    }
+    return names;
+}
+function copySourceValue(value, ancestors = new Set()) {
+    if (value === undefined || value === null || typeof value === 'string' || typeof value === 'boolean')
+        return value;
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : { type: 'NON_FINITE_NUMBER', value: String(value) };
+    }
+    if (value === figma.mixed)
+        return { type: 'MIXED' };
+    if (typeof value !== 'object')
+        throw new Error(`Source value is not JSON data (${typeof value})`);
+    // Node references carry identity; the actual node trees are exported separately.
+    if (typeof value.getPluginData === 'function' && 'parent' in value) {
+        return { id: value.id, name: value.name, type: value.type };
+    }
+    if (ancestors.has(value))
+        throw new Error('Source data contains a circular reference');
+    ancestors.add(value);
     try {
-        const response = await node.exportAsync({ format: 'JSON_REST_V1' });
-        const document = unwrapRestExportResponse(response, node.id);
-        if (document)
-            retainRestGeometryPaths(node, indexRestNodes(document));
+        if (Array.isArray(value))
+            return value.map(entry => copySourceValue(entry, ancestors));
+        const result = {};
+        for (const key of sourcePropertyNames(value)) {
+            const entry = value[key];
+            if (entry !== undefined && typeof entry !== 'function')
+                result[key] = copySourceValue(entry, ancestors);
+        }
+        return result;
+    }
+    finally {
+        ancestors.delete(value);
+    }
+}
+const motionFields = ['animationStyles', 'animations', 'manualKeyframeTracks', 'timelines'];
+function capturePluginData(source, includeMotion = false) {
+    const raw = {};
+    const diagnostics = [];
+    const keys = sourcePropertyNames(source);
+    // Motion properties may be present in the API contract but hidden by account gates.
+    if (includeMotion)
+        for (const field of motionFields)
+            keys.add(field);
+    for (const field of keys) {
+        if (field === 'children' || field === 'parent')
+            continue;
+        if (field === 'componentPropertyDefinitions' && source.type === 'COMPONENT' && isVariantComponent(source))
+            continue;
+        try {
+            const value = source[field];
+            if (typeof value === 'function')
+                continue;
+            if (value === undefined) {
+                if (motionFields.includes(field)) {
+                    diagnostics.push({ nodeId: source.id, field, message: 'Motion API is unavailable; data was not read' });
+                }
+                continue;
+            }
+            raw[field] = copySourceValue(value);
+        }
+        catch (error) {
+            diagnostics.push({ nodeId: source.id, field, message: error instanceof Error ? error.message : String(error) });
+        }
+    }
+    return { data: raw, diagnostics };
+}
+function pluginNodeTypeToRest(type) {
+    return type === 'POLYGON' ? 'REGULAR_POLYGON' : type;
+}
+async function mergePluginSourceNode(source, out) {
+    if (out.id !== source.id || out.type !== pluginNodeTypeToRest(source.type)) {
+        throw new Error(`REST export changed source identity ${source.id} (${source.type}) to ${out.id} (${out.type})`);
+    }
+    const { data: raw, diagnostics } = capturePluginData(source, true);
+    out.visible = source.visible;
+    if (source.type === 'TEXT') {
+        raw.styledTextSegments = copySourceValue(source.getStyledTextSegments([
+            'fontSize', 'fontName', 'fontWeight', 'fontStyle', 'textDecoration', 'textDecorationStyle',
+            'textDecorationOffset', 'textDecorationThickness', 'textDecorationColor', 'textDecorationSkipInk',
+            'textCase', 'lineHeight', 'letterSpacing', 'fills', 'textStyleId', 'fillStyleId', 'listOptions',
+            'listSpacing', 'indentation', 'paragraphIndent', 'paragraphSpacing', 'textWrapStyle', 'hyperlink',
+            'openTypeFeatures', 'boundVariables', 'textStyleOverrides',
+        ]));
+    }
+    out.design2umgPluginData = raw;
+    if (diagnostics.length)
+        out.design2umgExportDiagnostics = diagnostics;
+    for (const field of motionFields) {
+        if (Object.prototype.hasOwnProperty.call(raw, field))
+            out[field] = raw[field];
+        else
+            delete out[field];
+    }
+    out.design2umgMotionTimeUnit = 'SECONDS';
+    if ('reactions' in source)
+        out.interactions = pluginReactionsToRest(source.reactions);
+    if ('fills' in source && source.fills !== figma.mixed) {
+        out.fills = source.fills.map((paint, index) => { var _a; return (Object.assign(Object.assign({}, (_a = out.fills) === null || _a === void 0 ? void 0 : _a[index]), serializePaint(paint))); });
+    }
+    if ('strokes' in source) {
+        out.strokes = source.strokes.map((paint, index) => { var _a; return (Object.assign(Object.assign({}, (_a = out.strokes) === null || _a === void 0 ? void 0 : _a[index]), serializePaint(paint))); });
+    }
+    if ('effects' in source) {
+        out.effects = source.effects.map((effect, index) => { var _a; return (Object.assign(Object.assign({}, (_a = out.effects) === null || _a === void 0 ? void 0 : _a[index]), serializeEffect(effect))); });
+    }
+    if ('children' in source) {
+        const sourceChildren = Array.from(source.children);
+        const officialChildren = out.children || [];
+        const describe = (children) => children.map(child => { var _a, _b; return ({ id: child.id, name: (_a = child.name) !== null && _a !== void 0 ? _a : null, type: child.type, visible: (_b = child.visible) !== null && _b !== void 0 ? _b : null }); });
+        const context = `on ${source.id} (${source.name}); sourceChildren=${JSON.stringify(describe(sourceChildren))}; `
+            + `restChildren=${JSON.stringify(describe(officialChildren))}`;
+        const sourceIds = new Set(sourceChildren.map(child => child.id));
+        const childrenById = new Map(officialChildren.map(child => [child.id, child]));
+        if (childrenById.size !== officialChildren.length || officialChildren.some(child => !sourceIds.has(child.id))) {
+            throw new Error(`REST export changed source children or order ${context}`);
+        }
+        const children = [];
+        for (const child of sourceChildren) {
+            try {
+                // Every missing subtree must come from that exact source child's official export.
+                const document = childrenById.get(child.id) || await readOfficialRestNode(child);
+                await mergePluginSourceNode(child, document);
+                children.push(document);
+            }
+            catch (error) {
+                throw new Error(`REST child ${child.id} (${child.name}) ${context}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        if (JSON.stringify(children.map(child => child.id)) !== JSON.stringify(sourceChildren.map(child => child.id))) {
+            throw new Error(`REST export changed source children or order ${context}`);
+        }
+        out.children = children;
+    }
+}
+async function readOfficialRestNode(node) {
+    var _a, _b;
+    const response = await node.exportAsync({ format: 'JSON_REST_V1' });
+    const document = unwrapRestExportResponse(response, node.id);
+    if (!document || document.id !== node.id || document.type !== pluginNodeTypeToRest(node.type)) {
+        throw new Error(`Official JSON did not contain source identity ${node.id} (${node.type}); `
+            + `received ${(_a = document === null || document === void 0 ? void 0 : document.id) !== null && _a !== void 0 ? _a : 'null'} (${(_b = document === null || document === void 0 ? void 0 : document.type) !== null && _b !== void 0 ? _b : 'null'})`);
+    }
+    return document;
+}
+async function exportOfficialRestNode(node) {
+    try {
+        const document = await readOfficialRestNode(node);
+        await mergePluginSourceNode(node, document);
+        const nodes = indexRestNodes(document);
+        validatePrototypeInteractions(node, nodes);
+        retainRestGeometryPaths(node, nodes);
         return document;
     }
     catch (error) {
-        console.warn(`JSON_REST_V1 export failed for ${node.name}:`, error);
-        return null;
+        throw new Error(`JSON_REST_V1 ${node.id} (${node.name}): ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+function pluginReactionsToRest(reactions) {
+    if (!Array.isArray(reactions) || reactions.some(reaction => !Array.isArray(reaction.actions))) {
+        throw new Error('Source interaction has no action list');
+    }
+    const result = copySourceValue(reactions);
+    function convert(actions) {
+        for (const action of actions) {
+            if (!action)
+                continue;
+            if (action.transition && typeof action.transition.duration === 'number') {
+                action.transition.duration *= 1000;
+            }
+            for (const block of action.conditionalBlocks || [])
+                convert(block.actions || []);
+        }
+    }
+    for (const reaction of result) {
+        // The normalized contract uses actions; the deprecated source mirror stays in the raw snapshot.
+        delete reaction.action;
+        if (reaction.trigger && reaction.trigger.type === 'AFTER_TIMEOUT') {
+            reaction.trigger.timeout *= 1000;
+        }
+        convert(reaction.actions || []);
+    }
+    return result;
+}
+function validatePrototypeInteractions(source, nodes) {
+    var _a;
+    function interactionJson(interactions) {
+        function actions(entries) {
+            for (const action of entries) {
+                if (!action)
+                    continue;
+                if (action.type === 'NODE') {
+                    if (typeof action.navigation !== 'string' || !action.navigation) {
+                        throw new Error(`NODE action on ${source.id} is missing required navigation`);
+                    }
+                }
+                for (const block of action.conditionalBlocks || [])
+                    actions(block.actions || []);
+            }
+        }
+        for (const interaction of interactions) {
+            if (interaction.trigger)
+                actions(interaction.actions || []);
+        }
+        return JSON.stringify(interactions, (_key, value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value))
+                return value;
+            const ordered = {};
+            for (const key of Object.keys(value).sort())
+                ordered[key] = value[key];
+            return ordered;
+        });
+    }
+    if ('reactions' in source && interactionJson(pluginReactionsToRest(source.reactions))
+        !== interactionJson(((_a = nodes.get(source.id)) === null || _a === void 0 ? void 0 : _a.interactions) || [])) {
+        throw new Error(`REST export lost prototype destinations or changed interaction data on ${source.id}`);
+    }
+    if ('children' in source) {
+        for (const child of source.children)
+            validatePrototypeInteractions(child, nodes);
     }
 }
 function isVariantComponent(component) {
     return !!(component.parent && component.parent.type === 'COMPONENT_SET');
 }
-function getExportableComponentPropertyDefinitions(component) {
-    if (isVariantComponent(component)) {
-        return undefined;
+function componentMetadata(node) {
+    var _a;
+    const metadata = {
+        key: node.key, name: node.name, description: node.description || '', remote: !!node.remote,
+        documentationLinks: documentationLinksToRest(node.documentationLinks),
+    };
+    if (node.type === 'COMPONENT' && ((_a = node.parent) === null || _a === void 0 ? void 0 : _a.type) === 'COMPONENT_SET')
+        metadata.componentSetId = node.parent.id;
+    const fields = node.type === 'COMPONENT_SET' ? ['componentPropertyDefinitions', 'variantGroupProperties']
+        : isVariantComponent(node) ? [] : ['componentPropertyDefinitions'];
+    const diagnostics = [];
+    for (const field of fields) {
+        try {
+            metadata[field] = copySourceValue(node[field]);
+        }
+        catch (error) {
+            diagnostics.push({ nodeId: node.id, field, message: error instanceof Error ? error.message : String(error) });
+        }
     }
-    return cloneJsonSafe(component.componentPropertyDefinitions);
+    if (diagnostics.length)
+        metadata.design2umgExportDiagnostics = diagnostics;
+    return metadata;
+}
+function registerReferencedComponent(component, components, componentSets) {
+    var _a;
+    components[component.id] = componentMetadata(component);
+    if (((_a = component.parent) === null || _a === void 0 ? void 0 : _a.type) === 'COMPONENT_SET') {
+        componentSets[component.parent.id] = componentMetadata(component.parent);
+    }
 }
 function collectReferencedComponents(node, components, componentSets) {
-    const registerComponent = (component) => {
-        components[component.id] = {
-            key: component.key,
-            name: component.name,
-            description: component.description || '',
-            remote: !!component.remote,
-            componentSetId: component.parent && component.parent.type === 'COMPONENT_SET' ? component.parent.id : undefined,
-            componentPropertyDefinitions: getExportableComponentPropertyDefinitions(component),
-            documentationLinks: documentationLinksToRest(component.documentationLinks),
-        };
-        if (component.parent && component.parent.type === 'COMPONENT_SET') {
-            const componentSet = component.parent;
-            componentSets[componentSet.id] = {
-                key: componentSet.key,
-                name: componentSet.name,
-                description: componentSet.description || '',
-                remote: !!componentSet.remote,
-                componentPropertyDefinitions: cloneJsonSafe(componentSet.componentPropertyDefinitions),
-                variantGroupProperties: cloneJsonSafe(componentSet.variantGroupProperties),
-                documentationLinks: documentationLinksToRest(componentSet.documentationLinks),
-            };
-        }
-    };
     if (node.type === 'COMPONENT') {
-        registerComponent(node);
+        registerReferencedComponent(node, components, componentSets);
     }
     else if (node.type === 'COMPONENT_SET') {
-        componentSets[node.id] = {
-            key: node.key,
-            name: node.name,
-            description: node.description || '',
-            remote: !!node.remote,
-            componentPropertyDefinitions: cloneJsonSafe(node.componentPropertyDefinitions),
-            variantGroupProperties: cloneJsonSafe(node.variantGroupProperties),
-            documentationLinks: documentationLinksToRest(node.documentationLinks),
-        };
+        componentSets[node.id] = componentMetadata(node);
     }
     else if (node.type === 'INSTANCE' && node.mainComponent) {
-        registerComponent(node.mainComponent);
+        registerReferencedComponent(node.mainComponent, components, componentSets);
     }
     if ('children' in node) {
         for (const child of node.children) {
@@ -608,27 +463,7 @@ function collectReferencedComponents(node, components, componentSets) {
         }
     }
 }
-async function collectImages(node, images, scale, onProgress, restNodesById) {
-    const renderFallback = shouldExportNodeRenderFallback(node);
-    if (renderFallback.use && 'exportAsync' in node) {
-        const imageRef = makeRenderFallbackKey(node.id);
-        if (!images.has(imageRef)) {
-            try {
-                const bytes = await node.exportAsync({
-                    format: 'PNG',
-                    constraint: { type: 'SCALE', value: scale },
-                });
-                images.set(imageRef, bytes);
-                onProgress(`Render: ${node.name}`);
-            }
-            catch (e) {
-                throw new Error(`Failed to export render image ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
-            }
-        }
-        if (images.has(imageRef)) {
-            attachRenderFallbackMetadata(restNodesById === null || restNodesById === void 0 ? void 0 : restNodesById.get(node.id), imageRef, renderFallback.reason);
-        }
-    }
+async function collectImages(node, images, onProgress) {
     // Image fills
     if ('fills' in node && node.fills !== figma.mixed) {
         for (const fill of node.fills) {
@@ -674,28 +509,10 @@ async function collectImages(node, images, scale, onProgress, restNodesById) {
             }
         }
     }
-    // Vector nodes → export as PNG
-    const vectorTypes = ['VECTOR', 'BOOLEAN_OPERATION', 'STAR', 'LINE', 'ELLIPSE', 'POLYGON'];
-    if (vectorTypes.includes(node.type) && 'exportAsync' in node) {
-        const vecKey = `vec_${node.id.replace(/[:/]/g, '_')}`;
-        if (!images.has(vecKey)) {
-            try {
-                const bytes = await node.exportAsync({
-                    format: 'PNG',
-                    constraint: { type: 'SCALE', value: scale },
-                });
-                images.set(vecKey, bytes);
-                onProgress(`Vector: ${node.name}`);
-            }
-            catch (e) {
-                throw new Error(`Failed to export vector ${node.name}: ${e instanceof Error ? e.message : String(e)}`);
-            }
-        }
-    }
     // Recurse children
     if ('children' in node) {
         for (const child of node.children) {
-            await collectImages(child, images, scale, onProgress, restNodesById);
+            await collectImages(child, images, onProgress);
         }
     }
 }
@@ -714,18 +531,66 @@ async function exportReferencePng(node, scale) {
     }
     return bytes;
 }
-async function collectComponentDependencyImages(bundle, images) {
-    const hashes = new Set();
-    function collect(node) {
-        for (const paint of [...(node.fills || []), ...(node.strokes || [])]) {
-            if (paint.type === 'IMAGE' && typeof paint.imageRef === 'string')
-                hashes.add(paint.imageRef);
+const exportChunkLength = 1024 * 1024;
+async function transferExport(prepared, send) {
+    await send({ type: 'export-start', warning: prepared.warning, fileCount: prepared.images.size + 2 });
+    async function textFile(name, text) {
+        await send({ type: 'export-file', name, kind: 'text', length: text.length });
+        for (let start = 0; start < text.length;) {
+            let end = Math.min(start + exportChunkLength, text.length);
+            // Each UI TextEncoder call must receive both halves of a UTF-16 surrogate pair.
+            if (end < text.length && text.charCodeAt(end - 1) >= 0xD800 && text.charCodeAt(end - 1) <= 0xDBFF
+                && text.charCodeAt(end) >= 0xDC00 && text.charCodeAt(end) <= 0xDFFF)
+                end--;
+            await send({ type: 'export-text', data: text.slice(start, end) });
+            start = end;
         }
-        for (const child of node.children || [])
-            collect(child);
+        await send({ type: 'export-file-end' });
+    }
+    async function binaryFile(name, bytes) {
+        await send({ type: 'export-file', name, kind: 'binary', length: bytes.length });
+        for (let start = 0; start < bytes.length; start += exportChunkLength) {
+            await send({ type: 'export-bytes', data: bytes.length <= exportChunkLength
+                    ? bytes : bytes.subarray(start, Math.min(start + exportChunkLength, bytes.length)) });
+        }
+        await send({ type: 'export-file-end' });
+    }
+    await textFile('design.json', prepared.json);
+    prepared.json = '';
+    await binaryFile('reference.png', prepared.reference);
+    prepared.reference = new Uint8Array(0);
+    for (const [key, bytes] of prepared.images) {
+        await binaryFile('images/' + key + '.png', bytes);
+        prepared.images.delete(key);
+    }
+    await send({ type: 'export-complete' });
+}
+async function collectComponentDependencyImages(bundle, images, pages = []) {
+    const hashes = new Set();
+    function collect(value) {
+        var _a;
+        if (!value || typeof value !== 'object')
+            return;
+        if (value.type === 'IMAGE') {
+            const hash = (_a = value.imageRef) !== null && _a !== void 0 ? _a : value.imageHash;
+            if (typeof hash === 'string' && hash)
+                hashes.add(hash);
+        }
+        if (value.type === 'VIDEO' && value.videoHash) {
+            throw new Error(`Video resource ${value.videoHash} cannot be read by the current Plugin API`);
+        }
+        if (value.type === 'SHADER' && value.id) {
+            throw new Error(`Shader resource ${value.id} has no readable shader source in the current Plugin API`);
+        }
+        for (const entry of Object.values(value))
+            collect(entry);
     }
     for (const definition of bundle.definitions)
         collect(definition.document);
+    for (const node of bundle.sourceNodes || [])
+        collect(node);
+    for (const page of pages)
+        collect(page);
     for (const hash of hashes) {
         if (images.has(hash))
             continue;
@@ -746,12 +611,69 @@ async function collectComponentDependencyImages(bundle, images) {
 }
 // Component definitions are separate from the selected layout tree. Instance nodes
 // retain their resolved appearance; definitions supply reusable defaults and dependencies.
-async function collectComponentDependencies(root) {
+async function collectComponentDependencies(root, pages = [], components = {}, componentSets = {}) {
+    var _a;
     const result = {
-        schemaVersion: 1, definitions: [], instances: {}, errors: [],
+        schemaVersion: 1, definitions: [], sourceNodes: [], instances: {}, errors: [],
     };
     const active = new Set();
     const completed = new Set();
+    const runtimeIds = new Set();
+    const scanned = new Set();
+    const targets = [];
+    function collectTargets(node, fileLocal) {
+        if (scanned.has(node))
+            return;
+        scanned.add(node);
+        function actions(entries) {
+            for (const action of entries) {
+                if (!action)
+                    continue;
+                for (const block of action.conditionalBlocks || [])
+                    actions(block.actions || []);
+                if (action.type !== 'NODE')
+                    continue;
+                const navigation = action.navigation;
+                if (typeof navigation !== 'string' || !navigation) {
+                    throw new Error(`NODE action on ${node.id} is missing required navigation`);
+                }
+                if (!['CHANGE_TO', 'NAVIGATE', 'OVERLAY', 'SWAP', 'OPEN_OVERLAY', 'SWAP_OVERLAY'].includes(navigation))
+                    continue;
+                if (action.destinationId === null)
+                    continue;
+                targets.push({ origin: node, destinationId: action.destinationId, navigation, fileLocal });
+            }
+        }
+        if ('reactions' in node) {
+            for (const reaction of node.reactions) {
+                if (reaction.trigger)
+                    actions(reaction.actions || []);
+            }
+        }
+        function paints(value) {
+            if (!value || typeof value !== 'object')
+                return;
+            if (value.type === 'PATTERN') {
+                targets.push({ origin: node, destinationId: value.sourceNodeId, navigation: 'PATTERN', fileLocal });
+            }
+            for (const entry of Object.values(value))
+                paints(entry);
+        }
+        if ('fills' in node && node.fills !== figma.mixed)
+            paints(node.fills);
+        if ('strokes' in node)
+            paints(node.strokes);
+        if (node.type === 'TEXT' && typeof node.getStyledTextSegments === 'function') {
+            paints(node.getStyledTextSegments(['fills']).map(segment => segment.fills));
+        }
+        for (const field of motionFields) {
+            // Access restrictions are recorded by mergePluginSourceNode; they do not mean an empty animation.
+            try {
+                paints(node[field]);
+            }
+            catch (_a) { /* unavailable Motion source */ }
+        }
+    }
     function identity(component) {
         var _a;
         const set = ((_a = component.parent) === null || _a === void 0 ? void 0 : _a.type) === 'COMPONENT_SET' ? component.parent : undefined;
@@ -770,16 +692,14 @@ async function collectComponentDependencies(root) {
             return;
         active.add(token);
         try {
+            if (!component.remote)
+                registerReferencedComponent(component, components, componentSets);
+            collectTargets(component, !component.remote);
             // Node ids are file-local. Remote definitions can contain the same node id
             // as another definition or the selected file, so resolve each tree separately.
             const instances = {};
-            await visitChildren(component, instances);
-            const exported = await component.exportAsync({ format: 'JSON_REST_V1' });
-            const document = unwrapRestExportResponse(exported, component.id);
-            if (!document || document.id !== component.id || document.type !== 'COMPONENT') {
-                throw new Error('Component export did not contain its complete definition');
-            }
-            retainRestGeometryPaths(component, indexRestNodes(document));
+            await visitChildren(component, instances, !component.remote);
+            const document = await exportOfficialRestNode(component);
             applyComponentIdentities(document, instances);
             result.definitions.push(Object.assign(Object.assign({}, source), { document }));
         }
@@ -792,13 +712,16 @@ async function collectComponentDependencies(root) {
             completed.add(token);
         }
     }
-    async function visitChildren(node, instances) {
+    async function visitChildren(node, instances, fileLocal) {
         if ('children' in node) {
             for (const child of node.children)
-                await visit(child, instances);
+                await visit(child, instances, fileLocal);
         }
     }
-    async function visit(node, instances) {
+    async function visit(node, instances, fileLocal) {
+        if (instances === result.instances)
+            runtimeIds.add(node.id);
+        collectTargets(node, fileLocal);
         if (node.type === 'INSTANCE') {
             try {
                 const main = await node.getMainComponentAsync();
@@ -814,12 +737,73 @@ async function collectComponentDependencies(root) {
         }
         else if (node.type === 'COMPONENT') {
             await visitDefinition(node);
-            return;
         }
         // Resolved instance children may contain a component swap absent from the main definition.
-        await visitChildren(node, instances);
+        await visitChildren(node, instances, fileLocal);
     }
-    await visit(root, result.instances);
+    await visit(root, result.instances, true);
+    for (let index = 0; index < targets.length; index++) {
+        const { origin, destinationId, navigation, fileLocal } = targets[index];
+        try {
+            if (!destinationId)
+                throw new Error(`${navigation} destination is missing`);
+            if (fileLocal && navigation !== 'CHANGE_TO' && runtimeIds.has(destinationId))
+                continue;
+            let target;
+            if (navigation === 'CHANGE_TO') {
+                let scope = origin;
+                while (scope && scope.type !== 'INSTANCE' && scope.type !== 'COMPONENT_SET')
+                    scope = scope.parent;
+                if ((scope === null || scope === void 0 ? void 0 : scope.type) === 'INSTANCE') {
+                    const main = await scope.getMainComponentAsync();
+                    if (!main || ((_a = main.parent) === null || _a === void 0 ? void 0 : _a.type) !== 'COMPONENT_SET') {
+                        throw new Error(`CHANGE_TO destination ${destinationId} has no accessible source component set`);
+                    }
+                    scope = main.parent;
+                }
+                if ((scope === null || scope === void 0 ? void 0 : scope.type) === 'COMPONENT_SET') {
+                    target = scope.children.find(child => child.id === destinationId);
+                    if (!target)
+                        throw new Error(`CHANGE_TO destination ${destinationId} is unavailable in source component set ${scope.id}`);
+                }
+                else if (fileLocal && !scope) {
+                    target = await figma.getNodeByIdAsync(destinationId);
+                }
+                else {
+                    throw new Error(`CHANGE_TO destination ${destinationId} has no accessible source component set`);
+                }
+            }
+            else if (fileLocal) {
+                target = await figma.getNodeByIdAsync(destinationId);
+            }
+            else {
+                throw new Error(`Remote ${navigation} destination ${destinationId} cannot be resolved in this file`);
+            }
+            if (!target || target.type === 'PAGE' || target.type === 'DOCUMENT'
+                || (navigation !== 'PATTERN' && (navigation === 'CHANGE_TO' ? target.type !== 'COMPONENT'
+                    : target.type !== 'FRAME' && target.type !== 'INSTANCE' && target.type !== 'COMPONENT'))) {
+                const actualTarget = target ? { id: target.id, type: target.type, name: target.name } : null;
+                throw new Error(`${navigation} destination ${destinationId} is missing or has the wrong node type; `
+                    + `actualTarget=${JSON.stringify(actualTarget)}`);
+            }
+            if (target.type === 'COMPONENT' && (navigation === 'CHANGE_TO' || navigation === 'PATTERN')) {
+                await visitDefinition(target);
+            }
+            else {
+                await visit(target, result.instances, true);
+                const document = await exportOfficialRestNode(target);
+                applyComponentIdentities(document, result.instances);
+                if (navigation === 'PATTERN')
+                    result.sourceNodes.push(document);
+                else
+                    pages.push(document);
+            }
+        }
+        catch (error) {
+            result.errors.push({ kind: 'prototype_destination_unavailable', nodeId: origin.id,
+                message: `${origin.id}: ${error instanceof Error ? error.message : String(error)}` });
+        }
+    }
     return result;
 }
 function applyComponentIdentities(node, identities) {
@@ -836,84 +820,171 @@ function applyComponentIdentities(node, identities) {
     for (const child of node.children || [])
         applyComponentIdentities(child, identities);
 }
+/** Definitions used by source bindings are separate from the resolved layout values. */
+async function collectSourceDataDependencies(trees) {
+    const result = { variables: {}, variableCollections: {}, styles: {} };
+    const pending = [];
+    const queued = new Set();
+    function enqueue(kind, id) {
+        if (typeof id !== 'string' || !id || queued.has(`${kind}:${id}`))
+            return;
+        queued.add(`${kind}:${id}`);
+        pending.push({ kind, id });
+    }
+    function scan(value) {
+        if (!value || typeof value !== 'object')
+            return;
+        if (value.type === 'VARIABLE_ALIAS')
+            enqueue('variables', value.id);
+        for (const [key, entry] of Object.entries(value)) {
+            if (key === 'variableId')
+                enqueue('variables', entry);
+            if (key === 'variableCollectionId' || key === 'parentVariableCollectionId' || key === 'rootVariableCollectionId') {
+                enqueue('variableCollections', entry);
+            }
+            if (key.endsWith('StyleId'))
+                enqueue('styles', entry);
+            if ((key === 'explicitVariableModes' || key === 'resolvedVariableModes') && entry && typeof entry === 'object') {
+                for (const id of Object.keys(entry))
+                    enqueue('variableCollections', id);
+            }
+            scan(entry);
+        }
+    }
+    // REST style references use a different identity space from Plugin API style ids.
+    for (const tree of trees) {
+        for (const node of indexRestNodes(tree).values())
+            scan(node.design2umgPluginData);
+    }
+    for (let index = 0; index < pending.length; index++) {
+        const { kind, id } = pending[index];
+        const source = kind === 'variables' ? await figma.variables.getVariableByIdAsync(id)
+            : kind === 'variableCollections' ? await figma.variables.getVariableCollectionByIdAsync(id)
+                : await figma.getStyleByIdAsync(id);
+        if (!source)
+            throw new Error(`Source ${kind} ${id} is unavailable`);
+        result[kind][id] = copySourceValue(source);
+        scan(result[kind][id]);
+    }
+    return result;
+}
+// Source trees leave scope before the acknowledged UI transfer starts.
+async function prepareExport(root, scale) {
+    let page = root.parent;
+    while (page && page.type !== 'PAGE')
+        page = page.parent;
+    figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
+    const serialized = await exportOfficialRestNode(root);
+    const components = {};
+    const componentSets = {};
+    collectReferencedComponents(root, components, componentSets);
+    const prototypePages = [];
+    const componentDependencies = await collectComponentDependencies(root, prototypePages, components, componentSets);
+    if (componentDependencies.errors.length > 0) {
+        throw new Error(componentDependencies.errors.map(error => error.message).join('\n'));
+    }
+    applyComponentIdentities(serialized, componentDependencies.instances);
+    const document = {
+        design2umgPrototypeDurationUnit: 'MILLISECONDS',
+        document: {
+            id: '0:0',
+            name: figma.root.name,
+            type: 'DOCUMENT',
+            children: [{
+                    id: (page === null || page === void 0 ? void 0 : page.id) || figma.currentPage.id,
+                    name: (page === null || page === void 0 ? void 0 : page.name) || figma.currentPage.name,
+                    type: 'CANVAS',
+                    children: [serialized],
+                }],
+        },
+        name: figma.root.name,
+        version: '0',
+        schemaVersion: 0,
+        fileKey: figma.fileKey,
+        design2umgComponentDependencies: componentDependencies,
+        design2umgPrototypePages: prototypePages,
+    };
+    if (Object.keys(components).length > 0) {
+        document.components = components;
+    }
+    if (Object.keys(componentSets).length > 0) {
+        document.componentSets = componentSets;
+    }
+    const sourceTrees = [serialized, ...prototypePages, ...componentDependencies.definitions.map(entry => entry.document),
+        ...(componentDependencies.sourceNodes || [])];
+    const documentSource = capturePluginData(figma.root);
+    const pageSource = page ? capturePluginData(page) : undefined;
+    document.document.design2umgPluginData = documentSource.data;
+    if (pageSource)
+        document.document.children[0].design2umgPluginData = pageSource.data;
+    const sourceDependencies = await collectSourceDataDependencies(sourceTrees);
+    document.design2umgSourceDataDependencies = sourceDependencies;
+    figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
+    const images = new Map();
+    await collectImages(root, images, (text) => {
+        figma.ui.postMessage({ type: 'progress', percent: 50, text });
+    });
+    await collectComponentDependencyImages(componentDependencies, images, [serialized, ...prototypePages,
+        { id: 'source-data-dependencies', type: 'SOURCE_DATA', name: 'Source definitions', sourceDependencies }]);
+    if (componentDependencies.errors.length > 0) {
+        throw new Error(componentDependencies.errors.map(error => error.message).join('\n'));
+    }
+    const diagnostics = [...documentSource.diagnostics, ...((pageSource === null || pageSource === void 0 ? void 0 : pageSource.diagnostics) || [])];
+    for (const tree of sourceTrees) {
+        for (const node of indexRestNodes(tree).values())
+            diagnostics.push(...(node.design2umgExportDiagnostics || []));
+    }
+    for (const metadata of [...Object.values(components), ...Object.values(componentSets)]) {
+        diagnostics.push(...(metadata.design2umgExportDiagnostics || []));
+    }
+    const warning = diagnostics.length
+        ? `${diagnostics.length} source API field(s) could not be read. See design2umgExportDiagnostics in design.json.` : '';
+    document.design2umgExportDiagnostics = diagnostics;
+    figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
+    const reference = await exportReferencePng(root, scale);
+    figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
+    return { warning, json: JSON.stringify(document, null, 2), images, reference };
+}
 // ── Main Export Flow ──
 if (typeof figma !== 'undefined') {
-    figma.showUI(__html__, { width: 360, height: 200 });
+    figma.showUI(__html__, { width: 400, height: 250 });
+    let sequence = 0;
+    let pending;
+    const send = (message) => new Promise((resolve, reject) => {
+        const current = ++sequence;
+        pending = { sequence: current, resolve, reject };
+        try {
+            figma.ui.postMessage(Object.assign(Object.assign({}, message), { sequence: current }));
+        }
+        catch (error) {
+            pending = undefined;
+            reject(error);
+        }
+    });
     figma.ui.onmessage = async (msg) => {
+        var _a;
+        if (msg.type === 'export-ack') {
+            if (pending && pending.sequence === msg.sequence) {
+                const completed = pending;
+                pending = undefined;
+                if (msg.error)
+                    completed.reject(new Error(msg.error));
+                else
+                    completed.resolve();
+            }
+            return;
+        }
         if (msg.type !== 'export')
             return;
-        const selection = figma.currentPage.selection;
-        if (selection.length === 0) {
-            figma.ui.postMessage({ type: 'error', text: 'No frame selected. Please select a frame first.' });
-            return;
-        }
-        const root = selection[0];
-        if (root.type !== 'FRAME' && root.type !== 'COMPONENT' && root.type !== 'INSTANCE') {
-            figma.ui.postMessage({ type: 'error', text: 'Please select a Frame, Component, or Instance.' });
-            return;
-        }
         const scale = msg.scale || 2;
         try {
-            figma.ui.postMessage({ type: 'progress', percent: 10, text: 'Serializing nodes...' });
-            const official = await exportOfficialRestNode(root);
-            const serialized = official || serializeNode(root);
-            const warning = official ? '' : 'Official JSON export failed. Manual export may omit unsupported fields; verify interactions and appearance.';
-            if (!serialized) {
-                figma.ui.postMessage({ type: 'error', text: 'Failed to serialize selected node.' });
-                return;
+            const rootId = (_a = msg.rootNodeId) === null || _a === void 0 ? void 0 : _a.trim();
+            const root = rootId ? await figma.getNodeByIdAsync(rootId) : figma.currentPage.selection[0];
+            if (!root || (root.type !== 'FRAME' && root.type !== 'COMPONENT_SET' && root.type !== 'COMPONENT' && root.type !== 'INSTANCE')) {
+                throw new Error('Select a Frame, Component Set, Component, or Instance, or enter its root node ID.');
             }
-            const components = {};
-            const componentSets = {};
-            collectReferencedComponents(root, components, componentSets);
-            const componentDependencies = await collectComponentDependencies(root);
-            applyComponentIdentities(serialized, componentDependencies.instances);
-            const document = {
-                document: {
-                    id: '0:0',
-                    name: figma.root.name,
-                    type: 'DOCUMENT',
-                    children: [{
-                            id: figma.currentPage.id,
-                            name: figma.currentPage.name,
-                            type: 'CANVAS',
-                            children: [serialized],
-                        }],
-                },
-                name: figma.root.name,
-                version: '0',
-                schemaVersion: 0,
-                fileKey: figma.fileKey,
-                design2umgComponentDependencies: componentDependencies,
-            };
-            if (Object.keys(components).length > 0) {
-                document.components = components;
-            }
-            if (Object.keys(componentSets).length > 0) {
-                document.componentSets = componentSets;
-            }
-            figma.ui.postMessage({ type: 'progress', percent: 30, text: 'Collecting images...' });
-            const images = new Map();
-            const restNodesById = indexRestNodes(serialized);
-            await collectImages(root, images, scale, (text) => {
-                figma.ui.postMessage({ type: 'progress', percent: 50, text });
-            }, restNodesById);
-            await collectComponentDependencyImages(componentDependencies, images);
-            figma.ui.postMessage({ type: 'progress', percent: 70, text: 'Rendering reference PNG...' });
-            const reference = await exportReferencePng(root, scale);
-            figma.ui.postMessage({ type: 'progress', percent: 80, text: 'Preparing download...' });
-            const imageEntries = [];
-            for (const [key, bytes] of images) {
-                imageEntries.push({ name: key, data: Array.from(bytes) });
-            }
-            figma.ui.postMessage({
-                type: 'done',
-                warning,
-                text: `Exported ${images.size} image(s). Saving...`,
-                json: JSON.stringify(document, null, 2),
-                images: imageEntries,
-                reference: Array.from(reference),
-                exportPath: msg.exportPath,
-            });
+            const prepared = await prepareExport(root, scale);
+            await transferExport(prepared, send);
         }
         catch (e) {
             figma.ui.postMessage({ type: 'error', text: `Export failed: ${e.message || e}` });
@@ -922,20 +993,19 @@ if (typeof figma !== 'undefined') {
 }
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        attachRenderFallbackMetadata,
         indexRestNodes,
-        makeRenderFallbackKey,
         serializePaint,
         serializeEffect,
-        buildTextStyle,
-        serializeNode,
         exportOfficialRestNode,
+        pluginReactionsToRest,
+        copySourceValue,
         unwrapRestExportResponse,
         collectReferencedComponents,
         collectComponentDependencies,
         collectComponentDependencyImages,
+        collectSourceDataDependencies,
         collectImages,
         exportReferencePng,
-        shouldExportNodeRenderFallback,
+        transferExport,
     };
 }

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 globalThis.__html__ = '';
 globalThis.figma = { mixed: Symbol('mixed'), showUI() {}, ui: { postMessage() {} } };
 const loadExporterTestApi = require('./load-exporter-test-api');
-const { serializeNode } = loadExporterTestApi();
+const { exportOfficialRestNode } = loadExporterTestApi();
 const normal = { fontName: { family: 'Example Sans', style: 'Regular' }, fontWeight: 400,
   fontStyle: 'REGULAR', fontSize: 18, textDecoration: 'NONE', textCase: 'ORIGINAL',
   lineHeight: { unit: 'PIXELS', value: 24 }, letterSpacing: { unit: 'PIXELS', value: 1 },
@@ -23,19 +23,47 @@ const node = { id: 'text', name: 'Mixed', type: 'TEXT', visible: true, character
     for (const field of ['fontName', 'fontWeight', 'fontStyle', 'fontSize', 'fills', 'lineHeight', 'letterSpacing', 'textDecoration', 'hyperlink']) assert.ok(fields.includes(field), field);
     return segments;
   } };
-const output = serializeNode(node);
-assert.deepEqual(output.characterStyleOverrides, [1, 2, 2, 1], 'indices cover UTF-16 units and reuse equal styles');
-assert.equal(output.style.fontFamily, 'Example Sans', 'base uses actual first style, not mixed defaults');
-assert.equal(output.style.fontSize, 18);
-const row = output.styleOverrideTable['2'];
-assert.equal(row.fontFamily, 'Example Serif');
-assert.equal(row.fontWeight, 700);
-assert.equal(row.italic, true);
-assert.equal(row.letterSpacing, 3, 'percentage spacing resolves to source pixels');
-assert.equal(row.lineHeightPercentFontSize, 150);
-assert.equal(row.textDecoration, 'UNDERLINE');
-assert.deepEqual(row.hyperlink, { type: 'URL', url: 'https://example.com/' });
-assert.equal(row.fills[0].color.b, 1);
-const uniform = serializeNode({ ...node, ...normal, characters: 'A', getStyledTextSegments() { return [segments[0]]; } });
-assert.equal(uniform.characterStyleOverrides, undefined, 'uniform text keeps its existing generation path');
-console.log('Character style export tests passed.');
+const officialMixed = {
+  id: 'text', name: 'Mixed', type: 'TEXT', characters: 'A\uD83D\uDE00B',
+  style: { fontFamily: 'Example Sans', fontStyle: 'Regular', fontWeight: 400, fontSize: 18,
+    textCase: 'ORIGINAL', textDecoration: 'NONE', letterSpacing: 1, lineHeightUnit: 'PIXELS', lineHeightPx: 24 },
+  characterStyleOverrides: [1, 2, 2, 1],
+  styleOverrideTable: {
+    1: { fontFamily: 'Example Sans', fontStyle: 'Regular', fontWeight: 400, fontSize: 18,
+      italic: false, letterSpacing: 1, lineHeightUnit: 'PIXELS', lineHeightPx: 24,
+      textDecoration: 'NONE', fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 } }] },
+    2: { fontFamily: 'Example Serif', fontStyle: 'Bold Italic', fontWeight: 700, fontSize: 30,
+      italic: true, letterSpacing: 3, lineHeightUnit: 'FONT_SIZE_%', lineHeightPercentFontSize: 150,
+      textDecoration: 'UNDERLINE', hyperlink: { type: 'URL', url: 'https://example.com/' },
+      fills: [{ type: 'SOLID', color: { r: 0, g: 0, b: 1, a: 1 } }] },
+  },
+};
+node.exportAsync = async () => ({ document: structuredClone(officialMixed) });
+
+(async () => {
+  const output = await exportOfficialRestNode(node);
+  assert.deepEqual(output.characterStyleOverrides, [1, 2, 2, 1], 'official indices cover UTF-16 units and reuse equal styles');
+  assert.equal(output.style.fontFamily, 'Example Sans', 'the official first style survives mixed source properties');
+  assert.equal(output.style.fontSize, 18);
+  const row = output.styleOverrideTable['2'];
+  assert.equal(row.fontFamily, 'Example Serif');
+  assert.equal(row.fontWeight, 700);
+  assert.equal(row.italic, true);
+  assert.equal(row.letterSpacing, 3, 'official pixel spacing is preserved alongside source percentage spacing');
+  assert.equal(row.lineHeightPercentFontSize, 150);
+  assert.equal(row.textDecoration, 'UNDERLINE');
+  assert.deepEqual(row.hyperlink, { type: 'URL', url: 'https://example.com/' });
+  assert.equal(row.fills[0].color.b, 1);
+  assert.deepEqual(output.style, officialMixed.style, 'source merging preserves all official base style fields');
+  assert.deepEqual(output.styleOverrideTable, officialMixed.styleOverrideTable, 'source merging preserves the complete official character table');
+  assert.deepEqual(output.design2umgPluginData.styledTextSegments, segments, 'all source segments and units are retained independently');
+  assert.deepEqual(output.design2umgPluginData.fontName, { type: 'MIXED' }, 'mixed source values are retained without guessed defaults');
+  const uniform = await exportOfficialRestNode({ ...node, ...normal, characters: 'A',
+    getStyledTextSegments() { return [segments[0]]; },
+    exportAsync: async () => ({ document: { id: 'text', name: 'Uniform', type: 'TEXT', characters: 'A',
+      style: structuredClone(officialMixed.style) } }),
+  });
+  assert.equal(uniform.characterStyleOverrides, undefined, 'uniform official text is not given synthetic character overrides');
+  assert.deepEqual(uniform.design2umgPluginData.styledTextSegments, [segments[0]]);
+  console.log('Character style export tests passed.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -143,36 +143,9 @@ namespace
 
 	void ApplyPathSizeOverrides(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node)
 	{
-		Widget.WidgetStyle.WidthOverride = FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value));
-		Widget.WidgetStyle.HeightOverride = FMath::Max(1, FMath::RoundToInt(Node->Transform.Height.Value));
-	}
-
-	bool HasGradientPathFill(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid())
-		{
-			return false;
-		}
-
-		for (const FDesignFill& Fill : Node->Visual.Fills)
-		{
-			if (Fill.Type == EDesignFillType::Gradient)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	FString GetVectorRasterFallbackTexturePath(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid() || Node->Type != EDesignNodeType::Ellipse || !HasGradientPathFill(Node))
-		{
-			return FString();
-		}
-
-		return Node->Visual.VectorRasterFallbackImageRef;
+		// Positive layout dimensions stay in design space; texture allocation owns pixel rounding.
+		Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value > 0.0f ? Node->Transform.Width.Value : 1.0f;
+		Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value > 0.0f ? Node->Transform.Height.Value : 1.0f;
 	}
 
 	FString ResolvePathRasterFillColor(const TSharedPtr<FDesignNode>& Node)
@@ -240,14 +213,6 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 {
 	const TSharedPtr<FDesignNode> Node = WithPrimitiveGeometry(SourceNode);
 	FUMGWidgetNode Widget;
-
-	if (const FString VectorRasterFallback = GetVectorRasterFallbackTexturePath(Node); !VectorRasterFallback.IsEmpty())
-	{
-		Widget.Type = UMGWidgetTypes::Image;
-		Widget.Brush.Image.TexturePath = VectorRasterFallback;
-		ApplyPathSizeOverrides(Widget, Node);
-		return Widget;
-	}
 
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 	if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty() && Node->Shape.Geometry.IsEmpty())

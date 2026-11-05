@@ -276,36 +276,6 @@ namespace Design2UMGEditorImportServices
 			UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImport: Some image refs unresolved"));
 		}
 
-		FFigmaImageExporter::ExportVectorNodes(
-			*Client,
-			FileKey,
-			Document,
-			[Self = AsShared(), Document](const bool bVectorsExported, const TMap<FString, FString>& IdToUrl)
-			{
-				Self->HandleVectorsExported(Document, bVectorsExported, IdToUrl);
-			});
-	}
-
-	void FFigmaImportSession::HandleVectorsExported(
-		const TSharedRef<FDesignDocument>& Document,
-		const bool bVectorsExported,
-		const TMap<FString, FString>& IdToUrl)
-	{
-		if (IsCancelled())
-		{
-			return;
-		}
-
-		if (!bVectorsExported)
-		{
-			UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaImport: Some vector nodes not exported"));
-		}
-
-		if (IdToUrl.Num() > 0)
-		{
-			FFigmaImageExporter::ApplyExportedImages(Document->Children, IdToUrl);
-		}
-
 		OnResolvedDocument(Document, bImageResolutionFailed);
 	}
 

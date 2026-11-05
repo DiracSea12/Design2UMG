@@ -21,6 +21,9 @@ namespace Design2UMGPrototypeNavigation
 		const TArray<TSharedPtr<FDesignNode>>& VisibleChildren,
 		TArray<FString>& Warnings);
 
+	/** Add reachable exported navigation and overlay destinations to a conversion-only document. */
+	bool AddReachablePages(FDesignDocument& Document, TArray<FString>& Warnings);
+
 	bool ShouldWrapNodeWithButton(
 		const TSharedPtr<FDesignNode>& Node,
 		const FUMGPrototypeNavigationData& NavigationData,
@@ -30,5 +33,6 @@ namespace Design2UMGPrototypeNavigation
 
 	FUMGWidgetNode BuildRoot(
 		TArray<FUMGWidgetNode>&& PageWidgets,
-		const FUMGPrototypeNavigationData& NavigationData);
+		FUMGPrototypeNavigationData& NavigationData,
+		bool bUseInitialPageSize);
 }

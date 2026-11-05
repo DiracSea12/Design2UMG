@@ -8,6 +8,7 @@
 #include "Design2UMGSettings.h"
 #include "Design2UMGLocalFigmaImport.h"
 #include "DesignImportPipeline.h"
+#include "Design2UMGAnimationPresets.h"
 
 #include "Containers/Ticker.h"
 #include "DesktopPlatformModule.h"
@@ -392,6 +393,11 @@ namespace Design2UMGEditorMenuOwner
 
 			FToolMenuSection& ReimportSection = SubMenu->AddSection(
 				TEXT("Reimport"), LOCTEXT("ReimportSection", "Reimport"));
+
+			FToolMenuSection& AnimationSection = SubMenu->AddSection(TEXT("Animation"), LOCTEXT("AnimationSection", "Animation"));
+			AnimationSection.AddMenuEntry(TEXT("AnimationPresets"), LOCTEXT("AnimationPresets", "Animation Presets..."),
+				LOCTEXT("AnimationPresetsTooltip", "Apply editable native animations to the selected Widget Blueprint"),
+				FSlateIcon(), FUIAction(FExecuteAction::CreateStatic(&Design2UMGAnimationPresets::OpenDialog)));
 
 			ReimportSection.AddMenuEntry(
 				TEXT("ReimportDesign"),

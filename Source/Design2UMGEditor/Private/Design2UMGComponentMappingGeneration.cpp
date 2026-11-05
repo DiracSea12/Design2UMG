@@ -584,8 +584,7 @@ namespace Design2UMGComponentMappingGeneration
 		{
 			// A trigger on the mapped instance body and one inside its subtree are two different locations; the messages say
 			// so explicitly; neither generates a binding, and both need the "inert" diagnostic.
-			if (BuildState.IsMappedNodeId(Binding.TriggerWidgetId)
-				|| BuildState.IsMappedNodeId(Binding.TriggerWidgetName))
+			if (BuildState.IsMappedNodeId(Binding.TriggerWidgetId))
 			{
 				ReportBoth(
 					TEXT("mapping_prototype_inert"),
@@ -594,8 +593,7 @@ namespace Design2UMGComponentMappingGeneration
 						*Binding.TriggerWidgetName,
 						*Binding.TriggerType));
 			}
-			else if (BuildState.IsInsideMappedSubtree(Binding.TriggerWidgetId)
-				|| BuildState.IsInsideMappedSubtree(Binding.TriggerWidgetName))
+			else if (BuildState.IsInsideMappedSubtree(Binding.TriggerWidgetId))
 			{
 				ReportBoth(
 					TEXT("mapping_prototype_inert"),

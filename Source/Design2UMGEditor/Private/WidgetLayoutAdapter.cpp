@@ -18,6 +18,7 @@ FWidgetLayoutAdapter::FNonDefaultGroups FWidgetLayoutAdapter::GetNonDefaultSlotG
 	const FUMGSlotData Default;
 	FNonDefaultGroups Groups;
 	Groups.bCanvas =
+		Slot.ZOrder != Default.ZOrder ||
 		!FMath::IsNearlyEqual(Slot.Anchors.Min.X, Default.Anchors.Min.X) ||
 		!FMath::IsNearlyEqual(Slot.Anchors.Min.Y, Default.Anchors.Min.Y) ||
 		!FMath::IsNearlyEqual(Slot.Anchors.Max.X, Default.Anchors.Max.X) ||
@@ -44,7 +45,9 @@ FWidgetLayoutAdapter::FNonDefaultGroups FWidgetLayoutAdapter::GetNonDefaultSlotG
 
 bool FWidgetLayoutAdapter::HasMeaningfulSlot(const FUMGSlotData& Slot)
 {
-	const FNonDefaultGroups Groups = GetNonDefaultSlotGroups(Slot);
+	FUMGSlotData LayoutSlot = Slot;
+	LayoutSlot.ZOrder = 0;
+	const FNonDefaultGroups Groups = GetNonDefaultSlotGroups(LayoutSlot);
 	return Groups.bCanvas || Groups.bPadding || Groups.bBox || Groups.bGrid;
 }
 
@@ -83,8 +86,10 @@ FUMGSlotData FWidgetLayoutAdapter::Resolve(
 	NormalizedBounds.H = Node.Bounds.H / DesignSize.Y;
 
 	const bool bOrigAutoSize = SlotData.bAutoSize;
+	const int32 OriginalZOrder = SlotData.ZOrder;
 	SlotData = LayoutCalculator::CalculateSlot(NormalizedBounds, Context);
 	SlotData.bAutoSize = bOrigAutoSize;
+	SlotData.ZOrder = OriginalZOrder;
 
 	return SlotData;
 }

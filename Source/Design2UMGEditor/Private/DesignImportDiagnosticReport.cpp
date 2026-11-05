@@ -205,53 +205,20 @@ namespace DesignImportDiagnosticReport
 					TEXT("TEXT_PATH is not formally supported; convert path text to regular text if path geometry is required at runtime."));
 			}
 
-			if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
+			if (Node->Metadata.Contains(TEXT("figma.gifStaticFrame")))
 			{
-				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
-					TEXT("vector_raster_fallback"),
-					Node->Id,
-					Node->Name,
-					Node->Source().SourceNodeType,
-					TEXT("complex vector was rasterized"),
-					TEXT("runtime output uses baked image content for the vector node"));
-				Entry->SetStringField(TEXT("imageRef"), Node->Visual.VectorRasterFallbackImageRef);
-				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
-				AddUniqueRecommendation(
-					InOutRecommendations,
-					TEXT("Vector raster fallback is an explicit degradation path; prefer exporter/parser-side simplification before treating it as semantic support."));
+				OutValues.Add(MakeShared<FJsonValueObject>(MakeNodeDiagnosticEntry(
+					TEXT("static_gif_frame"), Node->Id, Node->Name, Node->Source().SourceNodeType,
+					TEXT("animated GIF"), TEXT("runtime output displays only the first frame"))));
+				AddUniqueRecommendation(InOutRecommendations, TEXT("Animated GIF playback is not supported; only the first frame is imported."));
 			}
 
-			const FString RenderFallbackReason = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackReason"));
-			const FString RenderFallbackScope = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackScope"));
-			const FString RenderFallbackSource = Node->Metadata.FindRef(TEXT("design2umgRenderFallbackSource"));
-			if (Node->Visual.RenderFallback.HasAny()
-				|| !RenderFallbackReason.IsEmpty()
-				|| !RenderFallbackScope.IsEmpty()
-				|| !RenderFallbackSource.IsEmpty())
+			if (Node->Metadata.Contains(TEXT("figma.imageFiltersUnsupported")))
 			{
-				TSharedRef<FJsonObject> Entry = MakeNodeDiagnosticEntry(
-					TEXT("render_fallback"),
-					Node->Id,
-					Node->Name,
-					Node->Source().SourceNodeType,
-					RenderFallbackReason,
-					TEXT("runtime output uses a baked render fallback image"));
-				if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
-				{
-					Entry->SetStringField(TEXT("imageRef"), Node->Visual.RenderFallback.ImageRef);
-				}
-				if (!RenderFallbackScope.IsEmpty())
-				{
-					Entry->SetStringField(TEXT("scope"), RenderFallbackScope);
-				}
-				if (!RenderFallbackSource.IsEmpty())
-				{
-					Entry->SetStringField(TEXT("source"), RenderFallbackSource);
-				}
-				OutValues.Add(MakeShared<FJsonValueObject>(Entry));
-				AddUniqueRecommendation(
-					InOutRecommendations,
-					TEXT("Render fallback is a last-resort approximation; fix source/exporter/parser coverage before treating the node as fully supported."));
+				OutValues.Add(MakeShared<FJsonValueObject>(MakeNodeDiagnosticEntry(
+					TEXT("unsupported_image_filters"), Node->Id, Node->Name, Node->Source().SourceNodeType,
+					TEXT("non-neutral image filters"), TEXT("runtime output uses the source image without these filters"))));
+				AddUniqueRecommendation(InOutRecommendations, TEXT("Non-neutral Figma image filters are not supported."));
 			}
 
 			for (const TSharedPtr<FDesignNode>& Child : Node->Children)

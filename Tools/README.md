@@ -4,7 +4,7 @@ The tools are public; design corpora and visual baselines are user-owned inputs.
 
 ## Collect and discover your cases
 
-Put supported inputs under one directory of your choice. The suite tool recursively discovers `.pen` files and Figma export directories containing `design.json` plus a top-level reference PNG. It never searches parent directories or a bundled private corpus. Optional repeated `--figma-export-root` arguments explicitly select separate Figma roots instead of the default scan within `--design-root`.
+Put supported inputs under one directory of your choice. The suite tool recursively discovers `.pen` files and Figma export directories containing `design.json` plus a top-level reference PNG. It also discovers Figma export ZIP archives containing top-level `design.json` and `reference.png`, and extracts each archive into the run output directory. It never searches parent directories or a bundled private corpus. Optional repeated `--figma-export-root` arguments explicitly select separate Figma roots instead of the default scan within `--design-root`.
 
 ```text
 <YourCases>/
@@ -15,7 +15,7 @@ Put supported inputs under one directory of your choice. The suite tool recursiv
       reference.png
 ```
 
-A Pen case is an eligible root frame/group/component/ref, not necessarily a whole file. A Figma export contributes the existing `local` and `source` verification paths. Unsupported files are not cases. A directory with design.json but no reference PNG is not yet a runnable Figma case; discovery reports a warning and does not count it. A reference that disappears after discovery blocks execution.
+A Pen case is an eligible root frame/group/component/ref, not necessarily a whole file. A Figma export contributes the existing `local` and `source` verification paths. Different archive paths are separate inputs, even when their names match; an archive and an extracted directory are also separate inputs. Source archives are not modified, and their identities are recorded in the run scope. Use a fresh output root for each ZIP discovery; existing archive staging directories are not overwritten. Incomplete archives and directories without a reference PNG produce a warning and are not counted. A native `.fig` file is not an export bundle: discovery warns that it must first be exported from Figma and does not count it. A reference that disappears after discovery blocks execution.
 
 ```powershell
 python Tools/design2umg_auto_verify_suite.py --design-root <YourCases> --output-root <RunRoot> --list-cases

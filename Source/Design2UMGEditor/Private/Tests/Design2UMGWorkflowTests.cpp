@@ -406,7 +406,7 @@ bool FFigmaOverflowDirectionRuntimeWorkflowTest::RunTest(const FString& Paramete
 
 	TestEqual(TEXT("ScrollBox orientation is vertical"), Design2UMGWidgetPropertyAccess::GetScrollBoxOrientation(*ScrollBox), Orient_Vertical);
 	TestEqual(TEXT("ScrollBox keeps child count"), ScrollBox->GetChildrenCount(), 2);
-	TestEqual(TEXT("ScrollBox hides scrollbar by default"), Design2UMGWidgetPropertyAccess::GetScrollBarVisibility(*ScrollBox), ESlateVisibility::Hidden);
+	TestEqual(TEXT("ScrollBox hides scrollbar by default"), Design2UMGWidgetPropertyAccess::GetScrollBarVisibility(*ScrollBox), ESlateVisibility::Collapsed);
 
 	DeleteGeneratedAssetsAtPath(OutputPath);
 	return true;

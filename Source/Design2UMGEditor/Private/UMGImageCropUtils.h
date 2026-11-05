@@ -25,6 +25,9 @@ namespace UMGImageCropUtils
 		FUMGVisualBrushData::FImageTransformData Transform;
 		FVector2D CropScale = FVector2D(1, 1);
 		bool bClipToCrop = false;
+		/** Whole-source prefilter extent derived from the original sampling footprint. */
+		FIntPoint PrefilterSize = FIntPoint::ZeroValue;
+		bool bPrefilter = false;
 	};
 
 	bool TryBuildSamplingPlan(const FUMGVisualBrushData::FImageTransformData& Transform, const FString& FitMode,
@@ -33,6 +36,7 @@ namespace UMGImageCropUtils
 	bool TryBuildCropRequest(const FUMGWidgetNode& Node, FImageCropRequest& OutRequest);
 	bool CanUseUvRegion(const FUMGVisualBrushData::FImageTransformData& Transform);
 	bool CanUseUvRegion(const FImageCropRequest& Request);
+	bool CanUseUvShortcut(const FImageCropRequest& Request, const UTexture2D* Texture);
 	bool TryApplyCropToBrush(
 		FSlateBrush& InOutBrush,
 		UTexture2D* SourceTexture,

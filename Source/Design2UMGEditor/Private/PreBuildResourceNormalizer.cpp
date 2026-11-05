@@ -12,6 +12,7 @@
 #include "ProceduralShapeGenerator.h"
 #include "ObjectTools.h"
 #include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/FileManager.h"
 #include "Misc/Crc.h"
@@ -65,6 +66,8 @@ namespace
 		FTextureRequestKey Key;
 		FMemoryWriter Writer(Key.Bytes);
 		FUMGPathData Path = Node.Path;
+		auto ContourPaths = Node.Effect.GeometryMaskPaths;
+		Writer << ContourPaths;
 		auto Width = Node.WidgetStyle.WidthOverride;
 		auto Height = Node.WidgetStyle.HeightOverride;
 		bool bShaderMask = Node.Brush.Shader.IsSet();
@@ -359,6 +362,10 @@ namespace
 		{
 			// Shader materials are paint outputs, not procedural texture inputs.
 			if (Node.Brush.Shader.IsSet()) return false;
+			if ((Node.Effect.SurfacePaints.IsSet() || Node.Effect.SharedCapture.IsSet())
+				&& (Node.Type == UMGWidgetTypes::Image || Node.Type == UMGWidgetTypes::Border)
+				&& FPackageName::IsValidObjectPath(ResourceRequest.MaterialRef)
+				&& LoadObject<UMaterialInterface>(nullptr, *ResourceRequest.MaterialRef)) return false;
 			const FString SubstitutePath = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
 			UTexture2D* SubstituteTexture = SubstitutePath.IsEmpty()
 				? nullptr
@@ -402,11 +409,17 @@ namespace
 		FTextureMaterializationPlan& OutPlan)
 	{
 		const FString TexturePath = Node.Brush.Image.TexturePath.Get(FString()).TrimStartAndEnd();
-		if (TexturePath.IsEmpty()
-			|| !UMGImageCropUtils::TryBuildCropRequest(Node, OutPlan.ImageCropRequest)
-			|| UMGImageCropUtils::CanUseUvRegion(OutPlan.ImageCropRequest))
+		// Only texture assets are cropped; image resolution reports an unresolved image reference.
+		if (!FPackageName::IsValidObjectPath(TexturePath)
+			|| !UMGImageCropUtils::TryBuildCropRequest(Node, OutPlan.ImageCropRequest))
 		{
 			return false;
+		}
+
+		if (UMGImageCropUtils::CanUseUvRegion(OutPlan.ImageCropRequest))
+		{
+			UTexture2D* Source = DesignResourceResolver::LoadTextureFromPath(TexturePath, DesignResourceResolver::ELoadMode::LoadThenFind);
+			if (UMGImageCropUtils::CanUseUvShortcut(OutPlan.ImageCropRequest, Source)) return false;
 		}
 
 		OutPlan.Key = MakeImageTransformTextureKey(TexturePath, OutPlan.ImageCropRequest);
@@ -441,7 +454,9 @@ namespace
 			Transform.D,
 			Transform.TY,
 			Plan.ImageCropRequest.OutputWidth,
-			Plan.ImageCropRequest.OutputHeight, &OutError, Budget, Plan.ImageCropRequest.FitMode);
+			Plan.ImageCropRequest.OutputHeight, &OutError, Budget, Plan.ImageCropRequest.FitMode, nullptr,
+			UMGImageCropUtils::CanUseUvRegion(Plan.ImageCropRequest)
+				? FProceduralShapeGenerator::ECropAddressMode::Clamp : FProceduralShapeGenerator::ECropAddressMode::Transparent);
 	}
 
 	void ApplyMaterializedTextureToNode(
@@ -616,7 +631,6 @@ bool FPreBuildResourceNormalizer::ValidateGeneratedTextureRequests(
 		if (Node.Brush.Image.Transform.IsSet()
 			&& Node.Brush.Image.Mode.Get(FString()).Equals(TEXT("Crop"), ESearchCase::IgnoreCase)
 			&& UMGImageCropUtils::TryBuildCropRequest(Node, CropRequest)
-			&& !UMGImageCropUtils::CanUseUvRegion(CropRequest)
 			&& !Limits.AllowsDimensions(CropRequest.OutputWidth, CropRequest.OutputHeight))
 		{
 			OutError = FString::Printf(

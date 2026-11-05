@@ -24,6 +24,8 @@
 #include "WidgetBlueprint.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/RetainerBox.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "UMGWidgetTreeBuilder.h"
 #include "Components/Image.h"
 #include "Tests/Design2UMGTestAssetCleanup.h"
@@ -223,6 +225,71 @@ bool FDesignPathDegenerateBoundsTest::RunTest(const FString&)
 		}
 	}
 
+	const FString StrokeRegion = TEXT("M0 -1 L16 -1 L16 1 L0 1 Z");
+	FUMGWidgetNode StrokeOnly;
+	StrokeOnly.Type = TEXT("Image");
+	StrokeOnly.WidgetStyle.WidthOverride = 16.0f;
+	StrokeOnly.WidgetStyle.HeightOverride = 4.0f;
+	StrokeOnly.Path.CanvasSize = FVector2D(16, 4);
+	StrokeOnly.Path.Geometry = StrokeRegion;
+	StrokeOnly.Path.SourcePaintGeometry.Emplace();
+	auto& SourceStroke = StrokeOnly.Path.SourcePaintGeometry.GetValue();
+	SourceStroke.Geometry.FillPaths = TArray<FDesignGeometryPath>();
+	SourceStroke.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{StrokeRegion, TEXT("nonzero")}};
+	SourceStroke.StrokeAlignment = TEXT("inner");
+	SourceStroke.FillPaints = TArray<FUMGSurfacePaint>();
+	SourceStroke.StrokePaint = FUMGSurfacePaint();
+	for (const bool bCombinedSurface : {true, false})
+	{
+		FUMGWidgetNode Node = StrokeOnly;
+		if (!bCombinedSurface)
+		{
+			Node.Path.Geometry.Reset();
+			Node.Path.StrokeGeometry = StrokeRegion;
+			Node.Path.FillColor = FLinearColor::White;
+			Node.Path.SourcePaintGeometry->FillPaints.Reset();
+			Node.Path.SourcePaintGeometry->StrokePaint.Reset();
+		}
+		FDesignPathRasterRequest Request;
+		if (!TestTrue(TEXT("A stroke-only source with an empty fill builds its raster request"),
+			FDesignPathRasterizer::TryBuildRequest(Node, Request))) continue;
+		UTexture2D* Texture = FDesignPathRasterizer::Rasterize(Request);
+		if (!TestNotNull(TEXT("A stroke-only source rasterizes"), Texture)) continue;
+		FTexture2DMipMap& Mip = Texture->GetPlatformData()->Mips[0];
+		const FColor* Pixels = static_cast<const FColor*>(Mip.BulkData.LockReadOnly());
+		bool bHasVisibleStroke = false;
+		if (Pixels)
+			for (int32 Index = 0; Index < Request.Size.X * Request.Size.Y; ++Index)
+				bHasVisibleStroke |= Pixels[Index].A > 0;
+		Mip.BulkData.Unlock();
+		TestTrue(TEXT("The source stroke is not clipped by an empty fill"), bHasVisibleStroke);
+	}
+
+	FUMGWidgetNode NarrowStroke = StrokeOnly;
+	NarrowStroke.Bounds = {180, 129, 1, 20};
+	NarrowStroke.WidgetStyle.WidthOverride = 1.0f;
+	NarrowStroke.WidgetStyle.HeightOverride = 20.0f;
+	NarrowStroke.Path.CanvasSize = FVector2D(1, 20);
+	NarrowStroke.Path.ViewBox = FVector4(0, 0, 0.00000035, 20);
+	const FString NarrowRegion = TEXT("M0 20L5 10L-5 10Z M-1 0L1 0L1 11L-1 11Z");
+	NarrowStroke.Path.Geometry = NarrowRegion;
+	NarrowStroke.Path.SourcePaintGeometry->Geometry.StrokePaths = TArray<FDesignGeometryPath>{{NarrowRegion, TEXT("nonzero")}};
+	FDesignPathRasterRequest NarrowRequest;
+	if (TestTrue(TEXT("A narrow source stroke builds its raster request"),
+		FDesignPathRasterizer::TryBuildRequest(NarrowStroke, NarrowRequest)))
+	{
+		TestEqual(TEXT("The authored paint size stays on the layout box"), NarrowRequest.PaintSize, FIntPoint(2, 40));
+		TestTrue(TEXT("The canvas retains the source stroke outset"), NarrowRequest.CanvasBounds == FIntRect(-10, 0, 10, 40));
+		TestEqual(TEXT("The raster retains the source local origin"), NarrowRequest.PaintOffset, FIntPoint(10, 0));
+		FDesignPathRasterizer::ApplyCanvasTransform(NarrowStroke, NarrowRequest);
+		TestTrue(TEXT("Expanded painting preserves the layout bounds"), NarrowStroke.Bounds.X == 180 && NarrowStroke.Bounds.Y == 129
+			&& NarrowStroke.Bounds.W == 1 && NarrowStroke.Bounds.H == 20);
+		TestTrue(TEXT("Expanded painting preserves the source origin"), NarrowStroke.Render.RenderTransformScale.IsSet()
+			&& NarrowStroke.Render.RenderTransformScale->Equals(FVector2D(10, 1))
+			&& NarrowStroke.Render.RenderTranslation.IsSet()
+			&& NarrowStroke.Render.RenderTranslation->Equals(FVector2D(-0.5, 0)));
+	}
+
 	FDesignPathRasterRequest Square(TEXT("M10 10L30 10"), FIntPoint(40, 20), {});
 	Square.Path.CanvasSize = FVector2D(40, 20);
 	Square.Path.StrokeColor = FLinearColor::White;
@@ -373,6 +440,104 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 {
 	if (!TestNotNull(TEXT("Base material is ready before injecting instance failure"),
 		Design2UMGEffectMaterialBuilder::GetOrCreateGeometryMaskRetainerMaterial())) return false;
+	FUMGWidgetNode Contour;
+	Contour.Type = UMGWidgetTypes::RetainerBox;
+	Contour.Id = Contour.Name = TEXT("SourceContourContract");
+	Contour.Effect.EffectMaterial = UMGPropertyKeys::RetainerSourceContourEffectRef;
+	Contour.Effect.GeometryMaskSize = FVector2D(20, 20);
+	Contour.Effect.GeometryMaskPaths = TArray<FDesignGeometryPath>{{TEXT("M4 0H16Q20 0 20 4V16Q20 20 16 20H4Q0 20 0 16V4Q0 0 4 0Z"), TEXT("nonzero")}};
+	TArray<TStrongObjectPtr<UMaterialInterface>> ContourMaterials;
+	FString ContourError;
+	if (!TestTrue(TEXT("Source contour coverage uses the persisted retainer resource lifecycle"),
+		Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Contour, ContourMaterials, ContourError)))
+	{ AddError(ContourError); return false; }
+	TestTrue(TEXT("Prepared source contour material is a persisted native effect dependency"), ContourMaterials.Num() == 1
+		&& Contour.Effect.EffectMaterial.Get(FString()).StartsWith(TEXT("/Game/Design2UMG/GeneratedMaterials/")));
+	{
+		FUMGWidgetNode Shared;
+		Shared.Type = UMGWidgetTypes::RetainerBox;
+		Shared.Id = Shared.Name = TEXT("SharedCaptureContract");
+		Shared.Effect.EffectMaterial = UMGPropertyKeys::RetainerSharedCaptureEffectRef;
+		Shared.Effect.SharedCapture.Emplace();
+		auto& Endpoint = Shared.Effect.SharedCapture->Source;
+		Endpoint.Size = FVector2D(20, 20);
+		Endpoint.bClipContent = true;
+		Endpoint.ClipPaths = Contour.Effect.GeometryMaskPaths;
+		Endpoint.OwnPaint.Geometry.FillPaths = Endpoint.ClipPaths;
+		Endpoint.OwnPaint.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{TEXT("M-1 -1H21V21H-1Z M0 0V20H20V0Z"), TEXT("evenodd")}};
+		Endpoint.OwnPaint.StrokeAlignment = TEXT("outer");
+		FUMGSurfacePaint WhitePaint;
+		WhitePaint.Color = FLinearColor::White;
+		Endpoint.OwnPaint.FillPaints = TArray<FUMGSurfacePaint>{WhitePaint};
+		Endpoint.OwnPaint.StrokePaint = WhitePaint;
+		Endpoint.BoxShadows.Add({TEXT("normal"), FVector2D(1, 2), 4, 0, FLinearColor::Black, true});
+		auto& EndpointTarget = Shared.Effect.SharedCapture->Targets.Add_GetRef(Endpoint);
+		EndpointTarget.DestinationWidgetId = TEXT("native-target");
+		EndpointTarget.BoxShadows[0].Offset = FVector2D(-2, 1);
+		FUMGWidgetNode ShadowOwner = Shared;
+		ShadowOwner.Type = UMGWidgetTypes::Image;
+		TArray<TStrongObjectPtr<UMaterialInterface>> ShadowMaterials;
+		TArray<TStrongObjectPtr<UMaterialInterface>> SharedMaterials;
+		FString SharedError;
+		if (!TestTrue(TEXT("Shared capture prepares native source and target material dependencies"),
+			Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Shared, SharedMaterials, SharedError)))
+		{ AddError(SharedError); return false; }
+		if (!TestTrue(TEXT("The native shadow Image prepares complete own-paint alpha without a second capture"),
+			Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(ShadowOwner, ShadowMaterials, SharedError)))
+		{ AddError(SharedError); return false; }
+		const auto& ShadowEndpoint = ShadowOwner.Effect.SharedCapture->Source;
+		TestTrue(TEXT("Shared capture owns one prepared retainer material"), SharedMaterials.Num() == 1 && ShadowMaterials.Num() == 1);
+		TestTrue(TEXT("Shared capture persists both complete own-paint regions and curve coverage"),
+			!Endpoint.CoverageTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *Endpoint.CoverageTexture)
+			&& !ShadowEndpoint.PaintTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *ShadowEndpoint.PaintTexture)
+			&& !ShadowEndpoint.StrokeTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *ShadowEndpoint.StrokeTexture));
+		auto* NativeCapture = NewObject<URetainerBox>(GetTransientPackage());
+		NativeCapture->SetContent(NewObject<UImage>(NativeCapture));
+		NativeCapture->SetEffectMaterial(LoadObject<UMaterialInterface>(nullptr, *Shared.Effect.EffectMaterial.GetValue()));
+		const FVector4 Frame(-7, -9, 40, 42);
+		if (!TestTrue(TEXT("Measured shared capture frame is persisted on the native owner"),
+			Design2UMGEffectMaterialBuilder::FinalizeSharedCaptureFrame(NativeCapture, Frame, FVector2D(0.5,0.5), SharedError)))
+		{ AddError(SharedError); return false; }
+		const auto* FrameMaterial = Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*NativeCapture);
+		FLinearColor DefaultFrame;
+		TestTrue(TEXT("Saved frame material contains all four measured components"), FrameMaterial
+			&& FrameMaterial->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), DefaultFrame)
+			&& DefaultFrame == FLinearColor(-7, -9, 40, 42));
+		if (!FrameMaterial) return false;
+		const FString FrameFilename = FPackageName::LongPackageNameToFilename(FrameMaterial->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
+		TestTrue(TEXT("Frame defaults are a persisted asset rather than an editor-only MID"),
+			FrameMaterial->IsA<UMaterialInstanceConstant>() && IFileManager::Get().FileExists(*FrameFilename));
+		auto* NativeShadow = NewObject<UImage>(GetTransientPackage());
+		FSlateBrush ShadowBrush;
+		ShadowBrush.SetResourceObject(LoadObject<UMaterialInterface>(nullptr, *ShadowOwner.Brush.MaterialRef.GetValue()));
+		NativeShadow->SetBrush(ShadowBrush);
+		if (!TestTrue(TEXT("Shadow Image persists the same measured owner frame"),
+			Design2UMGEffectMaterialBuilder::FinalizeSharedCaptureFrame(NativeShadow, Frame, FVector2D(0.5,0.5), SharedError)))
+		{ AddError(SharedError); return false; }
+		FLinearColor ShadowFrame;
+		UMaterialInstanceDynamic* ShadowMID = NativeShadow->GetDynamicMaterial();
+		TestTrue(TEXT("Native shadow material inherits the common frame without capturing content"), ShadowMID
+			&& ShadowMID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), ShadowFrame) && ShadowFrame == DefaultFrame);
+		ON_SCOPE_EXIT { NativeCapture->ReleaseSlateResources(true); };
+		NativeCapture->TakeWidget();
+		UMaterialInstanceDynamic* FirstMID = NativeCapture->GetEffectMaterial();
+		if (!TestNotNull(TEXT("Native construction creates its effect MID"), FirstMID)) return false;
+		FLinearColor InitialFrame;
+		TestTrue(TEXT("Native construction inherits the persisted frame"),
+			FirstMID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), InitialFrame) && InitialFrame == DefaultFrame);
+		FirstMID->SetVectorParameterValue(TEXT("CaptureRect"), FLinearColor(1, 2, 3, 4));
+		FirstMID->SetScalarParameterValue(TEXT("PaintProgress"), 0.75f);
+		NativeCapture->ReleaseSlateResources(true);
+		NativeCapture->TakeWidget();
+		UMaterialInstanceDynamic* RebuiltMID = NativeCapture->GetEffectMaterial();
+		if (!TestNotNull(TEXT("Fresh native Slate rebuild creates an effect MID"), RebuiltMID)) return false;
+		FLinearColor RebuiltFrame;
+		float RebuiltProgress = -1;
+		TestTrue(TEXT("Fresh native rebuild inherits saved defaults rather than transient animation values"),
+			RebuiltMID != FirstMID && RebuiltMID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), RebuiltFrame)
+			&& RebuiltFrame == DefaultFrame && RebuiltMID->GetScalarParameterValue(FMaterialParameterInfo(TEXT("PaintProgress")), RebuiltProgress)
+			&& RebuiltProgress == 0);
+	}
 	FUMGWidgetData Data;
 	Data.WidgetName = TEXT("WBP_MaskSaveFailure");
 	Data.RootWidget.Type = TEXT("CanvasPanel");
@@ -655,7 +820,6 @@ bool FGeneratedTextureCreationFailureTest::RunTest(const FString&)
 		{
 			Image.Path.Geometry = TEXT("M0 0 @");
 			Image.Path.FillColor = FLinearColor::White;
-			AddExpectedError(TEXT("DesignPathRasterizer: failed to parse path data"), EAutomationExpectedErrorFlags::Contains, 1);
 		}
 		else
 		{
@@ -1099,18 +1263,23 @@ bool FNativeBorderGradientStrokeTest::RunTest(const FString&)
 		&& BakedImage.Mode.Get(FString()) == TEXT("Crop") && !BakedImage.CropFitMode.IsSet());
 	TestFalse(TEXT("Baked background cannot enter path rasterization again"), Parsed.RootWidget.Path.HasPaintGeometry());
 	const FString BakedPath = BakedImage.TexturePath.Get(FString());
-	if (!TestTrue(TEXT("The remaining window needs no additional image bake"), FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
+	if (!TestTrue(TEXT("The remaining raster window and minification are materialized"), FPreBuildResourceNormalizer::NormalizeImageTransformTextures(
 		Parsed.RootWidget, Folder / TEXT("ImageTransforms"), TEXT("Border"), &Error))) return false;
-	TestEqual(TEXT("Image normalization keeps the already baked texture"), Parsed.RootWidget.Brush.Image.TexturePath.Get(FString()), BakedPath);
-	UTexture2D* BakedTexture = LoadObject<UTexture2D>(nullptr, *BakedPath);
-	if (!TestNotNull(TEXT("The already baked texture remains available"), BakedTexture)) return false;
+	const auto& MaterializedImage = Parsed.RootWidget.Brush.Image;
+	const FString MaterializedPath = MaterializedImage.TexturePath.Get(FString());
+	TestTrue(TEXT("Image normalization consumes the raster window into its filtered resource"),
+		!MaterializedPath.IsEmpty() && MaterializedPath != BakedPath
+		&& !MaterializedImage.Transform.IsSet() && !MaterializedImage.Mode.IsSet() && !MaterializedImage.CropFitMode.IsSet());
+	UTexture2D* MaterializedTexture = LoadObject<UTexture2D>(nullptr, *MaterializedPath);
+	if (!TestNotNull(TEXT("The materialized texture remains available"), MaterializedTexture)) return false;
 	UBorder* PersistedBorder = NewObject<UBorder>();
 	FUMGWidgetTreeBuilder::ApplyWidgetProperties(PersistedBorder, Parsed.RootWidget);
-	TestTrue(TEXT("Native background binds the already baked resource"), PersistedBorder->Background.GetResourceObject() == BakedTexture);
-	const FBox2f WindowUV = Design2UMGWidgetPropertyAccess::GetUVRegion(PersistedBorder->Background);
-	TestTrue(TEXT("Native background samples only the raster window without composing the source transform"),
-		WindowUV.Min.Equals(FVector2f(Window.TX, Window.TY))
-		&& WindowUV.Max.Equals(FVector2f(Window.TX + Window.A, Window.TY + Window.D)));
+	TestTrue(TEXT("Native background binds the actual materialized resource"), PersistedBorder->Background.GetResourceObject() == MaterializedTexture);
+	const FBox2f BrushUV = Design2UMGWidgetPropertyAccess::GetUVRegion(PersistedBorder->Background);
+	// An unset Slate UV region samples the complete standalone texture.
+	const FBox2f EffectiveUV = BrushUV.bIsValid ? BrushUV : FBox2f(FVector2f::ZeroVector, FVector2f(1, 1));
+	TestTrue(TEXT("Native background samples the complete materialized texture without a second crop"),
+		EffectiveUV.Min.Equals(FVector2f::ZeroVector, 0.0f) && EffectiveUV.Max.Equals(FVector2f(1, 1), 0.0f));
 	FUMGWidgetNode Variants;
 	Variants.Children = {Node, Node, Node};
 	Variants.Children[1].Path.StrokeGradient.Stops[0].Color = FLinearColor::White;

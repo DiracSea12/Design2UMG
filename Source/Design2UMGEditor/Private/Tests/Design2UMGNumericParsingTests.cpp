@@ -337,7 +337,9 @@ bool FImageCropSizingTest::RunTest(const FString&)
 	RoundTrip.RootWidget.Path.Geometry = TEXT("M0,0 L200,0 L200,100 L0,100 Z");
 	FDesignPathRasterRequest PathRequest;
 	if (!TestTrue(TEXT("An image path uses the same resolved extent"), FDesignPathRasterizer::TryBuildRequest(RoundTrip.RootWidget, PathRequest))) return false;
-	TestEqual(TEXT("A path without an explicit canvas keeps the measured image size"), PathRequest.Size, FIntPoint(200, 100));
+	FIntPoint ExpectedRaster = FIntPoint::ZeroValue;
+	if (!TestTrue(TEXT("The measured image canvas converts to raster dimensions"), FDesignPathRasterizer::TryGetRasterSize(Request.OutputWidth, Request.OutputHeight, ExpectedRaster))) return false;
+	TestEqual(TEXT("A path without an explicit canvas keeps the measured image canvas in raster units"), PathRequest.PaintSize, ExpectedRaster);
 	TestFalse(TEXT("Sizing requires source dimensions, not raw UV-region assignment"), UMGImageCropUtils::CanUseUvRegion(Request));
 	UMGImageCropUtils::FImageSamplingPlan Plan;
 	if (!TestTrue(TEXT("Contain plan builds"), UMGImageCropUtils::TryBuildSamplingPlan(Request.Transform, Request.FitMode, FVector2D(200, 100), FVector2D(200, 100), Plan))) return false;

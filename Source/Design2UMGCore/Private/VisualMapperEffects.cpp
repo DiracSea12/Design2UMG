@@ -55,27 +55,16 @@ namespace
 			for (const TSharedPtr<FDesignNode>& Child : Node.Children)
 			{
 				if (!Child.IsValid() || !Child->Transform.bEnabled) continue;
-				const FBox2D ChildPaint = SubtreePaintBounds(*Child, true);
-				const FVector2D ChildSize(Child->Transform.Width.Value, Child->Transform.Height.Value);
-				const FVector2D Pivot = ChildSize * Child->Transform.TransformOrigin;
-				FBox2D Transformed(ForceInit);
-				for (int32 Corner = 0; Corner < 4; ++Corner)
-				{
-					FVector2D Point((Corner & 1) ? ChildPaint.Max.X : ChildPaint.Min.X,
-						(Corner & 2) ? ChildPaint.Max.Y : ChildPaint.Min.Y);
-					Point -= Pivot;
-					if (Child->Transform.bFlipX) Point.X = -Point.X;
-					if (Child->Transform.bFlipY) Point.Y = -Point.Y;
-					Transformed += Point.GetRotated(Child->Transform.Rotation) + Pivot;
-				}
-				Content += FBox2D(Transformed.Min + FVector2D(Child->Transform.X, Child->Transform.Y),
-					Transformed.Max + FVector2D(Child->Transform.X, Child->Transform.Y));
+				const FBox2D Placed = VisualMapper::ChildPaintBounds(*Child);
+				Content += Placed;
 				if (Node.LayoutData.Layout != EDesignLayout::None && !Child->LayoutData.bAbsoluteLayoutPositioning)
 				{
 					// Flow placement is resolved by UMG. Reserve each child's paint
 					// outsets at either edge instead of assuming its source position.
-					Content += FBox2D(FVector2D(FMath::Min(0.0, Transformed.Min.X), FMath::Min(0.0, Transformed.Min.Y)),
-						Size + FVector2D(FMath::Max(0.0, Transformed.Max.X - ChildSize.X), FMath::Max(0.0, Transformed.Max.Y - ChildSize.Y)));
+					const FVector2D Origin(Child->Transform.X, Child->Transform.Y);
+					const FVector2D ChildSize(Child->Transform.Width.Value, Child->Transform.Height.Value);
+					Content += FBox2D(FVector2D(FMath::Min(0.0, Placed.Min.X - Origin.X), FMath::Min(0.0, Placed.Min.Y - Origin.Y)),
+						Size + FVector2D(FMath::Max(0.0, Placed.Max.X - Origin.X - ChildSize.X), FMath::Max(0.0, Placed.Max.Y - Origin.Y - ChildSize.Y)));
 				}
 			}
 		}
@@ -297,6 +286,50 @@ FUMGWidgetNode VisualMapper::WrapWithForegroundBlur(FUMGWidgetNode&& Widget, con
 	return Retainer;
 }
 
+FBox2D VisualMapper::ChildPaintBounds(const FDesignNode& Child)
+{
+	const FBox2D ChildPaint = SubtreePaintBounds(Child, true);
+	const FVector2D Pivot = FVector2D(Child.Transform.Width.Value, Child.Transform.Height.Value) * Child.Transform.TransformOrigin;
+	const FVector2D Origin(Child.Transform.X, Child.Transform.Y);
+	FBox2D Placed(ForceInit);
+	for (int32 Corner = 0; Corner < 4; ++Corner)
+	{
+		FVector2D Point((Corner & 1) ? ChildPaint.Max.X : ChildPaint.Min.X,
+			(Corner & 2) ? ChildPaint.Max.Y : ChildPaint.Min.Y);
+		Point -= Pivot;
+		if (Child.Transform.bFlipX) Point.X = -Point.X;
+		if (Child.Transform.bFlipY) Point.Y = -Point.Y;
+		Placed += Point.GetRotated(Child.Transform.Rotation) + Pivot + Origin;
+	}
+	return Placed;
+}
+
+FUMGWidgetNode VisualMapper::WrapWithSourceContour(FUMGWidgetNode&& Content, const FUMGEffectData& Contour)
+{
+	FUMGWidgetNode Retainer;
+	Retainer.Type = UMGWidgetTypes::RetainerBox;
+	Retainer.Id = Content.Id;
+	Retainer.Name = Content.Name;
+	Retainer.Bounds = Content.Bounds;
+	Retainer.Slot = Content.Slot;
+	Retainer.Render = MoveTemp(Content.Render);
+	Retainer.WidgetStyle = MoveTemp(Content.WidgetStyle);
+	Retainer.Effect = Contour;
+	Content.Render = FUMGRenderStyleData();
+	if (Retainer.Render.Clipping.IsSet())
+	{
+		Content.Render.Clipping = Retainer.Render.Clipping;
+		Retainer.Render.Clipping.Reset();
+	}
+	Content.WidgetStyle = FUMGWidgetStyleData();
+	Content.Id += TEXT("__contour_content");
+	Content.Name += TEXT("__contour_content");
+	Content.Bounds = FDesignPixelBounds();
+	Content.Slot = FUMGSlotData();
+	Retainer.Children.Add(MoveTemp(Content));
+	return Retainer;
+}
+
 FUMGWidgetNode VisualMapper::WrapWithGeometryMask(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node)
 {
 	FUMGWidgetNode Retainer;
@@ -367,8 +400,26 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	Wrapper.Bounds = Widget.Bounds;
 	Wrapper.Slot = Widget.Slot;
 	TransferWrapperRenderProperties(Wrapper, Widget, Node);
+	const auto ResetContentBounds = [&Widget]()
+	{
+		const FDesignPixelBounds PaintBounds = Widget.Bounds;
+		Widget.Bounds = FDesignPixelBounds();
+		if (Widget.Brush.Image.CropFitMode.IsSet() || Widget.Effect.TextPaints.IsSet())
+		{
+			Widget.Bounds.W = PaintBounds.W;
+			Widget.Bounds.H = PaintBounds.H;
+		}
+	};
 
-	if (Node->Type == EDesignNodeType::IconFont
+	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
+	const bool bOpaqueEllipse = Node->Type == EDesignNodeType::Ellipse
+		&& Node->Shape.InnerRadius <= 0.0001f && FMath::Abs(Node->Shape.SweepAngle) >= 359.9999f
+		&& !Node->Visual.Stroke.HasStroke() && PrimaryFill.IsColor() && PrimaryFill.bEnabled
+		&& PrimaryFill.Opacity == 1.0f && FUMGValueParser::ParseColor(PrimaryFill.SolidColor).A == 1.0f;
+	// A filled opaque ellipse has an exact analytic silhouette, including shadow spread.
+	const bool bVectorSurface = Node->Type == EDesignNodeType::Path || Node->Type == EDesignNodeType::Line
+		|| Node->Type == EDesignNodeType::Polygon || (Node->Type == EDesignNodeType::Ellipse && !bOpaqueEllipse);
+	if (bVectorSurface || RequiresSourceContour(*Node) || Node->Type == EDesignNodeType::IconFont
 		|| Node->Type == EDesignNodeType::Text
 		|| (!Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty()))
 	{
@@ -419,9 +470,10 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 		Padded.Name = Widget.Name + TEXT("_shadowpadding");
 		Padded.Brush.BrushColor = FLinearColor::Transparent;
 		Padded.WidgetStyle.Padding = Gutter;
-		Widget.Id += Design2UMGGeneratedNameSuffixes::Content();
-		Widget.Name += Design2UMGGeneratedNameSuffixes::Content();
-		Widget.Bounds = FDesignPixelBounds();
+		const TCHAR* ContentSuffix = RequiresSourceContour(*Node) ? TEXT("__contour_shadow_content") : Design2UMGGeneratedNameSuffixes::Content();
+		Widget.Id += ContentSuffix;
+		Widget.Name += ContentSuffix;
+		ResetContentBounds();
 		Widget.Slot = FUMGSlotData();
 		Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 		Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
@@ -441,12 +493,12 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	// Place the original widget above the shadows.
 	Widget.Id = Widget.Id + Design2UMGGeneratedNameSuffixes::Content();
 	Widget.Name = Widget.Name + Design2UMGGeneratedNameSuffixes::Content();
-	Widget.Bounds = FDesignPixelBounds();
+	ResetContentBounds();
 	Widget.Slot = FUMGSlotData();
 	Widget.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
 	Widget.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
 
-	Wrapper.Children.Add(MoveTemp(Widget));
+	Wrapper.SourceVisualChildIndex = Wrapper.Children.Add(MoveTemp(Widget));
 	return Wrapper;
 }
 

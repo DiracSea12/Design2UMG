@@ -45,20 +45,6 @@ void FFigmaHttpClient::GetComponent(const FString& ComponentKey, FOnComplete OnC
 	SendGet(FString::Printf(TEXT("%s/v1/components/%s"), *FigmaApiBase, *FGenericPlatformHttp::UrlEncode(ComponentKey)), MoveTemp(OnComplete));
 }
 
-void FFigmaHttpClient::ExportImages(const FString& FileKey, const TArray<FString>& NodeIds, FOnComplete OnComplete)
-{
-	// Figma node ids can contain characters that are not URL-safe (e.g. ':');
-	// encode each id but keep the ',' separator literal.
-	TArray<FString> EncodedIds;
-	EncodedIds.Reserve(NodeIds.Num());
-	for (const FString& NodeId : NodeIds)
-	{
-		EncodedIds.Add(FPlatformHttp::UrlEncode(NodeId));
-	}
-	const FString Ids = FString::Join(EncodedIds, TEXT(","));
-	SendGet(FString::Printf(TEXT("%s/v1/images/%s?ids=%s&format=png&scale=2"), *FigmaApiBase, *FileKey, *Ids), MoveTemp(OnComplete));
-}
-
 void FFigmaHttpClient::CancelActiveRequest()
 {
 	State->CancelActiveRequest();

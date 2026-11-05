@@ -16,6 +16,7 @@
 #include "Components/RichTextBlock.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/WidgetSwitcher.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -353,6 +354,51 @@ namespace
 			MakeSnapshotReferenceNode(TEXT("snapshot-cycle-entry"), TEXT("snapshot-cycle-a"), false)};
 		return Document;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStructureSnapshotActiveSwitcherTest,
+	"Design2UMG.Automation.WidgetStructureSnapshotActiveSwitcher",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWidgetStructureSnapshotActiveSwitcherTest::RunTest(const FString& Parameters)
+{
+	UWidgetTree* Tree = NewObject<UWidgetTree>();
+	UWidgetSwitcher* Switcher = Tree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("Switcher"));
+	Tree->RootWidget = Switcher;
+	UCanvasPanel* FirstPage = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("FirstPage"));
+	UCanvasPanel* SecondPage = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("SecondPage"));
+	Switcher->AddChild(FirstPage);
+	Switcher->AddChild(SecondPage);
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+		Text->SetText(FText::FromString(TEXT("First")));
+		FirstPage->AddChild(Text);
+	}
+	UTextBlock* SecondText = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	SecondText->SetText(FText::FromString(TEXT("Second")));
+	SecondPage->AddChild(SecondText);
+
+	Switcher->SetActiveWidgetIndex(0);
+	const TSharedPtr<FJsonObject> First = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(Tree);
+	if (!TestTrue(TEXT("First page snapshot exists"), First.IsValid())) return false;
+	const auto& FirstTexts = First->GetArrayField(TEXT("visible_texts"));
+	if (!TestEqual(TEXT("Repeated first-page texts remain counted"), FirstTexts.Num(), 2)) return false;
+	TestEqual(TEXT("First text is from the active page"), FirstTexts[0]->AsString(), FString(TEXT("First")));
+	TestEqual(TEXT("Repeated text is from the active page"), FirstTexts[1]->AsString(), FString(TEXT("First")));
+	TestEqual(TEXT("First page text node count"), static_cast<int32>(First->GetNumberField(TEXT("text_nodes"))), 2);
+
+	Switcher->SetActiveWidgetIndex(1);
+	const TSharedPtr<FJsonObject> Second = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(Tree);
+	if (!TestTrue(TEXT("Second page snapshot exists"), Second.IsValid())) return false;
+	const auto& SecondTexts = Second->GetArrayField(TEXT("visible_texts"));
+	if (!TestEqual(TEXT("Only active second-page text is counted"), SecondTexts.Num(), 1)) return false;
+	TestEqual(TEXT("Text follows the active page"), SecondTexts[0]->AsString(), FString(TEXT("Second")));
+	TestEqual(TEXT("Second page text node count"), static_cast<int32>(Second->GetNumberField(TEXT("text_nodes"))), 1);
+	SecondPage->SetVisibility(ESlateVisibility::Collapsed);
+	const TSharedPtr<FJsonObject> Hidden = Design2UMGAutomationStructureSnapshot::BuildWidgetTreeStructureSnapshot(Tree);
+	if (!TestTrue(TEXT("Hidden active page snapshot exists"), Hidden.IsValid())) return false;
+	TestEqual(TEXT("Collapsed active page is excluded"), static_cast<int32>(Hidden->GetNumberField(TEXT("text_nodes"))), 0);
+	return !HasAnyErrors();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWidgetStructureSnapshotCarrierResponsibilityTest,

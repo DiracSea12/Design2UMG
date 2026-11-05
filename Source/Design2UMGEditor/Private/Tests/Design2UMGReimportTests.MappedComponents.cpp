@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Safe reimport: mapped component boundaries (class change, switcher host duplicates, mapping diagnostics, own-attribute divergence).
+// Safe reimport: mapped component boundaries (class change, page host duplicates, mapping diagnostics, own-attribute divergence).
 
 #include "Misc/AutomationTest.h"
 
@@ -12,7 +12,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/Widget.h"
-#include "Components/WidgetSwitcher.h"
+#include "Components/CanvasPanel.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "UObject/Package.h"
@@ -96,18 +96,18 @@ bool FSafeReimportMappedClassChangeTest::RunTest(const FString&)
 }
 
 // ---------------------------------------------------------------------------
-// under a multi-page prototype document (synthesized switcher host root),
+// under a multi-page prototype document (synthesized page host root),
 // the mapped instance gains an interaction in v2 (the same-named IR-side node becomes the trigger wrapper
 // form named by node id). The reimport update plan must handle it via the Matched path: the instance is not
 // created twice, no node-id-named copy appears, the sidecar holds no double record for the same designNodeId, and no false "content slot occupied" move conflict.
 // ---------------------------------------------------------------------------
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportSwitcherMappedNoDuplicateTest,
-	"Design2UMG.SafeReimport.SwitcherHostMappedNoDuplicate",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSafeReimportPageHostMappedNoDuplicateTest,
+	"Design2UMG.SafeReimport.PageHostHostMappedNoDuplicate",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
+bool FSafeReimportPageHostMappedNoDuplicateTest::RunTest(const FString&)
 {
-	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/FixtureReimportSwitcherMapped");
+	const FString OutputDir = TEXT("/Game/Design2UMG/_TestOutput/FixtureReimportPageHostMapped");
 
 	// The mapped instance: no interaction in v1; in v2 it gains an ON_CLICK NODE navigation (becoming the trigger wrapper form).
 	const auto MakeMappedButton = [](const TCHAR* Label, const bool bWithInteraction)
@@ -123,7 +123,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 				 "\"fills\":[{\"type\":\"SOLID\",\"visible\":true,\"color\":{\"r\":0.2,\"g\":0.5,\"b\":0.8,\"a\":1}}]%s}"),
 			FixtureReimportComponentKey, Label, *Interactions);
 	};
-	// The text inside PageA carries a cross-page navigation (making the document a multi-page prototype; v1/v2 both synthesize the switcher host root).
+	// The text inside PageA carries a cross-page navigation (making the document a multi-page prototype; v1/v2 both synthesize the page host root).
 	const auto MakePageAText = []()
 	{
 		return FString::Printf(
@@ -132,7 +132,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 				 "\"interactions\":[{\"trigger\":{\"type\":\"ON_CLICK\"},\"actions\":[{\"type\":\"NODE\",\"destinationId\":\"c41_page\",\"navigation\":\"NAVIGATE\"}]}]}"),
 			*FixtureTextStyle());
 	};
-	const auto MakeSwitcherDoc = [&MakeMappedButton, &MakePageAText](const bool bButtonInteractive)
+	const auto MakePageHostDoc = [&MakeMappedButton, &MakePageAText](const bool bButtonInteractive)
 	{
 		return FString::Printf(
 			TEXT("{\"fileKey\":\"%s\",\"document\":{\"id\":\"0:0\",\"name\":\"Doc\",\"type\":\"DOCUMENT\",\"children\":["
@@ -150,7 +150,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 			*MakePageAText());
 	};
 
-	UWidgetBlueprint* WBP = FixtureImport(MakeSwitcherDoc(false), FixtureMappedClassPath, OutputDir);
+	UWidgetBlueprint* WBP = FixtureImport(MakePageHostDoc(false), FixtureMappedClassPath, OutputDir);
 	if (!TestTrue(TEXT("v1 import generates"), WBP != nullptr))
 	{
 		FixtureWipeOutput(OutputDir);
@@ -158,8 +158,8 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	if (!TestTrue(TEXT("v1 host root is the synthetic switcher"),
-			WBP->WidgetTree->RootWidget && WBP->WidgetTree->RootWidget->IsA<UWidgetSwitcher>()))
+	if (!TestTrue(TEXT("v1 host root is the synthetic page host"),
+			WBP->WidgetTree->RootWidget && WBP->WidgetTree->RootWidget->IsA<UCanvasPanel>()))
 	{
 		FixtureWipeOutput(OutputDir);
 		return false;
@@ -175,7 +175,7 @@ bool FSafeReimportSwitcherMappedNoDuplicateTest::RunTest(const FString&)
 	}
 	const TWeakObjectPtr<UUserWidget> MappedWeak = MappedBefore;
 
-	const FDesignReimportResult Result = FixtureReimport(MakeSwitcherDoc(true), FixtureMappedClassPath, TargetPackage);
+	const FDesignReimportResult Result = FixtureReimport(MakePageHostDoc(true), FixtureMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v2 reimport succeeds"), Result.bSucceeded);
 
 	// The only instance + identity preserved + name unchanged (no node-id-named copy appears).

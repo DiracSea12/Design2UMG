@@ -19,6 +19,7 @@ refused server-side (returned as no render), which is a Figma-side
 limitation, not a pipeline error.
 """
 import json
+import copy
 import os
 import sys
 import urllib.parse
@@ -86,12 +87,121 @@ def collect_image_refs(node: dict, refs: set):
             collect_image_refs(child, refs)
 
 
-def collect_vector_nodes(node: dict, ids: list, root_id: str):
-    if node.get("id") != root_id and node.get("type") in ("VECTOR", "LINE", "STAR", "ELLIPSE", "POLYGON", "BOOLEAN_OPERATION", "RECTANGLE"):
-        ids.append(node["id"])
+def walk_nodes(node):
+    yield node
     for child in node.get("children") or []:
-        if isinstance(child, dict):
-            collect_vector_nodes(child, ids, root_id)
+        yield from walk_nodes(child)
+
+
+def walk_actions(actions):
+    for action in actions or []:
+        if not isinstance(action, dict):
+            continue
+        yield action
+        for block in action.get("conditionalBlocks") or []:
+            yield from walk_actions(block.get("actions"))
+
+
+def prepare_design(data: dict, node_id: str, file_key=None):
+    nodes = {node["id"]: node for node in walk_nodes(data["document"])}
+    if node_id not in nodes:
+        raise ValueError(f"Selected node {node_id} is missing")
+    if file_key and data.get("fileKey") and data["fileKey"] != file_key:
+        raise ValueError("Response fileKey does not match the requested file")
+    components = data.get("components") or {}
+    sets = data.get("componentSets") or {}
+    parent_sets = {child["id"]: node["id"] for node in nodes.values()
+                   if node.get("type") == "COMPONENT_SET" for child in node.get("children") or []}
+    design = copy.deepcopy({key: value for key, value in data.items() if key != "document"})
+    design["document"] = copy.deepcopy(nodes[node_id])
+    if file_key:
+        design["fileKey"] = file_key
+    bundle = {"schemaVersion": 1, "definitions": [], "instances": {}, "errors": []}
+    design["design2umgComponentDependencies"] = bundle
+    pages = []
+    design["design2umgPrototypePages"] = pages
+    definitions = {}
+    runtime_ids = set()
+    pending = []
+
+    def add_runtime(node):
+        runtime_ids.update(child["id"] for child in walk_nodes(node))
+        pending.append((node, True))
+
+    def require_component(component_id, origin):
+        if component_id in definitions:
+            return definitions[component_id]
+        metadata = components.get(component_id) or {}
+        component = nodes.get(component_id)
+        if metadata.get("remote") or not component or component.get("type") != "COMPONENT":
+            raise ValueError(f"Node {origin}: component {component_id} definition is missing or inaccessible")
+        identity = {"id": component_id, "key": metadata.get("key") or ""}
+        set_id = metadata.get("componentSetId") or parent_sets.get(component_id)
+        if set_id:
+            identity["componentSetId"] = set_id
+            identity["componentSetKey"] = (sets.get(set_id) or {}).get("key") or ""
+        document = copy.deepcopy(component)
+        definitions[component_id] = identity
+        bundle["definitions"].append({**identity, "document": document})
+        pending.append((document, False))
+        return identity
+
+    add_runtime(design["document"])
+    while pending:
+        tree, runtime = pending.pop(0)
+        for node in walk_nodes(tree):
+            if node.get("type") == "COMPONENT":
+                require_component(node["id"], node["id"])
+            if node.get("type") == "INSTANCE":
+                identity = require_component(node.get("componentId"), node["id"])
+                for field, value in identity.items():
+                    if field != "id" and value:
+                        node["mainComponentKey" if field == "key" else field] = value
+                if runtime:
+                    bundle["instances"][node["id"]] = dict(identity)
+            for interaction in node.get("interactions") or []:
+                if not interaction.get("trigger"):
+                    continue
+                for action in walk_actions(interaction.get("actions")):
+                    if action.get("type") != "NODE":
+                        continue
+                    navigation = action.get("navigation")
+                    if not isinstance(navigation, str) or not navigation:
+                        raise ValueError(f"Node {node['id']}: NODE action is missing required navigation")
+                    if navigation not in ("CHANGE_TO", "NAVIGATE", "OVERLAY", "SWAP", "OPEN_OVERLAY", "SWAP_OVERLAY"):
+                        continue
+                    target_id = action.get("destinationId")
+                    if not target_id:
+                        raise ValueError(f"Node {node['id']}: {navigation} destination is missing")
+                    if navigation == "CHANGE_TO":
+                        require_component(target_id, node["id"])
+                    elif target_id not in runtime_ids:
+                        target = nodes.get(target_id)
+                        if not target or target.get("type") != "FRAME":
+                            raise ValueError(f"Node {node['id']}: {navigation} destination {target_id} is missing or is not a FRAME")
+                        page = copy.deepcopy(target)
+                        pages.append(page)
+                        add_runtime(page)
+
+    completed = set()
+    active = set()
+    documents = {entry["id"]: entry["document"] for entry in bundle["definitions"]}
+
+    def check_structure(component_id):
+        if component_id in active:
+            raise ValueError(f"Component structure cycle at {component_id}")
+        if component_id in completed:
+            return
+        active.add(component_id)
+        for node in walk_nodes(documents[component_id]):
+            if node.get("type") == "INSTANCE":
+                check_structure(node["componentId"])
+        active.remove(component_id)
+        completed.add(component_id)
+
+    for component_id in definitions:
+        check_structure(component_id)
+    return design
 
 
 def main():
@@ -125,27 +235,21 @@ def main():
         if len(sys.argv) < 5:
             sys.exit("build KEY NODE_ID OUTDIR")
         node_id, outdir = sys.argv[3], Path(sys.argv[4])
+        data = http_json(f"{API}/files/{key}?geometry=paths", token)
+        design = prepare_design(data, node_id, key)
+        node_doc = design["document"]
         outdir.mkdir(parents=True, exist_ok=True)
         images_dir = outdir / "images"
         images_dir.mkdir(exist_ok=True)
 
-        sub = http_json(f"{API}/files/{key}/nodes?ids={urllib.parse.quote(node_id)}&geometry=paths", token)
-        node_doc = (sub.get("nodes") or {}).get(node_id, {}).get("document")
-        if node_doc is None:
-            sys.exit(f"node {node_id} not returned")
-        design = {
-            "document": {"id": "0:0", "name": sub.get("name") or key, "type": "DOCUMENT", "children": [
-                {"id": "0:1", "name": "Page 1", "type": "CANVAS", "children": [node_doc]}
-            ]},
-            "name": sub.get("name") or key,
-            "version": sub.get("version"),
-            "schemaVersion": sub.get("schemaVersion"),
-            "components": sub.get("components") or {},
-        }
         (outdir / "design.json").write_text(json.dumps(design), encoding="utf-8")
 
         refs: set = set()
         collect_image_refs(node_doc, refs)
+        for entry in design["design2umgComponentDependencies"]["definitions"]:
+            collect_image_refs(entry["document"], refs)
+        for page in design["design2umgPrototypePages"]:
+            collect_image_refs(page, refs)
         if refs:
             payload = http_json(f"{API}/files/{key}/images", token)
             mapping = (payload.get("meta") or {}).get("images") or payload.get("images") or {}
@@ -157,21 +261,6 @@ def main():
                 http_download(url, images_dir, f"{ref}.png")
                 done += 1
             print(f"image fills: {done}/{len(refs)} downloaded")
-
-        vec_ids: list = []
-        collect_vector_nodes(node_doc, vec_ids, node_doc.get("id"))
-        done = 0
-        for start in range(0, len(vec_ids), 60):
-            suite = vec_ids[start:start + 60]
-            query = urllib.parse.urlencode({"ids": ",".join(suite), "format": "png", "scale": "2"})
-            fills = http_json(f"{API}/images/{key}?{query}", token).get("images") or {}
-            for vid in suite:
-                url = fills.get(vid)
-                if not url:
-                    continue
-                http_download(url, images_dir, f"vec_{vid.replace(':', '_').replace('/', '_')}.png")
-                done += 1
-        print(f"vector renders: {done}/{len(vec_ids)}")
 
         query = urllib.parse.urlencode({"ids": node_id, "format": "png", "scale": "2"})
         png = http_json(f"{API}/images/{key}?{query}", token).get("images", {}).get(node_id)

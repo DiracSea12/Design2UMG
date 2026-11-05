@@ -59,7 +59,7 @@ def parse_no_regression_epsilon(raw: str) -> float:
 def parse_args():
     parser = argparse.ArgumentParser(description="Bulk Design2UMG verification from a design directory")
     parser.add_argument("--design-root", required=True, help="User-owned test corpus. Recursively scans .pen files and Figma export directories; no bundled cases or fixed case count.")
-    parser.add_argument("--figma-export-root", action="append", default=[], help="Optional additional Figma export root, scanned recursively for design.json + reference PNG. Can be repeated. When omitted, scan only --design-root.")
+    parser.add_argument("--figma-export-root", action="append", default=[], help="Optional Figma export root, scanned recursively for export directories and ZIP archives. Can be repeated. When omitted, scan only --design-root.")
     parser.add_argument("--list-cases", action="store_true", help="Write run_scope.json and print discovered cases without requiring or launching Unreal.")
     parser.add_argument("--no-publish-history", action="store_true", help="Keep historical validation run-local without updating the global history manifest.")
     parser.add_argument("--history-root", default="", help="Read accepted historical results from this root. External history requires --no-publish-history; new outputs stay under --output-root.")
@@ -1770,9 +1770,17 @@ def main():
     history_root = Path(args.history_root).resolve() if args.history_root else output_root.parent
     if history_root.resolve() != output_root.parent.resolve() and not args.no_publish_history:
         raise ValueError("External --history-root requires --no-publish-history")
+    staged_archives, figma_source_diagnostics = suite_discovery.stage_figma_export_archives(
+        design_root, args.figma_export_root, output_root)
+    effective_figma_export_roots.extend(staged_archives)
     cases = suite_discovery.discover_pen_cases(design_root, args.include, args.exclude)
-    cases.extend(suite_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude))
-    run_scope_path = suite_discovery.write_run_scope(output_root, args, cases, effective_figma_export_roots)
+    figma_cases = suite_discovery.discover_figma_export_cases(effective_figma_export_roots, args.include, args.exclude)
+    for case in figma_cases:
+        if case["export_root"] in staged_archives:
+            case["source_archive"] = staged_archives[case["export_root"]]
+    cases.extend(figma_cases)
+    run_scope_path = suite_discovery.write_run_scope(
+        output_root, args, cases, effective_figma_export_roots, figma_source_diagnostics)
     if args.list_cases:
         print(json.dumps(verify.helper_load_json(run_scope_path), ensure_ascii=False, indent=2))
         return 0
@@ -1780,6 +1788,7 @@ def main():
         verify.write_json(output_root / "summary.json", {
             "status": "empty", "total": 0, "executed": 0, "passed": None,
             "cases": [], "editor_exit_codes": [], "run_scope_path": str(run_scope_path),
+            "figma_source_diagnostics": figma_source_diagnostics,
             "no_regression": {"available": 0, "passed": 0, "failed": 0},
         })
         print(f"[EMPTY] Discovered 0 cases under {design_root}; no tests executed.")
@@ -1811,7 +1820,7 @@ def main():
         validate_explicit_suite_game_output_root(args.effective_game_output_root, cases)
     verify.validate_plugin_module_build_id(args.editor, project_plugin_root)
     if not args.no_font_asset_seed:
-        verify.seed_runtime_font_assets(runtime_args.project, [case["source"] for case in cases])
+        verify.seed_runtime_font_assets(runtime_args.project, [case.get("source_archive", case["source"]) for case in cases])
     record_effective_game_output_root(run_scope_path, args)
     reference_cache_root = reference_cache.resolve_reference_cache_root(args, output_root)
     if reference_cache_root:
@@ -1924,6 +1933,7 @@ def main():
         case_results=case_results,
         completeness=completeness,
     )
+    summary["figma_source_diagnostics"] = figma_source_diagnostics
     visual_review_path = write_visual_review_index(output_root, case_results)
     summary["visual_review_path"] = str(visual_review_path)
     summary_path = output_root / "summary.json"

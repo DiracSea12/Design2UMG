@@ -391,7 +391,8 @@ TSharedPtr<FDesignNode> ParseNode(
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
 	bool bInsideInstanceSubtree,
 	FDesignParserBudget& ParseBudget,
-	int32 Depth);
+	int32 Depth,
+	bool bParentTransformedCoordinates = false);
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs);
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map);
 
@@ -408,6 +409,18 @@ static bool ShouldSkipFigmaNodeType(const FString& FigmaType)
 
 static void ParsePathGeometry(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& OutNode)
 {
+	if (OutNode.Type == EDesignNodeType::Ellipse)
+	{
+		if (const TSharedPtr<FJsonObject> Arc = GetObject(NodeObj, TEXT("arcData")))
+		{
+			const double Start = GetNumber(Arc, TEXT("startingAngle"));
+			const double End = GetNumber(Arc, TEXT("endingAngle"));
+			OutNode.Shape.InnerRadius = GetNumber(Arc, TEXT("innerRadius"));
+			// The shared shape convention is counterclockwise degrees; Figma uses clockwise radians.
+			OutNode.Shape.StartAngle = -FMath::RadiansToDegrees(Start);
+			OutNode.Shape.SweepAngle = FMath::RadiansToDegrees(Start - End);
+		}
+	}
 	FDesignPaintGeometry& Geometry = OutNode.Shape.PaintGeometry;
 	Geometry.FillPaths = ParseGeometryArray(GetArray(NodeObj, TEXT("fillGeometry")));
 	Geometry.StrokePaths = ParseGeometryArray(GetArray(NodeObj, TEXT("strokeGeometry")));
@@ -552,37 +565,17 @@ static void ParseExplicitGeometryMask(
 	}
 }
 
-static void ApplyRelativeTransformFlipData(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node)
+static void ApplyRelativeTransform(const FRelativeTransform& Transform, FDesignNode& Node)
 {
-	const TArray<TSharedPtr<FJsonValue>>* TransformArr = GetArray(NodeObj, TEXT("relativeTransform"));
-	if (!TransformArr || TransformArr->Num() != 2)
+	const double Determinant = Transform.A * Transform.D - Transform.B * Transform.C;
+	if (Determinant < 0.0f)
 	{
-		return;
+		Node.Transform.bFlipX = Transform.A < 0.0;
+		Node.Transform.bFlipY = !Node.Transform.bFlipX;
 	}
-
-	const TArray<TSharedPtr<FJsonValue>> Row0 = (*TransformArr)[0]->AsArray();
-	const TArray<TSharedPtr<FJsonValue>> Row1 = (*TransformArr)[1]->AsArray();
-	if (Row0.Num() != 3 || Row1.Num() != 3)
-	{
-		return;
-	}
-
-	const float A = Row0[0]->AsNumber();
-	const float B = Row0[1]->AsNumber();
-	const float C = Row1[0]->AsNumber();
-	const float D = Row1[1]->AsNumber();
-	const float Determinant = A * D - B * C;
-	if (Determinant >= -KINDA_SMALL_NUMBER)
-	{
-		return;
-	}
-
-	const float ScaleX = FMath::Sqrt(A * A + C * C);
-	const float ScaleY = FMath::Sqrt(B * B + D * D);
-	const float CosFromX = A / FMath::Max(ScaleX, KINDA_SMALL_NUMBER);
-	const float CosFromY = D / FMath::Max(ScaleY, KINDA_SMALL_NUMBER);
-	Node.Transform.bFlipX = (CosFromX * CosFromY < 0.0f) ? (CosFromX < 0.0f) : false;
-	Node.Transform.bFlipY = (CosFromX * CosFromY < 0.0f) ? (CosFromY < 0.0f) : true;
+	Node.Transform.Rotation = FMath::RadiansToDegrees(FMath::Atan2(
+		Node.Transform.bFlipX ? -Transform.C : Transform.C,
+		Node.Transform.bFlipX ? -Transform.A : Transform.A));
 }
 
 static void InitializeNodeFromFigma(
@@ -595,13 +588,11 @@ static void InitializeNodeFromFigma(
 	OutNode.Name = GetString(NodeObj, TEXT("name"));
 	OutNode.Transform.bEnabled = GetBool(NodeObj, TEXT("visible"), true);
 	OutNode.Transform.SetOpacityValue(GetNumber(NodeObj, TEXT("opacity"), 1.0));
-	OutNode.Transform.Rotation = GetNumber(NodeObj, TEXT("rotation"));
 	OutNode.MutableSource().ComponentInstance.bInInstanceSubtree = bInsideInstanceSubtree;
 	OutNode.Type = MapNodeType(FigmaType);
 	OutNode.MutableSource().SourceNodeType = FigmaType;
 	OutNode.bReusable = (FigmaType == TEXT("COMPONENT"));
 	OutNode.Metadata.Add(TEXT("source.provider"), DesignComponentMapping::ProviderFigma);
-	ApplyRelativeTransformFlipData(NodeObj, OutNode);
 }
 
 static void ApplyInstanceTrackingData(
@@ -702,17 +693,23 @@ static void ParseNodeVisualData(
 	{
 		OutNode.Visual.Fills = ParseFills(*FillsArr);
 		OutNode.Visual.bFillExplicitClear = FillsArr->Num() == 0;
-		const FString VectorRasterFallback = ExtractSyntheticVectorRasterImageRef(*FillsArr);
-		if (!VectorRasterFallback.IsEmpty())
+		for (const TSharedPtr<FJsonValue>& FillValue : *FillsArr)
 		{
-			OutNode.Visual.VectorRasterFallbackImageRef = VectorRasterFallback;
-			if (HasParentClippedRenderBounds(NodeObj, ParentObj))
+			const TSharedPtr<FJsonObject> Fill = FillValue.IsValid() && FillValue->Type == EJson::Object ? FillValue->AsObject() : nullptr;
+			if (!Fill.IsValid() || GetString(Fill, TEXT("type")) != TEXT("IMAGE") || !GetBool(Fill, TEXT("visible"), true)) continue;
+			if (!GetString(Fill, TEXT("gifRef")).IsEmpty()) OutNode.Metadata.Add(TEXT("figma.gifStaticFrame"), TEXT("true"));
+			const TSharedPtr<FJsonObject> Filters = GetObject(Fill, TEXT("filters"));
+			if (!Filters.IsValid()) continue;
+			for (const auto& Filter : Filters->Values)
 			{
-				OutNode.Visual.bRenderBoundsClippedByParent = true;
+				if (Filter.Value.IsValid() && Filter.Value->Type == EJson::Number && Filter.Value->AsNumber() != 0.0)
+				{
+					OutNode.Metadata.Add(TEXT("figma.imageFiltersUnsupported"), TEXT("true"));
+					break;
+				}
 			}
 		}
 	}
-	FigmaParserMetadata::CaptureRenderFallbackMetadata(NodeObj, OutNode);
 	CaptureBoundsDeltaMetadata(NodeObj, OutNode.Metadata);
 
 	OutNode.Visual.Stroke = ParseStroke(NodeObj);
@@ -740,6 +737,7 @@ static void ParseNodeChildren(
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
 	FDesignParserBudget& ParseBudget,
 	int32 Depth,
+	bool bTransformedCoordinates,
 	FDesignNode& OutNode)
 {
 	if (FigmaType == TEXT("BOOLEAN_OPERATION") || FigmaType == TEXT("VECTOR"))
@@ -768,7 +766,8 @@ static void ParseNodeChildren(
 			SkippedDesignerNodes,
 			OutNode.Source().ComponentInstance.bIsInstance || OutNode.Source().ComponentInstance.bInInstanceSubtree,
 			ParseBudget,
-			Depth + 1))
+			Depth + 1,
+			bTransformedCoordinates))
 		{
 			OutNode.Children.Add(ChildNode);
 		}
@@ -782,7 +781,8 @@ TSharedPtr<FDesignNode> ParseNode(
 	TArray<FDesignSkippedNodeReport>* SkippedDesignerNodes,
 	bool bInsideInstanceSubtree,
 	FDesignParserBudget& ParseBudget,
-	int32 Depth)
+	int32 Depth,
+	bool bParentTransformedCoordinates)
 {
 	if (!ParseBudget.TryEnterNode(Depth))
 	{
@@ -798,14 +798,41 @@ TSharedPtr<FDesignNode> ParseNode(
 	auto Node = MakeShared<FDesignNode>();
 	InitializeNodeFromFigma(NodeObj, FigmaType, bInsideInstanceSubtree, *Node);
 	ApplyInstanceTrackingData(NodeObj, FigmaType, *Node);
+	FLocalGeometry LocalGeometry;
+	const bool bHasLocalGeometry = TryGetLocalGeometry(NodeObj, LocalGeometry);
+	if (bHasLocalGeometry)
+	{
+		ApplyRelativeTransform(LocalGeometry.Transform, *Node);
+	}
+	else
+	{
+		FRelativeTransform SourceTransform;
+		const bool bHasSourceTransform = TryGetRelativeTransform(NodeObj, SourceTransform);
+		if (!FMath::IsNearlyZero(GetNumber(NodeObj, TEXT("rotation")))
+			|| (bHasSourceTransform && (!FMath::IsNearlyEqual(SourceTransform.A, 1.0)
+				|| !FMath::IsNearlyEqual(SourceTransform.D, 1.0)
+				|| !FMath::IsNearlyZero(SourceTransform.B) || !FMath::IsNearlyZero(SourceTransform.C))))
+		{
+			UE_LOG(LogDesign2UMG, Warning, TEXT("FigmaParser: transform not applied because local matrix or size is missing (%s)"), *Node->Id);
+		}
+	}
 
 	const bool bParentAutoLayout = ParentObj ? HasAutoLayout(ParentObj) : false;
+	const bool bTransformedCoordinates = bParentTransformedCoordinates || !FMath::IsNearlyZero(Node->Transform.Rotation)
+		|| Node->Transform.bFlipX || Node->Transform.bFlipY;
+	const auto* FillGeometry = GetArray(NodeObj, TEXT("fillGeometry"));
+	const auto* StrokeGeometry = GetArray(NodeObj, TEXT("strokeGeometry"));
+	const auto* Fills = GetArray(NodeObj, TEXT("fills"));
+	const bool bSourceStrokeOnly = FillGeometry && FillGeometry->IsEmpty() && Fills && Fills->IsEmpty()
+		&& StrokeGeometry && !StrokeGeometry->IsEmpty();
+	const FLocalGeometry* ActiveLocalGeometry = bHasLocalGeometry && (bTransformedCoordinates || bSourceStrokeOnly)
+		? &LocalGeometry : nullptr;
 
 	// Position
-	ParsePosition(NodeObj, ParentObj, ParentCoordinateBounds, *Node, bParentAutoLayout);
+	ParsePosition(NodeObj, ParentObj, ParentCoordinateBounds, *Node, bParentAutoLayout, bParentTransformedCoordinates, ActiveLocalGeometry);
 
 	// Size
-	ParseSize(NodeObj, ParentObj, *Node, bParentAutoLayout);
+	ParseSize(NodeObj, ParentObj, *Node, bParentAutoLayout, ActiveLocalGeometry);
 
 	// Layout (for containers)
 	ParseLayout(NodeObj, *Node);
@@ -825,7 +852,22 @@ TSharedPtr<FDesignNode> ParseNode(
 		SkippedDesignerNodes,
 		ParseBudget,
 		Depth,
+		bTransformedCoordinates,
 		*Node);
+
+	if (!ParentObj && bHasNodeCoordinateBounds)
+	{
+		FNodeBounds LayoutBounds;
+		if (TryReadBounds(GetObject(NodeObj, TEXT("absoluteBoundingBox")), LayoutBounds))
+		{
+			// Local transforms place the layout center at the source bounding-box center.
+			const FVector2D Origin = ActiveLocalGeometry
+				? FVector2D(LayoutBounds.X + (LayoutBounds.W - ActiveLocalGeometry->Size.X) * 0.5,
+					LayoutBounds.Y + (LayoutBounds.H - ActiveLocalGeometry->Size.Y) * 0.5)
+				: FVector2D(NodeCoordinateBounds.X, NodeCoordinateBounds.Y);
+			Node->MutableSource().ExportBounds = FigmaParserMetadata::CalculateExportBounds(*Node, Origin);
+		}
+	}
 
 	FigmaParserMetadata::ApplyFigmaSemanticHints(NodeObj, *Node);
 	FinalizeNodePaddingRuntimeWrap(*Node);
@@ -976,6 +1018,27 @@ bool ParseDocument(const FString& FigmaJson, FDesignDocument& OutDocument)
 			OutDocument.Children.Add(Node);
 	}
 
+	if (Root->HasField(TEXT("design2umgPrototypePages")))
+	{
+		const auto* PrototypePages = GetArray(Root, TEXT("design2umgPrototypePages"));
+		if (!PrototypePages)
+		{
+			UE_LOG(LogDesign2UMG, Error, TEXT("FigmaParser: prototype pages must be an array"));
+			return false;
+		}
+		for (const auto& PageValue : *PrototypePages)
+		{
+			const auto Page = PageValue.IsValid() && PageValue->Type == EJson::Object ? PageValue->AsObject() : nullptr;
+			if (!Page)
+			{
+				UE_LOG(LogDesign2UMG, Error, TEXT("FigmaParser: prototype page must be an object"));
+				return false;
+			}
+			if (auto Node = ParseNode(Page, nullptr, nullptr, &OutDocument.MutableParseDiagnostics().SkippedDesignerNodes, false, ParseBudget, 0))
+				OutDocument.MutableSourceDocument().PrototypePages.Add(Node);
+		}
+	}
+
 	if (ParseBudget.WasExceeded())
 	{
 		UE_LOG(LogDesign2UMG, Error,
@@ -1024,6 +1087,7 @@ bool ExtractFileKey(const FString& UrlOrKey, FString& OutKey)
 void CollectImageRefs(const FDesignDocument& Document, TSet<FString>& OutImageRefs)
 {
 	CollectImageRefsRecursive(Document.Children, OutImageRefs);
+	CollectImageRefsRecursive(Document.SourceDocument().PrototypePages, OutImageRefs);
 }
 
 void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSet<FString>& OutRefs)
@@ -1036,10 +1100,6 @@ void CollectImageRefsRecursive(const TArray<TSharedPtr<FDesignNode>>& Nodes, TSe
 			if (F.IsImage() && !F.Image.Url.IsEmpty())
 				OutRefs.Add(F.Image.Url);
 		}
-		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
-			OutRefs.Add(Node->Visual.VectorRasterFallbackImageRef);
-		if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
-			OutRefs.Add(Node->Visual.RenderFallback.ImageRef);
 		CollectImageRefsRecursive(Node->Children, OutRefs);
 	}
 }
@@ -1051,6 +1111,7 @@ void ApplyImageUrls(FDesignDocument& Document, const TMap<FString, FString>& Ima
 		Document.MutableSourceDocument().ResolvedComponentImageUrls.Append(ImageRefToUrl);
 	}
 	ApplyImageUrlsRecursive(Document.Children, ImageRefToUrl);
+	ApplyImageUrlsRecursive(Document.MutableSourceDocument().PrototypePages, ImageRefToUrl);
 }
 
 void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<FString, FString>& Map)
@@ -1064,20 +1125,6 @@ void ApplyImageUrlsRecursive(TArray<TSharedPtr<FDesignNode>>& Nodes, const TMap<
 			{
 				if (const FString* Url = Map.Find(F.Image.Url))
 					F.Image.Url = *Url;
-			}
-		}
-		if (!Node->Visual.VectorRasterFallbackImageRef.IsEmpty())
-		{
-			if (const FString* Url = Map.Find(Node->Visual.VectorRasterFallbackImageRef))
-			{
-				Node->Visual.VectorRasterFallbackImageRef = *Url;
-			}
-		}
-		if (!Node->Visual.RenderFallback.ImageRef.IsEmpty())
-		{
-			if (const FString* Url = Map.Find(Node->Visual.RenderFallback.ImageRef))
-			{
-				Node->Visual.RenderFallback.ImageRef = *Url;
 			}
 		}
 		ApplyImageUrlsRecursive(Node->Children, Map);

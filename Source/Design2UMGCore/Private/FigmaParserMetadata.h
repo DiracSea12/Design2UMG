@@ -10,8 +10,8 @@ struct FDesignNode;
 
 namespace FigmaParserMetadata
 {
-	void CaptureRenderFallbackMetadata(const TSharedPtr<FJsonObject>& Obj, FDesignNode& OutNode);
 	void CaptureSharedMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions);
 	void CaptureLayoutMetadataExtensions(const TSharedPtr<FJsonObject>& Obj, TMap<FString, FString>& Extensions);
+	FBox2D CalculateExportBounds(const FDesignNode& Root, const FVector2D& SourceOrigin);
 	void ApplyFigmaSemanticHints(const TSharedPtr<FJsonObject>& NodeObj, FDesignNode& Node);
 }

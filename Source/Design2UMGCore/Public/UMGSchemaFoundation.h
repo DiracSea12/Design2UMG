@@ -123,6 +123,9 @@ struct FUMGSlotData
 	UPROPERTY()
 	FUMGOffsetsData Offsets;
 
+	UPROPERTY()
+	int32 ZOrder = 0;
+
 	// Shared slot fields
 	UPROPERTY()
 	FMargin Padding = FMargin(0.0f);

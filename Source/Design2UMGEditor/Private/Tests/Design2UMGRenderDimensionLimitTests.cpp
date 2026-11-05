@@ -5,6 +5,8 @@
 #include "UMGWidgetRenderer.h"
 #include "Design2UMGConverter.h"
 #include "PenParser.h"
+#include "FigmaParser.h"
+#include "FigmaTestDocBuilder.h"
 #include "Editor.h"
 #include "ScopedTransaction.h"
 #include "UMGJsonParser.h"
@@ -12,6 +14,8 @@
 #include "Tests/Design2UMGTestAssetCleanup.h"
 
 #include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
@@ -21,6 +25,30 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 using Design2UMGEditorTests::DeleteGeneratedAssetsAtPath;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesign2UMGRenderAuthoredVisibilityTest,
+	"Design2UMG.Generation.RenderAuthoredVisibility",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FDesign2UMGRenderAuthoredVisibilityTest::RunTest(const FString&)
+{
+	for (const ESlateVisibility Initial : {ESlateVisibility::Collapsed, ESlateVisibility::Hidden})
+	{
+		UWidgetTree* Tree = NewObject<UWidgetTree>();
+		UBorder* Border = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		Tree->RootWidget = Border;
+		Border->SetVisibility(Initial);
+		Border->SetDesignerFlags(EWidgetDesignFlags::Designing);
+		const TSharedRef<SWidget> Slate = Border->TakeWidget();
+		TestTrue(TEXT("Designer normally overrides the hidden state"), Slate->GetVisibility() == EVisibility::Visible);
+		FUMGWidgetRenderer::ApplyAuthoredVisibility(Tree);
+		TestEqual(TEXT("Renderer restores the authored initial visibility"), Border->GetVisibility(), Initial);
+		Border->SetVisibility(ESlateVisibility::Visible);
+		TestTrue(TEXT("An explicit show updates the same Slate widget"), Slate->GetVisibility() == EVisibility::Visible);
+		Border->ReleaseSlateResources(true);
+	}
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FDesign2UMGRenderDimensionLimitTest,
@@ -133,6 +161,40 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDesign2UMGSourceExportBoundsTest,
 
 bool FDesign2UMGSourceExportBoundsTest::RunTest(const FString&)
 {
+
+	FDesignDocument FigmaDoc;
+	if (!TestTrue(TEXT("Figma paint bounds source parses"), FFigmaParser::ParseDocument(
+		Design2UMGCoreTests::MakeFigmaDocJson(TEXT(R"({"id":"viewport","name":"Viewport","type":"FRAME",
+			"absoluteBoundingBox":{"x":0,"y":0,"width":100,"height":60},
+			"absoluteRenderBounds":{"x":0,"y":0,"width":500,"height":60},"fills":[],"clipsContent":false,
+			"children":[{"id":"layout","name":"Layout","type":"FRAME","fills":[],
+				"absoluteBoundingBox":{"x":0,"y":0,"width":160,"height":60},
+				"absoluteRenderBounds":{"x":0,"y":0,"width":160,"height":60},
+				"children":[{"id":"ink","name":"Ink","type":"RECTANGLE",
+					"absoluteBoundingBox":{"x":120,"y":20,"width":10,"height":20},
+					"absoluteRenderBounds":{"x":119,"y":19,"width":14,"height":32},
+					"strokeWeight":1,"strokeAlign":"OUTSIDE","strokes":[{"type":"SOLID","color":{"r":0,"g":0,"b":0,"a":1}}],
+					"effects":[{"type":"DROP_SHADOW","radius":0,"offset":{"x":2,"y":10},"color":{"r":0,"g":0,"b":0,"a":1}}],
+					"fills":[{"type":"SOLID","color":{"r":1,"g":0,"b":0,"a":1}}]}]},
+				{"id":"clip","name":"Clip","type":"FRAME","clipsContent":true,"fills":[],
+					"absoluteBoundingBox":{"x":90,"y":0,"width":10,"height":10},
+					"children":[{"id":"clipped","name":"Clipped","type":"RECTANGLE",
+						"absoluteBoundingBox":{"x":150,"y":0,"width":20,"height":10},
+						"fills":[{"type":"SOLID","color":{"r":1,"g":0,"b":0,"a":1}}]}]},
+				{"id":"transparent","name":"Transparent","type":"FRAME","opacity":0,
+					"absoluteBoundingBox":{"x":400,"y":0,"width":100,"height":10},
+					"children":[{"id":"hiddenInk","name":"Hidden ink","type":"RECTANGLE",
+						"absoluteBoundingBox":{"x":400,"y":0,"width":100,"height":10},
+						"fills":[{"type":"SOLID","color":{"r":1,"g":0,"b":0,"a":1}}]}]}]})")), FigmaDoc))) return false;
+	const FUMGWidgetData FigmaData = FDesign2UMGConverter::Convert(FigmaDoc, FDesign2UMGConversionSettings::Defaults());
+	if (!TestTrue(TEXT("Figma records visible paint separately from layout aggregates"), FigmaData.ExportBounds.IsSet())) return false;
+	TestEqual(TEXT("Figma paint overflow retains the declared viewport lower bound"), FigmaData.ExportBounds->GetSize(), FVector2D(133,60));
+	TestEqual(TEXT("Figma layout keeps its authored viewport width"), FigmaData.RootWidget.Bounds.W, 100.0f);
+	FUMGWidgetData FigmaRoundTrip;
+	if (!TestTrue(TEXT("Figma paint bounds survive the JSON bridge"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(FigmaData), FigmaRoundTrip))) return false;
+	if (!TestTrue(TEXT("Figma JSON contains paint export bounds"), FigmaRoundTrip.ExportBounds.IsSet())) return false;
+	TestEqual(TEXT("Figma JSON preserves independent capture bounds"), FigmaRoundTrip.ExportBounds->GetSize(), FigmaData.ExportBounds->GetSize());
+
 	FDesignDocument Doc;
 	if (!TestTrue(TEXT("Source with outer shadow parses"), FPenParser::ParseDocument(TEXT(R"({"version":"2.8",
 		"children":[{"id":"root","type":"rectangle","width":45,"height":45,"fill":"#ffffff",

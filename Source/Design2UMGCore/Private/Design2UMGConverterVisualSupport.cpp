@@ -76,43 +76,6 @@ namespace Design2UMGConverterVisualSupport
 		return Node.IsValid() && Node->Visual.Fills.Num() > 0;
 	}
 
-	bool ShouldUseRenderFallback(const TSharedPtr<FDesignNode>& Node)
-	{
-		if (!Node.IsValid()
-			|| Node->Visual.RenderFallback.ImageRef.IsEmpty()
-			|| Node->Visual.RenderFallback.Scope == EDesignRenderFallbackScope::Unsupported
-			|| Node->Visual.RenderFallback.bSuppressedBySourceSemantics)
-		{
-			return false;
-		}
-
-		if (Node->Type == EDesignNodeType::Text
-			|| Node->Type == EDesignNodeType::IconFont
-			|| Node->Type == EDesignNodeType::Ref)
-		{
-			return false;
-		}
-
-		return Node->Children.Num() == 0
-			|| Node->Visual.RenderFallback.Scope == EDesignRenderFallbackScope::Subtree;
-	}
-
-	FUMGWidgetNode CreateRenderFallbackWidget(const TSharedPtr<FDesignNode>& Node)
-	{
-		FUMGWidgetNode Widget;
-		Widget.Type = UMGWidgetTypes::Image;
-		Widget.Brush.Image.TexturePath = Node->Visual.RenderFallback.ImageRef;
-		if (Node->Transform.Width.Value > 0.0f)
-		{
-			Widget.WidgetStyle.WidthOverride = Node->Transform.Width.Value;
-		}
-		if (Node->Transform.Height.Value > 0.0f)
-		{
-			Widget.WidgetStyle.HeightOverride = Node->Transform.Height.Value;
-		}
-		return Widget;
-	}
-
 	void ApplyBaseVisualProperties(
 		FUMGWidgetNode& Widget,
 		const TSharedPtr<FDesignNode>& Node)
@@ -134,13 +97,6 @@ namespace Design2UMGConverterVisualSupport
 				Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 			}
 		}
-	}
-
-	void ApplyRenderFallbackVisuals(
-		FUMGWidgetNode& Widget,
-		const TSharedPtr<FDesignNode>& Node)
-	{
-		VisualMapper::ApplyRenderTransformProperties(Widget, Node);
 	}
 
 	bool TryApplyPlaceholderSurfaceTint(
@@ -257,11 +213,31 @@ namespace Design2UMGConverterVisualSupport
 		FUMGWidgetNode Widget,
 		const TSharedPtr<FDesignNode>& Node,
 		const FVisualMapperOptions& VisualMapperOptions,
-		bool bExplicitStrokePainted)
+		bool bExplicitStrokePainted, bool bTextPaintHandled, bool bSourcePaintHandled)
 	{
+		if (bTextPaintHandled && Widget.Shadow.ShadowColorAndOpacity.IsSet())
+		{
+			// A text-paint material consumes glyph alpha; compose native shadow color afterwards.
+			const FDesignEffect* SourceShadow = nullptr;
+			for (const auto& Effect : Node->Visual.Effects)
+				if (Effect.bEnabled && Effect.Type == EDesignEffectType::Shadow && !Effect.Shadow.bInner)
+					SourceShadow = &Effect;
+			if (SourceShadow)
+			{
+				auto& Shadow = Widget.Shadow.BoxShadows.AddDefaulted_GetRef();
+				Shadow.Color = Widget.Shadow.ShadowColorAndOpacity.GetValue();
+				Shadow.Offset = Widget.Shadow.ShadowOffset.Get(FVector2D::ZeroVector);
+				Shadow.Blur = SourceShadow->Shadow.Blur;
+				Shadow.Spread = 0.0f;
+				Shadow.BlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(SourceShadow->BlendMode);
+				Shadow.bShowShadowBehindNode = SourceShadow->Shadow.bShowShadowBehindNode;
+			}
+			Widget.Shadow.ShadowOffset.Reset();
+			Widget.Shadow.ShadowColorAndOpacity.Reset();
+		}
 		int32 PaintLayerCount = 0;
-		if (VisualMapperFillTransfer::RequiresBackdropLayers(Widget, Node) || Node->HasMultiFill() || Node->Visual.Fills.ContainsByPredicate(
-            [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; }))
+		if (!bTextPaintHandled && !bSourcePaintHandled && (VisualMapperFillTransfer::RequiresBackdropLayers(Widget, Node) || Node->HasMultiFill() || Node->Visual.Fills.ContainsByPredicate(
+            [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; })))
 		{
 			Widget = VisualMapperFillTransfer::WrapWithMultiFill(MoveTemp(Widget), Node, VisualMapperOptions, &PaintLayerCount);
 		}
@@ -271,7 +247,7 @@ namespace Design2UMGConverterVisualSupport
             && !Node->Visual.Stroke.Fill->BlendMode.IsEmpty()
             && VisualMapperFillTransfer::CanonicalPaintBlendMode(Node->Visual.Stroke.Fill->BlendMode) != TEXT("normal");
         if (!bExplicitStrokePainted || bBlendedStroke)
-			Widget = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node, PaintLayerCount);
+			Widget = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node, PaintLayerCount, bSourcePaintHandled);
 
 		if (Node->Visual.GeometryMask.HasMask())
 		{

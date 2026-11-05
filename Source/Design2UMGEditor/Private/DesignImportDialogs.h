@@ -15,6 +15,8 @@ namespace DesignImportDialogs
 {
 	/** Interactive preparation retains the source on failure; the business analyzer never installs tools. */
 	FImportAnalysisResult AnalyzeForPreview(FDesignDocument& Document, const FImportAnalysisInput& Input);
+	/** Analysis mutates documents, so each analysis runs on an independent node tree. */
+	FDesignDocument CopyForAnalysis(const FDesignDocument& Document);
 	FString FormatImportResult(const FUMGWidgetData& Data, const FString& ErrorMessage, bool bSucceeded,
 		const FString& SourceFilePath = FString());
 	FString FormatImageIssues(const FDesignImageImportResult& Result);
@@ -31,7 +33,8 @@ namespace DesignImportDialogs
 		FOnPreviewCancelled OnCancelled = FOnPreviewCancelled(),
 		const TOptional<FDesignPreviewMaterializationSettingsSnapshot>& InitialMaterializationSettingsSnapshot =
 			TOptional<FDesignPreviewMaterializationSettingsSnapshot>(),
-		const FDesignImageImportResult& InitialImageResult = FDesignImageImportResult());
+		const FDesignImageImportResult& InitialImageResult = FDesignImageImportResult(),
+		FOnPreviewReconvert OnReconvert = FOnPreviewReconvert());
 
 	void ShowFrameSelector(
 		const TArray<FDesignFrameInfo>& Frames,

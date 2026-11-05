@@ -1,13 +1,12 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
-// Assorted Figma coverage: transform groups, text path fallback, design-only node skipping, exported-image fills, key extraction, and fixture-driven converter runs.
+// Figma transform groups, text paths, design-only nodes, image resolution, keys, and converter fixtures.
 
 #include "Misc/AutomationTest.h"
 #include "Design2UMGTestUtils.h"
 #include "Design2UMGConverter.h"
 #include "FigmaParser.h"
 #include "FigmaTestDocBuilder.h"
-#include "FigmaImageExporter.h"
 
 #if WITH_AUTOMATION_WORKER
 
@@ -144,31 +143,23 @@ bool FFigmaSkipDesignOnlyNodesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaExportedImageClearsExplicitFillTest,
-	"Design2UMG.FigmaParser.ExportedImageClearsExplicitFill",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFigmaImageResolutionPreservesVectorPaintTest,
+	"Design2UMG.FigmaParser.ImageResolutionPreservesVectorPaint",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FFigmaExportedImageClearsExplicitFillTest::RunTest(const FString& Parameters)
+bool FFigmaImageResolutionPreservesVectorPaintTest::RunTest(const FString& Parameters)
 {
-	TSharedPtr<FDesignNode> Node = MakeShared<FDesignNode>();
-	Node->Id = TEXT("remote_vector");
-	Node->Type = EDesignNodeType::Path;
-	Node->Visual.bFillExplicitClear = true;
-
-	TMap<FString, FString> IdToUrl;
-	IdToUrl.Add(Node->Id, TEXT("https://cdn.example.com/remote-vector.png"));
-	TArray<TSharedPtr<FDesignNode>> Nodes;
-	Nodes.Add(Node);
-
-	FFigmaImageExporter::ApplyExportedImages(Nodes, IdToUrl);
-
-	TestEqual(TEXT("Exported vector becomes a rectangle"), Node->Type, EDesignNodeType::Rectangle);
-	TestFalse(TEXT("Exported image clears the stale explicit fill flag"), Node->Visual.bFillExplicitClear);
-	TestEqual(TEXT("Exported vector has one image fill"), Node->Visual.Fills.Num(), 1);
-	if (Node->Visual.Fills.Num() == 1)
-	{
-		TestTrue(TEXT("Exported fill keeps the resolved image URL"), Node->Visual.Fills[0].IsImage());
-		TestEqual(TEXT("Exported fill URL is preserved"), Node->Visual.Fills[0].Image.Url, TEXT("https://cdn.example.com/remote-vector.png"));
-	}
+	FDesignDocument Document;
+	TestTrue(TEXT("Native path parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(
+		MakeLeafNode(TEXT("native_path"), TEXT("Path"), TEXT("VECTOR"), 0, 0, 8, 8,
+			TEXT(",\"fills\":[],\"fillGeometry\":[{\"path\":\"M0 0L8 0L8 8Z\",\"windingRule\":\"NONZERO\"}]"))), Document));
+	if (Document.Children.IsEmpty()) return false;
+	TMap<FString, FString> ImageUrls;
+	ImageUrls.Add(TEXT("native_path"), TEXT("https://cdn.example.com/image.png"));
+	FFigmaParser::ApplyImageUrls(Document, ImageUrls);
+	TestEqual(TEXT("Image resolution preserves path type"), Document.Children[0]->Type, EDesignNodeType::Path);
+	TestTrue(TEXT("Image resolution preserves explicitly empty fill"), Document.Children[0]->Visual.bFillExplicitClear
+		&& Document.Children[0]->Visual.Fills.IsEmpty());
+	TestEqual(TEXT("Image resolution preserves geometry"), Document.Children[0]->Shape.Geometry, FString(TEXT("M0 0L8 0L8 8Z")));
 	return true;
 }
 

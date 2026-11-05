@@ -59,7 +59,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	}
 	const FString TargetPackage = WBP->GetOutermost()->GetName();
 
-	UWidget* LinkButton = WBP->WidgetTree->FindWidget(TEXT("fixture_link"));
+	UWidget* LinkButton = WBP->WidgetTree->FindWidget(TEXT("JumpLink"));
 	UUserWidget* MappedBefore = FixtureFindMappedInstance(WBP);
 	UTextBlock* HeadBefore = Cast<UTextBlock>(WBP->WidgetTree->FindWidget(TEXT("Head")));
 	if (!TestNotNull(TEXT("trigger button widget present"), LinkButton)
@@ -77,7 +77,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	FString BindingError;
 	if (!TestTrue(TEXT("WidgetBindings adds the event binding"),
 			Design2UMGWidgetBindingTools::AddEventBinding(
-				WBP, TEXT("fixture_link"), TEXT("OnClicked"), TEXT("DevHandler"), BindingError)))
+				WBP, TEXT("JumpLink"), TEXT("OnClicked"), TEXT("DevHandler"), BindingError)))
 	{
 		AddError(FString::Printf(TEXT("AddEventBinding failed: %s"), *BindingError));
 		FixtureWipeOutput(OutputDir);
@@ -86,11 +86,11 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	// Idempotent: adding the same binding twice does not create a second one.
 	TestTrue(TEXT("AddEventBinding is idempotent"),
 		Design2UMGWidgetBindingTools::AddEventBinding(
-			WBP, TEXT("fixture_link"), TEXT("OnClicked"), TEXT("DevHandler"), BindingError));
+			WBP, TEXT("JumpLink"), TEXT("OnClicked"), TEXT("DevHandler"), BindingError));
 	int32 BindingCount = 0;
 	for (const FDelegateEditorBinding& Binding : WBP->Bindings)
 	{
-		BindingCount += (Binding.ObjectName == TEXT("fixture_link") && Binding.PropertyName == TEXT("OnClicked")) ? 1 : 0;
+		BindingCount += (Binding.ObjectName == TEXT("JumpLink") && Binding.PropertyName == TEXT("OnClicked")) ? 1 : 0;
 	}
 	TestEqual(TEXT("exactly one editor binding for the trigger"), BindingCount, 1);
 
@@ -107,7 +107,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 
 	const bool bV2HasDevBinding = WBP->Bindings.ContainsByPredicate([](const FDelegateEditorBinding& Binding)
 	{
-		return Binding.ObjectName == TEXT("fixture_link")
+		return Binding.ObjectName == TEXT("JumpLink")
 			&& Binding.PropertyName == TEXT("OnClicked")
 			&& Binding.FunctionName == TEXT("DevHandler");
 	});
@@ -131,7 +131,7 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	const FDesignReimportResult ResultV3 = FixtureReimport(MakeLifeDoc(TEXT("life-v3"), TEXT("head-v3")), FixtureMappedClassPath, TargetPackage);
 	TestTrue(TEXT("v3 reimport succeeds"), ResultV3.bSucceeded);
 
-	UWidget* LinkV3 = WBP->WidgetTree->FindWidget(TEXT("fixture_link"));
+	UWidget* LinkV3 = WBP->WidgetTree->FindWidget(TEXT("JumpLink"));
 	if (TestNotNull(TEXT("trigger button still present after v3"), LinkV3))
 	{
 		TestTrue(TEXT("trigger button identity stable across both reimports"), LinkV3 == LinkWeak.Get());
@@ -152,13 +152,13 @@ bool FSafeReimportContinuousLifecycleBindingsTest::RunTest(const FString&)
 	}
 	const bool bV3HasDevBinding = WBP->Bindings.ContainsByPredicate([](const FDelegateEditorBinding& Binding)
 	{
-		return Binding.ObjectName == TEXT("fixture_link")
+		return Binding.ObjectName == TEXT("JumpLink")
 			&& Binding.PropertyName == TEXT("OnClicked")
 			&& Binding.FunctionName == TEXT("DevHandler");
 	});
 	TestTrue(TEXT("project event binding preserved across v3 reimport"), bV3HasDevBinding);
 	TestNull(TEXT("no duplicate Head created"), WBP->WidgetTree->FindWidget(TEXT("Head_1")));
-	TestNull(TEXT("no duplicate trigger created"), WBP->WidgetTree->FindWidget(TEXT("fixture_link_1")));
+	TestNull(TEXT("no duplicate trigger created"), WBP->WidgetTree->FindWidget(TEXT("JumpLink_1")));
 
 	FDesign2UMGGenerationManifestSidecar Sidecar;
 	if (TestTrue(TEXT("manifest reloads after v3"), FixtureLoadSidecar(TargetPackage, Sidecar)))
@@ -201,7 +201,7 @@ bool FSafeReimportBindingFunctionNameCollisionTest::RunTest(const FString&)
 	FString BindingError;
 	if (!TestTrue(TEXT("binding added despite the name clash"),
 			Design2UMGWidgetBindingTools::AddEventBinding(
-				WBP, TEXT("fixture_link"), TEXT("OnClicked"), TEXT("ClashHandler"), BindingError)))
+				WBP, TEXT("JumpLink"), TEXT("OnClicked"), TEXT("ClashHandler"), BindingError)))
 	{
 		AddError(FString::Printf(TEXT("AddEventBinding failed: %s"), *BindingError));
 		FixtureWipeOutput(OutputDir);
@@ -211,7 +211,7 @@ bool FSafeReimportBindingFunctionNameCollisionTest::RunTest(const FString&)
 	const FDelegateEditorBinding* Binding = nullptr;
 	for (const FDelegateEditorBinding& Candidate : WBP->Bindings)
 	{
-		if (Candidate.ObjectName == TEXT("fixture_link") && Candidate.PropertyName == TEXT("OnClicked"))
+		if (Candidate.ObjectName == TEXT("JumpLink") && Candidate.PropertyName == TEXT("OnClicked"))
 		{
 			Binding = &Candidate;
 		}
@@ -241,7 +241,7 @@ bool FSafeReimportBindingFunctionNameCollisionTest::RunTest(const FString&)
 	const bool bBindingSurvivesCompile = WBP->Bindings.ContainsByPredicate(
 		[Binding](const FDelegateEditorBinding& Candidate)
 		{
-			return Candidate.ObjectName == TEXT("fixture_link")
+			return Candidate.ObjectName == TEXT("JumpLink")
 				&& Candidate.PropertyName == TEXT("OnClicked")
 				&& Candidate.FunctionName == Binding->FunctionName;
 		});
