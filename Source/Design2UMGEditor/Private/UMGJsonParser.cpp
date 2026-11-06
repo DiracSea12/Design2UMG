@@ -817,14 +817,6 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 					Endpoint.CornerRadii = Clip.GeometryMaskCornerRadii.Get(FVector4(0, 0, 0, 0));
 					Endpoint.ClipPaths = MoveTemp(Clip.GeometryMaskPaths);
 				}
-				if (Object->TryGetObjectField(TEXT("OwnPaint"), Value))
-				{
-					auto Holder = MakeShared<FJsonObject>();
-					Holder->SetObjectField(TEXT("PathData"), *Value);
-					FUMGPathData Path;
-					ParsePathPayload(Holder, Path);
-					if (Path.SourcePaintGeometry.IsSet()) Endpoint.OwnPaint = MoveTemp(Path.SourcePaintGeometry.GetValue());
-				}
 				if (Object->TryGetObjectField(TEXT("Shadow"), Value))
 				{
 					auto Holder = MakeShared<FJsonObject>();
@@ -834,14 +826,12 @@ void FUMGJsonParser::ParseEffectPayload(const TSharedPtr<FJsonObject>& NodeObjec
 					Endpoint.BoxShadows = MoveTemp(Shadow.BoxShadows);
 				}
 				Object->TryGetStringField(TEXT("CoverageTexture"), Endpoint.CoverageTexture);
-				Object->TryGetStringField(TEXT("PaintTexture"), Endpoint.PaintTexture);
-				Object->TryGetStringField(TEXT("StrokeTexture"), Endpoint.StrokeTexture);
 				FString Rect;
-				if (Object->TryGetStringField(TEXT("PaintRect"), Rect)) TryParseVector4(Rect, Endpoint.PaintRect);
-				if (Object->TryGetStringField(TEXT("StrokeRect"), Rect)) TryParseVector4(Rect, Endpoint.StrokeRect);
+				if (Object->TryGetStringField(TEXT("CaptureBounds"), Rect)) TryParseVector4(Rect, Endpoint.CaptureBounds);
 				return Endpoint;
 			};
 			OutEffect.SharedCapture.Emplace();
+			(*CaptureObject)->TryGetBoolField(TEXT("SubtreeShadow"), OutEffect.SharedCapture->bSubtreeShadow);
 			const TSharedPtr<FJsonObject>* Source = nullptr;
 			if ((*CaptureObject)->TryGetObjectField(TEXT("Source"), Source)) OutEffect.SharedCapture->Source = ReadEndpoint(*Source);
 			const TArray<TSharedPtr<FJsonValue>>* Targets = nullptr;

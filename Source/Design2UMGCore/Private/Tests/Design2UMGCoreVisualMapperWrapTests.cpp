@@ -614,7 +614,7 @@ bool FVisualMapperWrapWithBorderExplicitSideStrokeTest::RunTest(const FString& P
 	Widget.Bounds.H = 48.0f;
 	Widget.WidgetStyle.WidthOverride = 128.0f;
 
-	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+	VisualMapper::ApplyStrokeLayout(Widget, Node->Visual.Stroke);
 	FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 
 	TestEqual(TEXT("Explicit side stroke wraps with overlay"), Wrapped.Type, TEXT("Overlay"));
@@ -679,7 +679,7 @@ bool FVisualMapperAuthoredFlowPaddingTest::RunTest(const FString& Parameters)
 			Widget.Bounds.H = 80.0f;
 			Widget.Children.AddDefaulted_GetRef().Type = TEXT("TextBlock");
 			Widget.Children.AddDefaulted_GetRef().Type = TEXT("TextBlock");
-			VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+			VisualMapper::ApplyStrokeLayout(Widget, Node->Visual.Stroke);
 			const FUMGWidgetNode Border = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 			TestEqual(TEXT("Authored flow retains its border"), Border.Type, FString(TEXT("Border")));
 			const FMargin EffectivePadding = Border.WidgetStyle.Padding.Get(FMargin(0.0f))

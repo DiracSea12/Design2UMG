@@ -463,34 +463,25 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 		Endpoint.Size = FVector2D(20, 20);
 		Endpoint.bClipContent = true;
 		Endpoint.ClipPaths = Contour.Effect.GeometryMaskPaths;
-		Endpoint.OwnPaint.Geometry.FillPaths = Endpoint.ClipPaths;
-		Endpoint.OwnPaint.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{TEXT("M-1 -1H21V21H-1Z M0 0V20H20V0Z"), TEXT("evenodd")}};
-		Endpoint.OwnPaint.StrokeAlignment = TEXT("outer");
-		FUMGSurfacePaint WhitePaint;
-		WhitePaint.Color = FLinearColor::White;
-		Endpoint.OwnPaint.FillPaints = TArray<FUMGSurfacePaint>{WhitePaint};
-		Endpoint.OwnPaint.StrokePaint = WhitePaint;
+		Endpoint.CaptureBounds = FVector4(-8, -7, 38, 40);
 		Endpoint.BoxShadows.Add({TEXT("normal"), FVector2D(1, 2), 4, 0, FLinearColor::Black, true});
 		auto& EndpointTarget = Shared.Effect.SharedCapture->Targets.Add_GetRef(Endpoint);
 		EndpointTarget.DestinationWidgetId = TEXT("native-target");
 		EndpointTarget.BoxShadows[0].Offset = FVector2D(-2, 1);
 		FUMGWidgetNode ShadowOwner = Shared;
-		ShadowOwner.Type = UMGWidgetTypes::Image;
+		ShadowOwner.Effect.SharedCapture->bSubtreeShadow = true;
 		TArray<TStrongObjectPtr<UMaterialInterface>> ShadowMaterials;
 		TArray<TStrongObjectPtr<UMaterialInterface>> SharedMaterials;
 		FString SharedError;
 		if (!TestTrue(TEXT("Shared capture prepares native source and target material dependencies"),
 			Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(Shared, SharedMaterials, SharedError)))
 		{ AddError(SharedError); return false; }
-		if (!TestTrue(TEXT("The native shadow Image prepares complete own-paint alpha without a second capture"),
+		if (!TestTrue(TEXT("The native subtree shadow prepares its capture effect"),
 			Design2UMGEffectMaterialBuilder::PrepareRetainerEffectMaterials(ShadowOwner, ShadowMaterials, SharedError)))
 		{ AddError(SharedError); return false; }
-		const auto& ShadowEndpoint = ShadowOwner.Effect.SharedCapture->Source;
 		TestTrue(TEXT("Shared capture owns one prepared retainer material"), SharedMaterials.Num() == 1 && ShadowMaterials.Num() == 1);
-		TestTrue(TEXT("Shared capture persists both complete own-paint regions and curve coverage"),
-			!Endpoint.CoverageTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *Endpoint.CoverageTexture)
-			&& !ShadowEndpoint.PaintTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *ShadowEndpoint.PaintTexture)
-			&& !ShadowEndpoint.StrokeTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *ShadowEndpoint.StrokeTexture));
+		TestTrue(TEXT("Shared capture persists its curve coverage"),
+			!Endpoint.CoverageTexture.IsEmpty() && LoadObject<UTexture2D>(nullptr, *Endpoint.CoverageTexture));
 		auto* NativeCapture = NewObject<URetainerBox>(GetTransientPackage());
 		NativeCapture->SetContent(NewObject<UImage>(NativeCapture));
 		NativeCapture->SetEffectMaterial(LoadObject<UMaterialInterface>(nullptr, *Shared.Effect.EffectMaterial.GetValue()));
@@ -507,16 +498,17 @@ bool FGeometryMaskSaveFailurePropagationTest::RunTest(const FString&)
 		const FString FrameFilename = FPackageName::LongPackageNameToFilename(FrameMaterial->GetOutermost()->GetName(), FPackageName::GetAssetPackageExtension());
 		TestTrue(TEXT("Frame defaults are a persisted asset rather than an editor-only MID"),
 			FrameMaterial->IsA<UMaterialInstanceConstant>() && IFileManager::Get().FileExists(*FrameFilename));
-		auto* NativeShadow = NewObject<UImage>(GetTransientPackage());
-		FSlateBrush ShadowBrush;
-		ShadowBrush.SetResourceObject(LoadObject<UMaterialInterface>(nullptr, *ShadowOwner.Brush.MaterialRef.GetValue()));
-		NativeShadow->SetBrush(ShadowBrush);
-		if (!TestTrue(TEXT("Shadow Image persists the same measured owner frame"),
+		auto* NativeShadow = NewObject<URetainerBox>(GetTransientPackage());
+		NativeShadow->SetContent(NewObject<UImage>(NativeShadow));
+		NativeShadow->SetEffectMaterial(LoadObject<UMaterialInterface>(nullptr, *ShadowOwner.Effect.EffectMaterial.GetValue()));
+		if (!TestTrue(TEXT("Subtree shadow persists the same measured owner frame"),
 			Design2UMGEffectMaterialBuilder::FinalizeSharedCaptureFrame(NativeShadow, Frame, FVector2D(0.5,0.5), SharedError)))
 		{ AddError(SharedError); return false; }
 		FLinearColor ShadowFrame;
-		UMaterialInstanceDynamic* ShadowMID = NativeShadow->GetDynamicMaterial();
-		TestTrue(TEXT("Native shadow material inherits the common frame without capturing content"), ShadowMID
+		ON_SCOPE_EXIT { NativeShadow->ReleaseSlateResources(true); };
+		NativeShadow->TakeWidget();
+		UMaterialInstanceDynamic* ShadowMID = NativeShadow->GetEffectMaterial();
+		TestTrue(TEXT("Native subtree shadow inherits the common frame"), ShadowMID
 			&& ShadowMID->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), ShadowFrame) && ShadowFrame == DefaultFrame);
 		ON_SCOPE_EXIT { NativeCapture->ReleaseSlateResources(true); };
 		NativeCapture->TakeWidget();

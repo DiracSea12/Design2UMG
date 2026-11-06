@@ -14,6 +14,7 @@
 #include "DesignSchema.h"
 #include "UMGSchema.h"
 #include "UMGPropertyKeys.h"
+#include "UMGValueParser.h"
 #include "VisualMapper.h"
 #include "VisualMapperFillTransfer.h"
 #include "Design2UMGCoreTestHelpers.h"
@@ -145,7 +146,7 @@ bool FVisualMapperExplicitSideStrokeKeepsNonLayoutSurfaceTest::RunTest(const FSt
 	Widget.Type = TEXT("Image");
 	Widget.Id = TEXT("image_stroke_surface");
 	Widget.Name = TEXT("ImageStrokeSurface");
-	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+	VisualMapper::ApplyStrokeLayout(Widget, Node->Visual.Stroke);
 
 	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	TestEqual(TEXT("Non-layout content keeps the surface plus one stroke line"), Wrapped.Children.Num(), 2);
@@ -182,7 +183,7 @@ bool FVisualMapperExplicitSideStrokeKeepsPaddedSurfaceTest::RunTest(const FStrin
 	Widget.Bounds.W = 128.0f;
 	Widget.Bounds.H = 48.0f;
 
-	VisualMapper::ApplyStroke(Widget, Node->Visual.Stroke);
+	VisualMapper::ApplyStrokeLayout(Widget, Node->Visual.Stroke);
 	const FUMGWidgetNode Wrapped = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
 	TestEqual(TEXT("Explicit side stroke still uses an overlay"), Wrapped.Type, TEXT("Overlay"));
 	TestEqual(TEXT("Padding keeps the surface plus one stroke line"), Wrapped.Children.Num(), 2);
@@ -377,10 +378,10 @@ bool FVisualMapperShaderFillKeepsContentTransparentTest::RunTest(const FString& 
 	TestTrue(TEXT("Content fill is explicitly transparent instead of engine-default white"),
 		Carrier.Brush.BrushColor.IsSet() && Carrier.Brush.BrushColor.GetValue().Equals(FLinearColor::Transparent));
 	TestFalse(TEXT("Content does not duplicate the shader"), Carrier.Brush.Shader.IsSet());
-	TestEqual(TEXT("Content carrier retains its independent outline width"), Carrier.Brush.OutlineThickness.Get(0.0f), 2.0f);
-	TestTrue(TEXT("Content carrier retains its independent outline color"),
-		Carrier.Brush.OutlineColor.IsSet()
-		&& Carrier.Brush.OutlineColor.GetValue().Equals(FLinearColor(FColor(0x11, 0x22, 0x33))));
+	const FUMGWidgetNode Stroked = VisualMapperFillTransfer::WrapWithPaintedStroke(FUMGWidgetNode(Wrapped), Node, 1);
+	TestTrue(TEXT("Shader surface has an independent source-colored stroke"), Stroked.Children.Num() == 2
+		&& Stroked.Children[1].Brush.BrushColor.Get(FLinearColor::Transparent).Equals(FLinearColor(FColor(0x11, 0x22, 0x33)))
+		&& Stroked.Children[1].Path.StrokeThickness.Get(0) == 2.0f);
 	TestEqual(TEXT("Content carrier retains rounded outline drawing"),
 		Carrier.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType), ESlateBrushDrawType::RoundedBox);
 	TestEqual(TEXT("Content width hint is preserved"), Carrier.WidgetStyle.WidthOverride.Get(0.0f), 96.0f);
@@ -392,108 +393,40 @@ bool FVisualMapperShaderFillKeepsContentTransparentTest::RunTest(const FString& 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperTranslucentStrokeCompositesOverSolidFillTest,
-	"Design2UMG.VisualMapper.TranslucentStrokeCompositesOverSolidFill",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperStrokePaintOpacityTest,
+	"Design2UMG.VisualMapper.StrokePaintOpacity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FVisualMapperTranslucentStrokeCompositesOverSolidFillTest::RunTest(const FString& Parameters)
+bool FVisualMapperStrokePaintOpacityTest::RunTest(const FString&)
 {
-	// Pencil composites an inside stroke over the node fill at the edge band.
-	// The UMG RoundedBox outline instead REPLACES that band, so a translucent
-	// stroke over a dark fill must bake the composite into the outline color;
-	// otherwise the edge renders as a bare translucent stripe on transparency.
-	TSharedPtr<FDesignNode> Node = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
-	Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
-	Node->Visual.Stroke.Thickness.bUniform = true;
-	Node->Visual.Stroke.Thickness.Uniform = 1.0f;
-	Node->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
-
-	FUMGWidgetNode Widget;
-	Widget.Type = TEXT("Border");
-	VisualMapper::ApplyVisualProperties(Widget, Node);
-
-	if (!TestTrue(TEXT("Stroke outline color is set"), Widget.Brush.OutlineColor.IsSet()))
+	const auto CheckPaint = [&](const FString& StrokeColor, bool bHasFill, EDesignStrokeAlign Align)
 	{
-		return false;
-	}
-	// sRGB byte composite: 255*(26/255) + fill*(1-26/255) => (47, 54, 72).
-	const FLinearColor ExpectedComposited(FColor(47, 54, 72, 255));
-	const FLinearColor Actual = Widget.Brush.OutlineColor.GetValue();
-	TestTrue(TEXT("Translucent stroke bakes the over-fill composite into the outline color"),
-		FMath::Abs(Actual.R - ExpectedComposited.R) < 0.005f
-		&& FMath::Abs(Actual.G - ExpectedComposited.G) < 0.005f
-		&& FMath::Abs(Actual.B - ExpectedComposited.B) < 0.005f
-		&& FMath::Abs(Actual.A - 1.0f) < 0.005f);
-
-	// Opaque strokes must stay untouched (composite equals the stroke itself).
-	TSharedPtr<FDesignNode> OpaqueNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
-	OpaqueNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
-	OpaqueNode->Visual.Stroke.Thickness.bUniform = true;
-	OpaqueNode->Visual.Stroke.Thickness.Uniform = 1.0f;
-	OpaqueNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFAA00"));
-
-	FUMGWidgetNode OpaqueWidget;
-	OpaqueWidget.Type = TEXT("Border");
-	VisualMapper::ApplyVisualProperties(OpaqueWidget, OpaqueNode);
-	if (!TestTrue(TEXT("Opaque stroke outline color is set"), OpaqueWidget.Brush.OutlineColor.IsSet()))
-	{
-		return false;
-	}
-	const FLinearColor OpaqueExpected(FColor(255, 170, 0, 255));
-	const FLinearColor OpaqueActual = OpaqueWidget.Brush.OutlineColor.GetValue();
-	TestTrue(TEXT("Opaque stroke keeps its own color"),
-		FMath::Abs(OpaqueActual.R - OpaqueExpected.R) < 0.005f
-		&& FMath::Abs(OpaqueActual.G - OpaqueExpected.G) < 0.005f
-		&& FMath::Abs(OpaqueActual.B - OpaqueExpected.B) < 0.005f);
-
-	// Translucent stroke without a solid opaque fill stays as authored.
-	TSharedPtr<FDesignNode> BareNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
-	BareNode->Visual.Stroke.Thickness.bUniform = true;
-	BareNode->Visual.Stroke.Thickness.Uniform = 1.0f;
-	BareNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
-
-	FUMGWidgetNode BareWidget;
-	BareWidget.Type = TEXT("Border");
-	VisualMapper::ApplyVisualProperties(BareWidget, BareNode);
-	if (TestTrue(TEXT("Bare translucent stroke outline color is set"), BareWidget.Brush.OutlineColor.IsSet()))
-	{
-		const FLinearColor BareActual = BareWidget.Brush.OutlineColor.GetValue();
-		TestTrue(TEXT("Bare translucent stroke keeps authored alpha"),
-			BareActual.A > 0.05f && BareActual.A < 0.2f);
-	}
-
-	// Center/Outside strokes do not overlay the node's own fill (ApplyStroke
-	// pushes their band off the body), so the composite must NOT be baked and
-	// the outline keeps the authored translucent stroke color untouched.
-	for (const EDesignStrokeAlign Align : { EDesignStrokeAlign::Center, EDesignStrokeAlign::Outside })
-	{
-		TSharedPtr<FDesignNode> AlignedNode = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
-		AlignedNode->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
-		AlignedNode->Visual.Stroke.Align = Align;
-		AlignedNode->Visual.Stroke.Thickness.bUniform = true;
-		AlignedNode->Visual.Stroke.Thickness.Uniform = 1.0f;
-		AlignedNode->Visual.Stroke.Fill = FDesignFill::FromColor(TEXT("#FFFFFF1A"));
-
-		FUMGWidgetNode AlignedWidget;
-		AlignedWidget.Type = TEXT("Border");
-		VisualMapper::ApplyVisualProperties(AlignedWidget, AlignedNode);
-		if (TestTrue(TEXT("Non-inside stroke outline color is set"), AlignedWidget.Brush.OutlineColor.IsSet()))
-		{
-			const FLinearColor AlignedActual = AlignedWidget.Brush.OutlineColor.GetValue();
-			const FLinearColor Authored(FColor(255, 255, 255, 26));
-			TestTrue(TEXT("Non-inside translucent stroke is not composited over the fill"),
-				FMath::Abs(AlignedActual.R - Authored.R) < 0.005f
-				&& FMath::Abs(AlignedActual.G - Authored.G) < 0.005f
-				&& FMath::Abs(AlignedActual.B - Authored.B) < 0.005f
-				&& FMath::Abs(AlignedActual.A - Authored.A) < 0.005f);
-		}
-	}
+		auto Node = MakeFixedNode(EDesignNodeType::Frame, 64.0f, 48.0f);
+		if (bHasFill) Node->Visual.Fills.Add(FDesignFill::FromColor(TEXT("#171F33")));
+		Node->Visual.Stroke.Thickness.Uniform = 1.0f;
+		Node->Visual.Stroke.Align = Align;
+		Node->Visual.Stroke.Fill = FDesignFill::FromColor(StrokeColor);
+		FUMGWidgetNode Widget;
+		Widget.Type = TEXT("Border");
+		VisualMapper::ApplyVisualProperties(Widget, Node);
+		const auto Painted = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node);
+		const auto& Paint = Painted.Children.IsEmpty() ? Painted : Painted.Children.Last();
+		const FLinearColor Color = Paint.Type == TEXT("Border") ? Paint.Path.StrokeColor.Get(FLinearColor::Transparent)
+			: Paint.Brush.BrushColor.Get(FLinearColor::Transparent);
+		TestTrue(TEXT("Stroke paint retains its authored color and alpha"), Color.Equals(FUMGValueParser::ParseColor(StrokeColor)));
+		TestEqual(TEXT("Stroke source color remains unchanged"), Node->Visual.Stroke.Fill->SolidColor, StrokeColor);
+	};
+	CheckPaint(TEXT("#FFFFFF1A"), true, EDesignStrokeAlign::Inside);
+	CheckPaint(TEXT("#FFAA00"), true, EDesignStrokeAlign::Inside);
+	CheckPaint(TEXT("#FFFFFF1A"), false, EDesignStrokeAlign::Inside);
+	for (const auto Align : {EDesignStrokeAlign::Center, EDesignStrokeAlign::Outside})
+		CheckPaint(TEXT("#FFFFFF1A"), true, Align);
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperStrokeBrushSelectionTest,
-	"Design2UMG.VisualMapper.StrokeBrushSelection",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisualMapperStrokeLeavesFillBrushUnchangedTest,
+	"Design2UMG.VisualMapper.StrokeLeavesFillBrushUnchanged",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
-bool FVisualMapperStrokeBrushSelectionTest::RunTest(const FString&)
+bool FVisualMapperStrokeLeavesFillBrushUnchangedTest::RunTest(const FString&)
 {
 	FDesignStroke Stroke;
 	Stroke.Thickness.bUniform = true;
@@ -511,9 +444,8 @@ bool FVisualMapperStrokeBrushSelectionTest::RunTest(const FString&)
 		case 4: Widget.Brush.DrawAs = ESlateBrushDrawType::Image; break;
 		case 5: Widget.Brush.DrawAs = ESlateBrushDrawType::RoundedBox; break;
 		}
-		VisualMapper::ApplyStroke(Widget, Stroke);
-		const ESlateBrushDrawType::Type Expected = Variant == 4 ? ESlateBrushDrawType::Image
-			: (Variant == 0 || Variant == 5 ? ESlateBrushDrawType::RoundedBox : ESlateBrushDrawType::Box);
+		const auto Expected = Widget.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType);
+		VisualMapper::ApplyStrokeLayout(Widget, Stroke);
 		TestEqual(FString::Printf(TEXT("Stroke brush selection variant %d"), Variant),
 			Widget.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType), Expected);
 	}
@@ -694,7 +626,8 @@ bool FVisualMapperGlyphShadowBlendTransferTest::RunTest(const FString&)
     FUMGWidgetNode PlainText;
     PlainText.Type = TEXT("TextBlock");
     VisualMapper::ApplyVisualProperties(PlainText, TextNode);
-    TestTrue(TEXT("Normal-only text shadows keep the original native route"), PlainText.Shadow.BoxShadows.IsEmpty());
+    TestTrue(TEXT("Normal blurred text shadows retain their capture layers"), PlainText.Shadow.BoxShadows.Num() == 2
+        && PlainText.Shadow.BoxShadows[0].Blur == 4.0f && PlainText.Shadow.BoxShadows[1].BlendMode == TEXT("normal"));
 
     TextNode->Visual.Fills[0].BlendMode = TEXT("MULTIPLY");
     FDesignEffect Inner;
@@ -817,7 +750,7 @@ bool FVisualMapperStrokeInnerBlendTransferTest::RunTest(const FString&)
     ShapeContent.Type = TEXT("Image");
     LayeredShape.Children.Add(MoveTemp(ShapeContent));
     VisualMapper::ApplyVisualProperties(LayeredShape, ShapeNode);
-    TestTrue(TEXT("Layered fill fixture starts with a native outline"), LayeredShape.Brush.OutlineThickness.IsSet());
+    TestFalse(TEXT("Layered fill has no duplicate native outline"), LayeredShape.Brush.OutlineThickness.IsSet());
     FUMGWidgetNode LayeredStrokeGroup = Design2UMGConverterVisualSupport::ApplyVisualEffectWrappers(
         MoveTemp(LayeredShape), ShapeNode, FVisualMapperOptions(), true, false);
     TestTrue(TEXT("Layered fill clears its original outline and preserves child content"),

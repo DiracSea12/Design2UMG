@@ -372,19 +372,10 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 	CaptureSource.bClipContent = true;
 	CaptureSource.CornerRadii = Root.Effect.GeometryMaskCornerRadii.GetValue();
 	CaptureSource.ClipPaths = Root.Effect.GeometryMaskPaths;
-	CaptureSource.OwnPaint.Geometry.FillPaths = CaptureSource.ClipPaths;
-	CaptureSource.OwnPaint.Geometry.StrokePaths = TArray<FDesignGeometryPath>{{TEXT("M-2 -2H102V82H-2Z M0 0V80H100V0Z"), TEXT("evenodd")}};
-	CaptureSource.OwnPaint.StrokeAlignment = TEXT("outer");
-	FUMGSurfacePaint EndpointPaint;
-	EndpointPaint.Color = FLinearColor::White;
-	CaptureSource.OwnPaint.FillPaints = TArray<FUMGSurfacePaint>{EndpointPaint};
-	CaptureSource.OwnPaint.StrokePaint = EndpointPaint;
+	CaptureSource.CaptureBounds = FVector4(-2, -2, 104, 84);
+	Root.Effect.SharedCapture->bSubtreeShadow = true;
 	CaptureSource.BoxShadows.Add({TEXT("normal"), FVector2D(2, -3), 4, 0, FLinearColor::Black, true});
 	CaptureSource.CoverageTexture = TEXT("/Game/SharedCapture/Coverage.Coverage");
-	CaptureSource.PaintTexture = TEXT("/Game/SharedCapture/Fill.Fill");
-	CaptureSource.PaintRect = FVector4(0, 0, 100, 80);
-	CaptureSource.StrokeTexture = TEXT("/Game/SharedCapture/Stroke.Stroke");
-	CaptureSource.StrokeRect = FVector4(-2, -2, 104, 84);
 	auto& CaptureTarget = Root.Effect.SharedCapture->Targets.Add_GetRef(CaptureSource);
 	CaptureTarget.DestinationWidgetId = TEXT("endpoint-target");
 	CaptureTarget.Size = FVector2D(60, 40);
@@ -528,19 +519,9 @@ bool FWidgetDataSerializationCycleDeepEqualityTest::RunTest(const FString& Param
 		&& ParsedCapture.Source.ClipPaths.IsSet() && ParsedCapture.Source.ClipPaths->Num() == 1
 		&& ParsedCapture.Source.ClipPaths.GetValue()[0].Path == CaptureSource.ClipPaths.GetValue()[0].Path
 		&& ParsedCapture.Source.ClipPaths.GetValue()[0].FillRule == TEXT("nonzero"));
-	TestTrue(TEXT("Complete source own-paint regions survive serialization"),
-		ParsedCapture.Source.OwnPaint.Geometry.FillPaths.IsSet() && ParsedCapture.Source.OwnPaint.Geometry.FillPaths->Num() == 1
-		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.IsSet() && ParsedCapture.Source.OwnPaint.Geometry.StrokePaths->Num() == 1
-		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.GetValue()[0].Path == CaptureSource.OwnPaint.Geometry.StrokePaths.GetValue()[0].Path
-		&& ParsedCapture.Source.OwnPaint.Geometry.StrokePaths.GetValue()[0].FillRule == TEXT("evenodd")
-		&& ParsedCapture.Source.OwnPaint.StrokeAlignment == TEXT("outer")
-		&& ParsedCapture.Source.OwnPaint.FillPaints.IsSet() && ParsedCapture.Source.OwnPaint.FillPaints->Num() == 1
-		&& ParsedCapture.Source.OwnPaint.FillPaints.GetValue()[0].Color == FLinearColor::White
-		&& ParsedCapture.Source.OwnPaint.StrokePaint.IsSet() && ParsedCapture.Source.OwnPaint.StrokePaint->Color == FLinearColor::White);
-	TestTrue(TEXT("Shared capture persisted resource domains survive serialization"),
-		ParsedCapture.Source.CoverageTexture == CaptureSource.CoverageTexture && ParsedCapture.Source.PaintTexture == CaptureSource.PaintTexture
-		&& ParsedCapture.Source.PaintRect == CaptureSource.PaintRect && ParsedCapture.Source.StrokeTexture == CaptureSource.StrokeTexture
-		&& ParsedCapture.Source.StrokeRect == CaptureSource.StrokeRect);
+	TestTrue(TEXT("Capture role and bounds survive serialization"), ParsedCapture.bSubtreeShadow
+		&& ParsedCapture.Source.CaptureBounds == CaptureSource.CaptureBounds);
+	TestEqual(TEXT("Shared capture coverage resource survives serialization"), ParsedCapture.Source.CoverageTexture, CaptureSource.CoverageTexture);
 	const auto& ParsedTarget = ParsedCapture.Targets[0];
 	TestTrue(TEXT("Target identity and explicit clip-off remain distinct from source"),
 		ParsedTarget.DestinationWidgetId == CaptureTarget.DestinationWidgetId && ParsedTarget.Size == CaptureTarget.Size

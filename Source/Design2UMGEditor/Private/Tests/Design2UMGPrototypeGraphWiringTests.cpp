@@ -3686,9 +3686,9 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Both typed local roles exist"), VectorEndpoint && TextEndpoint)) return false;
 	const auto* VectorPaintModel = FindIrNodeById(LocalData.RootWidget, VectorEndpoint->SourceVisualWidgetId);
 	TestTrue(TEXT("Static vector paint inputs do not bake the original node opacity"), VectorPaintModel
-		&& VectorPaintModel->Path.SourcePaintGeometry.IsSet() && VectorPaintModel->Path.SourcePaintGeometry->FillPaints.IsSet()
-		&& VectorPaintModel->Path.SourcePaintGeometry->FillPaints->Num() == 1
-		&& VectorPaintModel->Path.SourcePaintGeometry->FillPaints.GetValue()[0].Color.A == 1.f);
+		&& VectorPaintModel->Children.Num() == 2
+		&& VectorPaintModel->Children[0].Path.FillColor.Get(FLinearColor::Transparent).A == 1.f
+		&& VectorPaintModel->Children[1].Brush.BrushColor.Get(FLinearColor::Transparent).A == 1.f);
 	auto* Outgoing = RuntimeWidget(VectorEndpoint->SourcePresentationWidgetId);
 	auto* Incoming = RuntimeWidget(VectorEndpoint->TargetPresentationWidgetId);
 	auto* OutgoingText = Cast<UTextBlock>(RuntimeWidget(TextEndpoint->SourcePresentationWidgetId));

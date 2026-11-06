@@ -1526,51 +1526,53 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 		}
 	}
 
+	const auto RasterizeRegions = [&](const TOptional<TArray<FDesignGeometryPath>>& Regions, TArray<FColor>& Mask,
+		const auto& FillRegion) -> bool
+	{
+		if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+		{ if (OutError) *OutError = BudgetError; return false; }
+		Mask.SetNumZeroed(Pixels.Num());
+		if (!Regions.IsSet()) return true;
+		for (const auto& Region : Regions.GetValue())
+		{
+			TArray<TArray<FPathPoint>> Contours;
+			FBox2D RegionBounds;
+			if (!ParsePathData(Region.Path, Contours, RegionBounds))
+			{ if (OutError) *OutError = TEXT("Failed to parse source surface geometry"); return false; }
+			for (auto& Contour : Contours) for (auto& Point : Contour)
+			{
+				Point.X = Point.X * CoordinateScaleX + OffsetX;
+				Point.Y = Point.Y * CoordinateScaleY + OffsetY;
+			}
+			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
+			{ if (OutError) *OutError = BudgetError; return false; }
+			TArray<FColor> RegionMask;
+			FillRegion(Contours, RegionMask, Width, Height, FColor::White,
+				Region.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
+			for (int32 Index = 0; Index < Mask.Num(); ++Index)
+				if (RegionMask[Index].A > Mask[Index].A) Mask[Index] = RegionMask[Index];
+		}
+		return true;
+	};
+	const auto ClipStroke = [](TArray<FColor>& Stroke, const TArray<FColor>& Interior, bool bInside)
+	{
+		for (int32 Index = 0; Index < Stroke.Num(); ++Index)
+		{
+			const uint32 Coverage = bInside ? Interior[Index].A : 255 - Interior[Index].A;
+			Stroke[Index].A = static_cast<uint8>((Stroke[Index].A * Coverage + 127) / 255);
+			if (Stroke[Index].A == 0) Stroke[Index] = FColor::Transparent;
+		}
+	};
+
 	if (bSourceStrokeRegion)
 	{
 		const auto& Source = PathData.SourcePaintGeometry.GetValue();
 		if ((Source.StrokeAlignment == TEXT("inner") && !HasExplicitlyEmptyFillGeometry(Source))
 			|| Source.StrokeAlignment == TEXT("outer"))
 		{
-			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-			{
-				if (OutError) *OutError = BudgetError;
-				return nullptr;
-			}
 			TArray<FColor> Interior;
-			Interior.SetNumZeroed(Pixels.Num());
-			if (Source.Geometry.FillPaths.IsSet())
-			{
-				TArray<FColor> FillMask;
-				for (const auto& FillPath : Source.Geometry.FillPaths.GetValue())
-				{
-					TArray<TArray<FPathPoint>> FillContours;
-					FBox2D FillBounds;
-					if (!ParsePathData(FillPath.Path, FillContours, FillBounds))
-					{
-						if (OutError) *OutError = TEXT("Failed to parse source fill geometry");
-						return nullptr;
-					}
-					for (auto& Contour : FillContours)
-						for (auto& Point : Contour)
-						{
-							Point.X = Point.X * CoordinateScaleX + OffsetX;
-							Point.Y = Point.Y * CoordinateScaleY + OffsetY;
-						}
-					if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-					{
-						if (OutError) *OutError = BudgetError;
-						return nullptr;
-					}
-					ScanlineFill(FillContours, FillMask, Width, Height, FColor::White,
-						FillPath.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
-					for (int32 Index = 0; Index < Interior.Num(); ++Index)
-						Interior[Index].A = FMath::Max(Interior[Index].A, FillMask[Index].A);
-				}
-			}
-			for (int32 Index = 0; Index < Pixels.Num(); ++Index)
-				if ((Interior[Index].A > 0) != (Source.StrokeAlignment == TEXT("inner")))
-					Pixels[Index] = FColor::Transparent;
+			if (!RasterizeRegions(Source.Geometry.FillPaths, Interior, ScanlineFillCoverage)) return nullptr;
+			ClipStroke(Pixels, Interior, Source.StrokeAlignment == TEXT("inner"));
 		}
 	}
 
@@ -1620,34 +1622,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 	if (bSourceSurface)
 	{
 		for (auto& Pixel : Pixels) Pixel = FColor::Transparent;
-		const auto RasterizeRegions = [&](const TOptional<TArray<FDesignGeometryPath>>& Regions, TArray<FColor>& Mask,
-			const auto& FillRegion) -> bool
-		{
-			if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-			{ if (OutError) *OutError = BudgetError; return false; }
-			Mask.SetNumZeroed(Pixels.Num());
-			if (!Regions.IsSet()) return true;
-			for (const auto& Region : Regions.GetValue())
-			{
-				TArray<TArray<FPathPoint>> Contours;
-				FBox2D RegionBounds;
-				if (!ParsePathData(Region.Path, Contours, RegionBounds))
-				{ if (OutError) *OutError = TEXT("Failed to parse source surface geometry"); return false; }
-				for (auto& Contour : Contours) for (auto& Point : Contour)
-				{
-					Point.X = Point.X * CoordinateScaleX + OffsetX;
-					Point.Y = Point.Y * CoordinateScaleY + OffsetY;
-				}
-				if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
-				{ if (OutError) *OutError = BudgetError; return false; }
-				TArray<FColor> RegionMask;
-				FillRegion(Contours, RegionMask, Width, Height, FColor::White,
-					Region.FillRule.Equals(TEXT("evenodd"), ESearchCase::IgnoreCase));
-				for (int32 Index = 0; Index < Mask.Num(); ++Index)
-					if (RegionMask[Index].A > Mask[Index].A) Mask[Index] = RegionMask[Index];
-			}
-			return true;
-		};
+
 		TArray<FColor> FillMask, StrokeMask;
 		if (!RasterizeRegions(Surface->Geometry.FillPaths, FillMask, ScanlineFillCoverage)
 			|| !RasterizeRegions(Surface->Geometry.StrokePaths, StrokeMask, ScanlineFill)) return nullptr;
@@ -1655,15 +1630,7 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 		const bool bInnerStroke = bHasSourceStroke && Surface->StrokeAlignment == TEXT("inner")
 			&& !HasExplicitlyEmptyFillGeometry(*Surface);
 		const bool bOuterStroke = bHasSourceStroke && Surface->StrokeAlignment == TEXT("outer");
-		if (bOuterStroke)
-		{
-			for (int32 Index = 0; Index < StrokeMask.Num(); ++Index)
-			{
-				const uint32 Coverage = 255 - FillMask[Index].A;
-				StrokeMask[Index].A = static_cast<uint8>((StrokeMask[Index].A * Coverage + 127) / 255);
-				if (StrokeMask[Index].A == 0) StrokeMask[Index] = FColor::Transparent;
-			}
-		}
+		if (bOuterStroke) ClipStroke(StrokeMask, FillMask, false);
 
 		const auto CompositePaint = [&](const TArray<FColor>& Mask, const FUMGSurfacePaint& SourcePaint,
 			bool bDisjointCoverage = false) -> bool
@@ -1766,9 +1733,8 @@ UTexture2D* FDesignPathRasterizer::Rasterize(const FDesignPathRasterRequest& Req
 				if (!Budget->ConsumeDecodedPixels(static_cast<int64>(Width) * Height, BudgetError))
 				{ if (OutError) *OutError = BudgetError; return nullptr; }
 				TArray<FColor> Interior;
-				ScanlineFill(SubPaths, Interior, Width, Height, FColor::White, bEvenOdd);
-				for (int32 Index = 0; Index < StrokePixels.Num(); ++Index)
-					if ((Interior[Index].A > 0) != (Alignment == TEXT("inner"))) StrokePixels[Index] = FColor::Transparent;
+				ScanlineFillCoverage(SubPaths, Interior, Width, Height, FColor::White, bEvenOdd);
+				ClipStroke(StrokePixels, Interior, Alignment == TEXT("inner"));
 			}
 			UTexture2D* PaintedStroke = StrokePaint ? PaintMask(StrokePixels, *StrokePaint) : nullptr;
 			if (StrokePaint && !PaintedStroke) return nullptr;

@@ -1143,62 +1143,6 @@ bool Design2UMGEffectMaterialBuilder::PrepareSurfacePaintMaterial(FUMGWidgetNode
 
 namespace
 {
-bool PrepareCapturePaintRegion(FUMGSharedCaptureEndpoint& Endpoint, bool bStroke,
-    FString& Error, DesignImageResources::FImageOperationBudget* Budget)
-{
-    FUMGSourcePaintGeometry Paint = Endpoint.OwnPaint;
-    if (!Paint.Geometry.FillPaths.IsSet() || !Paint.Geometry.StrokePaths.IsSet()
-        || !Paint.FillPaints.IsSet() || !Paint.StrokePaint.IsSet())
-    { Error = TEXT("Shared capture shadow requires complete native own-paint regions"); return false; }
-    const auto& Regions = bStroke ? Paint.Geometry.StrokePaths.GetValue() : Paint.Geometry.FillPaths.GetValue();
-    if (Regions.IsEmpty() || (!bStroke && Paint.FillPaints->IsEmpty())) return true;
-    // FUMGSourcePaintGeometry uses paint color alpha, as in the existing static raster path.
-    if (bStroke)
-    {
-        Paint.FillPaints = TArray<FUMGSurfacePaint>();
-        // An inside stroke still needs the actual fill contour for clipping.
-        if (Paint.StrokeAlignment != TEXT("inner")) Paint.Geometry.FillPaths = TArray<FDesignGeometryPath>();
-    }
-    else
-    {
-        Paint.Geometry.StrokePaths = TArray<FDesignGeometryPath>();
-        FUMGSurfacePaint Empty;
-        Empty.Color = FLinearColor::Transparent;
-        Paint.StrokePaint = Empty;
-    }
-    FUMGWidgetNode Region;
-    Region.Type = UMGWidgetTypes::Image;
-    Region.Path.CanvasSize = Endpoint.Size;
-    Region.Path.ViewBox = FVector4(0, 0, Endpoint.Size.X, Endpoint.Size.Y);
-    Region.Path.SourcePaintGeometry = Paint;
-    if (bStroke) Region.Path.StrokeGeometry = Regions[0].Path;
-    else Region.Path.Geometry = Regions[0].Path;
-    // A stroke-only request keeps outside ink in the original authored coordinates.
-    if (bStroke && Paint.StrokeAlignment == TEXT("inner")) Region.Path.Geometry = Paint.Geometry.FillPaths->IsEmpty()
-        ? Regions[0].Path : Paint.Geometry.FillPaths.GetValue()[0].Path;
-    TArray<uint8> Identity;
-    FMemoryWriter Writer(Identity);
-    FVector2D Size = Endpoint.Size;
-    Writer << Size << Paint;
-    FSHAHash Hash;
-    FSHA1::HashBuffer(Identity.GetData(), Identity.Num(), Hash.Hash);
-    Region.Id = Region.Name = TEXT("OwnPaint_") + Hash.ToString();
-    FDesignPathRasterRequest Request;
-    if (!FDesignPathRasterizer::TryBuildRequest(Region, Request))
-    { Error = TEXT("Shared capture own-paint raster has invalid geometry or dimensions"); return false; }
-    const FVector2D Units(Endpoint.Size.X / Request.PaintSize.X, Endpoint.Size.Y / Request.PaintSize.Y);
-    const FVector4 Rect(-Request.PaintOffset.X * Units.X, -Request.PaintOffset.Y * Units.Y,
-        Request.Size.X * Units.X, Request.Size.Y * Units.Y);
-    if (!FPreBuildResourceNormalizer::NormalizePathTextures(Region,
-        TEXT("/Game/Design2UMG/GeneratedTextures/SharedCapturePaint"), TEXT("OwnPaint"), &Error, Budget)) return false;
-    const FString Texture = Region.Brush.Image.TexturePath.Get(FString());
-    if (Texture.IsEmpty() || !LoadObject<UTexture2D>(nullptr, *Texture))
-    { Error = TEXT("Shared capture own-paint texture was not persisted"); return false; }
-    if (bStroke) { Endpoint.StrokeTexture = Texture; Endpoint.StrokeRect = Rect; }
-    else { Endpoint.PaintTexture = Texture; Endpoint.PaintRect = Rect; }
-    return true;
-}
-
 bool PrepareCaptureEndpoint(FUMGSharedCaptureEndpoint& Endpoint, bool bShadow, FString& Error,
     DesignImageResources::FImageOperationBudget* Budget)
 {
@@ -1206,8 +1150,6 @@ bool PrepareCaptureEndpoint(FUMGSharedCaptureEndpoint& Endpoint, bool bShadow, F
     if (!FDesignPathRasterizer::TryGetRasterSize(Endpoint.Size.X, Endpoint.Size.Y, RasterSize))
     { Error = TEXT("Shared capture endpoint has invalid native paint size"); return false; }
     Endpoint.CoverageTexture.Reset();
-    Endpoint.PaintTexture.Reset(); Endpoint.PaintRect = FVector4(0, 0, 0, 0);
-    Endpoint.StrokeTexture.Reset(); Endpoint.StrokeRect = FVector4(0, 0, 0, 0);
     if (!bShadow && Endpoint.bClipContent && Endpoint.ClipPaths.IsSet())
     {
         FUMGWidgetNode Coverage;
@@ -1219,17 +1161,6 @@ bool PrepareCaptureEndpoint(FUMGSharedCaptureEndpoint& Endpoint, bool bShadow, F
         Endpoint.CoverageTexture = Texture->GetPathName();
     }
     if (!bShadow || Endpoint.BoxShadows.IsEmpty()) return true;
-    // The supported own-paint shadow substitution requires the opaque clipped surface
-    // established by the source analysis, rather than an arbitrary translucent subtree.
-    const bool bOpaqueBase = Endpoint.OwnPaint.FillPaints.IsSet()
-        && Endpoint.OwnPaint.FillPaints->ContainsByPredicate([](const FUMGSurfacePaint& Paint)
-        {
-            return Paint.Color.A == 1.0f && Paint.Opacity == 1.0f && !Paint.Gradient.HasAny()
-                && Paint.Image.TexturePath.Get(FString()).IsEmpty()
-                && (Paint.BlendMode.IsEmpty() || Paint.BlendMode.Equals(TEXT("normal"), ESearchCase::IgnoreCase));
-        });
-    if (!Endpoint.bClipContent || !bOpaqueBase)
-    { Error = TEXT("Shared capture own-paint alpha does not bound this subtree shadow"); return false; }
     for (const auto& Shadow : Endpoint.BoxShadows)
     {
         int32 Blend = 0;
@@ -1238,8 +1169,7 @@ bool PrepareCaptureEndpoint(FUMGSharedCaptureEndpoint& Endpoint, bool bShadow, F
             || !FMath::IsFinite(Shadow.Blur) || Shadow.Blur < 0 || Shadow.Blur > MAX_flt / 3.0f)
         { Error = TEXT("Shared capture endpoint shadow requires supported normal paint and zero spread"); return false; }
     }
-    return PrepareCapturePaintRegion(Endpoint, false, Error, Budget)
-        && PrepareCapturePaintRegion(Endpoint, true, Error, Budget);
+    return true;
 }
 
 struct FCaptureTextureInput
@@ -1288,21 +1218,17 @@ FString CaptureEndpointCode(const FUMGSharedCaptureEndpoint& Endpoint, int32 Ind
         }
     }
     if (!bShadow || Endpoint.BoxShadows.IsEmpty()) return Code + TEXT("}\n");
-    const FString FillName = Endpoint.PaintTexture.IsEmpty() ? FString() : TextureInput(Endpoint.PaintTexture, TEXT("Fill"));
-    const FString StrokeName = Endpoint.StrokeTexture.IsEmpty() ? FString() : TextureInput(Endpoint.StrokeTexture, TEXT("Stroke"));
-    const FString Fill = FillName.IsEmpty() ? TEXT("0") : CaptureAlphaSample(FillName, Endpoint.PaintRect, TEXT("SampleP"));
-    const FString Stroke = StrokeName.IsEmpty() ? TEXT("0") : CaptureAlphaSample(StrokeName, Endpoint.StrokeRect, TEXT("SampleP"));
-    const FString Alpha = TEXT("(1-(1-") + Fill + TEXT(")*(1-") + Stroke + TEXT("))");
+    const FString Alpha = TEXT("(all(SampleP>=0)&&all(SampleP<=1)?Texture.SampleLevel(TextureSampler,SampleP,0).a:0)");
     for (int32 Layer = Endpoint.BoxShadows.Num() - 1; Layer >= 0; --Layer)
     {
         const auto& S = Endpoint.BoxShadows[Layer];
-        Code += FString::Printf(TEXT("{ float2 Shifted=LocalP-float2(%.17g,%.17g); float A=0;\n"), S.Offset.X, S.Offset.Y);
+        Code += FString::Printf(TEXT("{ float2 Shifted=UV-float2(%.17g,%.17g)/CaptureRect.zw; float A=0;\n"), S.Offset.X, S.Offset.Y);
         const float Sigma = S.Blur * 0.5f;
         if (Sigma < 0.5f) Code += TEXT("float2 SampleP=Shifted; A=") + Alpha + TEXT(";\n");
         else
         {
             const auto Kernel = Design2UMGEffectMaterialBuilder::MakeSubtreeShadowKernel(Sigma);
-            Code += FString::Printf(TEXT("float WeightSum=0; [loop] for(int y=-%d;y<=%d;++y) { [loop] for(int x=-%d;x<=%d;++x) { float Weight=exp(-float(x*x+y*y)/%.17g); float2 SampleP=Shifted+float2(x,y)*%.17g; A+=(%s)*Weight; WeightSum+=Weight; }} A/=WeightSum;\n"),
+            Code += FString::Printf(TEXT("float WeightSum=0; [loop] for(int y=-%d;y<=%d;++y) { [loop] for(int x=-%d;x<=%d;++x) { float Weight=exp(-float(x*x+y*y)/%.17g); float2 SampleP=Shifted+float2(x,y)*%.17g/CaptureRect.zw; A+=(%s)*Weight; WeightSum+=Weight; }} A/=WeightSum;\n"),
                 Kernel.Radius, Kernel.Radius, Kernel.Radius, Kernel.Radius,
                 2.0f * FMath::Square(Sigma / Kernel.Step), Kernel.Step, *Alpha);
         }
@@ -1316,11 +1242,11 @@ FString CaptureEndpointCode(const FUMGSharedCaptureEndpoint& Endpoint, int32 Ind
 bool Design2UMGEffectMaterialBuilder::PrepareSharedCaptureMaterial(FUMGWidgetNode& Root, FString& Error,
     DesignImageResources::FImageOperationBudget* Budget)
 {
-    if ((Root.Type != UMGWidgetTypes::RetainerBox && Root.Type != UMGWidgetTypes::Image) || !Root.Effect.SharedCapture.IsSet())
-    { Error = TEXT("Shared capture requires a native Image or Retainer and typed endpoints"); return false; }
+    if (Root.Type != UMGWidgetTypes::RetainerBox || !Root.Effect.SharedCapture.IsSet())
+    { Error = TEXT("Shared capture requires a native Retainer and typed endpoints"); return false; }
     DesignImageResources::FImageOperationBudget LocalBudget(DesignImageResources::GetGeneratedTextureLimits());
     if (!Budget) Budget = &LocalBudget;
-    const bool bShadow = Root.Type == UMGWidgetTypes::Image;
+    const bool bShadow = Root.Effect.SharedCapture->bSubtreeShadow;
     auto& Capture = Root.Effect.SharedCapture.GetValue();
     if (!PrepareCaptureEndpoint(Capture.Source, bShadow, Error, Budget)) return false;
     for (auto& Target : Capture.Targets) if (!PrepareCaptureEndpoint(Target, bShadow, Error, Budget)) return false;
@@ -1334,7 +1260,7 @@ bool Design2UMGEffectMaterialBuilder::PrepareSharedCaptureMaterial(FUMGWidgetNod
         Code += CaptureEndpointCode(Capture.Targets[I], I + 1, TEXT("Mask"), TEXT("Shadow"), bShadow, Inputs);
         Code += TEXT("TargetMask=Mask; TargetShadow=Shadow; }\n");
     }
-    Code += bShadow ? TEXT("return lerp(SourceShadow,TargetShadow,saturate(PaintProgress));")
+    Code += bShadow ? TEXT("float4 Base=Texture.SampleLevel(TextureSampler,UV,0); float4 Shadow=lerp(SourceShadow,TargetShadow,saturate(PaintProgress)); return float4(Base.rgb+Shadow.rgb*(1-Base.a),Base.a+Shadow.a*(1-Base.a));")
         : TEXT("return Texture.SampleLevel(TextureSampler,UV,0)*lerp(SourceMask,TargetMask,saturate(PaintProgress));");
     FString Identity = Code;
     for (const auto& Input : Inputs)
@@ -1361,7 +1287,7 @@ bool Design2UMGEffectMaterialBuilder::PrepareSharedCaptureMaterial(FUMGWidgetNod
         Shader->Code = Code;
         Shader->OutputType = CMOT_Float4;
         Design2UMGMaterialAccess::AddExpression(*Material, *Shader);
-        if (!bShadow) AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("Texture"));
+        AddCustomInput<UMaterialExpressionTextureObjectParameter>(Material, Shader, TEXT("Texture"));
         AddCustomInput<UMaterialExpressionTextureCoordinate>(Material, Shader, TEXT("UV"));
         auto* Rect = AddCustomInput<UMaterialExpressionVectorParameter>(Material, Shader, TEXT("CaptureRect"));
         // Vector parameters expose RGB at output 0 and RGBA at output 5.
@@ -1382,8 +1308,7 @@ bool Design2UMGEffectMaterialBuilder::PrepareSharedCaptureMaterial(FUMGWidgetNod
         if (!SaveGeneratedMaterialAsset(Material, Filename)) { Error = TEXT("Could not persist shared capture material"); return false; }
     }
     if (!EnsurePaintMaterial(Material, Root.Name, Error)) return false;
-    if (bShadow) Root.Brush.MaterialRef = ObjectPath;
-    else Root.Effect.EffectMaterial = ObjectPath;
+    Root.Effect.EffectMaterial = ObjectPath;
     Root.Effect.TextureParameter = TEXT("Texture");
     Root.Effect.bRetainRendering = true;
     return true;
@@ -1394,12 +1319,10 @@ bool Design2UMGEffectMaterialBuilder::FinalizeSharedCaptureFrame(UWidget* Owner,
 {
     FIntPoint PixelSize;
     auto* Retainer = Cast<URetainerBox>(Owner);
-    auto* Image = Cast<UImage>(Owner);
-    if ((!Retainer && !Image) || !FMath::IsFinite(CaptureRect.X) || !FMath::IsFinite(CaptureRect.Y)
+    if (!Retainer || !FMath::IsFinite(CaptureRect.X) || !FMath::IsFinite(CaptureRect.Y)
         || !DesignImageResources::GetGeneratedTextureLimits().TryGetPixelSize(CaptureRect.Z, CaptureRect.W, PixelSize))
     { Error = TEXT("Shared capture frame exceeds the existing generated-resource limits"); return false; }
-    UMaterialInterface* Parent = Retainer ? const_cast<UMaterialInterface*>(Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Retainer))
-        : Cast<UMaterialInterface>(Design2UMGWidgetPropertyAccess::GetBrush(*Image).GetResourceObject());
+    UMaterialInterface* Parent = const_cast<UMaterialInterface*>(Design2UMGWidgetPropertyAccess::GetRetainerEffectMaterialInterface(*Retainer));
     float Progress = 0;
     FLinearColor DefaultRect;
     if (!Parent || !Parent->GetVectorParameterValue(FMaterialParameterInfo(TEXT("CaptureRect")), DefaultRect)
@@ -1439,13 +1362,7 @@ bool Design2UMGEffectMaterialBuilder::FinalizeSharedCaptureFrame(UWidget* Owner,
         IFileManager::Get().MakeDirectory(*FPaths::GetPath(Filename), true);
         if (!SaveGeneratedMaterialAsset(Instance, Filename)) { Error = TEXT("Could not persist shared capture frame"); return false; }
     }
-    if (Retainer) Retainer->SetEffectMaterial(Instance);
-    else
-    {
-        FSlateBrush Brush = Design2UMGWidgetPropertyAccess::GetBrush(*Image);
-        Brush.SetResourceObject(Instance);
-        Image->SetBrush(Brush);
-    }
+    Retainer->SetEffectMaterial(Instance);
     return true;
 }
 

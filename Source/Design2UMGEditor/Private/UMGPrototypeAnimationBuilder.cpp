@@ -295,17 +295,12 @@ namespace
 	FAnimationWidget SurfaceOwner(const FAnimationWidget& Target)
 	{
 		FAnimationWidget Visual = ColorOwner(Target);
-		if (Visual.Node->Type == TEXT("Overlay") && Visual.Node->Children.Num() == 2
-			&& Visual.Node->Children[0].Effect.SurfacePaints.IsSet())
+		if (Visual.Node->Effect.SurfacePaints.IsSet()) return Visual;
+		if (!Visual.Node->Children.IsEmpty() && Visual.Node->Children[0].Effect.SurfacePaints.IsSet())
 			return {CastChecked<UPanelWidget>(Visual.Widget)->GetChildAt(0), &Visual.Node->Children[0]};
-		FAnimationWidget Result{nullptr, nullptr};
-		const FString ProducerId = Visual.Node->Id + TEXT("__surface_paint");
-		VisitSourceWidgets(*Visual.Node, Visual.Widget, [&](const FUMGWidgetNode& Node, UWidget* Widget)
-		{
-			if (Node.Id == ProducerId && Node.Effect.SurfacePaints.IsSet()) Result = {Widget, &Node};
-		});
-		return Result;
+		return {};
 	}
+
 	UMovieSceneMarginSection* AddSlotTrack(UWidgetAnimation* Animation, UWidget* Widget, FName Property, const FString& Path, const FMargin& Start, const FMargin& End, FChannelWriter Keys)
 	{
 		UPanelSlot* Slot = Widget->Slot;
@@ -369,16 +364,9 @@ namespace
 	/** Extends capture bounds by an endpoint's blurred box shadows, with the paint origin ranging over [Low, High]. */
 	void IncludeShadowPaint(FBox2D& Bounds, const FUMGSharedCaptureEndpoint& Endpoint, const FVector2D& Low, const FVector2D& High)
 	{
-		for (const auto& Shadow : Endpoint.BoxShadows)
-		{
-			const double Gutter = FMath::CeilToDouble(Shadow.Blur * 1.5 + FMath::Abs(Shadow.Spread)) + 1;
-			for (const FVector4& Paint : {Endpoint.PaintRect, Endpoint.StrokeRect})
-				if (Paint.Z > 0 && Paint.W > 0)
-				{
-					Bounds += FVector2D(Low.X + Paint.X + Shadow.Offset.X - Gutter, Low.Y + Paint.Y + Shadow.Offset.Y - Gutter);
-					Bounds += FVector2D(High.X + Paint.X + Paint.Z + Shadow.Offset.X + Gutter, High.Y + Paint.Y + Paint.W + Shadow.Offset.Y + Gutter);
-				}
-		}
+		const FVector4& Paint = Endpoint.CaptureBounds;
+		Bounds += FVector2D(Low.X + Paint.X, Low.Y + Paint.Y);
+		Bounds += FVector2D(High.X + Paint.X + Paint.Z, High.Y + Paint.Y + Paint.W);
 	}
 
 	struct FSharedCaptureFrame
@@ -455,7 +443,8 @@ namespace
 		{
 			UWidget* Widget = Pair.Key;
 			const auto& Node = *Pair.Value;
-			if (Node.Type != TEXT("RetainerBox") || !Node.Effect.SharedCapture.IsSet() || Frames.Contains(Widget)) continue;
+			if (Node.Type != TEXT("RetainerBox") || !Node.Effect.SharedCapture.IsSet()
+				|| Node.Effect.SharedCapture->bSubtreeShadow || Frames.Contains(Widget)) continue;
 			const auto& Endpoint = Node.Effect.SharedCapture->Source;
 			auto* Parent = Cast<UPanelWidget>(Widget->GetParent());
 			const auto* ParentNode = Models.FindRef(Parent);
@@ -468,12 +457,13 @@ namespace
 			Frame.Capture = Widget; Frame.SourceSize = Endpoint.Size; Frame.Pivot = Parent->GetRenderTransformPivot();
 			Frame.Content = CastChecked<UPanelWidget>(CastChecked<URetainerBox>(Widget)->GetContent())->GetChildAt(0);
 			Frame.Bounds = Bounds;
-			for (int32 Index = 0; Index < ParentNode->Children.Num(); ++Index)
+			UWidget* Shadow = Parent->GetParent() ? Parent->GetParent()->GetParent() : nullptr;
+			const auto* ShadowNode = Models.FindRef(Shadow);
+			if (ShadowNode && ShadowNode->Effect.SharedCapture.IsSet() && ShadowNode->Effect.SharedCapture->bSubtreeShadow)
 			{
-				const auto& Child = ParentNode->Children[Index];
-				if (Child.Type != TEXT("Image") || !Child.Effect.SharedCapture.IsSet()) continue;
-				Frame.Shadow = Parent->GetChildAt(Index);
-				IncludeShadowPaint(Frame.Bounds, Child.Effect.SharedCapture->Source, FVector2D::ZeroVector, FVector2D::ZeroVector);
+				Frame.Shadow = Shadow;
+				Frame.Pivot = Shadow->GetParent()->GetRenderTransformPivot();
+				IncludeShadowPaint(Frame.Bounds, ShadowNode->Effect.SharedCapture->Source, FVector2D::ZeroVector, FVector2D::ZeroVector);
 			}
 		}
 		return true;
@@ -496,7 +486,14 @@ namespace
 			}
 			const FMargin Padding(Origin.X, Origin.Y, Frame.SourceSize.X - Frame.Bounds.Max.X, Frame.SourceSize.Y - Frame.Bounds.Max.Y);
 			CastChecked<UOverlaySlot>(Frame.Capture->Slot)->SetPadding(Padding);
-			if (Frame.Shadow) CastChecked<UOverlaySlot>(Frame.Shadow->Slot)->SetPadding(Padding);
+			if (Frame.Shadow)
+			{
+				CastChecked<UOverlaySlot>(Frame.Shadow->Slot)->SetPadding(Padding);
+				auto* Paints = CastChecked<UPanelWidget>(CastChecked<URetainerBox>(Frame.Shadow)->GetContent())->GetChildAt(0);
+				auto* PaintSlot = CastChecked<UCanvasPanelSlot>(Paints->Slot);
+				PaintSlot->SetAutoSize(false); PaintSlot->SetAnchors(FAnchors(0)); PaintSlot->SetAlignment(FVector2D::ZeroVector);
+				PaintSlot->SetOffsets(FMargin(-Origin.X, -Origin.Y, Frame.SourceSize.X, Frame.SourceSize.Y));
+			}
 			auto* ContentSlot = CastChecked<UCanvasPanelSlot>(Frame.Content->Slot);
 			ContentSlot->SetAutoSize(false); ContentSlot->SetAnchors(FAnchors(0)); ContentSlot->SetAlignment(FVector2D::ZeroVector);
 			ContentSlot->SetOffsets(FMargin(-Origin.X, -Origin.Y, Frame.SourceSize.X, Frame.SourceSize.Y));
@@ -686,7 +683,8 @@ namespace
 			const FVector2D OffsetA = A.Position - ParentPositionA, OffsetB = B.Position - ParentPositionB;
 			const FMargin Start(OffsetA.X, OffsetA.Y, A.Size.X, A.Size.Y), End(OffsetB.X, OffsetB.Y, B.Size.X, B.Size.Y);
 			Slot->SetAutoSize(false); Slot->SetAnchors(FAnchors(0)); Slot->SetAlignment(FVector2D::ZeroVector); Slot->SetOffsets(Start);
-			if (!Mapping.DestinationWidgetId.IsEmpty()) AddSlotTrack(Animation, Painted.Widget, TEXT("Offsets"), TEXT("LayoutData.Offsets"), Start, End, Keys);
+			if (!Mapping.DestinationWidgetId.IsEmpty())
+				LayoutSections.Add(Painted.Widget, AddSlotTrack(Animation, Painted.Widget, TEXT("Offsets"), TEXT("LayoutData.Offsets"), Start, End, Keys));
 			return true;
 		}
 
@@ -860,6 +858,11 @@ namespace
 					return Fail(TEXT("shared capture content has no positive measured logical endpoints"));
 				RegisterFrame(Canonical, CanonicalShadow, CanonicalContent, Pivot, Bounds);
 				FSharedCaptureFrame& Frame = RegisterFrame(Painted, Shadow, Content, Pivot, Bounds);
+				if (Shadow.Widget)
+				{
+					auto* Paints = CastChecked<UPanelWidget>(CastChecked<URetainerBox>(Shadow.Widget)->GetContent())->GetChildAt(0);
+					Frame.ContentSections.Add(LayoutSections.FindChecked(Paints));
+				}
 				const FMargin CaptureStart(0, 0, A.Size.X, A.Size.Y), CaptureEnd(0, 0, B.Size.X, B.Size.Y);
 				Frame.CaptureSections.Add(AddSlotTrack(Animation, Painted.Widget, TEXT("Padding"), TEXT("Padding"), CaptureStart, CaptureEnd, Keys));
 				if (Shadow.Widget)
@@ -911,6 +914,7 @@ namespace
 		FAnimationWidget Source, Destination, Original, Presentation;
 		FNativeGeometries StartGeometry, EndGeometry;
 		TMap<UWidget*, FLayoutBox> StartBoxes, EndBoxes;
+		TMap<UWidget*, UMovieSceneMarginSection*> LayoutSections;
 		FLayoutBox StartRoot, EndRoot;
 		// Presentation poses keyed by the painted presentation widget.
 		TMap<UWidget*, FLayoutBox> Starts, Ends;

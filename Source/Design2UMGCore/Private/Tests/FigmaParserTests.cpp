@@ -410,9 +410,11 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	{
 		if (Node.Id == TEXT("contour_a") && Node.Children.IsValidIndex(Node.SourceVisualChildIndex))
 		{
-			const auto& OwnPaint = Node.Children[Node.SourceVisualChildIndex];
-			if (OwnPaint.Type != UMGWidgetTypes::Overlay || OwnPaint.Children.IsEmpty()) return false;
-			const auto& Producer = OwnPaint.Children[0];
+			const FUMGWidgetNode* OwnPaint = &Node;
+			while (OwnPaint->Children.IsValidIndex(OwnPaint->SourceVisualChildIndex))
+				OwnPaint = &OwnPaint->Children[OwnPaint->SourceVisualChildIndex];
+			if (OwnPaint->Type != UMGWidgetTypes::Overlay || OwnPaint->Children.IsEmpty()) return false;
+			const auto& Producer = OwnPaint->Children[0];
 			const auto* TargetPaint = Producer.Effect.SurfacePaintTargets.IsSet() ? Producer.Effect.SurfacePaintTargets->FindByPredicate(
 				[](const FUMGSurfacePaintTarget& Paint) { return Paint.DestinationWidgetId == TEXT("contour_b"); }) : nullptr;
 			return Producer.Type == UMGWidgetTypes::Image && Producer.Effect.GeometryMaskPaths.IsSet()
@@ -1024,26 +1026,31 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	const auto* StaticVectorB = SourceVisual(FindEndpoint(Data.RootWidget, TEXT("vector_b")));
 	const auto* VectorOwnerA = FindEndpoint(Data.RootWidget, TEXT("vector_a"));
 	const auto* VectorOwnerB = FindEndpoint(Data.RootWidget, TEXT("vector_b"));
+	const auto* StrokeVectorA = StaticVectorA ? StaticVectorA->Children.FindByPredicate(
+		[](const FUMGWidgetNode& Child) { return Child.Path.SourcePaintGeometry.IsSet() && Child.Path.SourcePaintGeometry->StrokePaint.IsSet(); }) : nullptr;
+	const auto* StrokeVectorB = StaticVectorB ? StaticVectorB->Children.FindByPredicate(
+		[](const FUMGWidgetNode& Child) { return Child.Path.SourcePaintGeometry.IsSet() && Child.Path.SourcePaintGeometry->StrokePaint.IsSet(); }) : nullptr;
 	TestTrue(TEXT("Vector endpoints keep logical canvas and exact expanded stroke paths"), VectorOwnerA && VectorOwnerB
 		&& VectorOwnerA->Bounds.X == -0.5f && VectorOwnerA->Bounds.Y == -0.5f
 		&& VectorOwnerB->Bounds.X == -0.5f && VectorOwnerB->Bounds.Y == -0.5f
 		&& VectorOwnerA->Bounds.W == 21 && VectorOwnerB->Bounds.W == 41
 		&& StaticVectorA && StaticVectorB && StaticVectorA->Bounds.W == 21 && StaticVectorB->Bounds.W == 41
-		&& StaticVectorA->Path.CanvasSize.IsSet() && StaticVectorA->Path.CanvasSize.GetValue() == FVector2D(21, 21)
-		&& StaticVectorB->Path.CanvasSize.IsSet() && StaticVectorB->Path.CanvasSize.GetValue() == FVector2D(41, 41)
-		&& StaticVectorA->Path.SourcePaintGeometry.IsSet() && StaticVectorB->Path.SourcePaintGeometry.IsSet()
-		&& StaticVectorA->Path.SourcePaintGeometry->Geometry.FillPaths.IsSet()
-		&& StaticVectorB->Path.SourcePaintGeometry->Geometry.FillPaths.IsSet()
-		&& StaticVectorA->Path.SourcePaintGeometry->Geometry.FillPaths->Num() == 1
-		&& StaticVectorB->Path.SourcePaintGeometry->Geometry.FillPaths->Num() == 1
-		&& (*StaticVectorA->Path.SourcePaintGeometry->Geometry.FillPaths)[0].Path == TEXT("M0 0L20 0L20 20L0 20Z")
-		&& (*StaticVectorB->Path.SourcePaintGeometry->Geometry.FillPaths)[0].Path == TEXT("M0 0L40 0L40 40L0 40Z")
-		&& StaticVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths.IsSet()
-		&& StaticVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths.IsSet()
-		&& StaticVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths->Num() == 1
-		&& StaticVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths->Num() == 1
-		&& (*StaticVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths)[0].Path == TEXT("M-0.5 -0.5L20.5 -0.5L20.5 20.5L-0.5 20.5Z M0.5 0.5L0.5 19.5L19.5 19.5L19.5 0.5Z")
-		&& (*StaticVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths)[0].Path == TEXT("M-0.5 -0.5L40.5 -0.5L40.5 40.5L-0.5 40.5Z M0.5 0.5L0.5 39.5L39.5 39.5L39.5 0.5Z"));
+		&& StrokeVectorA && StrokeVectorB
+		&& StrokeVectorA->Path.CanvasSize.IsSet() && StrokeVectorA->Path.CanvasSize.GetValue() == FVector2D(21, 21)
+		&& StrokeVectorB->Path.CanvasSize.IsSet() && StrokeVectorB->Path.CanvasSize.GetValue() == FVector2D(41, 41)
+		&& StrokeVectorA->Path.SourcePaintGeometry.IsSet() && StrokeVectorB->Path.SourcePaintGeometry.IsSet()
+		&& StrokeVectorA->Path.SourcePaintGeometry->Geometry.FillPaths.IsSet()
+		&& StrokeVectorB->Path.SourcePaintGeometry->Geometry.FillPaths.IsSet()
+		&& StrokeVectorA->Path.SourcePaintGeometry->Geometry.FillPaths->Num() == 1
+		&& StrokeVectorB->Path.SourcePaintGeometry->Geometry.FillPaths->Num() == 1
+		&& (*StrokeVectorA->Path.SourcePaintGeometry->Geometry.FillPaths)[0].Path == TEXT("M0 0L20 0L20 20L0 20Z")
+		&& (*StrokeVectorB->Path.SourcePaintGeometry->Geometry.FillPaths)[0].Path == TEXT("M0 0L40 0L40 40L0 40Z")
+		&& StrokeVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths.IsSet()
+		&& StrokeVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths.IsSet()
+		&& StrokeVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths->Num() == 1
+		&& StrokeVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths->Num() == 1
+		&& (*StrokeVectorA->Path.SourcePaintGeometry->Geometry.StrokePaths)[0].Path == TEXT("M-0.5 -0.5L20.5 -0.5L20.5 20.5L-0.5 20.5Z M0.5 0.5L0.5 19.5L19.5 19.5L19.5 0.5Z")
+		&& (*StrokeVectorB->Path.SourcePaintGeometry->Geometry.StrokePaths)[0].Path == TEXT("M-0.5 -0.5L40.5 -0.5L40.5 40.5L-0.5 40.5Z M0.5 0.5L0.5 39.5L39.5 39.5L39.5 0.5Z"));
 	if (!TestTrue(TEXT("Changed vector center fixture parses"), FFigmaParser::ParseDocument(
 		VectorDocument.Replace(TEXT("M0 0L40 0L40 40L0 40Z"), TEXT("M0 0L40 0L35 40L0 40Z")), Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
@@ -1218,10 +1225,6 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		&& EmptyPaintSource && EmptyPaintTarget
 		&& FindEndpoint(*EmptyPaintSource, TEXT("source_outline")) && FindEndpoint(*EmptyPaintTarget, TEXT("target_outline"))
 		&& EmptyPaintSource->Effect.SharedCapture.IsSet() && EmptyPaintTarget->Effect.SharedCapture.IsSet()
-		&& EmptyPaintSource->Effect.SharedCapture->Source.OwnPaint.FillPaints.IsSet()
-		&& EmptyPaintSource->Effect.SharedCapture->Source.OwnPaint.FillPaints->IsEmpty()
-		&& EmptyPaintSource->Effect.SharedCapture->Source.OwnPaint.StrokePaint.IsSet()
-		&& EmptyPaintSource->Effect.SharedCapture->Source.OwnPaint.StrokePaint->Color.A == 0
 		&& EmptyPaintOwner && EmptyPaintOwner->SourceVisualChildIndex == INDEX_NONE
 		&& EmptyPaintOwner->Children.Num() == 1
 		&& EmptyPaintOwner->Children[0].Id == TEXT("stroke_page_a__shared_capture")
@@ -1262,7 +1265,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		&& ExportedContour.GeometryMaskPaths.GetValue()[0].Path == MeasuredCanvas.Shape.PaintGeometry.FillPaths.GetValue()[0].Path);
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestEqual(TEXT("Source parameters use the existing contour conversion"), Data.ConversionError, FString());
-	const auto* PrimitiveClip = FindEndpoint(Data.RootWidget, TEXT("primitive_surface__contourstroke_content"));
+	const auto* PrimitiveClip = FindEndpoint(Data.RootWidget, TEXT("primitive_surface__stroke_content"));
 	const auto* PrimitiveStroke = FindEndpoint(Data.RootWidget, TEXT("primitive_surface_stroke0"));
 	TestTrue(TEXT("Parameter contours preserve local canvas and independent aligned stroke"), PrimitiveClip && PrimitiveStroke
 		&& PrimitiveClip->Type == UMGWidgetTypes::RetainerBox && PrimitiveClip->Effect.GeometryMaskPaths.IsSet()
@@ -2051,7 +2054,8 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	FUMGWidgetNode Surface = PathWidgetBuilder::CreatePathWidget(Node);
 	TestFalse(TEXT("Expanded outline is not restroked as a centerline"), Surface.Path.StrokeThickness.IsSet());
 	FUMGWidgetNode Painted = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Surface), Node);
-	if (!TestTrue(TEXT("Static source outlines compose into one native surface"), Painted.Children.IsEmpty() && Painted.Path.SourcePaintGeometry.IsSet())) return false;
+	if (!TestTrue(TEXT("All source outlines share one stroke paint"), Painted.Children.IsEmpty()
+		&& Painted.Path.SourcePaintGeometry.IsSet())) return false;
 	const auto& Common = Painted.Path.SourcePaintGeometry.GetValue();
 	if (!TestTrue(TEXT("Common geometry contains both source outlines"), Common.Geometry.StrokePaths.IsSet() && Common.Geometry.StrokePaths->Num() == 2)) return false;
 	TestEqual(TEXT("First source contour unchanged"), Common.Geometry.StrokePaths.GetValue()[0].Path, Upper);
@@ -2059,14 +2063,16 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	TestEqual(TEXT("Common geometry retains each path rule"), Common.Geometry.StrokePaths.GetValue()[1].FillRule, FString(TEXT("evenodd")));
 	TestEqual(TEXT("Open center strokes do not acquire alignment clipping"), Common.StrokeAlignment, FString(TEXT("center")));
 	TestTrue(TEXT("Source local canvas retained"), Painted.Path.ViewBox.IsSet() && Painted.Path.ViewBox->Equals(FVector4(0, 0, 26.5, 17.25)));
-	TestFalse(TEXT("Filled source outline has no second stroke"), Painted.Path.StrokeThickness.IsSet());
+	TestTrue(TEXT("Source outline regions are filled without restroking"),
+		Painted.Path.Geometry.Get(FString()) == Upper && !Painted.Path.StrokeThickness.IsSet()
+		&& Common.FillPaints.IsSet() && Common.FillPaints->IsEmpty());
 	TestEqual(TEXT("Source stroke metadata remains unchanged"), Node->Visual.Stroke.Thickness.Uniform, 5.0f);
 
 	auto InsideNode = MakeShared<FDesignNode>(*Node);
 	InsideNode->Visual.Stroke.Align = EDesignStrokeAlign::Inside;
 	InsideNode->Shape.PaintGeometry.FillPaths = TArray<FDesignGeometryPath>{{TEXT("M0 0L26.5 0L26.5 17.25L0 17.25Z"), TEXT("evenodd")}};
 	const FUMGWidgetNode Inside = VisualMapperFillTransfer::WrapWithPaintedStroke(PathWidgetBuilder::CreatePathWidget(InsideNode), InsideNode);
-	if (!TestTrue(TEXT("Inside alignment stays in the source context"), Inside.Path.SourcePaintGeometry.IsSet()
+	if (!TestTrue(TEXT("Inside alignment stays in the source context"), Inside.Children.IsEmpty() && Inside.Path.SourcePaintGeometry.IsSet()
 		&& Inside.Path.SourcePaintGeometry->StrokeAlignment == TEXT("inner"))) return false;
 	TestEqual(TEXT("The interior retains its own winding rule"), Inside.Path.SourcePaintGeometry->Geometry.FillPaths.GetValue()[0].FillRule, FString(TEXT("evenodd")));
 
@@ -2074,12 +2080,13 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	PrimitiveNode->Type = EDesignNodeType::Rectangle;
 	FUMGWidgetNode NativeBorder;
 	NativeBorder.Type = TEXT("Border");
-	VisualMapper::ApplyStroke(NativeBorder, PrimitiveNode->Visual.Stroke);
+	VisualMapper::ApplyStrokeLayout(NativeBorder, PrimitiveNode->Visual.Stroke);
 	FUMGWidgetNode NativePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(NativeBorder), PrimitiveNode);
-	TestEqual(TEXT("An existing native stroke keeps its paint surface"), NativePaint.Type, FString(TEXT("Border")));
-	TestEqual(TEXT("Native stroke keeps the declared thickness"), NativePaint.Brush.OutlineThickness.Get(0.0f), 5.0f);
-	TestFalse(TEXT("Native stroke is not replaced by source area geometry"), NativePaint.Path.Geometry.IsSet());
-	TestTrue(TEXT("A native primitive adds no source stroke layers"), NativePaint.Children.IsEmpty());
+	if (!TestTrue(TEXT("Primitive type does not replace exported outline regions"), NativePaint.Children.IsEmpty() && NativePaint.Path.SourcePaintGeometry.IsSet())) return false;
+	TestFalse(TEXT("Source stroke does not retain a second native outline"), NativePaint.Brush.OutlineThickness.IsSet());
+	TestTrue(TEXT("Primitive stroke uses its complete source area geometry"), NativePaint.Path.SourcePaintGeometry.IsSet()
+		&& NativePaint.Path.SourcePaintGeometry->Geometry.StrokePaths.IsSet()
+		&& NativePaint.Path.SourcePaintGeometry->Geometry.StrokePaths->Num() == 2);
 
 	auto ResourceNode = MakeShared<FDesignNode>(*PrimitiveNode);
 	FDesignFill ResourceFill;
@@ -2089,16 +2096,14 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	FUMGWidgetNode ResourceBorder;
 	ResourceBorder.Type = TEXT("Border");
 	ResourceBorder.Brush.Image.TexturePath = ResourceFill.Image.Url;
-	VisualMapper::ApplyStroke(ResourceBorder, ResourceNode->Visual.Stroke);
-	TestTrue(TEXT("Resource fill uses Box rather than native outline drawing"),
-		ResourceBorder.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType) == ESlateBrushDrawType::Box);
+	VisualMapper::ApplyStrokeLayout(ResourceBorder, ResourceNode->Visual.Stroke);
+	TestEqual(TEXT("Stroke layout leaves the resource fill intact"), ResourceBorder.Brush.Image.TexturePath.Get(FString()), ResourceFill.Image.Url);
 	FUMGWidgetNode ResourcePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ResourceBorder), ResourceNode);
-	if (!TestTrue(TEXT("Resource border keeps a single background surface"), ResourcePaint.Type == UMGWidgetTypes::Border
-		&& ResourcePaint.Children.IsEmpty() && ResourcePaint.Path.SourcePaintGeometry.IsSet())) return false;
-	TestEqual(TEXT("Resource fill is retained in the complete static paint list"),
-		ResourcePaint.Path.SourcePaintGeometry->FillPaints.GetValue()[0].Image.TexturePath.Get(FString()), ResourceFill.Image.Url);
-	TestEqual(TEXT("Box brush still paints the source outline geometry"),
-		ResourcePaint.Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[0].Path, Upper);
+	if (!TestEqual(TEXT("Resource border retains its fill and grouped stroke"), ResourcePaint.Children.Num(), 2)) return false;
+	TestEqual(TEXT("Resource fill remains on its original paint surface"),
+		ResourcePaint.Children[0].Brush.Image.TexturePath.Get(FString()), ResourceFill.Image.Url);
+	TestEqual(TEXT("Stroke layer retains the exported region"),
+		ResourcePaint.Children[1].Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[0].Path, Upper);
 
 	const FString FillPath = TEXT("M0 0 L26.5 0 L26.5 17.25 L0 17.25 Z");
 	auto FilledNode = MakeShared<FDesignNode>(*Node);
@@ -2114,13 +2119,23 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	FUMGWidgetNode TranslucentSurface = PathWidgetBuilder::CreatePathWidget(TranslucentNode);
 	TranslucentSurface.Render.RenderOpacity = 0.35f;
 	const FUMGWidgetNode Combined = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(TranslucentSurface), TranslucentNode);
-	TestTrue(TEXT("A leaf source fill and stroke share one paint surface"), Combined.Type == TEXT("Image") && Combined.Children.IsEmpty());
-	TestTrue(TEXT("Object opacity remains on the final single image"), Combined.Render.RenderOpacity.IsSet()
-		&& FMath::IsNearlyEqual(Combined.Render.RenderOpacity.GetValue(), 0.35f));
-	TestTrue(TEXT("Combined source regions retain their independent rules"), Combined.Path.SourcePaintGeometry.IsSet()
-		&& Combined.Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[1].FillRule == TEXT("evenodd"));
-	TestTrue(TEXT("Combined paint carries a stroke color without reintroducing a centerline"), Combined.Path.SourcePaintGeometry->StrokePaint.IsSet()
-		&& !Combined.Path.StrokeThickness.IsSet());
+	if (!TestEqual(TEXT("Fill and grouped stroke have separate paint owners"), Combined.Children.Num(), 2)) return false;
+	TestEqual(TEXT("Object opacity applies once to the combined group"), Combined.Render.RenderOpacity.Get(1.0f), 0.35f);
+	TestFalse(TEXT("The fill does not repeat group opacity"), Combined.Children[0].Render.RenderOpacity.IsSet());
+	TestTrue(TEXT("Source regions retain their independent rules"), Combined.Children[1].Path.SourcePaintGeometry.IsSet()
+		&& Combined.Children[1].Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[1].FillRule == TEXT("evenodd"));
+	TestTrue(TEXT("Stroke color stays separate from the fill and centerline"),
+		Combined.Children[1].Brush.BrushColor.Get(FLinearColor::Transparent).Equals(FLinearColor::Blue)
+		&& !Combined.Children[1].Path.StrokeThickness.IsSet());
+
+	FUMGBoxShadowLayerData Shadow;
+	Shadow.Color = FLinearColor::Black;
+	Shadow.Blur = 8.0f;
+	const FUMGWidgetNode Shadowed = VisualMapper::WrapWithBoxShadow(FUMGWidgetNode(Combined), TranslucentNode, {Shadow});
+	if (!TestTrue(TEXT("Shadow capture retains its stroke group"), !Shadowed.Children.IsEmpty()
+		&& !Shadowed.Children.Last().Children.IsEmpty())) return false;
+	TestNotEqual(TEXT("Stroke and shadow content have distinct generated identities"),
+		Shadowed.Children.Last().Id, Shadowed.Children.Last().Children[0].Id);
 	auto GradientNode = MakeShared<FDesignNode>(*FilledNode);
 	GradientNode->Visual.Fills.Reset();
 	FDesignFill GradientFill;
@@ -2140,25 +2155,24 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	GradientSurface.Brush.BrushColor = Tint;
 	const auto OriginalStops = GradientSurface.Brush.Gradient.Stops;
 	GradientSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(GradientSurface), GradientNode);
-	if (!TestTrue(TEXT("A real single gradient reaches the complete source surface"), GradientSurface.Path.SourcePaintGeometry.IsSet()
-		&& GradientSurface.Path.SourcePaintGeometry->FillPaints.IsSet()
-		&& GradientSurface.Path.SourcePaintGeometry->FillPaints->Num() == 1)) return false;
-	const auto& GradientPaint = GradientSurface.Path.SourcePaintGeometry->FillPaints.GetValue()[0];
-	TestTrue(TEXT("Gradient placeholder is not applied as a second tint; real tint alpha remains"), GradientPaint.Color.Equals(Tint));
-	TestTrue(TEXT("Gradient stop colors and alpha remain owned by the gradient"), GradientPaint.Gradient.Stops.Num() == 2
-		&& GradientPaint.Gradient.Stops[0].Color.Equals(OriginalStops[0].Color)
-		&& GradientPaint.Gradient.Stops[1].Color.Equals(OriginalStops[1].Color));
+	if (!TestEqual(TEXT("The gradient fill retains its original paint owner"), GradientSurface.Children.Num(), 2)) return false;
+	const auto& GradientPaint = GradientSurface.Children[0];
+	TestTrue(TEXT("The real gradient tint remains unchanged"), GradientPaint.Brush.BrushColor.Get(FLinearColor::White).Equals(Tint));
+	TestTrue(TEXT("Gradient stop colors and alpha remain owned by the gradient"), GradientPaint.Brush.Gradient.Stops.Num() == 2
+		&& GradientPaint.Brush.Gradient.Stops[0].Color.Equals(OriginalStops[0].Color)
+		&& GradientPaint.Brush.Gradient.Stops[1].Color.Equals(OriginalStops[1].Color));
 
 	FUMGWidgetNode FillSurface = PathWidgetBuilder::CreatePathWidget(FilledNode);
 	FUMGWidgetNode Content;
 	Content.Id = TEXT("Content");
 	FillSurface.Children.Add(Content);
 	FUMGWidgetNode Filled = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(FillSurface), FilledNode);
-	TestTrue(TEXT("A composed surface retains content without a second paint child"),
-		Filled.Type == UMGWidgetTypes::Border && Filled.Children.Num() == 1 && Filled.Children[0].Id == Content.Id);
-	TestTrue(TEXT("The complete source surface keeps fill and stroke paint descriptions"),
-		Filled.Path.SourcePaintGeometry.IsSet() && Filled.Path.SourcePaintGeometry->FillPaints.IsSet()
-		&& Filled.Path.SourcePaintGeometry->FillPaints->Num() == 1 && Filled.Path.SourcePaintGeometry->StrokePaint.IsSet());
+	TestTrue(TEXT("The original fill retains its content"), Filled.Children.Num() == 2
+		&& Filled.Children[0].Children.Num() == 1 && Filled.Children[0].Children[0].Id == Content.Id);
+	TestTrue(TEXT("The fill and stroke retain their respective geometry"), Filled.Children.Num() == 2
+		&& Filled.Children[0].Path.Geometry.Get(FString()) == FillPath
+		&& Filled.Children[1].Path.SourcePaintGeometry->Geometry.StrokePaths.GetValue()[0].Path == Upper);
+
 	auto MultiNode = MakeShared<FDesignNode>(*TranslucentNode);
 	FDesignFill SecondFill;
 	SecondFill.Type = EDesignFillType::Image;
@@ -2171,24 +2185,14 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 	FUMGWidgetNode MultiSurface = VisualMapperFillTransfer::WrapWithMultiFill(
 		MoveTemp(MultiContent), MultiNode, FVisualMapperOptions(), &PaintLayers);
 	MultiSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(MultiSurface), MultiNode, PaintLayers);
-	if (!TestTrue(TEXT("All static fills are owned by the final surface"), MultiSurface.Path.SourcePaintGeometry.IsSet()
-		&& MultiSurface.Path.SourcePaintGeometry->FillPaints.IsSet())) return false;
-	const auto& MultiPaints = MultiSurface.Path.SourcePaintGeometry->FillPaints.GetValue();
-	if (!TestEqual(TEXT("Both static fills remain in their original order"), MultiPaints.Num(), 2)) return false;
-	TestEqual(TEXT("Image paint opacity is applied once"), MultiPaints[1].Color.A, SecondFill.Image.Opacity, 0.0f);
-	TestEqual(TEXT("Object opacity remains on the final surface"), MultiSurface.Render.RenderOpacity.Get(1.0f), 0.35f, 0.0f);
-	TestFalse(TEXT("A retained layout carrier has no independent fill or stroke paint"),
-		MultiSurface.Children.ContainsByPredicate([](const FUMGWidgetNode& Child)
-		{
-			const FUMGVisualBrushData& Brush = Child.Brush;
-			return Child.Path.HasAny()
-				|| Brush.OutlineCornerRadius.IsSet() || Brush.CornerRadii.IsSet()
-				|| Brush.OutlineThickness.IsSet() || Brush.Margin.IsSet() || Brush.DrawAs.IsSet()
-				|| Brush.BrushColor.IsSet() || Brush.OutlineColor.IsSet()
-				|| Brush.MaterialRef.IsSet() || Brush.MaterialParams.IsSet() || Brush.Shape.IsSet()
-				|| Brush.Image.HasAny() || Brush.Gradient.HasAny() || Brush.Shader.IsSet()
-				|| !Child.Children.IsEmpty();
-		}));
+	if (!TestTrue(TEXT("Multi-fill owners survive stroke wrapping"), MultiSurface.Children.Num() == 2
+		&& MultiSurface.Children[0].Children.Num() == 2)) return false;
+	const auto& MultiPaints = MultiSurface.Children[0].Children;
+	TestTrue(TEXT("Both static fills remain in their original order"), MultiPaints[0].Path.FillColor.IsSet()
+		&& MultiPaints[1].Brush.Image.TexturePath.Get(FString()) == SecondFill.Image.Url);
+	TestEqual(TEXT("Image paint opacity is applied once"), MultiPaints[1].Render.RenderOpacity.Get(1.0f), SecondFill.Image.Opacity);
+	TestEqual(TEXT("Object opacity remains on the final group"), MultiSurface.Render.RenderOpacity.Get(1.0f), 0.35f);
+	TestFalse(TEXT("The inner paint group does not repeat object opacity"), MultiSurface.Children[0].Render.RenderOpacity.IsSet());
 
 	const FString FitSource = MakeLeafNode(TEXT("fit-surface"), TEXT("Fit surface"), TEXT("FRAME"), 0, 0, 100, 80,
 		TEXT(",\"size\":{\"x\":100,\"y\":80},\"opacity\":0.35,"
@@ -2218,12 +2222,14 @@ bool FFigmaExpandedStrokePaintTest::RunTest(const FString&)
 		&& FitSurface.Children[1].Children[0].Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Center);
 	const FString FitImage = FitSurface.Children[1].Children[0].Brush.Image.TexturePath.Get(FString());
 	FitSurface = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(FitSurface), FitNode, FitLayers);
-	if (!TestTrue(TEXT("The FIT frame reaches complete surface paint"), FitSurface.Path.SourcePaintGeometry.IsSet()
-		&& FitSurface.Path.SourcePaintGeometry->FillPaints.IsSet() && FitSurface.Path.SourcePaintGeometry->FillPaints->Num() == 2)) return false;
-	const auto& FitPaint = FitSurface.Path.SourcePaintGeometry->FillPaints.GetValue()[1];
-	TestEqual(TEXT("The captured FIT paint retains the actual nested image"), FitPaint.Image.TexturePath.Get(FString()), FitImage);
-	TestEqual(TEXT("Static paint samples the centered FIT image at its aspect ratio"), FitPaint.Image.CropFitMode.Get(FString()), FString(TEXT("Fit")));
-	TestTrue(TEXT("Nested image paint alpha and object opacity remain separate"), FMath::IsNearlyEqual(FitPaint.Color.A, 0.4f)
+	if (!TestTrue(TEXT("The FIT frame retains its original fill layout"), FitSurface.Children.Num() == 2
+		&& FitSurface.Children[0].Children.Num() == 2
+		&& FitSurface.Children[0].Children[1].Type == UMGWidgetTypes::ScaleBox)) return false;
+	const auto& FitPaint = FitSurface.Children[0].Children[1].Children[0];
+	TestEqual(TEXT("The FIT paint retains the actual nested image"), FitPaint.Brush.Image.TexturePath.Get(FString()), FitImage);
+	TestTrue(TEXT("The FIT image remains centered"), FitPaint.Slot.HorizontalAlignment == EUMGSlotHorizontalAlignment::Center
+		&& FitPaint.Slot.VerticalAlignment == EUMGSlotVerticalAlignment::Center);
+	TestTrue(TEXT("Nested image paint alpha and object opacity remain separate"), FMath::IsNearlyEqual(FitPaint.Render.RenderOpacity.Get(1.0f), 0.4f)
 		&& FMath::IsNearlyEqual(FitSurface.Render.RenderOpacity.Get(1.0f), 0.35f));
 
 	auto SideNode = MakeShared<FDesignNode>(*FilledNode);
@@ -2625,10 +2631,11 @@ bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
 	const FUMGWidgetNode Painted = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Surface), Doc.Children[0]);
 	TestEqual(TEXT("Stroke-only shape remains one native image"), Painted.Type, FString(TEXT("Image")));
 	TestTrue(TEXT("Stroke-only shape adds no wrappers"), Painted.Children.IsEmpty());
-	TestTrue(TEXT("A uniform primitive uses its canonical contour"), Painted.Path.Geometry.IsSet());
-	TestEqual(TEXT("Canonical primitive uses the declared stroke width"), Painted.Path.StrokeThickness.Get(0.0f), 2.0f);
-	TestFalse(TEXT("Canonical paint does not inherit source region bounds"), Painted.Path.SourcePaintGeometry.IsSet());
-	TestEqual(TEXT("Original gradient stops reach the native resource"), Painted.Brush.Gradient.Stops.Num(), 2);
+	TestTrue(TEXT("Exported primitive stroke remains an area contour"), Painted.Path.SourcePaintGeometry.IsSet() && Painted.Path.SourcePaintGeometry->StrokePaint.IsSet());
+	TestFalse(TEXT("An exported outline is not restroked"), Painted.Path.StrokeThickness.IsSet());
+	TestTrue(TEXT("Exported contour keeps its source context"), Painted.Path.SourcePaintGeometry.IsSet());
+	TestEqual(TEXT("Original gradient stops reach the native resource"), Painted.Path.SourcePaintGeometry->StrokePaint->Gradient.Stops.Num(), 2);
+	TestFalse(TEXT("The stroke gradient has one paint owner"), Painted.Brush.Gradient.HasAny());
 	const TSharedPtr<FDesignNode> Line = MakeShared<FDesignNode>(*Doc.Children[0]);
 	Line->Type = EDesignNodeType::Line;
 	Line->Shape.PaintGeometry.StrokePaths.Reset();
@@ -2688,16 +2695,16 @@ bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
 	Filled.Type = TEXT("Border");
 	Filled.Id = TEXT("filled");
 	Filled.Name = TEXT("Filled");
-	Filled.Brush.Gradient = Painted.Brush.Gradient;
+	Filled.Brush.Gradient = Painted.Path.SourcePaintGeometry->StrokePaint->Gradient;
 	Filled.Brush.BrushColor = FLinearColor::White;
 	Filled.Brush.OutlineThickness = 2.0f;
 	Filled.WidgetStyle.StrokePadding = FMargin(1.0f);
 	const FUMGWidgetNode PaintedBorder = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Filled), Doc.Children[0]);
-	TestEqual(TEXT("An inside primitive retains its combined native surface"), PaintedBorder.Type, FString(TEXT("Border")));
-	TestTrue(TEXT("Combined primitive paint adds no source layers"), PaintedBorder.Children.IsEmpty());
-	TestEqual(TEXT("Combined primitive keeps the declared width"), PaintedBorder.Path.StrokeThickness.Get(0.0f), 2.0f);
-	TestFalse(TEXT("Combined primitive has no source region bounds"), PaintedBorder.Path.SourcePaintGeometry.IsSet());
-	TestTrue(TEXT("Unselected source geometry does not clear native padding"), PaintedBorder.WidgetStyle.StrokePadding.IsSet());
+	if (!TestEqual(TEXT("An inside primitive retains fill and exported stroke owners"), PaintedBorder.Children.Num(), 2)) return false;
+	TestFalse(TEXT("The fill does not keep a duplicate native outline"), PaintedBorder.Children[0].Brush.OutlineThickness.IsSet());
+	TestTrue(TEXT("The stroke retains its source region"), PaintedBorder.Children[1].Path.SourcePaintGeometry.IsSet() && PaintedBorder.Children[1].Path.SourcePaintGeometry->StrokePaint.IsSet());
+	TestFalse(TEXT("Source geometry owns the stroke inset"), PaintedBorder.Children[0].WidgetStyle.StrokePadding.IsSet());
+
 	auto ImageNode = MakeShared<FDesignNode>(*Doc.Children[0]);
 	ImageNode->Visual.Fills.Reset();
 	FDesignFill ImageFill;
@@ -2711,10 +2718,11 @@ bool FFigmaNonSolidStrokeTest::RunTest(const FString&)
 	ImageSurface.Brush.Image.Transform = FUMGVisualBrushData::FImageTransformData();
 	ImageSurface.Brush.Image.Transform->TX = 0.25f;
 	const FUMGWidgetNode ImagePaint = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ImageSurface), ImageNode);
-	TestEqual(TEXT("Combined primitive preserves fill alpha"), ImagePaint.Path.FillColor.Get(FLinearColor::Transparent).A, 0.4f);
-	TestEqual(TEXT("Combined primitive preserves image resource"), ImagePaint.Brush.Image.TexturePath.Get(FString()), ImageFill.Image.Url);
-	TestTrue(TEXT("Combined primitive preserves authored image coordinates"), ImagePaint.Brush.Image.Transform.IsSet()
-		&& ImagePaint.Brush.Image.Transform->TX == 0.25f);
+	if (!TestEqual(TEXT("Image fill and stroke retain separate owners"), ImagePaint.Children.Num(), 2)) return false;
+	TestEqual(TEXT("Fill alpha remains unchanged"), ImagePaint.Children[0].Brush.BrushColor.Get(FLinearColor::Transparent).A, 0.4f);
+	TestEqual(TEXT("Image resource remains unchanged"), ImagePaint.Children[0].Brush.Image.TexturePath.Get(FString()), ImageFill.Image.Url);
+	TestTrue(TEXT("Authored image coordinates remain unchanged"), ImagePaint.Children[0].Brush.Image.Transform.IsSet()
+		&& ImagePaint.Children[0].Brush.Image.Transform->TX == 0.25f);
 	const auto Frame = MakeShared<FDesignNode>(*Doc.Children[0]);
 	Frame->Type = EDesignNodeType::Frame;
 	Frame->Shape.PaintGeometry.StrokePaths.Reset();

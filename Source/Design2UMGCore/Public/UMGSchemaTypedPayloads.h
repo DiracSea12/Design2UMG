@@ -340,18 +340,14 @@ struct FUMGSharedCaptureEndpoint
 	EUMGGeometryMaskShape Shape = EUMGGeometryMaskShape::RoundedRectangle;
 	FVector4 CornerRadii = FVector4(0, 0, 0, 0);
 	TOptional<TArray<FDesignGeometryPath>> ClipPaths;
-	// Complete own paint, including filled outside-stroke regions; never subtree opacity.
-	FUMGSourcePaintGeometry OwnPaint;
+	FVector4 CaptureBounds = FVector4(0, 0, 0, 0);
 	TArray<FUMGBoxShadowLayerData> BoxShadows;
 	FString CoverageTexture;
-	FString PaintTexture;
-	FVector4 PaintRect = FVector4(0, 0, 0, 0);
-	FString StrokeTexture;
-	FVector4 StrokeRect = FVector4(0, 0, 0, 0);
 };
 
 struct FUMGSharedCaptureData
 {
+	bool bSubtreeShadow = false;
 	FUMGSharedCaptureEndpoint Source;
 	TArray<FUMGSharedCaptureEndpoint> Targets;
 };

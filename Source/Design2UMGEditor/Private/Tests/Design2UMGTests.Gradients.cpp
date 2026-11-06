@@ -69,13 +69,13 @@ bool FAngularGradientBasisContractTest::RunTest(const FString&)
 		SourceStroke.Fill->Gradient.AngularBasis.IsSet() &&
 		SourceStroke.Fill->Gradient.AngularBasis.GetValue().Equals(Expected, 0.000001))) return false;
 	const auto LineData = FDesign2UMGConverter::Convert(Line, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Native line stroke owns the source angular axes"), LineData.RootWidget.Path.StrokeGradient.AngularBasis.IsSet());
+	TestTrue(TEXT("Native line stroke owns the source angular axes"), LineData.RootWidget.Brush.Gradient.AngularBasis.IsSet());
 	FUMGWidgetData ParsedLine;
 	if (!TestTrue(TEXT("Native stroke JSON parses"), FUMGJsonParser::ParseJson(FUMGJsonSerializer::Serialize(LineData), ParsedLine, &Error))) return false;
 	FDesignPathRasterRequest Request;
 	if (!TestTrue(TEXT("Native line builds its production raster request"), FDesignPathRasterizer::TryBuildRequest(ParsedLine.RootWidget, Request))) return false;
-	if (!TestTrue(TEXT("Native request retains the stroke paint"), Request.StrokePaint.IsSet())) return false;
-	auto Gradient = Request.StrokePaint->Gradient;
+	if (!TestTrue(TEXT("Native request retains the stroke mask paint"), Request.FillPaint.IsSet())) return false;
+	auto Gradient = Request.FillPaint->Gradient;
 	if (!TestTrue(TEXT("Angular source basis survives path JSON and request transfer"), Gradient.Type.Get(FString()) == TEXT("Angular")
 		&& Gradient.AngularBasis.IsSet() && Gradient.AngularBasis.GetValue().Equals(Expected, 0.000001)
 		&& Gradient.Center.Get(FVector2D::ZeroVector).Equals(FVector2D(0.25, 0.75), 0.000001))) return false;

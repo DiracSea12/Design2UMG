@@ -247,7 +247,7 @@ namespace Design2UMGConverterVisualSupport
             && !Node->Visual.Stroke.Fill->BlendMode.IsEmpty()
             && VisualMapperFillTransfer::CanonicalPaintBlendMode(Node->Visual.Stroke.Fill->BlendMode) != TEXT("normal");
         if (!bExplicitStrokePainted || bBlendedStroke)
-			Widget = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node, PaintLayerCount, bSourcePaintHandled);
+			Widget = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(Widget), Node, PaintLayerCount);
 
 		if (Node->Visual.GeometryMask.HasMask())
 		{

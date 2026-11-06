@@ -59,53 +59,6 @@ namespace
 			Widget.Render.Clipping = TEXT("ClipToBounds");
 		}
 	}
-
-	// Composite a translucent inside stroke over its opaque fill for UMG RoundedBox.
-	// Center/outside strokes lie outside that fill band and keep their own color.
-	FDesignStroke ResolveStrokeCompositedOverFill(const TSharedPtr<FDesignNode>& Node)
-	{
-		FDesignStroke Stroke = Node->Visual.Stroke;
-		if (Stroke.Align != EDesignStrokeAlign::Inside)
-		{
-			return Stroke;
-		}
-		if (!Stroke.Fill.IsSet() || Stroke.Fill->Type != EDesignFillType::Color || !Stroke.Fill->bEnabled)
-		{
-			return Stroke;
-		}
-
-		const FColor StrokeColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor, Stroke.Fill->Opacity).ToFColor(true);
-		if (StrokeColor.A >= 255)
-		{
-			return Stroke;
-		}
-
-		const FDesignFill& UnderlayFill = Node->Visual.TopmostFill();
-		if (!UnderlayFill.bEnabled || UnderlayFill.Type != EDesignFillType::Color)
-		{
-			return Stroke;
-		}
-		const FColor FillColor = FUMGValueParser::ParseColor(UnderlayFill.SolidColor, UnderlayFill.Opacity).ToFColor(true);
-		if (FillColor.A < 255)
-		{
-			return Stroke;
-		}
-
-		const float StrokeAlpha = StrokeColor.A / 255.0f;
-		const auto Mix = [StrokeAlpha](uint8 StrokeChannel, uint8 FillChannel)
-		{
-			return static_cast<uint8>(FMath::RoundToInt(StrokeChannel * StrokeAlpha + FillChannel * (1.0f - StrokeAlpha)));
-		};
-		const FColor Composited(
-			Mix(StrokeColor.R, FillColor.R),
-			Mix(StrokeColor.G, FillColor.G),
-			Mix(StrokeColor.B, FillColor.B),
-			255);
-		Stroke.Fill->Opacity = 1.0f;
-		Stroke.Fill->SolidColor = FString::Printf(
-			TEXT("#%02X%02X%02XFF"), Composited.R, Composited.G, Composited.B);
-		return Stroke;
-	}
 }
 
 namespace VisualMapperInternal
@@ -254,7 +207,7 @@ void VisualMapper::ApplyVisualProperties(FUMGWidgetNode& Widget, const TSharedPt
 	if (!Widget.Path.Geometry.IsSet())
 	{
 		ApplyRoundedCorner(Widget, Node->Visual.CornerRadius, Node->Transform.Width.Value, Node->Transform.Height.Value);
-		ApplyStroke(Widget, ResolveStrokeCompositedOverFill(Node));
+		ApplyStrokeLayout(Widget, Node->Visual.Stroke);
 	}
 
 	const FString GlyphPaintMode = Widget.Render.PaintBlendMode.Get(FString());
@@ -352,9 +305,9 @@ void VisualMapper::ApplyRoundedCorner(FUMGWidgetNode& Widget, const FDesignCorne
 	}
 }
 
-void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
+void VisualMapper::ApplyStrokeLayout(FUMGWidgetNode& Widget, const FDesignStroke& Stroke)
 {
-	// Non-solid paints use the exported stroke outline, not Slate's solid outline color.
+	// Non-solid strokes use their paint-layer layout.
 	if (Stroke.Fill.IsSet() && Stroke.Fill->Type != EDesignFillType::Color) return;
 	const FMargin HalfInsets = VisualMapperStrokeSupport::GetStrokeHalfInsets(Stroke.Thickness);
 	float Thickness = Stroke.Thickness.bUniform ? Stroke.Thickness.Uniform
@@ -364,25 +317,7 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 	if (Thickness <= 0)
 		return;
 
-	if (!Widget.Brush.DrawAs.IsSet())
-	{
-		// Slate draws OutlineSettings only for RoundedBox, including zero-radius
-		// rectangles. Resource-backed brushes keep their existing rendering path.
-		const bool bResourceBrush = Widget.Brush.MaterialRef.IsSet()
-			|| Widget.Brush.Image.HasAny() || Widget.Brush.Gradient.HasAny();
-		Widget.Brush.DrawAs = bResourceBrush
-			? ESlateBrushDrawType::Box : ESlateBrushDrawType::RoundedBox;
-	}
-
-	Widget.Brush.OutlineThickness = Thickness;
-
-	if (Stroke.Fill.IsSet() && Stroke.Fill->Type == EDesignFillType::Color)
-	{
-		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor, Stroke.Fill->Opacity);
-	}
-
-	// Stroke alignment compensation:
-	// UMG outline is always centered on the edge. Adjust padding to simulate inside/outside.
+	// Reserve the stroke band when the source layout includes it.
 	if (!Stroke.bIncludedInLayout)
 		return;
 	if (Stroke.Align == EDesignStrokeAlign::Inside)
@@ -395,7 +330,7 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 		// Outside: only compensate on stroked sides, otherwise we shift content for no reason.
 		Widget.WidgetStyle.StrokeMargin = FMargin(-HalfInsets.Left, -HalfInsets.Top, -HalfInsets.Right, -HalfInsets.Bottom);
 	}
-	// Center: default UMG behavior, no adjustment needed
+	// Center-aligned strokes need no layout offset.
 }
 
 FUMGWidgetNode VisualMapper::WrapWithMultiFill(

@@ -16,7 +16,7 @@ namespace VisualMapperFillTransfer
     bool RequiresBackdropLayers(const FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	void ApplyGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient, float Opacity = 1.0f);
 	bool PrepareSourceContourPaint(FUMGWidgetNode& Widget, const FUMGEffectData& Contour, int32 PaintLayerCount, FString& Error);
-	FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount = 0, bool bFillPaintHandled = false);
+	FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount = 0);
 	void ApplyFillProperties(FUMGWidgetNode& Widget, const TSharedPtr<FDesignNode>& Node);
 	FUMGWidgetNode WrapWithMultiFill(
 		FUMGWidgetNode&& Widget,

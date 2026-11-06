@@ -492,12 +492,7 @@ namespace VisualMapperFillTransfer
 				return;
 			}
 
-			// Rasterized path widgets bake the fill color into their texture, so a
-			// brush tint would square the color; Widget.Path is set only on that
-			// raster branch and is the ground truth. Node.Shape.Geometry is not
-			// equivalent: Figma ellipses carry fillGeometry yet fall back to a
-			// tint-only Border when stroked, while pen ellipses rasterize through
-			// a side-effect-free clone whose geometry never reaches their node.
+			// Path textures already own the fill color; applying a brush tint would multiply it twice.
 			if (!Widget.Path.Geometry.IsSet())
 			{
 				Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity);
@@ -561,43 +556,22 @@ namespace VisualMapperFillTransfer
 		return true;
 	}
 
-    FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount, bool bFillPaintHandled)
+    FUMGWidgetNode WrapWithPaintedStroke(FUMGWidgetNode&& Widget, const TSharedPtr<FDesignNode>& Node, int32 PaintLayerCount)
     {
         if (!Node->Visual.Stroke.HasStroke() || !Node->Visual.Stroke.Fill.IsSet())
             return MoveTemp(Widget);
         const FDesignFill& StrokeFill = Node->Visual.Stroke.Fill.GetValue();
         const bool bHasSourceStrokePaths = Node->Shape.PaintGeometry.StrokePaths.IsSet();
         const bool bShaderStroke = StrokeFill.Type == EDesignFillType::Shader;
-        const bool bShaderFill = Node->Visual.Fills.ContainsByPredicate(
-            [](const FDesignFill& Fill) { return Fill.bEnabled && Fill.Type == EDesignFillType::Shader; });
-        const bool bSeparatePaint = bFillPaintHandled || bShaderStroke || bShaderFill || NonNormalBlend(StrokeFill.BlendMode);
         // Generated shadow/fill layers precede the original content surface.
         FUMGWidgetNode* StrokeCarrier = &Widget;
         if (PaintLayerCount > 0 && Widget.Children.IsValidIndex(PaintLayerCount))
             StrokeCarrier = &Widget.Children[PaintLayerCount];
-        // Only RoundedBox draws the native brush outline.
-        const auto HasNativeStrokeSurface = [](const FUMGWidgetNode& Surface)
-        {
-            return Surface.Type == UMGWidgetTypes::Border && !Surface.Path.Geometry.IsSet()
-                && Surface.Brush.DrawAs.Get(ESlateBrushDrawType::NoDrawType) == ESlateBrushDrawType::RoundedBox
-                && Surface.Brush.OutlineThickness.IsSet();
-        };
-        if (StrokeFill.Type == EDesignFillType::Color && !bSeparatePaint &&
-            HasNativeStrokeSurface(*StrokeCarrier))
-            return MoveTemp(Widget);
         if (StrokeFill.Type != EDesignFillType::Gradient && StrokeFill.Type != EDesignFillType::Shader &&
             StrokeFill.Type != EDesignFillType::Color && StrokeFill.Type != EDesignFillType::Image)
             return MoveTemp(Widget);
-        if (StrokeFill.Type != EDesignFillType::Gradient && !bSeparatePaint && !bHasSourceStrokePaths)
-            return MoveTemp(Widget);
-        if (!bSeparatePaint)
-        {
-            if (StrokeCarrier->Path.StrokeGradient.HasAny()
-                && (StrokeCarrier == &Widget || !bHasSourceStrokePaths))
-                return MoveTemp(Widget);
-        }
         TOptional<FUMGPathData> StrokeMask;
-        if (bSeparatePaint && !Node->Shape.PaintGeometry.StrokePaths.IsSet() && StrokeCarrier->Path.Geometry.IsSet())
+        if (!Node->Shape.PaintGeometry.StrokePaths.IsSet() && StrokeCarrier->Path.Geometry.IsSet())
         {
             StrokeMask = StrokeCarrier->Path;
             StrokeMask->FillColor.Reset();
@@ -609,7 +583,7 @@ namespace VisualMapperFillTransfer
         const bool bRectangularShape = Node->Type == EDesignNodeType::Rectangle || Node->Type == EDesignNodeType::Frame;
         const bool bCanonicalOutline = Node->Visual.CornerRadius.Smoothing == 0.0f && Node->Visual.Stroke.Thickness.bUniform &&
             (bRectangularShape || Node->Type == EDesignNodeType::Line) &&
-            (!bHasSourceStrokePaths || (bRectangularShape && StrokeFill.Type == EDesignFillType::Gradient && !bSeparatePaint));
+            !bHasSourceStrokePaths;
         const float Thickness = Node->Visual.Stroke.Thickness.Uniform;
         FVector2D PaintSize(FMath::Max(1.0f, Node->Transform.Width.Value),
                             FMath::Max(1.0f, Node->Transform.Height.Value));
@@ -658,13 +632,10 @@ namespace VisualMapperFillTransfer
         {
             Paths = {{StrokeMask->Geometry.GetValue(), StrokeMask->FillRule.Get(TEXT("nonzero"))}};
         }
-        else if (bSeparatePaint && bCanonicalOutline && Node->Type != EDesignNodeType::Line)
+        else if (bCanonicalOutline && Node->Type != EDesignNodeType::Line)
         {
             FUMGPathData Mask;
-            Mask.Geometry =
-                Node->Type == EDesignNodeType::Line
-                    ? FString::Printf(TEXT("M0 0L%f %f"), Node->Transform.Width.Value, Node->Transform.Height.Value)
-                    : MakeRoundedRectanglePath(PaintSize, Radii, 0.0f);
+            Mask.Geometry = MakeRoundedRectanglePath(PaintSize, Radii, 0.0f);
             Mask.FillRule = TEXT("nonzero");
             Mask.CanvasSize = PaintSize;
             Mask.StrokeColor = FLinearColor::White;
@@ -683,33 +654,17 @@ namespace VisualMapperFillTransfer
         }
         else if (bCanonicalOutline)
         {
-            FString Geometry;
             const float Half = Thickness / 2.0f;
-            if (Node->Type == EDesignNodeType::Line)
-            {
-                const float CapExtent = Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular ||
-                                                Node->Visual.Stroke.Cap == EDesignStrokeCap::Square
-                                            ? Half
-                                            : 0.0f;
-                const float LineWidth = PaintSize.X;
-                // An integral canvas keeps both raster axes at the same supersample scale.
-                PaintSize = FVector2D(FMath::CeilToFloat(LineWidth + 2.0f * CapExtent), FMath::CeilToFloat(Thickness));
-                PaintOffset = FVector2D((LineWidth - PaintSize.X) * 0.5f, -PaintSize.Y * 0.5f);
-                Geometry = FString::Printf(TEXT("M%f %f L%f %f"), -PaintOffset.X, PaintSize.Y * 0.5f,
-                                           LineWidth - PaintOffset.X, PaintSize.Y * 0.5f);
-            }
-            else
-            {
-                const float Expansion =
-                    Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside
-                        ? 0.0f
-                        : (Node->Visual.Stroke.Align == EDesignStrokeAlign::Center ? Half : Thickness);
-                PaintOffset = FVector2D(-Expansion, -Expansion);
-                PaintSize += FVector2D(2.0f * Expansion, 2.0f * Expansion);
-                Geometry = MakeRoundedRectanglePath(PaintSize,
-                                                    Radii + FVector4(Expansion, Expansion, Expansion, Expansion), Half);
-            }
-            Paths = {{Geometry, TEXT("nonzero")}};
+            const float CapExtent = Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular ||
+                                            Node->Visual.Stroke.Cap == EDesignStrokeCap::Square
+                                        ? Half
+                                        : 0.0f;
+            const float LineWidth = PaintSize.X;
+            // An integral canvas keeps both raster axes at the same supersample scale.
+            PaintSize = FVector2D(FMath::CeilToFloat(LineWidth + 2.0f * CapExtent), FMath::CeilToFloat(Thickness));
+            PaintOffset = FVector2D((LineWidth - PaintSize.X) * 0.5f, -PaintSize.Y * 0.5f);
+            Paths = {{FString::Printf(TEXT("M%f %f L%f %f"), -PaintOffset.X, PaintSize.Y * 0.5f,
+                LineWidth - PaintOffset.X, PaintSize.Y * 0.5f), TEXT("nonzero")}};
         }
         else
         {
@@ -734,119 +689,28 @@ namespace VisualMapperFillTransfer
                 for (auto& Layer : Widget.Children)
                     if (Layer.Path.Geometry.IsSet()) Layer.Path.SourcePaintGeometry = SourcePaintGeometry;
         }
-        if (bSeparatePaint || bUsesSourceStrokeGeometry)
+        StrokeCarrier->Brush.OutlineThickness.Reset();
+        StrokeCarrier->Brush.OutlineColor.Reset();
+        if (bUsesSourceStrokeGeometry)
         {
-            StrokeCarrier->Brush.OutlineThickness.Reset();
-            StrokeCarrier->Brush.OutlineColor.Reset();
-            if (bUsesSourceStrokeGeometry)
-            {
-                StrokeCarrier->WidgetStyle.StrokePadding.Reset();
-                StrokeCarrier->WidgetStyle.StrokeMargin.Reset();
-            }
-            StrokeCarrier->Path.StrokeColor.Reset();
-            StrokeCarrier->Path.StrokeThickness.Reset();
-            StrokeCarrier->Path.StrokeGradient = FUMGVisualBrushData::FGradientData();
-            StrokeCarrier->Path.StrokeGeometry.Reset();
-            StrokeCarrier->Path.StrokeAlignment.Reset();
-            StrokeCarrier->Path.StrokeCap.Reset();
-            StrokeCarrier->Path.StrokeJoin.Reset();
-            if (StrokeCarrier != &Widget && StrokeCarrier->Path.Geometry.IsSet())
-            {
-                // Generated layers own the fills; only child content can remain on the path carrier.
-                StrokeCarrier->Path = FUMGPathData();
-                if (StrokeCarrier->Children.IsEmpty())
-                    Widget.Children.RemoveAt(PaintLayerCount);
-            }
+            StrokeCarrier->WidgetStyle.StrokePadding.Reset();
+            StrokeCarrier->WidgetStyle.StrokeMargin.Reset();
         }
-        if (bUsesSourceStrokeGeometry && !bSeparatePaint &&
-            (StrokeFill.Type == EDesignFillType::Color || StrokeFill.Type == EDesignFillType::Gradient))
+        StrokeCarrier->Path.StrokeColor.Reset();
+        StrokeCarrier->Path.StrokeThickness.Reset();
+        StrokeCarrier->Path.StrokeGradient = FUMGVisualBrushData::FGradientData();
+        StrokeCarrier->Path.StrokeGeometry.Reset();
+        StrokeCarrier->Path.StrokeAlignment.Reset();
+        StrokeCarrier->Path.StrokeCap.Reset();
+        StrokeCarrier->Path.StrokeJoin.Reset();
+        if (StrokeCarrier != &Widget && StrokeCarrier->Path.Geometry.IsSet())
         {
-            const auto CapturePaint = [](const FUMGWidgetNode& Surface)
-            {
-                const bool bFitImage = Surface.Type == UMGWidgetTypes::ScaleBox
-                    && Surface.WidgetStyle.Stretch.Get(FString()) == TEXT("ScaleToFit")
-                    && Surface.Children.Num() == 1 && Surface.Children[0].Type == UMGWidgetTypes::Image;
-                const auto& PaintOwner = bFitImage ? Surface.Children[0] : Surface;
-                FUMGSurfacePaint Paint;
-                Paint.Color = PaintOwner.Brush.BrushColor.Get(FLinearColor::White);
-                // Gradient stops own their color/alpha; Path.FillColor is only the builder's first-stop placeholder.
-                if (!PaintOwner.Brush.Gradient.HasAny()) Paint.Color *= PaintOwner.Path.FillColor.Get(FLinearColor::White);
-                Paint.Gradient = PaintOwner.Brush.Gradient;
-                Paint.Image = PaintOwner.Brush.Image;
-                if (bFitImage)
-                {
-                    // The generated FIT ScaleBox centers its image at its own aspect ratio.
-                    Paint.Image.CropFitMode = TEXT("Fit");
-                    Paint.Color.A *= PaintOwner.Render.RenderOpacity.Get(1.0f);
-                }
-                return Paint;
-            };
-            SourcePaintGeometry.FillPaints = TArray<FUMGSurfacePaint>();
-            if (Node->HasMultiFill())
-            {
-                for (int32 Index = 0; Index < PaintLayerCount; ++Index)
-                {
-                    auto Paint = CapturePaint(Widget.Children[Index]);
-                    if (Paint.Image.HasAny())
-                        Paint.Color.A = Widget.Children[Index].Render.RenderOpacity.Get(Paint.Color.A);
-                    else
-                        Paint.Color.A *= Widget.Children[Index].Render.RenderOpacity.Get(1.0f);
-                    SourcePaintGeometry.FillPaints->Add(MoveTemp(Paint));
-                }
-                Widget.Children.RemoveAt(0, PaintLayerCount);
-            }
-            else if (!Node->Visual.Fills.IsEmpty() && Node->Visual.TopmostFill().bEnabled)
-                SourcePaintGeometry.FillPaints->Add(CapturePaint(Widget));
-            FUMGSurfacePaint StrokePaint;
-            if (StrokeFill.Type == EDesignFillType::Color)
-                StrokePaint.Color = FUMGValueParser::ParseColor(StrokeFill.SolidColor, StrokeFill.Opacity);
-            else
-            {
-                FUMGVisualBrushData Brush;
-                ApplyGradientBrushData(Brush, StrokeFill.Gradient, StrokeFill.Opacity);
-                StrokePaint.Gradient = MoveTemp(Brush.Gradient);
-            }
-            SourcePaintGeometry.StrokePaint = MoveTemp(StrokePaint);
-            if (Widget.Type != UMGWidgetTypes::Image && Widget.Type != UMGWidgetTypes::Border)
-                Widget = VisualMapper::WrapWithBorder(MoveTemp(Widget), Node);
-            if (!Widget.Children.IsEmpty()) Widget.Type = UMGWidgetTypes::Border;
-            Widget.Path = FUMGPathData();
-            const auto& FillPaths = SourcePaintGeometry.Geometry.FillPaths;
-            Widget.Path.Geometry = FillPaths.IsSet() && !FillPaths->IsEmpty() ? (*FillPaths)[0].Path : Paths[0].Path;
-            Widget.Path.SourcePaintGeometry = MoveTemp(SourcePaintGeometry);
-            Widget.Path.ViewBox = SourceViewBox;
-            Widget.Path.CanvasSize = PaintSize;
-            Widget.Brush = FUMGVisualBrushData();
-            Widget.Brush.DrawAs = ESlateBrushDrawType::Image;
-            Widget.Brush.BrushColor = FLinearColor::White;
-            return MoveTemp(Widget);
+            // Generated layers own the fills; only child content can remain on the path carrier.
+            StrokeCarrier->Path = FUMGPathData();
+            if (StrokeCarrier->Children.IsEmpty())
+                Widget.Children.RemoveAt(PaintLayerCount);
         }
         const bool bStrokeOnly = Node->Children.IsEmpty() && Node->Visual.Fills.IsEmpty();
-        // An inside stroke fits the native brush bounds; outside paint needs a separate layer.
-        if (!bSeparatePaint && !bStrokeOnly && Widget.Type == UMGWidgetTypes::Border && bCanonicalOutline &&
-            bRectangularShape && Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside)
-        {
-            Widget.Path.Geometry = MakeRoundedRectanglePath(PaintSize, Radii, 0.0f);
-            Widget.Path.StrokeGeometry = Paths[0].Path;
-            Widget.Path.FillRule = TEXT("nonzero");
-            if (!Node->Visual.Fills.IsEmpty() && Node->Visual.TopmostFill().bEnabled)
-                Widget.Path.FillColor = Widget.Brush.BrushColor.Get(FLinearColor::White);
-            Widget.Path.StrokeColor = FLinearColor::White;
-            Widget.Path.StrokeThickness = Thickness;
-            FUMGVisualBrushData StrokeBrush;
-            VisualMapperFillTransfer::ApplyGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient, Node->Visual.Stroke.Fill->Opacity);
-            Widget.Path.StrokeGradient = MoveTemp(StrokeBrush.Gradient);
-            auto FillGradient = MoveTemp(Widget.Brush.Gradient);
-            auto FillImage = MoveTemp(Widget.Brush.Image);
-            Widget.Brush = FUMGVisualBrushData();
-            Widget.Brush.Gradient = MoveTemp(FillGradient);
-            Widget.Brush.Image = MoveTemp(FillImage);
-            Widget.Brush.DrawAs = ESlateBrushDrawType::Image;
-            Widget.Brush.BrushColor = FLinearColor::White;
-            Widget.WidgetStyle.WidthOverride = PaintSize.X;
-            Widget.WidgetStyle.HeightOverride = PaintSize.Y;
-            return MoveTemp(Widget);
-        }
         const bool bLine = !StrokeMask.IsSet() && bCanonicalOutline && Node->Type == EDesignNodeType::Line;
         const FVector2D LayoutSize = bLine ? FVector2D(PaintSize.X + 2.0f * PaintOffset.X, Thickness) : PaintSize;
         const auto ApplyLineCanvas = [&](FUMGWidgetNode& Layer)
@@ -878,122 +742,121 @@ namespace VisualMapperFillTransfer
         if (!bStrokeOnly)
         {
             PrepareMultiFillContentWidget(Widget);
-            if (VisualMapper::RequiresSourceContour(*Node))
-            {
-                Widget.Id = Overlay.Id + TEXT("__contourstroke_content");
-                Widget.Name = Overlay.Name + TEXT("__contourstroke_content");
-            }
+            Widget.Id = Overlay.Id + TEXT("__stroke_content");
+            Widget.Name = Overlay.Name + TEXT("__stroke_content");
             Overlay.Children.Add(MoveTemp(Widget));
         }
-        for (int32 Index = 0; Index < Paths.Num(); ++Index)
+        const FDesignGeometryPath& Path = Paths[0];
+        FUMGWidgetNode Layer;
+        Layer.Type = UMGWidgetTypes::Image;
+        const FString Suffix = TEXT("_stroke0");
+        Layer.WidgetStyle.Visibility = TEXT("HitTestInvisible");
+        Layer.Id = Overlay.Id + Suffix;
+        Layer.Name = Overlay.Name + Suffix;
+        Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
+        Layer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
+        Layer.Path.Geometry = Path.Path;
+        Layer.Path.FillRule = Path.FillRule;
+        if (bUsesSourceStrokeGeometry)
         {
-            const FDesignGeometryPath& Path = Paths[Index];
-            FUMGWidgetNode Layer;
-            Layer.Type = UMGWidgetTypes::Image;
-            const FString Suffix = FString::Printf(TEXT("_stroke%d"), Index);
-            Layer.WidgetStyle.Visibility = TEXT("HitTestInvisible");
-            Layer.Id = Overlay.Id + Suffix;
-            Layer.Name = Overlay.Name + Suffix;
-            Layer.Slot.HorizontalAlignment = EUMGSlotHorizontalAlignment::Fill;
-            Layer.Slot.VerticalAlignment = EUMGSlotVerticalAlignment::Fill;
-            Layer.Path.Geometry = Path.Path;
-            Layer.Path.FillRule = Path.FillRule;
-            if (bUsesSourceStrokeGeometry)
-            {
-                Layer.Path.ViewBox = SourceViewBox;
-                Layer.Path.CanvasSize = PaintSize;
-                Layer.Path.SourcePaintGeometry = SourcePaintGeometry;
-                Layer.Path.StrokeGeometry = MoveTemp(Layer.Path.Geometry);
-                Layer.Path.Geometry.Reset();
-            }
-            if (StrokeMask.IsSet())
-                Layer.Path = StrokeMask.GetValue();
-            else if (bCanonicalOutline)
-            {
-                Layer.Path.StrokeColor = FLinearColor::White;
-                Layer.Path.StrokeThickness = Thickness;
-                Layer.Path.StrokeCap =
-                    Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular
-                        ? TEXT("round")
-                        : (Node->Visual.Stroke.Cap == EDesignStrokeCap::Square ? TEXT("square") : TEXT("butt"));
-            }
-            else
-                Layer.Path.FillColor = FLinearColor::White;
-            Layer.Render.RenderTranslation = bLine ? FVector2D(0.0f, -LayoutSize.Y * 0.5f) : PaintOffset;
-            if (!bShaderStroke && NonNormalBlend(StrokeFill.BlendMode))
-                Layer.Render.PaintBlendMode = CanonicalPaintBlendMode(StrokeFill.BlendMode);
-            if (bShaderStroke)
-            {
-                Layer.Brush.Shader = StrokeFill.Shader;
-                Layer.Brush.Shader->Size =
-                    bLine ? LayoutSize : FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
-                if (bLine)
-                    Layer.Brush.Shader->CaptureInsets = FVector4(-PaintOffset.X, 0, -PaintOffset.X, 0);
-            }
-            else if (StrokeFill.Type == EDesignFillType::Gradient)
-                VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, StrokeFill.Gradient, StrokeFill.Opacity);
-            else if (StrokeFill.Type == EDesignFillType::Image)
-            {
-                ImageFillUtils::ApplyImageFillProperties(Layer, StrokeFill.Image);
-                Layer.Brush.Image.TexturePath = StrokeFill.Image.Url;
-            }
-            else
-                Layer.Brush.BrushColor = FUMGValueParser::ParseColor(StrokeFill.SolidColor, StrokeFill.Opacity);
-            Layer.WidgetStyle.WidthOverride = PaintSize.X;
-            Layer.WidgetStyle.HeightOverride = PaintSize.Y;
-            if (bLine && PaintOffset.X != 0.0f &&
-                Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Linear"), ESearchCase::IgnoreCase) &&
-                (!Layer.Brush.Gradient.StartPoint.IsSet() || !Layer.Brush.Gradient.EndPoint.IsSet()))
-            {
-                // Convert an angle gradient to the same projection in the unpadded paint box.
-                const float Angle = FMath::DegreesToRadians(Layer.Brush.Gradient.Rotation.Get(0.0f));
-                const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
-                const float Minimum = FMath::Min(0.0f, static_cast<float>(Direction.X)) +
-                                      FMath::Min(0.0f, static_cast<float>(Direction.Y));
-                const float Range = FMath::Abs(Direction.X) + FMath::Abs(Direction.Y);
-                const FVector2D Projection = Direction / LayoutSize / Range;
-                const FVector2D Span = Projection / Projection.SizeSquared();
-                const FVector2D Start = Span * (Minimum / Range);
-                Layer.Brush.Gradient.StartPoint = (Start + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
-                Layer.Brush.Gradient.EndPoint = (Start + Span + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
-            }
-            else
-            {
-                if (Layer.Brush.Gradient.StartPoint.IsSet())
-                    Layer.Brush.Gradient.StartPoint =
-                        (Layer.Brush.Gradient.StartPoint.GetValue() *
-                             FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) -
-                         PaintOffset) /
-                        PaintSize;
-                if (Layer.Brush.Gradient.EndPoint.IsSet())
-                    Layer.Brush.Gradient.EndPoint =
-                        (Layer.Brush.Gradient.EndPoint.GetValue() *
-                             FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) -
-                         PaintOffset) /
-                        PaintSize;
-            }
-            if (bLine && Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
-            {
-                FVector2D Center = Layer.Brush.Gradient.Center.Get(FVector2D(0.5f, 0.5f));
-                FVector2D Size = Layer.Brush.Gradient.Size.Get(FVector2D(1.0f, 1.0f));
-                Center = (Center * LayoutSize + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
-                Size *= LayoutSize / PaintSize;
-                Layer.Brush.Gradient.Center = Center;
-                Layer.Brush.Gradient.Size = Size;
-            }
-            if (Layer.Brush.Gradient.AngularBasis.IsSet())
-            {
-                const FVector2D SourceSize =
-                    bLine ? LayoutSize : FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
-                const FVector2D Origin = bLine ? (PaintSize - LayoutSize) * 0.5f : -PaintOffset;
-                Layer.Brush.Gradient.TransformAngularPaintSpace(SourceSize / PaintSize, Origin / PaintSize);
-            }
-            ApplyLineCanvas(Layer);
-            Overlay.Children.Add(MoveTemp(Layer));
+            Layer.Path.ViewBox = SourceViewBox;
+            Layer.Path.CanvasSize = PaintSize;
+            Layer.Path.SourcePaintGeometry = SourcePaintGeometry;
         }
-        if (bStrokeOnly && Overlay.Children.Num() == 1)
+        if (StrokeMask.IsSet())
+            Layer.Path = StrokeMask.GetValue();
+        else if (bCanonicalOutline)
         {
-            FUMGWidgetNode Layer = MoveTemp(Overlay.Children[0]);
+            Layer.Path.StrokeColor = FLinearColor::White;
+            Layer.Path.StrokeThickness = Thickness;
+            Layer.Path.StrokeCap =
+                Node->Visual.Stroke.Cap == EDesignStrokeCap::Circular
+                    ? TEXT("round")
+                    : (Node->Visual.Stroke.Cap == EDesignStrokeCap::Square ? TEXT("square") : TEXT("butt"));
+        }
+        else
+            Layer.Path.FillColor = FLinearColor::White;
+        Layer.Render.RenderTranslation = bLine ? FVector2D(0.0f, -LayoutSize.Y * 0.5f) : PaintOffset;
+        if (!bShaderStroke && NonNormalBlend(StrokeFill.BlendMode))
+            Layer.Render.PaintBlendMode = CanonicalPaintBlendMode(StrokeFill.BlendMode);
+        if (bShaderStroke)
+        {
+            Layer.Brush.Shader = StrokeFill.Shader;
+            Layer.Brush.Shader->Size =
+                bLine ? LayoutSize : FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
+            if (bLine)
+                Layer.Brush.Shader->CaptureInsets = FVector4(-PaintOffset.X, 0, -PaintOffset.X, 0);
+        }
+        else if (StrokeFill.Type == EDesignFillType::Gradient)
+            VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, StrokeFill.Gradient, StrokeFill.Opacity);
+        else if (StrokeFill.Type == EDesignFillType::Image)
+        {
+            ImageFillUtils::ApplyImageFillProperties(Layer, StrokeFill.Image);
+            Layer.Brush.Image.TexturePath = StrokeFill.Image.Url;
+        }
+        else
+            Layer.Brush.BrushColor = FUMGValueParser::ParseColor(StrokeFill.SolidColor, StrokeFill.Opacity);
+        Layer.WidgetStyle.WidthOverride = PaintSize.X;
+        Layer.WidgetStyle.HeightOverride = PaintSize.Y;
+        if (bLine && PaintOffset.X != 0.0f &&
+            Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Linear"), ESearchCase::IgnoreCase) &&
+            (!Layer.Brush.Gradient.StartPoint.IsSet() || !Layer.Brush.Gradient.EndPoint.IsSet()))
+        {
+            // Convert an angle gradient to the same projection in the unpadded paint box.
+            const float Angle = FMath::DegreesToRadians(Layer.Brush.Gradient.Rotation.Get(0.0f));
+            const FVector2D Direction(FMath::Cos(Angle), FMath::Sin(Angle));
+            const float Minimum = FMath::Min(0.0f, static_cast<float>(Direction.X)) +
+                                  FMath::Min(0.0f, static_cast<float>(Direction.Y));
+            const float Range = FMath::Abs(Direction.X) + FMath::Abs(Direction.Y);
+            const FVector2D Projection = Direction / LayoutSize / Range;
+            const FVector2D Span = Projection / Projection.SizeSquared();
+            const FVector2D Start = Span * (Minimum / Range);
+            Layer.Brush.Gradient.StartPoint = (Start + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+            Layer.Brush.Gradient.EndPoint = (Start + Span + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+        }
+        else
+        {
+            if (Layer.Brush.Gradient.StartPoint.IsSet())
+                Layer.Brush.Gradient.StartPoint =
+                    (Layer.Brush.Gradient.StartPoint.GetValue() *
+                         FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) -
+                     PaintOffset) /
+                    PaintSize;
+            if (Layer.Brush.Gradient.EndPoint.IsSet())
+                Layer.Brush.Gradient.EndPoint =
+                    (Layer.Brush.Gradient.EndPoint.GetValue() *
+                         FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value) -
+                     PaintOffset) /
+                    PaintSize;
+        }
+        if (bLine && Layer.Brush.Gradient.Type.Get(FString()).Equals(TEXT("Radial"), ESearchCase::IgnoreCase))
+        {
+            FVector2D Center = Layer.Brush.Gradient.Center.Get(FVector2D(0.5f, 0.5f));
+            FVector2D Size = Layer.Brush.Gradient.Size.Get(FVector2D(1.0f, 1.0f));
+            Center = (Center * LayoutSize + (PaintSize - LayoutSize) * 0.5f) / PaintSize;
+            Size *= LayoutSize / PaintSize;
+            Layer.Brush.Gradient.Center = Center;
+            Layer.Brush.Gradient.Size = Size;
+        }
+        if (Layer.Brush.Gradient.AngularBasis.IsSet())
+        {
+            const FVector2D SourceSize =
+                bLine ? LayoutSize : FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
+            const FVector2D Origin = bLine ? (PaintSize - LayoutSize) * 0.5f : -PaintOffset;
+            Layer.Brush.Gradient.TransformAngularPaintSpace(SourceSize / PaintSize, Origin / PaintSize);
+        }
+        if (bUsesSourceStrokeGeometry)
+        {
+            auto& Source = Layer.Path.SourcePaintGeometry.GetValue();
+            Source.FillPaints = TArray<FUMGSurfacePaint>();
+            FUMGSurfacePaint Stroke;
+            Stroke.Color = FLinearColor::White;
+            Swap(Stroke.Gradient, Layer.Brush.Gradient);
+            Swap(Stroke.Image, Layer.Brush.Image);
+            Source.StrokePaint = MoveTemp(Stroke);
+        }
+        if (bStrokeOnly)
+        {
             Layer.Id = Overlay.Id;
             Layer.Name = Overlay.Name;
             Layer.Bounds = Overlay.Bounds;
@@ -1008,6 +871,8 @@ namespace VisualMapperFillTransfer
             Layer.Shadow = MoveTemp(Overlay.Shadow);
             return Layer;
         }
+        ApplyLineCanvas(Layer);
+        Overlay.Children.Add(MoveTemp(Layer));
         return Overlay;
     }
 

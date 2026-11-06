@@ -102,29 +102,9 @@ namespace Design2UMGConverterPrivate
 		Endpoint.bClipContent = Node.LayoutData.ExplicitClip.Get(false);
 		Endpoint.CornerRadii = Node.Visual.CornerRadius.ToVector4();
 		Endpoint.ClipPaths = Contour.GeometryMaskPaths;
-		Endpoint.OwnPaint.Geometry.FillPaths = Contour.GeometryMaskPaths;
-		Endpoint.OwnPaint.Geometry.StrokePaths = Node.Shape.PaintGeometry.StrokePaths.Get(TArray<FDesignGeometryPath>());
-		Endpoint.OwnPaint.StrokeAlignment = Node.Visual.Stroke.Align == EDesignStrokeAlign::Inside ? TEXT("inner")
-			: Node.Visual.Stroke.Align == EDesignStrokeAlign::Outside ? TEXT("outer") : TEXT("center");
-		TArray<FUMGSurfacePaint> Paints;
-		if (!BuildSurfacePaints(Node, Paints, Error)) return false;
-		for (auto& Paint : Paints) { Paint.Color.A *= Paint.Opacity; Paint.Opacity = 1; }
-		Endpoint.OwnPaint.FillPaints = MoveTemp(Paints);
-		FUMGSurfacePaint Stroke;
-		Stroke.Color = FLinearColor::Transparent;
-		if (Node.Visual.Stroke.HasStroke() && Node.Visual.Stroke.Fill.IsSet())
-		{
-			const auto& Fill = Node.Visual.Stroke.Fill.GetValue();
-			if (Fill.Type == EDesignFillType::Color) Stroke.Color = FUMGValueParser::ParseColor(Fill.SolidColor, Fill.Opacity);
-			else if (Fill.Type == EDesignFillType::Gradient)
-			{
-				FUMGVisualBrushData Brush;
-				VisualMapperFillTransfer::ApplyGradientBrushData(Brush, Fill.Gradient, Fill.Opacity);
-				Stroke.Gradient = MoveTemp(Brush.Gradient); Stroke.Color = FLinearColor::White;
-			}
-			else { Error = TEXT("shared capture own stroke has no supported native paint"); return false; }
-		}
-		Endpoint.OwnPaint.StrokePaint = MoveTemp(Stroke);
+		const FMargin Insets = VisualMapperFillTransfer::BackgroundCaptureInsets(Node);
+		Endpoint.CaptureBounds = FVector4(-Insets.Left, -Insets.Top,
+			Endpoint.Size.X + Insets.Left + Insets.Right, Endpoint.Size.Y + Insets.Top + Insets.Bottom);
 		for (const auto& Effect : Node.Visual.Effects)
 		{
 			if (!Effect.bEnabled) continue;
@@ -138,21 +118,24 @@ namespace Design2UMGConverterPrivate
 			Layer.bShowShadowBehindNode = Shadow.bShowShadowBehindNode;
 			Endpoint.BoxShadows.Add(Layer);
 		}
-		if (!Endpoint.BoxShadows.IsEmpty() && Node.Visual.Stroke.HasStroke() && !Node.Shape.PaintGeometry.StrokePaths.IsSet())
-		{ Error = TEXT("shared native shadow requires the complete source stroke region"); return false; }
 		return true;
 	}
 
-	FUMGWidgetNode* SharedCaptureNode(FUMGWidgetNode& Owner)
-	{
-		for (auto& Child : Owner.Children)
-			if (Child.Type == UMGWidgetTypes::RetainerBox && Child.Effect.SharedCapture.IsSet()) return &Child;
-		return nullptr;
-	}
 	FUMGWidgetNode* SharedShadowNode(FUMGWidgetNode& Owner)
 	{
-		for (auto& Child : Owner.Children)
-			if (Child.Type == UMGWidgetTypes::Image && Child.Effect.SharedCapture.IsSet()) return &Child;
+		if (Owner.Children.Num() == 1 && Owner.Children[0].Effect.SharedCapture.IsSet()
+			&& Owner.Children[0].Effect.SharedCapture->bSubtreeShadow) return &Owner.Children[0];
+		return nullptr;
+	}
+	FUMGWidgetNode* SharedPaintOwner(FUMGWidgetNode& Owner)
+	{
+		if (auto* Shadow = SharedShadowNode(Owner)) return &Shadow->Children[0].Children[0];
+		return &Owner;
+	}
+	FUMGWidgetNode* SharedCaptureNode(FUMGWidgetNode& Owner)
+	{
+		for (auto& Child : SharedPaintOwner(Owner)->Children)
+			if (Child.Type == UMGWidgetTypes::RetainerBox && Child.Effect.SharedCapture.IsSet()) return &Child;
 		return nullptr;
 	}
 	FUMGWidgetNode* LogicalContent(FUMGWidgetNode& Owner)
@@ -731,15 +714,25 @@ namespace Design2UMGConverterPrivate
 				Capture.Effect.bRetainRendering = true; Capture.Effect.TextureParameter = TEXT("Texture");
 				Capture.WidgetStyle.Visibility = TEXT("SelfHitTestInvisible");
 				Capture.Children.Add(MoveTemp(Canvas));
-				FUMGWidgetNode Shadow;
-				Shadow.Type = UMGWidgetTypes::Image; Shadow.Id = Node->Id + TEXT("__shared_shadow"); Shadow.Name = Shadow.Id;
-				Shadow.Bounds.W = Endpoint.Size.X; Shadow.Bounds.H = Endpoint.Size.Y;
-				Shadow.Brush.BrushColor = FLinearColor::White;
-				Shadow.Effect.SharedCapture = Capture.Effect.SharedCapture;
-				Shadow.WidgetStyle.Visibility = TEXT("HitTestInvisible");
-				Widget.Children.Insert(MoveTemp(Shadow), 0);
-				if (Widget.SourceVisualChildIndex != INDEX_NONE) ++Widget.SourceVisualChildIndex;
 				Widget.Children.Add(MoveTemp(Capture));
+				FUMGWidgetNode Paints;
+				Paints.Type = UMGWidgetTypes::Overlay; Paints.Id = Node->Id + TEXT("__shared_paints"); Paints.Name = Paints.Id;
+				Paints.Bounds.W = Endpoint.Size.X; Paints.Bounds.H = Endpoint.Size.Y;
+				Paints.Slot.Offsets = {0.0f, 0.0f, static_cast<float>(Endpoint.Size.X), static_cast<float>(Endpoint.Size.Y)};
+				Paints.SourceVisualChildIndex = Widget.SourceVisualChildIndex;
+				Paints.Children = MoveTemp(Widget.Children);
+				FUMGWidgetNode ShadowCanvas;
+				ShadowCanvas.Type = UMGWidgetTypes::CanvasPanel; ShadowCanvas.Id = Node->Id + TEXT("__shadow_canvas"); ShadowCanvas.Name = ShadowCanvas.Id;
+				ShadowCanvas.Bounds.W = Endpoint.Size.X; ShadowCanvas.Bounds.H = Endpoint.Size.Y;
+				ShadowCanvas.SourceVisualChildIndex = 0; ShadowCanvas.Children.Add(MoveTemp(Paints));
+				FUMGWidgetNode Shadow;
+				Shadow.Type = UMGWidgetTypes::RetainerBox; Shadow.Id = Node->Id + TEXT("__shared_shadow"); Shadow.Name = Shadow.Id;
+				Shadow.Bounds.W = Endpoint.Size.X; Shadow.Bounds.H = Endpoint.Size.Y;
+				Shadow.Effect.SharedCapture.Emplace(); Shadow.Effect.SharedCapture->Source = Endpoint;
+				Shadow.Effect.SharedCapture->bSubtreeShadow = true;
+				Shadow.Effect.bRetainRendering = true; Shadow.Effect.TextureParameter = TEXT("Texture");
+				Shadow.SourceVisualChildIndex = 0; Shadow.Children.Add(MoveTemp(ShadowCanvas));
+				Widget.SourceVisualChildIndex = 0; Widget.Children.Add(MoveTemp(Shadow));
 			}
 			return true;
 		}
@@ -1760,12 +1753,13 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 					[](const FUMGSharedCaptureEndpoint& Target) { return !Target.BoxShadows.IsEmpty(); });
 				if (auto* Shadow = Design2UMGConverterPrivate::SharedShadowNode(Node))
 				{
-					if (HasShadow) Shadow->Effect.SharedCapture = Data;
+					if (HasShadow) { Shadow->Effect.SharedCapture = Data; Shadow->Effect.SharedCapture->bSubtreeShadow = true; }
 					else
 					{
 						const FString ShadowId = Shadow->Id;
-						Node.Children.RemoveAt(0);
-						if (Node.SourceVisualChildIndex != INDEX_NONE) --Node.SourceVisualChildIndex;
+						FUMGWidgetNode Paints = MoveTemp(Shadow->Children[0].Children[0]);
+						Node.Children = MoveTemp(Paints.Children);
+						Node.SourceVisualChildIndex = Paints.SourceVisualChildIndex;
 						for (auto& Binding : State.PrototypeNavigation.ClickBindings) for (auto& Item : Binding.PrimaryStep().Transition.SharedCaptures)
 							if (Item.ShadowWidgetId == ShadowId) Item.ShadowWidgetId.Reset();
 					}
@@ -1782,7 +1776,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 		Plan.LocalEndpoints.RemoveAll([&](const FUMGPrototypeLocalEndpoint& Endpoint)
 		{
 			auto* Source = NativeVisual(FindRenderWidgetById(Endpoint.NodeId));
+			if (Source) Source = Design2UMGConverterPrivate::SharedPaintOwner(*Source);
 			auto* Destination = NativeVisual(FindRenderWidgetById(Endpoint.DestinationWidgetId));
+			if (Destination) Destination = Design2UMGConverterPrivate::SharedPaintOwner(*Destination);
 			return Source && Destination && Source->SourceVisualChildIndex == INDEX_NONE && Destination->SourceVisualChildIndex == INDEX_NONE
 				&& Design2UMGConverterPrivate::SharedCaptureNode(*Source)
 				&& Design2UMGConverterPrivate::SharedCaptureNode(*Destination);
@@ -1790,7 +1786,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 		for (auto& Endpoint : Plan.LocalEndpoints)
 		{
 			auto* Source = NativeVisual(FindRenderWidgetById(Endpoint.NodeId));
+			if (Source) Source = Design2UMGConverterPrivate::SharedPaintOwner(*Source);
 			auto* Destination = NativeVisual(FindRenderWidgetById(Endpoint.DestinationWidgetId));
+			if (Destination) Destination = Design2UMGConverterPrivate::SharedPaintOwner(*Destination);
 			if (!Source || !Destination)
 			{ Plan.Diagnostic = TEXT("local visual endpoints have no unique native source and destination"); break; }
 			FUMGWidgetNode Target;
@@ -1864,10 +1862,11 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	const auto FindSurface = [&FindRenderWidgetById, &NativeVisual](const FString& Id) -> FUMGWidgetNode*
 	{
 		auto* Owner = NativeVisual(FindRenderWidgetById(Id));
-		const FString ProducerOwnerId = Owner && Owner->Children.IsValidIndex(Owner->SourceVisualChildIndex)
-			? Owner->Children[Owner->SourceVisualChildIndex].Id : Id;
-		auto* Node = Owner ? FindRenderWidgetById(ProducerOwnerId + TEXT("__surface_paint")) : nullptr;
-		return Node && Node->Type == UMGWidgetTypes::Image && Node->Effect.SurfacePaints.IsSet() ? Node : nullptr;
+		while (Owner && Owner->Children.IsValidIndex(Owner->SourceVisualChildIndex))
+			Owner = &Owner->Children[Owner->SourceVisualChildIndex];
+		if (Owner && Owner->Effect.SurfacePaints.IsSet()) return Owner;
+		return Owner && !Owner->Children.IsEmpty() && Owner->Children[0].Effect.SurfacePaints.IsSet()
+			? &Owner->Children[0] : nullptr;
 	};
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
@@ -2040,6 +2039,14 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			auto* Mapping = Plan.LayoutTargets.FindByPredicate([&](const FUMGPrototypeLayoutTarget& Target) { return Target.NodeId == OriginalId; });
 			if (!Mapping) Mapping = &Plan.LayoutTargets.Add_GetRef({OriginalId, FString(), FString()});
 			Mapping->PresentationWidgetId = Node.Id;
+			if (auto* Live = Plan.LivePresentations.FindByPredicate([&](const FUMGPrototypeLivePresentation& Item)
+				{ return Item.PresentationSocketWidgetId == OriginalId; }))
+			{
+				Mapping->DestinationWidgetId = Live->WidgetId;
+				Live->PresentationSocketWidgetId = Node.Id;
+				Node.Children.Reset();
+				return;
+			}
 			const auto* StateHost = State.PrototypeNavigation.StateHosts.FindByPredicate(
 				[&](const FUMGPrototypeStateHost& Item) { return Item.HostWidgetId == OriginalId; });
 			const bool bTrigger = OriginalId != SourceId && OriginalId != Plan.LayoutDestinationWidgetId
@@ -2075,18 +2082,24 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 					}
 					if (auto* Target = Plan.LayoutTargets.FindByPredicate([&](const FUMGPrototypeLayoutTarget& Item) { return Item.NodeId == Child.Id; }))
 						Target->PresentationWidgetId = Child.Id;
-					Child.Id = Scope + TEXT("::") + Child.Id;
-					Child.ClearSourceDesignIdentity();
 					for (auto& Descendant : Child.Children) MapLiveChildren(Descendant);
 				};
 				for (auto& Child : Node.Children) MapLiveChildren(Child);
+				Node.Children.Reset();
 				return;
 			}
 			for (auto& Child : Node.Children) PreparePresentation(Child);
 		};
 		for (const auto& Item : Plan.SharedCaptures)
 		{
+			auto* Source = NativeVisual(FindRenderWidgetById(Item.NodeId));
 			auto* Destination = NativeVisual(FindRenderWidgetById(Item.DestinationWidgetId));
+			if (Source && Destination && Design2UMGConverterPrivate::SharedShadowNode(*Source))
+			{
+				const FString& From = Design2UMGConverterPrivate::SharedPaintOwner(*Source)->Id;
+				if (!Plan.LayoutTargets.ContainsByPredicate([&](const FUMGPrototypeLayoutTarget& Target) { return Target.NodeId == From; }))
+					Plan.LayoutTargets.Add({From, Design2UMGConverterPrivate::SharedPaintOwner(*Destination)->Id, FString()});
+			}
 			if (Destination && !Plan.LayoutTargets.ContainsByPredicate([&](const FUMGPrototypeLayoutTarget& Target) { return Target.NodeId == Item.ContentWidgetId; }))
 				Plan.LayoutTargets.Add({Item.ContentWidgetId, Design2UMGConverterPrivate::LogicalContent(*Destination)->Id, FString()});
 		}
