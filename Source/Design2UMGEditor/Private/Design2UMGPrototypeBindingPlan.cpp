@@ -176,35 +176,35 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 		}
 		const FUMGPrototypeNavigationStep& Step = Binding.Steps[0];
 		const bool bNavigate = Step.Kind == EUMGPrototypeNavigationStepKind::Navigate;
-		if (Binding.UsesDragTrigger() && (Binding.Transition.WidgetAnimationName.IsEmpty()
+		if (Binding.UsesDragTrigger() && (Step.Transition.WidgetAnimationName.IsEmpty()
 			|| (Step.Kind != EUMGPrototypeNavigationStepKind::Navigate && Step.Kind != EUMGPrototypeNavigationStepKind::AnimateWidget)))
 		{
 			SkipBinding(OutWarnings, FString::Printf(TEXT("trigger '%s' -> '%s': drag animation unavailable (%s); action not executed"),
-				*Binding.TriggerWidgetId, *Step.TargetPageId, Binding.Transition.Diagnostic.IsEmpty()
-					? TEXT("drag requires a resolved native animation and a page or state target") : *Binding.Transition.Diagnostic));
+				*Binding.TriggerWidgetId, *Step.TargetPageId, Step.Transition.Diagnostic.IsEmpty()
+					? TEXT("drag requires a resolved native animation and a page or state target") : *Step.Transition.Diagnostic));
 			continue;
 		}
 		if ((bNavigate || Step.Kind == EUMGPrototypeNavigationStepKind::Overlay)
-			&& Binding.Transition.IsAnimated() && Binding.Transition.Type != TEXT("SMART_ANIMATE")
-			&& Binding.Transition.WidgetAnimationName.IsEmpty())
+			&& Step.Transition.IsAnimated() && Step.Transition.Type != TEXT("SMART_ANIMATE")
+			&& Step.Transition.WidgetAnimationName.IsEmpty())
 		{
 			SkipBinding(OutWarnings, FString::Printf(TEXT("trigger '%s': unsupported navigation transition '%s'; action not executed"),
-				*Binding.TriggerWidgetId, *Binding.Transition.Type));
+				*Binding.TriggerWidgetId, *Step.Transition.Type));
 			continue;
 		}
-		if ((Binding.Transition.Type == TEXT("SMART_ANIMATE") || !Binding.Transition.WidgetAnimationName.IsEmpty())
+		if ((Step.Transition.Type == TEXT("SMART_ANIMATE") || !Step.Transition.WidgetAnimationName.IsEmpty())
 			&& ((!bMouse && !bPageOpen) || (!bNavigate && Step.Kind != EUMGPrototypeNavigationStepKind::AnimateWidget
-				&& (Step.Kind != EUMGPrototypeNavigationStepKind::Overlay || Binding.Transition.Type == TEXT("SMART_ANIMATE")))))
+				&& (Step.Kind != EUMGPrototypeNavigationStepKind::Overlay || Step.Transition.Type == TEXT("SMART_ANIMATE")))))
 		{
 			SkipBinding(OutWarnings, FString::Printf(TEXT("trigger '%s': property animation supports only mouse/page-entry CHANGE_TO and page Navigate; Overlay and other actions not executed"), *Binding.TriggerWidgetId));
 			continue;
 		}
-		if (!Binding.Transition.Diagnostic.IsEmpty()
-			|| ((Binding.Transition.Type == TEXT("SMART_ANIMATE") || Step.Kind == EUMGPrototypeNavigationStepKind::AnimateWidget)
-				&& Binding.Transition.WidgetAnimationName.IsEmpty() && !Binding.Transition.bStateInstant))
+		if (!Step.Transition.Diagnostic.IsEmpty()
+			|| ((Step.Transition.Type == TEXT("SMART_ANIMATE") || Step.Kind == EUMGPrototypeNavigationStepKind::AnimateWidget)
+				&& Step.Transition.WidgetAnimationName.IsEmpty() && !Step.Transition.bStateInstant))
 		{
 			SkipBinding(OutWarnings, FString::Printf(TEXT("trigger '%s': animation unavailable (%s); action not executed"),
-				*Binding.TriggerWidgetId, *Binding.Transition.Diagnostic));
+				*Binding.TriggerWidgetId, *Step.Transition.Diagnostic));
 			continue;
 		}
 
@@ -223,17 +223,17 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 			}
 		}
 		Resolved.bTemporaryNavigate = bNavigate && (Binding.UsesHoverTrigger() || Binding.UsesPressTrigger());
-		if (!Binding.Transition.StateHostWidgetId.IsEmpty())
+		if (!Step.Transition.StateHostWidgetId.IsEmpty())
 		{
 			Resolved.bTemporaryState = Binding.UsesHoverTrigger() || Binding.UsesPressTrigger();
-			if (Resolved.bTemporaryState && Binding.Transition.bStateInstant
+			if (Resolved.bTemporaryState && Step.Transition.bStateInstant
 				&& (!Functions.GetRenderOpacity || !Functions.SetRenderOpacity))
 			{
 				SkipBinding(OutWarnings, TEXT("temporary state requires native opacity functions"));
 				continue;
 			}
-			if (Resolved.bTemporaryState && !Binding.Transition.bStateInstant
-				&& Binding.Transition.Type != TEXT("SMART_ANIMATE") && Binding.Transition.Type != TEXT("DISSOLVE"))
+			if (Resolved.bTemporaryState && !Step.Transition.bStateInstant
+				&& Step.Transition.Type != TEXT("SMART_ANIMATE") && Step.Transition.Type != TEXT("DISSOLVE"))
 			{
 				SkipBinding(OutWarnings, TEXT("temporary state transition requires reversible state lifecycle; action not executed"));
 				continue;
@@ -241,11 +241,11 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 			for (int32 HostIndex = 0; HostIndex < NavigationData.StateHosts.Num(); ++HostIndex)
 			{
 				const auto& Host = NavigationData.StateHosts[HostIndex];
-				if (Host.HostWidgetId != Binding.Transition.StateHostWidgetId) continue;
+				if (Host.HostWidgetId != Step.Transition.StateHostWidgetId) continue;
 				if (Resolved.StateHostIndex != INDEX_NONE) { Resolved.StateHostIndex = INDEX_NONE; break; }
 				Resolved.StateHostIndex = HostIndex;
-				Resolved.SourceStateIndex = Host.States.IndexOfByPredicate([&](const auto& State) { return State.StateId == Binding.Transition.SourceStateId; });
-				Resolved.TargetStateIndex = Host.States.IndexOfByPredicate([&](const auto& State) { return State.StateId == Binding.Transition.TargetStateId; });
+				Resolved.SourceStateIndex = Host.States.IndexOfByPredicate([&](const auto& State) { return State.StateId == Step.Transition.SourceStateId; });
+				Resolved.TargetStateIndex = Host.States.IndexOfByPredicate([&](const auto& State) { return State.StateId == Step.Transition.TargetStateId; });
 			}
 			if (Resolved.StateHostIndex == INDEX_NONE || Resolved.SourceStateIndex == INDEX_NONE || Resolved.TargetStateIndex == INDEX_NONE
 				|| Resolved.SourceStateIndex == Resolved.TargetStateIndex)
@@ -253,7 +253,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 				SkipBinding(OutWarnings, TEXT("state transition requires one host and unique source/target states"));
 				continue;
 			}
-			if (!Binding.Transition.bStateInstant && (!Resolved.bTemporaryState || Binding.Transition.Type == TEXT("DISSOLVE")) && !Binding.UsesDragTrigger())
+			if (!Step.Transition.bStateInstant && (!Resolved.bTemporaryState || Step.Transition.Type == TEXT("DISSOLVE")) && !Binding.UsesDragTrigger())
 			{
 				if (!Functions.SetTimer || !Functions.SetTimerForNextTick || !Functions.ClearTimer)
 				{
@@ -268,15 +268,15 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 				}
 			}
 		}
-		if (!Binding.Transition.WidgetAnimationName.IsEmpty())
+		if (!Step.Transition.WidgetAnimationName.IsEmpty())
 		{
 			if (!Functions.PlayAnimationForward || !Functions.PlayAnimationReverse || !Functions.StopAnimation || !FindFProperty<FObjectProperty>(
-				WBP->SkeletonGeneratedClass, FName(*Binding.Transition.WidgetAnimationName)))
+				WBP->SkeletonGeneratedClass, FName(*Step.Transition.WidgetAnimationName)))
 			{
 				SkipBinding(OutWarnings, FString::Printf(TEXT("trigger '%s': native animation function/property unavailable; action not executed"), *Binding.TriggerWidgetId));
 				continue;
 			}
-			Resolved.WidgetAnimationName = FName(*Binding.Transition.WidgetAnimationName);
+			Resolved.WidgetAnimationName = FName(*Step.Transition.WidgetAnimationName);
 			if (bPageOpen || bNavigate)
 			{
 				if (!Functions.PlayAnimation || !Functions.SetTimer || !Functions.SetTimerForNextTick || !Functions.ClearTimer)
@@ -333,12 +333,12 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 					continue;
 				}
 			}
-			if (Resolved.bTemporaryNavigate || (Resolved.WidgetAnimationName != NAME_None && Binding.Transition.Type != TEXT("SMART_ANIMATE")))
+			if (Resolved.bTemporaryNavigate || (Resolved.WidgetAnimationName != NAME_None && Step.Transition.Type != TEXT("SMART_ANIMATE")))
 			{
 				auto* Slot = Cast<UCanvasPanelSlot>(PageHost->GetChildAt(Resolved.TargetPageIndex)->Slot);
 				if (!Slot) { SkipBinding(OutWarnings, TEXT("temporary navigation requires a native Canvas page slot")); continue; }
 				Resolved.TargetPageOriginalZ = Slot->GetZOrder();
-				const bool bSourceOnTop = Binding.Transition.Type == TEXT("MOVE_OUT") || Binding.Transition.Type == TEXT("SLIDE_OUT");
+				const bool bSourceOnTop = Step.Transition.Type == TEXT("MOVE_OUT") || Step.Transition.Type == TEXT("SLIDE_OUT");
 				for (int32 ChildIndex = 0; ChildIndex < PageHost->GetChildrenCount(); ++ChildIndex)
 					if (auto* ChildSlot = Cast<UCanvasPanelSlot>(PageHost->GetChildAt(ChildIndex)->Slot))
 						Resolved.TemporaryPageZ = bSourceOnTop
@@ -388,7 +388,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 		if (bPageOpen)
 		{
 			if (Step.Kind == EUMGPrototypeNavigationStepKind::Overlay
-				|| Step.Kind == EUMGPrototypeNavigationStepKind::CloseOverlay || Binding.Transition.bStateInstant)
+				|| Step.Kind == EUMGPrototypeNavigationStepKind::CloseOverlay || Step.Transition.bStateInstant)
 			{
 				if (!Functions.SetTimer || !Functions.SetTimerForNextTick || !Functions.ClearTimer)
 				{
@@ -402,7 +402,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 					continue;
 				}
 			}
-			else if (Binding.Transition.WidgetAnimationName.IsEmpty())
+			else if (Step.Transition.WidgetAnimationName.IsEmpty())
 			{
 				SkipBinding(OutWarnings, TEXT("AFTER_TIMEOUT requires a resolved native property animation"));
 				continue;
@@ -476,7 +476,7 @@ FBindingPlan ResolveBindingPlan(UWidgetBlueprint* WBP,
 					*Binding.TriggerWidgetId, *Resolved.DelegateName.ToString(), *TriggerButton->GetName()));
 				continue;
 			}
-			const bool bReversiblePropertyAnimation = ((Resolved.WidgetAnimationName != NAME_None || Binding.Transition.bStateInstant)
+			const bool bReversiblePropertyAnimation = ((Resolved.WidgetAnimationName != NAME_None || Step.Transition.bStateInstant)
 				&& Step.Kind == EUMGPrototypeNavigationStepKind::AnimateWidget) || Resolved.bTemporaryNavigate || Resolved.bDrag;
 			const bool bHoverOverlay = Binding.UsesHoverTrigger() && Step.Kind == EUMGPrototypeNavigationStepKind::Overlay;
 			const bool bPressOverlay = Binding.UsesPressTrigger() && Step.Kind == EUMGPrototypeNavigationStepKind::Overlay;
@@ -742,7 +742,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 		StateOwnerNames[HostIndex] = OwnerName;
 		const bool bNeedsOpacity = NavigationData.ClickBindings.ContainsByPredicate([&](const auto& Binding)
 		{
-			return Binding.Transition.StateHostWidgetId == Host.HostWidgetId && Binding.Transition.bStateInstant
+			return Binding.PrimaryStep().Transition.StateHostWidgetId == Host.HostWidgetId && Binding.PrimaryStep().Transition.bStateInstant
 				&& (Binding.UsesHoverTrigger() || Binding.UsesPressTrigger());
 		});
 		if (bNeedsOpacity)
@@ -820,7 +820,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 	{
 		const auto& Binding = NavigationData.ClickBindings[Resolved.BindingIndex];
 		return Resolved.bTemporaryNavigate || Resolved.bDrag || (Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate
-			&& Binding.Transition.Type != TEXT("SMART_ANIMATE") && Resolved.WidgetAnimationName != NAME_None);
+			&& Binding.PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE") && Resolved.WidgetAnimationName != NAME_None);
 	};
 	const bool bNeedsTransitionOwner = MouseBindings.ContainsByPredicate(NeedsTransitionOwner)
 		|| Plan.PageOpenBindings.ContainsByPredicate(NeedsTransitionOwner);
@@ -954,7 +954,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 		for (int32 Index = Bindings.Num() - 1; Index >= 0; --Index)
 		{
 			auto& Resolved = Bindings[Index];
-			const auto& Orders = NavigationData.ClickBindings[Resolved.BindingIndex].Transition.LayerOrders;
+			const auto& Orders = NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition.LayerOrders;
 			bool bValid = true;
 			FString LayerFailure;
 			for (const auto& Order : Orders)
@@ -1018,7 +1018,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 		for (int32 Index = Bindings.Num() - 1; Index >= 0; --Index)
 		{
 			auto& Resolved = Bindings[Index];
-			const auto& Records = NavigationData.ClickBindings[Resolved.BindingIndex].Transition.LivePresentations;
+			const auto& Records = NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition.LivePresentations;
 			TSet<UWidget*> LiveWidgets;
 			bool bValid = true;
 			for (const auto& Live : Records)
@@ -1045,7 +1045,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 				SkipBinding(OutWarnings, TEXT("live presentation requires one native subtree in its original socket and one empty presentation socket"));
 				Bindings.RemoveAt(Index); continue;
 			}
-			const auto& Transition = NavigationData.ClickBindings[Resolved.BindingIndex].Transition;
+			const auto& Transition = NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition;
 			if (!Records.IsEmpty() && Transition.bFixedViewportLayout)
 			{
 				Resolved.LayoutOriginalWidgetName = FName(*Transition.LayoutOriginalWidgetName);
@@ -1164,7 +1164,7 @@ FBindingGraphTargets PrepareBindingGraphTargets(UWidgetBlueprint* WBP,
 			const int32 HostIndex = Bindings[Index].StateHostIndex;
 			if (HostIndex != INDEX_NONE && (!StateHostTargets.IsValidIndex(HostIndex)
 				|| !StateHostTargets[HostIndex].CurrentStateProperty || !StateHostTargets[HostIndex].TransitionOwnerProperty
-				|| (Bindings[Index].bTemporaryState && NavigationData.ClickBindings[Bindings[Index].BindingIndex].Transition.bStateInstant
+				|| (Bindings[Index].bTemporaryState && NavigationData.ClickBindings[Bindings[Index].BindingIndex].PrimaryStep().Transition.bStateInstant
 					&& !StateHostTargets[HostIndex].SavedSourceOpacityProperty)
 				|| !StateHostTargets[HostIndex].StateWidgets.IsValidIndex(Bindings[Index].SourceStateIndex)
 				|| !StateHostTargets[HostIndex].StateWidgets.IsValidIndex(Bindings[Index].TargetStateIndex)))

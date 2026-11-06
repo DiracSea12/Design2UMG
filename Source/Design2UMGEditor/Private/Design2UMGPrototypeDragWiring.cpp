@@ -240,7 +240,7 @@ bool AppendSample(UEdGraph* Graph, UWidgetBlueprint* WBP, const FEngineFunctions
     auto* Multiply = Call(Graph, ChangedPath, Math(TEXT("Multiply_DoubleDouble")));
     if (!Multiply || !Connect(Graph, Clamp->GetReturnValuePin(), SetInput(SetProgress))
         || !Connect(Graph, Clamp->GetReturnValuePin(), Multiply->FindPin(TEXT("A")))) return false;
-    Multiply->FindPinChecked(TEXT("B"))->DefaultValue = FString::SanitizeFloat(Binding.Transition.DurationSeconds);
+    Multiply->FindPinChecked(TEXT("B"))->DefaultValue = FString::SanitizeFloat(Binding.PrimaryStep().Transition.DurationSeconds);
     auto* SetTarget = Set(Graph, WBP, P.AnimationTarget, ChangedPath);
     if (!Connect(Graph, Multiply->GetReturnValuePin(), SetInput(SetTarget))) return false;
     auto* Target = ChangedPath.PlacePure(CreateVariableGet(Graph, WBP, P.AnimationTarget));
@@ -251,7 +251,7 @@ bool AppendSample(UEdGraph* Graph, UWidgetBlueprint* WBP, const FEngineFunctions
         || !ConnectExec(ChangedBranch->GetThenPin(), ChangedPath)) return false;
 
     FChainLayout First; First.RowY = ChangedPath.RowY + NodeRowStep; First.NextColumn = ChangedPath.NextColumn;
-    if ((Binding.Transition.UsesSlide() || Binding.Transition.UsesFadeOnly())
+    if ((Binding.PrimaryStep().Transition.UsesSlide() || Binding.PrimaryStep().Transition.UsesFadeOnly())
         && !AppendPrototypeTemporaryPageVisibility(Graph, WBP, Functions, Targets, Resolved, true, First)) return false;
     auto* Play = Call(Graph, First, Functions.PlayAnimation);
     if (!Play || !Connect(Graph, Animation->GetValuePin(), Play->FindPin(TEXT("InAnimation")))
@@ -277,7 +277,7 @@ FName GetDragAcceptedName(int32 BindingIndex) { return DragWiringPrivate::DragNa
 FName GetDragSelectedName(int32 BindingIndex) { return DragWiringPrivate::DragName(BindingIndex, TEXT("selected")); }
 FString GetDragStableIdentity(const FUMGPrototypeNavigationBinding& Binding)
 {
-    return Binding.SourcePageId + TEXT("|") + Binding.Transition.InstanceScopeId + TEXT("|") + Binding.TriggerWidgetId;
+    return Binding.SourcePageId + TEXT("|") + Binding.PrimaryStep().Transition.InstanceScopeId + TEXT("|") + Binding.TriggerWidgetId;
 }
 static FName ConfigName(const FString& Identity, const TCHAR* Suffix)
 {
@@ -368,8 +368,8 @@ struct FValidatedCandidate
 bool ResolveDirection(const FUMGPrototypeNavigationBinding& Binding, bool bMultiple,
     FVector2D& Unit, bool& bDirectional)
 {
-    const FString Direction = Binding.Transition.Direction.ToUpper();
-    if (Binding.Transition.UsesSlide() && Direction.IsEmpty()) return false;
+    const FString Direction = Binding.PrimaryStep().Transition.Direction.ToUpper();
+    if (Binding.PrimaryStep().Transition.UsesSlide() && Direction.IsEmpty()) return false;
     if (Direction == TEXT("LEFT")) Unit = FVector2D(-1, 0);
     else if (Direction == TEXT("RIGHT")) Unit = FVector2D(1, 0);
     else if (Direction == TEXT("TOP")) Unit = FVector2D(0, -1);
@@ -377,12 +377,12 @@ bool ResolveDirection(const FUMGPrototypeNavigationBinding& Binding, bool bMulti
     else if (!Direction.IsEmpty()) return false;
     else if (bMultiple)
     {
-        if (Binding.Transition.bHasDragMotionVector)
-            Unit = Binding.Transition.DragMotionVector.GetSafeNormal();
+        if (Binding.PrimaryStep().Transition.bHasDragMotionVector)
+            Unit = Binding.PrimaryStep().Transition.DragMotionVector.GetSafeNormal();
         else
         {
             int32 Matches = 0;
-            for (const auto& Target : Binding.Transition.WidgetTargets)
+            for (const auto& Target : Binding.PrimaryStep().Transition.WidgetTargets)
                 if (Target.NodeId == Binding.TriggerWidgetId && !Target.Translation.IsNearlyZero())
                 {
                     Unit = Target.Translation.GetSafeNormal();
@@ -543,10 +543,10 @@ bool WireDragBinding(UEdGraph* Graph, UWidgetBlueprint* WBP, TConstArrayView<FDr
     for (const FDragCandidate& Candidate : Candidates)
     {
         if (!Candidate.Binding || !Candidate.Resolved || !Candidate.Binding->UsesDragTrigger()
-            || !(Candidate.Binding->Transition.Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
-                || Candidate.Binding->Transition.UsesSlide() || Candidate.Binding->Transition.UsesFadeOnly())
-            || !Candidate.Binding->Transition.Diagnostic.IsEmpty()
-            || Candidate.Binding->Transition.DurationSeconds <= KINDA_SMALL_NUMBER
+            || !(Candidate.Binding->PrimaryStep().Transition.Type.Equals(TEXT("SMART_ANIMATE"), ESearchCase::IgnoreCase)
+                || Candidate.Binding->PrimaryStep().Transition.UsesSlide() || Candidate.Binding->PrimaryStep().Transition.UsesFadeOnly())
+            || !Candidate.Binding->PrimaryStep().Transition.Diagnostic.IsEmpty()
+            || Candidate.Binding->PrimaryStep().Transition.DurationSeconds <= KINDA_SMALL_NUMBER
             || Candidate.CommitEventName.IsNone() || Candidate.CancelEventName.IsNone()
             || Candidate.Resolved->TriggerWidgetName != Leader.TriggerWidgetName
             || Candidate.Resolved->SourcePageIndex != Leader.SourcePageIndex
@@ -568,7 +568,7 @@ bool WireDragBinding(UEdGraph* Graph, UWidgetBlueprint* WBP, TConstArrayView<FDr
                 ++ClipMatches;
                 Clip = Animation;
             }
-        const bool bTwoPages = Candidate.Binding->Transition.UsesSlide() || Candidate.Binding->Transition.UsesFadeOnly();
+        const bool bTwoPages = Candidate.Binding->PrimaryStep().Transition.UsesSlide() || Candidate.Binding->PrimaryStep().Transition.UsesFadeOnly();
         bool bValidPages = !bTwoPages || (Candidate.Binding->Steps.Num() == 1
             && Candidate.Binding->Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate
             && Candidate.Resolved->StateHostIndex == INDEX_NONE
@@ -755,7 +755,7 @@ bool WireDragBinding(UEdGraph* Graph, UWidgetBlueprint* WBP, TConstArrayView<FDr
             auto* IsZero = DragWiringPrivate::Call(Graph, Path, DragWiringPrivate::Math(TEXT("LessEqual_DoubleDouble")));
             if (!Remaining || !IsZero || !DragWiringPrivate::Connect(Graph, RemainingFraction, Remaining->FindPin(TEXT("A")))
                 || !DragWiringPrivate::Connect(Graph, Remaining->GetReturnValuePin(), IsZero->FindPin(TEXT("A")))) return false;
-            Remaining->FindPinChecked(TEXT("B"))->DefaultValue = FString::SanitizeFloat(Candidate.Binding->Transition.DurationSeconds);
+            Remaining->FindPinChecked(TEXT("B"))->DefaultValue = FString::SanitizeFloat(Candidate.Binding->PrimaryStep().Transition.DurationSeconds);
             IsZero->FindPinChecked(TEXT("B"))->DefaultValue = TEXT("0.0");
             auto* ZeroBranch = DragWiringPrivate::Branch(Graph, Path, IsZero->GetReturnValuePin());
             if (!ZeroBranch || !LinkExecChain(Path.ExecChain)) return false;
@@ -772,7 +772,7 @@ bool WireDragBinding(UEdGraph* Graph, UWidgetBlueprint* WBP, TConstArrayView<FDr
             Delay->FindPinChecked(TEXT("FunctionName"), EGPD_Input)->DefaultValue = Event.ToString();
             if (!WireAnimationTimeTarget(Graph, WBP, Candidate.Properties.Animation,
                     Candidate.Properties.AnimationTarget, Candidate.Properties.AnimationStart, nullptr,
-                    bCommit ? Candidate.Binding->Transition.DurationSeconds : 0.0f, 1.0f, ContinueAnimation)
+                    bCommit ? Candidate.Binding->PrimaryStep().Transition.DurationSeconds : 0.0f, 1.0f, ContinueAnimation)
                 || !LinkExecChain(ContinueAnimation.ExecChain)
                 || !DragWiringPrivate::ConnectExec(ZeroBranch->GetElsePin(), ContinueAnimation)) return false;
             if (bCommit) return DragWiringPrivate::ConnectExec(Commit->GetThenPin(), Path);

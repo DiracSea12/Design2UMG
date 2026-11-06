@@ -268,12 +268,6 @@ struct FUMGSourceDocumentData
 };
 
 UENUM()
-enum class EUMGPrototypeNavigationAction : uint8
-{
-	Navigate, Overlay, Back, OpenLink, SetVariable, SetVariableMode, Conditional, AnimateWidget, CloseOverlay
-};
-
-UENUM()
 enum class EUMGPrototypeNavigationStepKind : uint8
 {
 	Navigate, Overlay, Back, OpenLink, SetVariable, SetVariableMode, ConditionJump, Jump, AnimateWidget, CloseOverlay
@@ -327,20 +321,12 @@ struct FUMGPrototypeNavigationBinding
 
 	UPROPERTY() FString TriggerWidgetId;
 	UPROPERTY() FString TriggerWidgetName;
-	/**
-	 * Top-level action summary for binding-level consumers.
-	 */
 	UPROPERTY() FString SourcePageId;
 	UPROPERTY() FString TriggerType;
 	UPROPERTY() FString TriggerJson;
 	UPROPERTY() FString TriggerDevice;
 	UPROPERTY() TArray<FString> TriggerKeyCodes;
 	UPROPERTY() float TriggerDelaySeconds = 0;
-	UPROPERTY() FString TargetPageId;
-	UPROPERTY() int32 TargetPageIndex = INDEX_NONE;
-	UPROPERTY() EUMGPrototypeNavigationAction Action = EUMGPrototypeNavigationAction::Navigate;
-	UPROPERTY() FString ExternalUrl;
-	UPROPERTY() FUMGPrototypeTransitionData Transition;
 	UPROPERTY() TArray<FUMGPrototypeNavigationStep> Steps;
 
 	static bool IsClickTriggerType(const FString& T) { return T.IsEmpty() || T.Equals(TEXT("ON_CLICK"), ESearchCase::IgnoreCase); }
@@ -362,40 +348,33 @@ struct FUMGPrototypeNavigationBinding
 	bool UsesKeyboardTrigger() const { return UsesKeyDownTrigger() || UsesKeyUpTrigger(); }
 	bool UsesPageOpenTrigger() const { return IsPageOpenTriggerType(TriggerType); }
 
-	bool RequiresPageTarget() const
-	{
-		if (Steps.Num() > 0) { for (const auto& S : Steps) { if (S.RequiresPageTarget()) return true; } return false; }
-		return Action == EUMGPrototypeNavigationAction::Navigate || Action == EUMGPrototypeNavigationAction::Overlay;
-	}
+	const FUMGPrototypeNavigationStep& PrimaryStep() const { return Steps[PrimaryStepIndex()]; }
+	FUMGPrototypeNavigationStep& PrimaryStep() { return Steps[PrimaryStepIndex()]; }
 
-	bool RequiresPageHost() const
-	{
-		if (UsesDragTrigger()) return true;
-		if (Steps.Num() > 0) { for (const auto& S : Steps) { if (S.RequiresPageHost()) return true; } return false; }
-		return Action != EUMGPrototypeNavigationAction::OpenLink;
-	}
-
-	bool HasOverlayAction() const
-	{
-		if (Steps.Num() > 0) { for (const auto& S : Steps) { if (S.IsOverlayAction()) return true; } return false; }
-		return Action == EUMGPrototypeNavigationAction::Overlay;
-	}
+	bool RequiresPageTarget() const { return Steps.ContainsByPredicate([](const auto& Step) { return Step.RequiresPageTarget(); }); }
+	bool RequiresPageHost() const { return UsesDragTrigger() || Steps.ContainsByPredicate([](const auto& Step) { return Step.RequiresPageHost(); }); }
+	bool HasOverlayAction() const { return Steps.ContainsByPredicate([](const auto& Step) { return Step.IsOverlayAction(); }); }
 
 	bool IsValid() const
 	{
-		if (TriggerWidgetId.IsEmpty() || TriggerWidgetName.IsEmpty()) return false;
+		if (TriggerWidgetId.IsEmpty() || TriggerWidgetName.IsEmpty() || Steps.IsEmpty()) return false;
 		if (!UsesClickTrigger() && !UsesHoverTrigger() && !UsesMouseEnterTrigger() && !UsesPressTrigger() && !UsesDragTrigger() && !UsesKeyDownTrigger() && !UsesKeyUpTrigger() && !UsesPageOpenTrigger()) return false;
-		if (UsesKeyboardTrigger() && (TriggerDevice != TEXT("KEYBOARD") || TriggerKeyCodes.Num() == 0)) return false;
-		if (Steps.Num() > 0) { for (const auto& S : Steps) { if (!S.IsValid()) return false; } return true; }
-		switch (Action)
+		if (UsesKeyboardTrigger() && (TriggerDevice != TEXT("KEYBOARD") || TriggerKeyCodes.IsEmpty())) return false;
+		for (const auto& Step : Steps) if (!Step.IsValid()) return false;
+		return true;
+	}
+
+private:
+	int32 PrimaryStepIndex() const
+	{
+		for (int32 Index = 0; Index < Steps.Num(); ++Index)
 		{
-		case EUMGPrototypeNavigationAction::Navigate:
-		case EUMGPrototypeNavigationAction::Overlay: return !TargetPageId.IsEmpty() && TargetPageIndex >= 0;
-		case EUMGPrototypeNavigationAction::Back:
-		case EUMGPrototypeNavigationAction::CloseOverlay: return true;
-		case EUMGPrototypeNavigationAction::OpenLink: return !ExternalUrl.IsEmpty();
-		default: return false;
+			const auto Kind = Steps[Index].Kind;
+			if (Kind == EUMGPrototypeNavigationStepKind::Navigate || Kind == EUMGPrototypeNavigationStepKind::Overlay
+				|| Kind == EUMGPrototypeNavigationStepKind::Back || Kind == EUMGPrototypeNavigationStepKind::CloseOverlay
+				|| Kind == EUMGPrototypeNavigationStepKind::OpenLink) return Index;
 		}
+		return 0;
 	}
 };
 

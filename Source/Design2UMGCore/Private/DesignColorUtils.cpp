@@ -4,6 +4,36 @@
 
 namespace DesignColorUtils
 {
+	FString ApplyOpacity(const FString& ResolvedColor, const float PaintOpacity)
+	{
+		if (PaintOpacity == 1.0f)
+		{
+			return ResolvedColor;
+		}
+
+		const FString Trimmed = ResolvedColor.TrimStartAndEnd();
+		const FString ExpandedHex = DesignColorUtils::ExpandShortHexLiteral(Trimmed);
+		FColor Color;
+		if ((ExpandedHex.Len() == 7 || ExpandedHex.Len() == 9)
+			&& DesignColorUtils::IsHexColorLiteral(ExpandedHex))
+		{
+			Color = DesignColorUtils::ParseHexColor(ExpandedHex);
+		}
+		else if (const FLinearColor* NamedColor = DesignColorUtils::GetNamedColors().Find(Trimmed.ToLower()))
+		{
+			Color = NamedColor->ToFColor(true);
+		}
+		else
+		{
+			return ResolvedColor;
+		}
+
+		Color.A = static_cast<uint8>(FMath::Clamp(
+			FMath::RoundToInt(static_cast<float>(Color.A) * PaintOpacity), 0, 255));
+		return DesignColorUtils::FormatLiteral(Color);
+	}
+
+
 	const TMap<FString, FLinearColor>& GetNamedColors()
 	{
 		static const TMap<FString, FLinearColor> Map = {

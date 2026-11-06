@@ -84,38 +84,16 @@ namespace
 		}
 	}
 
-	/**
-	 * Collect targets for one action kind from executable steps and binding summaries.
-	 */
-	TSet<FString> CollectActionTargetPageIds(
-		const FUMGPrototypeNavigationData& NavigationData,
+	TSet<FString> CollectActionTargetPageIds(const FUMGPrototypeNavigationData& NavigationData,
 		EUMGPrototypeNavigationStepKind Kind)
 	{
-		const EUMGPrototypeNavigationAction BindingAction =
-			Kind == EUMGPrototypeNavigationStepKind::Overlay
-				? EUMGPrototypeNavigationAction::Overlay
-				: EUMGPrototypeNavigationAction::Navigate;
-
 		TSet<FString> Targets;
-		for (const FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
-		{
-			if (Binding.Steps.Num() > 0)
-			{
-				for (const FUMGPrototypeNavigationStep& Step : Binding.Steps)
-				{
-					if (Step.Kind == Kind)
-					{
-						Targets.Add(Step.TargetPageId);
-					}
-				}
-			}
-			else if (Binding.Action == BindingAction)
-			{
-				Targets.Add(Binding.TargetPageId);
-			}
-		}
+		for (const auto& Binding : NavigationData.ClickBindings)
+			for (const auto& Step : Binding.Steps)
+				if (Step.Kind == Kind) Targets.Add(Step.TargetPageId);
 		return Targets;
 	}
+
 }
 
 namespace Design2UMGPrototypeNavigation
@@ -166,7 +144,7 @@ namespace Design2UMGPrototypeNavigation
 					|| Binding.UsesHoverTrigger() || Binding.UsesPressTrigger() || Binding.UsesDragTrigger();
 				const bool bKeyboard = bNavigate && (Binding.UsesKeyDownTrigger() || Binding.UsesKeyUpTrigger());
 				const bool bPageOpen = Binding.UsesPageOpenTrigger()
-					&& (bOverlay || (bNavigate && !Binding.Transition.WidgetTargets.IsEmpty()));
+					&& (bOverlay || (bNavigate && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty()));
 				if (!bMouse && !bKeyboard && !bPageOpen) continue;
 				const FString& Target = Binding.Steps[0].TargetPageId;
 				if (!Target.IsEmpty() && !Reachable.Contains(Target))

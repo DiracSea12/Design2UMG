@@ -309,7 +309,7 @@ bool FNativeWidgetAnimationRealSourcePlaybackTest::RunTest(const FString&)
 	const auto& Navigation = Analysis.Data.PrototypeNavigation();
 	if (!TestEqual(TEXT("This playback check requires one real source interaction"), Navigation.ClickBindings.Num(), 1)) return false;
 	const auto& Binding = Navigation.ClickBindings[0];
-	const auto& Transition = Binding.Transition;
+	const auto& Transition = Binding.PrimaryStep().Transition;
 	if (!TestEqual(TEXT("Real source explicitly requests click"), Binding.TriggerType, FString(TEXT("ON_CLICK")))
 		|| !TestEqual(TEXT("Real click has one executable action"), Binding.Steps.Num(), 1)) return false;
 	if (!TestTrue(TEXT("Real click is a widget property action"), Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::AnimateWidget)
@@ -551,7 +551,7 @@ bool FNativeWidgetAnimationRealSourceAnalysisTest::RunTest(const FString&)
 		AddInfo(FString::Printf(TEXT("Analysis binding[%d]: trigger=%s type=%s sourcePage=%s destination=%s steps=%d targets=%d diagnostic=%s requestedMatch=%d"),
 			Index, *Binding.TriggerWidgetId, *Binding.TriggerType, *Binding.SourcePageId,
 			Binding.Steps.Num() == 1 ? *Binding.Steps[0].TargetPageId : TEXT(""), Binding.Steps.Num(),
-			Binding.Transition.WidgetTargets.Num(), *Binding.Transition.Diagnostic, bMatches));
+			Binding.PrimaryStep().Transition.WidgetTargets.Num(), *Binding.PrimaryStep().Transition.Diagnostic, bMatches));
 	}
 	if (!TriggerId.IsEmpty())
 		AddInfo(FString::Printf(TEXT("Requested analysis interaction: trigger=%s type=%s destination=%s matches=%d; rejected actions are reported in conversion warnings"),
@@ -666,7 +666,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 	}
 	if (!TestTrue(TEXT("Requested interaction exists in production analysis"), BindingIndex != INDEX_NONE)) return false;
 	const auto& Binding = Navigation.ClickBindings[BindingIndex];
-	const auto& Transition = Binding.Transition;
+	const auto& Transition = Binding.PrimaryStep().Transition;
 	const bool bOfficialDissolve = Transition.Type == TEXT("DISSOLVE") && Transition.SourceTransitionType == TEXT("SMART_ANIMATE")
 		&& !Transition.DissolveReason.IsEmpty();
 	const bool bWhileHoverState = Binding.UsesHoverTrigger() && Binding.Steps.Num() == 1
@@ -693,7 +693,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 				if (Candidate.TriggerWidgetId != PreTriggerId || !Candidate.UsesClickTrigger() || Candidate.Steps.Num() != 1
 					|| Candidate.SourcePageId != Navigation.PageIds[Navigation.InitialPageIndex]
 					|| Candidate.Steps[0].Kind != EUMGPrototypeNavigationStepKind::Navigate
-					|| Candidate.Steps[0].TargetPageId != Binding.SourcePageId || !Candidate.Transition.Type.IsEmpty()) continue;
+					|| Candidate.Steps[0].TargetPageId != Binding.SourcePageId || !Candidate.PrimaryStep().Transition.Type.IsEmpty()) continue;
 				if (!TestNull(TEXT("Preliminary real navigation is unique"), PreBinding)) return false;
 				PreBinding = &Candidate;
 			}
@@ -1223,7 +1223,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 			{
 				if (!CacheWidget(State.WidgetId)) return false;
 				if (!Navigation.ClickBindings.ContainsByPredicate([&](const FUMGPrototypeNavigationBinding& Candidate)
-					{ return Candidate.TriggerWidgetId == NestedTimeoutTriggerId && Candidate.Transition.TargetStateWidgetId == State.WidgetId; })) continue;
+					{ return Candidate.TriggerWidgetId == NestedTimeoutTriggerId && Candidate.PrimaryStep().Transition.TargetStateWidgetId == State.WidgetId; })) continue;
 				TArray<FRealWidgetMatch> Matches;
 				FindRealWidgets(Analysis.Data.RootWidget, Instance->WidgetTree->RootWidget, State.WidgetId, Matches);
 				if (!TestEqual(TEXT("Nested state geometry has one source model"), Matches.Num(), 1)) return false;
@@ -1260,7 +1260,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 		}
 		for (const auto& Candidate : Navigation.ClickBindings)
 			if (Candidate.TriggerWidgetId == NestedTimeoutTriggerId || Candidate.TriggerWidgetId == NestedReturnTimeoutTriggerId)
-				for (const auto& Target : Candidate.Transition.WidgetTargets) if (!CacheWidget(Target.NodeId)) return false;
+				for (const auto& Target : Candidate.PrimaryStep().Transition.WidgetTargets) if (!CacheWidget(Target.NodeId)) return false;
 	}
 	const auto ResolveStateWidget = [&](const FString& Id) -> UWidget*
 	{
@@ -1686,7 +1686,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 			const FPointerEvent Up(UserIndex, FSlateApplication::CursorPointerIndex, ReturnPoint, ReturnPoint, {}, EKeys::LeftMouseButton, 0, FModifierKeysState());
 			if (!TestTrue(TEXT("Actual return press is handled"), FSlateApplication::Get().RoutePointerDownEvent(ReturnPath, Down).IsEventHandled())
 				|| !TestTrue(TEXT("Actual return release is handled"), FSlateApplication::Get().RoutePointerUpEvent(ReturnPath, Up).IsEventHandled())) return false;
-			const float StepSeconds = FMath::Max(0.03f, ReturnBindings[0]->Transition.DurationSeconds * 0.25f);
+			const float StepSeconds = FMath::Max(0.03f, ReturnBindings[0]->PrimaryStep().Transition.DurationSeconds * 0.25f);
 			for (int32 Frame = 0; Frame < 8; ++Frame) Tick(StepSeconds);
 			TArray<FRealWidgetMatch> RestoredPages;
 			FindRealWidgets(Analysis.Data.RootWidget, Instance->WidgetTree->RootWidget, Binding.SourcePageId, RestoredPages);
@@ -1761,7 +1761,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 			if (!TestTrue(TEXT("Both nested timers exist in production analysis"), ForwardIndex != INDEX_NONE && ReturnIndex != INDEX_NONE)) return false;
 			const auto& Forward = Navigation.ClickBindings[ForwardIndex];
 			const auto& Return = Navigation.ClickBindings[ReturnIndex];
-			const auto& F = Forward.Transition; const auto& R = Return.Transition;
+			const auto& F = Forward.PrimaryStep().Transition; const auto& R = Return.PrimaryStep().Transition;
 			if (!TestTrue(TEXT("Nested timers are admitted animated CHANGE_TO actions with reciprocal endpoints"),
 				Forward.Steps.Num() == 1 && Return.Steps.Num() == 1
 				&& Forward.Steps[0].Kind == EUMGPrototypeNavigationStepKind::AnimateWidget
@@ -1799,7 +1799,7 @@ bool FNativeWidgetAnimationRealInteractionPlaybackTest::RunTest(const FString&)
 			const int32 InitialNestedSelection = NestedState->GetPropertyValue_InContainer(Instance);
 			const auto TimedOpacityOwner = [&](const FUMGPrototypeNavigationBinding& Timed, UWidgetAnimation* TimedAnimation) -> UWidget*
 			{
-				for (const auto& Target : Timed.Transition.WidgetTargets)
+				for (const auto& Target : Timed.PrimaryStep().Transition.WidgetTargets)
 					if (Target.bOpacity && !FMath::IsNearlyEqual(Target.StartOpacity, Target.EndOpacity))
 					{
 						UWidget* Widget = NestedWidgets.FindRef(Target.NodeId);

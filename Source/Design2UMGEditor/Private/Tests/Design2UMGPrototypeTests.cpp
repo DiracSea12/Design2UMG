@@ -57,11 +57,11 @@ bool FFigmaPrototypeNavigationConverterTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Prototype page host widget name is no longer fixed hardcode"),
 		NavigationData.PageHostWidgetName != TEXT("__d2u_prototype_page_host"));
 	TestEqual(TEXT("Prototype trigger type recorded"), Binding.TriggerType, TEXT("ON_CLICK"));
-	TestEqual(TEXT("Prototype target page id"), Binding.TargetPageId, TEXT("2:1"));
-	TestEqual(TEXT("Prototype target page index"), Binding.TargetPageIndex, 1);
-	TestEqual(TEXT("Prototype transition type preserved"), Binding.Transition.Type, TEXT("DISSOLVE"));
-	TestTrue(TEXT("Prototype transition duration preserved"), FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.18f, 0.0001f));
-	TestEqual(TEXT("Prototype transition easing preserved"), Binding.Transition.EasingType, TEXT("EASE_IN_AND_OUT"));
+	TestEqual(TEXT("Prototype target page id"), Binding.PrimaryStep().TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Prototype target page index"), Binding.PrimaryStep().TargetPageIndex, 1);
+	TestEqual(TEXT("Prototype transition type preserved"), Binding.PrimaryStep().Transition.Type, TEXT("DISSOLVE"));
+	TestTrue(TEXT("Prototype transition duration preserved"), FMath::IsNearlyEqual(Binding.PrimaryStep().Transition.DurationSeconds, 0.18f, 0.0001f));
+	TestEqual(TEXT("Prototype transition easing preserved"), Binding.PrimaryStep().Transition.EasingType, TEXT("EASE_IN_AND_OUT"));
 	TestEqual(TEXT("Only the initial page is visible"), Data.RootWidget.Children[0].WidgetStyle.Visibility.Get(TEXT("Visible")), FString(TEXT("Collapsed")));
 	TestEqual(TEXT("The selected page preserves its design visibility"), Data.RootWidget.Children[1].WidgetStyle.Visibility.Get(TEXT("Visible")), FString(TEXT("Visible")));
 
@@ -167,26 +167,26 @@ bool FFigmaPrototypeSpecialActionsConverterTest::RunTest(const FString& Paramete
 		return false;
 	}
 
-	TestEqual(TEXT("Overlay action typed"), OverlayBinding->Action, EUMGPrototypeNavigationAction::Overlay);
+	TestEqual(TEXT("Overlay action typed"), OverlayBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Overlay);
 	TestEqual(TEXT("Overlay trigger type preserved"), OverlayBinding->TriggerType, TEXT("ON_CLICK"));
-	TestEqual(TEXT("Overlay target page id preserved"), OverlayBinding->TargetPageId, TEXT("2:1"));
-	TestEqual(TEXT("Overlay target page index preserved"), OverlayBinding->TargetPageIndex, 1);
-	TestEqual(TEXT("Overlay transition preserved"), OverlayBinding->Transition.Type, TEXT("DISSOLVE"));
-	TestTrue(TEXT("Overlay duration preserved"), FMath::IsNearlyEqual(OverlayBinding->Transition.DurationSeconds, 0.15f, 0.0001f));
+	TestEqual(TEXT("Overlay target page id preserved"), OverlayBinding->PrimaryStep().TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Overlay target page index preserved"), OverlayBinding->PrimaryStep().TargetPageIndex, 1);
+	TestEqual(TEXT("Overlay transition preserved"), OverlayBinding->PrimaryStep().Transition.Type, TEXT("DISSOLVE"));
+	TestTrue(TEXT("Overlay duration preserved"), FMath::IsNearlyEqual(OverlayBinding->PrimaryStep().Transition.DurationSeconds, 0.15f, 0.0001f));
 	TestTrue(TEXT("Prototype overlay host widget name is no longer fixed hardcode"),
 		NavigationData.OverlayHostWidgetName != TEXT("__d2u_prototype_overlay_host"));
 
-	TestEqual(TEXT("Back action typed"), BackBinding->Action, EUMGPrototypeNavigationAction::Back);
+	TestEqual(TEXT("Back action typed"), BackBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Back);
 	TestEqual(TEXT("Back trigger type preserved"), BackBinding->TriggerType, TEXT("ON_CLICK"));
-	TestTrue(TEXT("Back no longer abuses target page id"), BackBinding->TargetPageId.IsEmpty());
-	TestEqual(TEXT("Back no longer abuses placeholder target page index"), BackBinding->TargetPageIndex, INDEX_NONE);
-	TestEqual(TEXT("Back transition preserved"), BackBinding->Transition.Type, TEXT("DISSOLVE"));
+	TestTrue(TEXT("Back no longer abuses target page id"), BackBinding->PrimaryStep().TargetPageId.IsEmpty());
+	TestEqual(TEXT("Back no longer abuses placeholder target page index"), BackBinding->PrimaryStep().TargetPageIndex, INDEX_NONE);
+	TestEqual(TEXT("Back transition preserved"), BackBinding->PrimaryStep().Transition.Type, TEXT("DISSOLVE"));
 
-	TestEqual(TEXT("Open link action typed"), OpenLinkBinding->Action, EUMGPrototypeNavigationAction::OpenLink);
+	TestEqual(TEXT("Open link action typed"), OpenLinkBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::OpenLink);
 	TestEqual(TEXT("Open link trigger type preserved"), OpenLinkBinding->TriggerType, TEXT("ON_CLICK"));
-	TestTrue(TEXT("Open link target page id stays empty"), OpenLinkBinding->TargetPageId.IsEmpty());
-	TestEqual(TEXT("Open link target page index stays empty"), OpenLinkBinding->TargetPageIndex, INDEX_NONE);
-	TestEqual(TEXT("Open link URL preserved"), OpenLinkBinding->ExternalUrl, TEXT("https://example.com/help"));
+	TestTrue(TEXT("Open link target page id stays empty"), OpenLinkBinding->PrimaryStep().TargetPageId.IsEmpty());
+	TestEqual(TEXT("Open link target page index stays empty"), OpenLinkBinding->PrimaryStep().TargetPageIndex, INDEX_NONE);
+	TestEqual(TEXT("Open link URL preserved"), OpenLinkBinding->PrimaryStep().ExternalUrl, TEXT("https://example.com/help"));
 
 	const FUMGWidgetNode* OverlayTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("overlay_button"));
 	const FUMGWidgetNode* BackTriggerWidget = FindWidgetById(Data.RootWidget, TEXT("back_button"));
@@ -254,20 +254,20 @@ bool FFigmaPrototypeHoverAndPressConverterTest::RunTest(const FString& Parameter
 	}
 
 	TestEqual(TEXT("Hover trigger type preserved"), HoverBinding->TriggerType, TEXT("ON_HOVER"));
-	TestEqual(TEXT("Hover action typed"), HoverBinding->Action, EUMGPrototypeNavigationAction::Navigate);
-	TestEqual(TEXT("Hover target page id preserved"), HoverBinding->TargetPageId, TEXT("2:1"));
-	TestEqual(TEXT("Hover target page index preserved"), HoverBinding->TargetPageIndex, 1);
+	TestEqual(TEXT("Hover action typed"), HoverBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Navigate);
+	TestEqual(TEXT("Hover target page id preserved"), HoverBinding->PrimaryStep().TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Hover target page index preserved"), HoverBinding->PrimaryStep().TargetPageIndex, 1);
 
 	TestEqual(TEXT("Drag trigger type preserved"), DragBinding->TriggerType, TEXT("ON_DRAG"));
-	TestEqual(TEXT("Drag action typed"), DragBinding->Action, EUMGPrototypeNavigationAction::Navigate);
-	TestEqual(TEXT("Drag target page id preserved"), DragBinding->TargetPageId, TEXT("2:1"));
-	TestEqual(TEXT("Drag target page index preserved"), DragBinding->TargetPageIndex, 1);
+	TestEqual(TEXT("Drag action typed"), DragBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Navigate);
+	TestEqual(TEXT("Drag target page id preserved"), DragBinding->PrimaryStep().TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Drag target page index preserved"), DragBinding->PrimaryStep().TargetPageIndex, 1);
 	TestTrue(TEXT("Drag binding exports executable steps"), DragBinding->Steps.Num() > 0);
 
 	TestEqual(TEXT("Press trigger type preserved"), PressBinding->TriggerType, TEXT("ON_PRESS"));
-	TestEqual(TEXT("Press action typed"), PressBinding->Action, EUMGPrototypeNavigationAction::Back);
-	TestTrue(TEXT("Press back keeps target page empty"), PressBinding->TargetPageId.IsEmpty());
-	TestEqual(TEXT("Press back keeps target page index empty"), PressBinding->TargetPageIndex, INDEX_NONE);
+	TestEqual(TEXT("Press action typed"), PressBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Back);
+	TestTrue(TEXT("Press back keeps target page empty"), PressBinding->PrimaryStep().TargetPageId.IsEmpty());
+	TestEqual(TEXT("Press back keeps target page index empty"), PressBinding->PrimaryStep().TargetPageIndex, INDEX_NONE);
 
 	TestFalse(TEXT("Drag trigger no longer warns as unsupported"),
 		Data.Warnings.ContainsByPredicate(
@@ -352,16 +352,16 @@ bool FFigmaPrototypeKeyboardAndConditionalConverterTest::RunTest(const FString& 
 
 	TestEqual(TEXT("Key-down trigger type preserved"), KeyDownBinding->TriggerType, TEXT("ON_KEY_DOWN"));
 	TestTrue(TEXT("Key-down trigger exports key code"), KeyDownBinding->TriggerKeyCodes.Num() == 1 && KeyDownBinding->TriggerKeyCodes[0] == TEXT("ENTER"));
-	TestEqual(TEXT("Key-down action summary preserved"), KeyDownBinding->Action, EUMGPrototypeNavigationAction::Navigate);
-	TestEqual(TEXT("Key-down target page id preserved"), KeyDownBinding->TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Key-down action summary preserved"), KeyDownBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Navigate);
+	TestEqual(TEXT("Key-down target page id preserved"), KeyDownBinding->PrimaryStep().TargetPageId, TEXT("2:1"));
 
 	TestEqual(TEXT("Key-up trigger type preserved"), KeyUpBinding->TriggerType, TEXT("ON_KEY_UP"));
 	TestTrue(TEXT("Key-up trigger exports key code"), KeyUpBinding->TriggerKeyCodes.Num() == 1 && KeyUpBinding->TriggerKeyCodes[0] == TEXT("ESCAPE"));
-	TestEqual(TEXT("Key-up action summary preserved"), KeyUpBinding->Action, EUMGPrototypeNavigationAction::Back);
+	TestEqual(TEXT("Key-up action summary preserved"), KeyUpBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Back);
 
 	TestEqual(TEXT("Conditional trigger keeps click type"), ConditionalBinding->TriggerType, TEXT("ON_CLICK"));
-	TestEqual(TEXT("Conditional summary resolves to first terminal navigation"), ConditionalBinding->Action, EUMGPrototypeNavigationAction::Navigate);
-	TestEqual(TEXT("Conditional summary target page id resolves first true branch"), ConditionalBinding->TargetPageId, TEXT("2:1"));
+	TestEqual(TEXT("Conditional summary resolves to first terminal navigation"), ConditionalBinding->PrimaryStep().Kind, EUMGPrototypeNavigationStepKind::Navigate);
+	TestEqual(TEXT("Conditional summary target page id resolves first true branch"), ConditionalBinding->PrimaryStep().TargetPageId, TEXT("2:1"));
 	TestTrue(TEXT("Conditional binding exports step program"), ConditionalBinding->Steps.Num() >= 6);
 	if (ConditionalBinding->Steps.Num() < 6)
 	{
@@ -636,8 +636,8 @@ bool FFigmaExportedPrototypePageTimeoutTest::RunTest(const FString&)
 		|| !TestEqual(TEXT("One timeout binding exists"), Navigation.ClickBindings.Num(), 1)) return false;
 	const auto& Binding = Navigation.ClickBindings[0];
 	TestTrue(TEXT("Source timeout is retained"), Binding.UsesPageOpenTrigger());
-	TestTrue(*FString::Printf(TEXT("Source transition is admitted: %s"), *Binding.Transition.Diagnostic), Binding.Transition.Diagnostic.IsEmpty());
-	TestTrue(TEXT("Source transition has an actual target"), !Binding.Transition.WidgetTargets.IsEmpty());
+	TestTrue(*FString::Printf(TEXT("Source transition is admitted: %s"), *Binding.PrimaryStep().Transition.Diagnostic), Binding.PrimaryStep().Transition.Diagnostic.IsEmpty());
+	TestTrue(TEXT("Source transition has an actual target"), !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty());
 	FDesignDocument DragDocument;
 	if (!TestTrue(TEXT("Drag navigation with exported target parses"), FFigmaParser::ParseDocument(
 		Json.Replace(TEXT("\"type\":\"AFTER_TIMEOUT\",\"timeout\":1"), TEXT("\"type\":\"ON_DRAG\"")), DragDocument))) return false;
@@ -645,7 +645,7 @@ bool FFigmaExportedPrototypePageTimeoutTest::RunTest(const FString&)
 	TestTrue(TEXT("Drag-only destination is included in the reachable page closure"),
 		DragData.PrototypeNavigation().PageIds.Contains(TEXT("B"))
 		&& DragData.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Item)
-			{ return Item.TriggerWidgetId == TEXT("A") && Item.UsesDragTrigger() && Item.TargetPageId == TEXT("B"); }));
+			{ return Item.TriggerWidgetId == TEXT("A") && Item.UsesDragTrigger() && Item.PrimaryStep().TargetPageId == TEXT("B"); }));
 	const FString RejectedJson = Json.Replace(TEXT("\"AFTER_TIMEOUT\""), TEXT("\"ON_CLICK\""))
 		.Replace(TEXT("\"LINEAR\""), TEXT("\"CUSTOM_SPRING\""));
 	FDesignDocument RejectedDocument;

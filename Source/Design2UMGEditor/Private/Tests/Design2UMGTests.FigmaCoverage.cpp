@@ -191,6 +191,15 @@ bool FFigmaComplexConverterTest::RunTest(const FString& Parameters)
 	FDesignDocument Doc;
 	TestTrue(TEXT("E2E parse"), FFigmaParser::ParseDocument(Json, Doc));
 	FUMGWidgetData Data = FDesign2UMGConverter::Convert(Doc, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("The full fixture reports its missing icon geometry"), Data.ConversionError.Contains(TEXT("10:6")) && Data.RootWidget.Type.IsEmpty());
+	TMap<FString, TSharedPtr<FDesignNode>> Nodes;
+	Doc.BuildReferenceNodeIndex(Nodes);
+	FDesignDocument NativeFrames = Doc;
+	NativeFrames.Children = {Nodes.FindRef(TEXT("20:2")), Nodes.FindRef(TEXT("30:1")), Nodes.FindRef(TEXT("40:1")), Nodes.FindRef(TEXT("10:7"))};
+	if (!TestTrue(TEXT("The fixture contains the complete content frames and sidebar label"),
+		NativeFrames.Children[0].IsValid() && NativeFrames.Children[1].IsValid() && NativeFrames.Children[2].IsValid() && NativeFrames.Children[3].IsValid())) return false;
+	Data = FDesign2UMGConverter::Convert(NativeFrames, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(*FString::Printf(TEXT("Complete content frame conversion: %s"), *Data.ConversionError), Data.ConversionError.IsEmpty());
 	TestFalse(TEXT("E2E root type"), Data.RootWidget.Type.IsEmpty());
 	TestTrue(TEXT("E2E has children"), Data.RootWidget.Children.Num() > 0);
 	// Verify that key text widgets survive end-to-end conversion.

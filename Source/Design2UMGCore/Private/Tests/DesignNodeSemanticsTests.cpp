@@ -883,6 +883,7 @@ bool FImageFillTransformModeIndependenceTest::RunTest(const FString& Parameters)
 		&& FMath::IsNearlyEqual(PlainWidget.Render.RenderOpacity.GetValue(), 0.5f));
 
 	OpacityNode->Type = EDesignNodeType::Path;
+	OpacityNode->Shape.Geometry = TEXT("M0 0L100 0L100 100L0 100Z");
 	FDesignFill& PathFill = OpacityNode->Visual.Fills.AddDefaulted_GetRef();
 	PathFill.Type = EDesignFillType::Image;
 	PathFill.Image = PlainStretch;
@@ -970,13 +971,15 @@ bool FNodeWidgetFactoryGeometryFallbackDoesNotMutateInputTest::RunTest(const FSt
 	DashedVectorNode->Visual.Stroke.Cap = EDesignStrokeCap::Circular;
 	DashedVectorNode->Transform.LayoutBoundsSize = FVector2D(0.000027f, 306.0f);
 
-	const Design2UMGNodeWidgetFactory::FBuildResult DashedVectorResult =
-		Design2UMGNodeWidgetFactory::CreateWidgetForNodeType(DashedVectorNode);
-	TestEqual(TEXT("Degenerate dashed VECTOR becomes a rasterized path image"), DashedVectorResult.Widget.Type, TEXT("Image"));
-	TestTrue(TEXT("Degenerate dashed VECTOR receives generated capsule geometry"),
-		DashedVectorResult.Widget.Path.Geometry.IsSet()
-		&& DashedVectorResult.Widget.Path.Geometry.GetValue().Contains(TEXT(" A ")));
-	TestTrue(TEXT("Dashed VECTOR fallback does not mutate source geometry"), DashedVectorNode->Shape.Geometry.IsEmpty());
+	GeometryDocument.Children = {DashedVectorNode};
+	const auto MissingGeometry = FDesign2UMGConverter::Convert(GeometryDocument, FDesign2UMGConversionSettings::Defaults());
+	TestTrue(TEXT("A missing vector contour is an explicit conversion error"),
+		MissingGeometry.ConversionError.Contains(DashedVectorNode->Id));
+	TestTrue(TEXT("Failed conversion does not return a replacement widget"), MissingGeometry.RootWidget.Type.IsEmpty());
+	TestTrue(TEXT("Failed conversion preserves the source geometry"), DashedVectorNode->Shape.Geometry.IsEmpty());
+	DashedVectorNode->Transform.bEnabled = false;
+	TestTrue(TEXT("Hidden source nodes do not require a drawable contour"),
+		FDesign2UMGConverter::Convert(GeometryDocument, FDesign2UMGConversionSettings::Defaults()).ConversionError.IsEmpty());
 	return true;
 }
 

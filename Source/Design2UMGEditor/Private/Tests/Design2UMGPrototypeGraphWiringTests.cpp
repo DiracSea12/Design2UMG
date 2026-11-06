@@ -1168,7 +1168,7 @@ bool FFigmaPrototypeNavigateNoTransitionDirectWiringTest::RunTest(const FString&
 
 	TestEqual(TEXT("No transition animations are generated"), WBP->Animations.Num(), 0);
 	TestTrue(TEXT("No transition animation name is written into the IR"),
-		NavigationData.ClickBindings[0].Transition.WidgetAnimationName.IsEmpty());
+		NavigationData.ClickBindings[0].PrimaryStep().Transition.WidgetAnimationName.IsEmpty());
 	const auto Events = CollectBoundEvents(WBP);
 	if (!TestEqual(TEXT("Exactly one click event is authored"), Events.Num(), 1))
 	{
@@ -3498,9 +3498,9 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 		const auto* LeafShadowBinding = LeafShadowNavigation.ClickBindings.FindByPredicate(
 			[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0"); });
 		TestTrue(TEXT("The original leaf shadow retains its executable native SMART animation after saving"), LeafShadowBinding
-			&& LeafShadowBinding->Steps.Num() == 1 && LeafShadowBinding->Transition.Type == TEXT("SMART_ANIMATE")
-			&& LeafShadowBinding->Transition.Diagnostic.IsEmpty() && !LeafShadowBinding->Transition.WidgetAnimationName.IsEmpty()
-			&& FindObject<UWidgetAnimation>(LeafShadowBlueprint, *LeafShadowBinding->Transition.WidgetAnimationName) != nullptr);
+			&& LeafShadowBinding->Steps.Num() == 1 && LeafShadowBinding->PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE")
+			&& LeafShadowBinding->PrimaryStep().Transition.Diagnostic.IsEmpty() && !LeafShadowBinding->PrimaryStep().Transition.WidgetAnimationName.IsEmpty()
+			&& FindObject<UWidgetAnimation>(LeafShadowBlueprint, *LeafShadowBinding->PrimaryStep().Transition.WidgetAnimationName) != nullptr);
 	}
 
 	{
@@ -3534,12 +3534,11 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 				FUMGGenerator::SaveWidgetBlueprint(ArrangedBlueprint, &ArrangedOutput, &ArrangedNavigation).IsSuccess())) return false;
 		TestFalse(TEXT("Offscreen painting does not remove the native layout action"), ArrangedOutput.bHasDegradation);
 		TestTrue(TEXT("The offscreen source keeps its positive native endpoint guard and saved animation"),
-			ArrangedNavigation.ClickBindings.Num() == 1 && ArrangedNavigation.ClickBindings[0].Transition.Diagnostic.IsEmpty()
-			&& !ArrangedNavigation.ClickBindings[0].Transition.WidgetAnimationName.IsEmpty()
-			&& FindObject<UWidgetAnimation>(ArrangedBlueprint, *ArrangedNavigation.ClickBindings[0].Transition.WidgetAnimationName) != nullptr);
+			ArrangedNavigation.ClickBindings.Num() == 1 && ArrangedNavigation.ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& !ArrangedNavigation.ClickBindings[0].PrimaryStep().Transition.WidgetAnimationName.IsEmpty()
+			&& FindObject<UWidgetAnimation>(ArrangedBlueprint, *ArrangedNavigation.ClickBindings[0].PrimaryStep().Transition.WidgetAnimationName) != nullptr);
 		// The resource owner also needs its bounded native frame when its page action is instantaneous.
 		auto& StaticBinding = StaticClipData.MutablePrototypeNavigation().ClickBindings[0];
-		StaticBinding.Transition = FUMGPrototypeTransitionData();
 		StaticBinding.Steps[0].Transition = FUMGPrototypeTransitionData();
 		StaticClipData.WidgetName = TEXT("WBP_StaticNativeClipOwner");
 		const FString StaticClipFolder = Folder / TEXT("StaticNativeClipOwner");
@@ -3585,8 +3584,8 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 		if (!TestEqual(TEXT("Both interactive text actions are retained"), LiveFontData.PrototypeNavigation().ClickBindings.Num(), 2)) return false;
 		for (const auto& LiveFontBinding : LiveFontData.PrototypeNavigation().ClickBindings)
 			TestTrue(TEXT("Interactive text layout contains the other live content and real font changes"),
-				LiveFontBinding.Transition.bFixedViewportLayout && !LiveFontBinding.Transition.LivePresentations.IsEmpty()
-				&& LiveFontBinding.Transition.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Target)
+				LiveFontBinding.PrimaryStep().Transition.bFixedViewportLayout && !LiveFontBinding.PrimaryStep().Transition.LivePresentations.IsEmpty()
+				&& LiveFontBinding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Target)
 					{ return Target.bFontSize && Target.bLetterSpacing; }));
 		LiveFontData.WidgetName = TEXT("WBP_LiveTextPropertyOwners");
 		const FString LiveFontFolder = Folder / TEXT("LiveTextPropertyOwners");
@@ -3600,12 +3599,13 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 		TestFalse(TEXT("Live glyph resolution does not skip native actions"), LiveFontOutput.bHasDegradation);
 		for (const auto& LiveFontBinding : LiveFontNavigation.ClickBindings)
 		{
-			const auto* LiveFontAnimation = FindObject<UWidgetAnimation>(LiveFontBlueprint, *LiveFontBinding.Transition.WidgetAnimationName);
+			const auto* LiveFontAnimation = FindObject<UWidgetAnimation>(LiveFontBlueprint, *LiveFontBinding.PrimaryStep().Transition.WidgetAnimationName);
 			if (!TestNotNull(TEXT("Each live text action saves its native animation"), LiveFontAnimation)) return false;
 			TSet<FName> LiveFontSockets;
-			for (const auto& Presentation : LiveFontBinding.Transition.LivePresentations) LiveFontSockets.Add(FName(*Presentation.PresentationSocketWidgetName));
+			for (const auto& Presentation : LiveFontBinding.PrimaryStep().Transition.LivePresentations) LiveFontSockets.Add(FName(*Presentation.PresentationSocketWidgetName));
 			int32 LiveGlyphTracks = 0;
-			for (const FMovieSceneBinding& TrackBinding : LiveFontAnimation->MovieScene->GetBindings())
+			const UMovieScene& MovieScene = *LiveFontAnimation->MovieScene;
+			for (const FMovieSceneBinding& TrackBinding : MovieScene.GetBindings())
 				for (const UMovieSceneTrack* Track : TrackBinding.GetTracks())
 					if (const auto* FloatTrack = Cast<UMovieSceneFloatTrack>(Track); FloatTrack && FloatTrack->GetPropertyPath() == TEXT("Font.Size"))
 					{
@@ -3664,8 +3664,8 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 		|| !TestFalse(TEXT("Mixed endpoint actions have no skipped wiring"), LocalOutput.bHasDegradation)) return false;
 	const auto* LocalBinding = LocalNavigation.ClickBindings.FindByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
 		{ return Binding.TriggerWidgetId == TEXT("local_a"); });
-	if (!TestTrue(TEXT("One SMART retains its vector and native text endpoints"), LocalBinding && LocalBinding->Transition.Type == TEXT("SMART_ANIMATE")
-		&& LocalBinding->Transition.LocalEndpoints.Num() == 2 && LocalNavigation.StateHosts.Num() == 1)) return false;
+	if (!TestTrue(TEXT("One SMART retains its vector and native text endpoints"), LocalBinding && LocalBinding->PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE")
+		&& LocalBinding->PrimaryStep().Transition.LocalEndpoints.Num() == 2 && LocalNavigation.StateHosts.Num() == 1)) return false;
 	UWorld* LocalWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 	if (!TestNotNull(TEXT("Local native playback world exists"), LocalWorld)) return false;
 	TStrongObjectPtr<UUserWidget> LocalInstance(CreateWidget<UUserWidget>(LocalWorld, LocalBlueprint->GeneratedClass.Get()));
@@ -3681,8 +3681,8 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 		return nullptr;
 	};
 	const auto RuntimeWidget = [&](const FString& Id) { return Resolve(LocalData.RootWidget, LocalInstance->WidgetTree->RootWidget, Id); };
-	const auto* VectorEndpoint = LocalBinding->Transition.LocalEndpoints.FindByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint) { return Endpoint.bFixedPaintSize; });
-	const auto* TextEndpoint = LocalBinding->Transition.LocalEndpoints.FindByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint) { return Endpoint.bText; });
+	const auto* VectorEndpoint = LocalBinding->PrimaryStep().Transition.LocalEndpoints.FindByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint) { return Endpoint.bFixedPaintSize; });
+	const auto* TextEndpoint = LocalBinding->PrimaryStep().Transition.LocalEndpoints.FindByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint) { return Endpoint.bText; });
 	if (!TestTrue(TEXT("Both typed local roles exist"), VectorEndpoint && TextEndpoint)) return false;
 	const auto* VectorPaintModel = FindIrNodeById(LocalData.RootWidget, VectorEndpoint->SourceVisualWidgetId);
 	TestTrue(TEXT("Static vector paint inputs do not bake the original node opacity"), VectorPaintModel
@@ -3695,13 +3695,13 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 	auto* IncomingText = Cast<UTextBlock>(RuntimeWidget(TextEndpoint->TargetPresentationWidgetId));
 	auto* CanonicalTextA = Cast<UTextBlock>(RuntimeWidget(TextEndpoint->SourceVisualWidgetId));
 	auto* CanonicalTextB = Cast<UTextBlock>(RuntimeWidget(TextEndpoint->DestinationWidgetId));
-	const auto* Placement = LocalBinding->Transition.LayoutTargets.FindByPredicate([](const FUMGPrototypeLayoutTarget& Item) { return Item.NodeId == TEXT("local_vector_a"); });
+	const auto* Placement = LocalBinding->PrimaryStep().Transition.LayoutTargets.FindByPredicate([](const FUMGPrototypeLayoutTarget& Item) { return Item.NodeId == TEXT("local_vector_a"); });
 	auto* Painted = Placement ? RuntimeWidget(Placement->PresentationWidgetId) : nullptr;
 	auto* PaintSlot = Painted ? Cast<UCanvasPanelSlot>(Painted->Slot) : nullptr;
 	auto* Hover = Cast<UButton>(RuntimeWidget(TEXT("local_a")));
 	auto* Leave = Cast<UButton>(RuntimeWidget(TEXT("local_leave_a")));
 	auto* Return = Cast<UButton>(RuntimeWidget(TEXT("local_c")));
-	const auto* AnimationProperty = FindFProperty<FObjectProperty>(LocalInstance->GetClass(), FName(*LocalBinding->Transition.WidgetAnimationName));
+	const auto* AnimationProperty = FindFProperty<FObjectProperty>(LocalInstance->GetClass(), FName(*LocalBinding->PrimaryStep().Transition.WidgetAnimationName));
 	auto* Runtime = AnimationProperty ? Cast<UWidgetAnimation>(AnimationProperty->GetObjectPropertyValue_InContainer(LocalInstance.Get())) : nullptr;
 	if (!TestTrue(TEXT("Native local paint, glyph, slot, input and animation resolve"), Outgoing && Incoming && OutgoingText && IncomingText && CanonicalTextA && CanonicalTextB && PaintSlot && Hover && Leave && Return && Runtime)) return false;
 	const FVector2D Viewport(200, 120);
@@ -3725,7 +3725,7 @@ bool FFigmaNativeWidgetAnimationBuildTest::RunTest(const FString&)
 	};
 	TickLocal(0); Draw();
 	Hover->OnHovered.Broadcast(); TickLocal(0); TickLocal(0.1f); Draw();
-	const float Progress = LocalInstance->GetAnimationCurrentTime(Runtime) / LocalBinding->Transition.DurationSeconds;
+	const float Progress = LocalInstance->GetAnimationCurrentTime(Runtime) / LocalBinding->PrimaryStep().Transition.DurationSeconds;
 	AddInfo(FString::Printf(TEXT("Local native playback time=%g progress=%g sourceOpacity=%g targetOpacity=%g slotX=%g width=%g paintWidths=%g/%g"),
 		LocalInstance->GetAnimationCurrentTime(Runtime), Progress, Outgoing->GetRenderOpacity(), Incoming->GetRenderOpacity(), PaintSlot->GetOffsets().Left,
 		PaintSlot->GetOffsets().Right, Outgoing->GetCachedGeometry().GetLocalSize().X, Incoming->GetCachedGeometry().GetLocalSize().X));
@@ -3869,7 +3869,7 @@ bool FFigmaNativeWidgetAnimationNavigationLifecycleTest::RunTest(const FString&)
 		if (bAutomatic) Tick(0.11f);
 		else if (!Click(TEXT("A_smart"))) return false;
 		const int32 AnimationIndex = 0;
-		const auto* Property = FindFProperty<FObjectProperty>(Blueprint->GeneratedClass, FName(*Navigation.ClickBindings[AnimationIndex].Transition.WidgetAnimationName));
+		const auto* Property = FindFProperty<FObjectProperty>(Blueprint->GeneratedClass, FName(*Navigation.ClickBindings[AnimationIndex].PrimaryStep().Transition.WidgetAnimationName));
 		auto* Animation = Property ? Cast<UWidgetAnimation>(Property->GetObjectPropertyValue_InContainer(Instance)) : nullptr;
 		TestTrue(TEXT("Current entry starts native property playback"), Animation && Instance->IsAnimationPlaying(Animation));
 		Tick(0.1f);
@@ -3897,8 +3897,8 @@ bool FFigmaNativeWidgetAnimationNavigationLifecycleTest::RunTest(const FString&)
 		for (int32 Index = 0; Index < Navigation.ClickBindings.Num(); ++Index)
 		{
 			const auto& Binding = Navigation.ClickBindings[Index];
-			if (Binding.Transition.WidgetAnimationName.IsEmpty()) continue;
-			const auto* AnimationProperty = FindFProperty<FObjectProperty>(Blueprint->GeneratedClass, FName(*Binding.Transition.WidgetAnimationName));
+			if (Binding.PrimaryStep().Transition.WidgetAnimationName.IsEmpty()) continue;
+			const auto* AnimationProperty = FindFProperty<FObjectProperty>(Blueprint->GeneratedClass, FName(*Binding.PrimaryStep().Transition.WidgetAnimationName));
 			auto* OwnedAnimation = AnimationProperty ? Cast<UWidgetAnimation>(AnimationProperty->GetObjectPropertyValue_InContainer(Instance)) : nullptr;
 			TestTrue(TEXT("Destruction stops every generated property animation"), OwnedAnimation && !Instance->IsAnimationPlaying(OwnedAnimation));
 			if (Binding.UsesPageOpenTrigger()) TestFalse(TEXT("Destruction clears owned automatic start timer"),

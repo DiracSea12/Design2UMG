@@ -145,8 +145,8 @@ bool FFigmaPrototypeRootPaintPlaybackTest::RunTest(const FString&)
 	UWidgetBlueprint* Blueprint = FUMGGenerator::BuildWidgetBlueprint(Data, Folder, nullptr, nullptr, &Navigation);
 	if (!TestNotNull(TEXT("Interactive source paint fixture builds"), Blueprint)
 		|| !TestTrue(TEXT("Interactive source paint fixture compiles"), FUMGGenerator::SaveWidgetBlueprint(Blueprint, nullptr, &Navigation).IsSuccess())) return false;
-	if (!TestTrue(*FString::Printf(TEXT("Root paint has native animation: %s"), *Navigation.ClickBindings[0].Transition.Diagnostic),
-		!Navigation.ClickBindings[0].Transition.WidgetAnimationName.IsEmpty())) return false;
+	if (!TestTrue(*FString::Printf(TEXT("Root paint has native animation: %s"), *Navigation.ClickBindings[0].PrimaryStep().Transition.Diagnostic),
+		!Navigation.ClickBindings[0].PrimaryStep().Transition.WidgetAnimationName.IsEmpty())) return false;
 	UUserWidget* Instance = CreateWidget<UUserWidget>(GEditor->GetEditorWorldContext().World(), Blueprint->GeneratedClass.Get());
 	if (!TestNotNull(TEXT("Interactive source paint instantiates"), Instance)) return false;
 	const TSharedRef<SWidget> Slate = Instance->TakeWidget();
@@ -245,7 +245,7 @@ bool FFigmaPrototypeGraphNavigationWorkflowTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("Wired click switches to the bound page after the transition delay"),
 		CurrentPage(WidgetInstance), 1);
 
-	const FName AnimationName(*NavigationData.ClickBindings[0].Transition.WidgetAnimationName);
+	const FName AnimationName(*NavigationData.ClickBindings[0].PrimaryStep().Transition.WidgetAnimationName);
 	const FObjectProperty* AnimationProperty = FindFProperty<FObjectProperty>(GeneratedClass, AnimationName);
 	UWidgetAnimation* Animation = AnimationProperty
 		? Cast<UWidgetAnimation>(AnimationProperty->GetObjectPropertyValue_InContainer(WidgetInstance)) : nullptr;

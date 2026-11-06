@@ -3,6 +3,7 @@
 #include "PathWidgetBuilder.h"
 
 #include "Design2UMGLog.h"
+#include "DesignColorUtils.h"
 #include "DesignTypeMapper.h"
 #include "UMGValueParser.h"
 #include "UMGWidgetTypes.h"
@@ -154,24 +155,24 @@ namespace
 		if (PrimaryFill.Type == EDesignFillType::Shader) return TEXT("#FFFFFFFF");
 		if (PrimaryFill.Type == EDesignFillType::Color)
 		{
-			return PrimaryFill.SolidColor;
+			return DesignColorUtils::ApplyOpacity(PrimaryFill.SolidColor, PrimaryFill.Opacity);
 		}
 
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.HasColors())
 		{
-			return PrimaryFill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : PrimaryFill.Gradient.Colors[0].Color;
+			return PrimaryFill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : DesignColorUtils::ApplyOpacity(PrimaryFill.Gradient.Colors[0].Color, PrimaryFill.Opacity);
 		}
 
 		for (const FDesignFill& Fill : Node->Visual.Fills)
 		{
 			if (Fill.Type == EDesignFillType::Color)
 			{
-				return Fill.SolidColor;
+				return DesignColorUtils::ApplyOpacity(Fill.SolidColor, Fill.Opacity);
 			}
 
 			if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.HasColors())
 			{
-				return Fill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : Fill.Gradient.Colors[0].Color;
+				return Fill.Gradient.Mesh.IsSet() ? TEXT("#FFFFFFFF") : DesignColorUtils::ApplyOpacity(Fill.Gradient.Colors[0].Color, Fill.Opacity);
 			}
 		}
 
@@ -184,7 +185,7 @@ namespace
 			&& Node->Visual.Stroke.Fill.IsSet()
 			&& Node->Visual.Stroke.Fill->Type == EDesignFillType::Color)
 		{
-			return Node->Visual.Stroke.Fill->SolidColor;
+			return DesignColorUtils::ApplyOpacity(Node->Visual.Stroke.Fill->SolidColor, Node->Visual.Stroke.Fill->Opacity);
 		}
 
 		return FString();
@@ -215,15 +216,6 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 	FUMGWidgetNode Widget;
 
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
-	if (PrimaryFill.Type == EDesignFillType::Image && !PrimaryFill.Image.Url.IsEmpty() && Node->Shape.Geometry.IsEmpty())
-	{
-		Widget.Type = UMGWidgetTypes::Image;
-		Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
-		// Shared visual mapping applies the image paint once.
-		ApplyPathSizeOverrides(Widget, Node);
-		return Widget;
-	}
-
 	if (!Node->Shape.Geometry.IsEmpty())
 	{
 		const FString FillColor = PrimaryFill.IsImage() ? TEXT("#FFFFFF") : ResolvePathRasterFillColor(Node);
@@ -233,46 +225,42 @@ FUMGWidgetNode PathWidgetBuilder::CreatePathWidget(const TSharedPtr<FDesignNode>
 		const FString StrokeColor = bNativePaintedStroke ? TEXT("#FFFFFF") : ResolvePathRasterStrokeColor(Node);
 		const float StrokeThickness = ResolvePathRasterStrokeThickness(Node);
 		const bool bExpandedStroke = Node->Shape.PaintGeometry.StrokePaths.IsSet();
-		if (!FillColor.IsEmpty() || (!StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
-			|| (bExpandedStroke && Node->Visual.Stroke.HasStroke()))
-		{
-			UE_LOG(LogDesign2UMG, Log, TEXT("CreatePathWidget: '%s' rasterize %dx%d (raw=%.1fx%.1f) geometry=%d chars fill=%d stroke=%.2f"),
-				*Node->Name,
-				FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value)),
-				FMath::Max(1, FMath::RoundToInt(Node->Transform.Height.Value)),
-				Node->Transform.Width.Value, Node->Transform.Height.Value, Node->Shape.Geometry.Len(),
-				FillColor.IsEmpty() ? 0 : 1,
-				StrokeThickness);
+		UE_LOG(LogDesign2UMG, Log, TEXT("CreatePathWidget: '%s' rasterize %dx%d (raw=%.1fx%.1f) geometry=%d chars fill=%d stroke=%.2f"),
+			*Node->Name,
+			FMath::Max(1, FMath::RoundToInt(Node->Transform.Width.Value)),
+			FMath::Max(1, FMath::RoundToInt(Node->Transform.Height.Value)),
+			Node->Transform.Width.Value, Node->Transform.Height.Value, Node->Shape.Geometry.Len(),
+			FillColor.IsEmpty() ? 0 : 1,
+			StrokeThickness);
 
-			Widget.Type = UMGWidgetTypes::Image;
-			Widget.Path.Geometry = Node->Shape.Geometry;
-			Widget.Path.ViewBox = Node->Shape.ViewBox;
-			if (Node->Shape.bFitGeometryToBounds) Widget.Path.FitGeometryToBounds = true;
-			if (Node->Shape.ViewBox.IsSet() || Node->Shape.bFitGeometryToBounds) Widget.Path.CanvasSize = FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
-			if (PrimaryFill.IsImage()) Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
-			Widget.Path.FillRule = Node->Shape.FillRule;
-			if (!FillColor.IsEmpty())
-			{
-				Widget.Path.FillColor = FUMGValueParser::ParseColor(FillColor);
-			}
-			if (!bExpandedStroke && !StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
-			{
-				Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
-				Widget.Path.StrokeThickness = StrokeThickness;
-				Widget.Path.StrokeAlignment = Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside ? TEXT("inner")
-					: (Node->Visual.Stroke.Align == EDesignStrokeAlign::Outside ? TEXT("outer") : TEXT("center"));
-				Widget.Path.StrokeCap = GetStrokeCapString(Node->Visual.Stroke.Cap);
-				Widget.Path.StrokeJoin = GetStrokeJoinString(Node->Visual.Stroke.Join);
-				if (bNativePaintedStroke && Node->Visual.Stroke.Fill->Type == EDesignFillType::Gradient)
-				{
-					FUMGVisualBrushData StrokeBrush;
-					VisualMapperFillTransfer::ApplyGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient);
-					Widget.Path.StrokeGradient = MoveTemp(StrokeBrush.Gradient);
-				}
-			}
-			ApplyPathSizeOverrides(Widget, Node);
-			return Widget;
+		Widget.Type = UMGWidgetTypes::Image;
+		Widget.Path.Geometry = Node->Shape.Geometry;
+		Widget.Path.ViewBox = Node->Shape.ViewBox;
+		if (Node->Shape.bFitGeometryToBounds) Widget.Path.FitGeometryToBounds = true;
+		if (Node->Shape.ViewBox.IsSet() || Node->Shape.bFitGeometryToBounds) Widget.Path.CanvasSize = FVector2D(Node->Transform.Width.Value, Node->Transform.Height.Value);
+		if (PrimaryFill.IsImage()) Widget.Brush.Image.TexturePath = PrimaryFill.Image.Url;
+		Widget.Path.FillRule = Node->Shape.FillRule;
+		if (!FillColor.IsEmpty())
+		{
+			Widget.Path.FillColor = FUMGValueParser::ParseColor(FillColor);
 		}
+		if (!bExpandedStroke && !StrokeColor.IsEmpty() && StrokeThickness > 0.0f)
+		{
+			Widget.Path.StrokeColor = FUMGValueParser::ParseColor(StrokeColor);
+			Widget.Path.StrokeThickness = StrokeThickness;
+			Widget.Path.StrokeAlignment = Node->Visual.Stroke.Align == EDesignStrokeAlign::Inside ? TEXT("inner")
+				: (Node->Visual.Stroke.Align == EDesignStrokeAlign::Outside ? TEXT("outer") : TEXT("center"));
+			Widget.Path.StrokeCap = GetStrokeCapString(Node->Visual.Stroke.Cap);
+			Widget.Path.StrokeJoin = GetStrokeJoinString(Node->Visual.Stroke.Join);
+			if (bNativePaintedStroke && Node->Visual.Stroke.Fill->Type == EDesignFillType::Gradient)
+			{
+				FUMGVisualBrushData StrokeBrush;
+				VisualMapperFillTransfer::ApplyGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient, Node->Visual.Stroke.Fill->Opacity);
+				Widget.Path.StrokeGradient = MoveTemp(StrokeBrush.Gradient);
+			}
+		}
+		ApplyPathSizeOverrides(Widget, Node);
+		return Widget;
 	}
 
 	Widget.Type = DesignTypeMapper::MapNodeTypeToWidget(Node->Type, Node->LayoutData.Layout);

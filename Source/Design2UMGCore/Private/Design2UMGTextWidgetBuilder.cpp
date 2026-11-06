@@ -290,7 +290,7 @@ namespace
 		else if (bHasNodeColor)
 		{
 			Result.Style.Color =
-				FLinearColor::FromSRGBColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor).ToFColor(true));
+				FLinearColor::FromSRGBColor(FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity).ToFColor(true));
 		}
 
 		const bool bRunUnderline = Run ? Run->bUnderline.Get(InNode->Text.bUnderline) : InNode->Text.bUnderline;
@@ -622,7 +622,7 @@ Design2UMGTextWidgetBuilder::FIconFontBuildResult Design2UMGTextWidgetBuilder::C
 	const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
 	if (PrimaryFill.Type == EDesignFillType::Color)
 	{
-		Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+		Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity);
 	}
 
 	return Result;

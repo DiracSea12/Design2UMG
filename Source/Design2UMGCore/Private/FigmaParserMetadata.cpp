@@ -160,7 +160,7 @@ namespace
 	bool HasVisiblePaint(const FDesignFill& Fill)
 	{
 		if (!Fill.bEnabled || Fill.IsNone() || Fill.Opacity <= 0) return false;
-		if (Fill.IsColor()) return FUMGValueParser::ParseColor(Fill.SolidColor).A > 0;
+		if (Fill.IsColor()) return FUMGValueParser::ParseColor(Fill.SolidColor, Fill.Opacity).A > 0;
 		if (Fill.Type == EDesignFillType::Gradient)
 		{
 			return Fill.Gradient.Colors.ContainsByPredicate([](const FDesignGradientStop& Stop)

@@ -283,9 +283,9 @@ namespace
 			Layer.Path.FillRule = Widget.Path.FillRule;
 			Layer.Path.FillColor = FLinearColor::White;
 			if (Fill.Type == EDesignFillType::Color)
-				Layer.Path.FillColor = FUMGValueParser::ParseColor(Fill.SolidColor);
+				Layer.Path.FillColor = FUMGValueParser::ParseColor(Fill.SolidColor, Fill.Opacity);
 			else if (Fill.Type == EDesignFillType::Gradient)
-				VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient);
+				VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient, Fill.Opacity);
 			else if (Fill.Type == EDesignFillType::Image && !Fill.Image.Url.IsEmpty())
 			{
 				ImageFillUtils::ApplyImageFillProperties(Layer, Fill.Image);
@@ -300,14 +300,14 @@ namespace
 		if (Fill.Type == EDesignFillType::Color)
 		{
 			Layer.Type = UMGWidgetTypes::Border;
-			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor);
+			Layer.Brush.BrushColor = FUMGValueParser::ParseColor(Fill.SolidColor, Fill.Opacity);
 			return true;
 		}
 
 		if (Fill.Type == EDesignFillType::Gradient && Fill.Gradient.HasColors())
 		{
 			Layer.Type = UMGWidgetTypes::Image;
-			VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient);
+			VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, Fill.Gradient, Fill.Opacity);
 			AddTextureSizeHints(Layer, Node);
 			return true;
 		}
@@ -417,7 +417,7 @@ namespace VisualMapperFillTransfer
         return Paints && SubtreeNeedsBackdrop(Widget);
     }
 
-	void ApplyGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient)
+	void ApplyGradientBrushData(FUMGVisualBrushData& Brush, const FDesignGradient& Gradient, float Opacity)
 	{
 		Brush.Gradient.Type = GradientHelpers::ToTypedGradientTypeString(Gradient.GradientType);
 		Brush.Gradient.Rotation = Gradient.Rotation;
@@ -443,7 +443,7 @@ namespace VisualMapperFillTransfer
 		for (const FDesignGradientStop& Stop : Gradient.Colors)
 		{
 			FUMGVisualBrushData::FGradientStopData& TypedStop = Brush.Gradient.Stops.AddDefaulted_GetRef();
-			TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color);
+			TypedStop.Color = FUMGValueParser::ParseColor(Stop.Color, Opacity);
 			TypedStop.Position = Stop.Position;
 		}
 	}
@@ -469,7 +469,7 @@ namespace VisualMapperFillTransfer
 				&& PrimaryFill.Type == EDesignFillType::Color
 				&& !Widget.Text.Color.IsSet())
 			{
-				Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+				Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity);
 			}
 			return;
 		}
@@ -487,7 +487,7 @@ namespace VisualMapperFillTransfer
 			{
 				if (!Widget.Text.Color.IsSet())
 				{
-					Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+					Widget.Text.Color = FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity);
 				}
 				return;
 			}
@@ -500,14 +500,14 @@ namespace VisualMapperFillTransfer
 			// a side-effect-free clone whose geometry never reaches their node.
 			if (!Widget.Path.Geometry.IsSet())
 			{
-				Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor);
+				Widget.Brush.BrushColor = FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity);
 			}
 			return;
 		}
 
 		if (PrimaryFill.Type == EDesignFillType::Gradient && PrimaryFill.Gradient.HasColors())
 		{
-			VisualMapperFillTransfer::ApplyGradientBrushData(Widget.Brush, PrimaryFill.Gradient);
+			VisualMapperFillTransfer::ApplyGradientBrushData(Widget.Brush, PrimaryFill.Gradient, PrimaryFill.Opacity);
 			AddTextureSizeHints(Widget, Node);
 			return;
 		}
@@ -799,11 +799,11 @@ namespace VisualMapperFillTransfer
                 SourcePaintGeometry.FillPaints->Add(CapturePaint(Widget));
             FUMGSurfacePaint StrokePaint;
             if (StrokeFill.Type == EDesignFillType::Color)
-                StrokePaint.Color = FUMGValueParser::ParseColor(StrokeFill.SolidColor);
+                StrokePaint.Color = FUMGValueParser::ParseColor(StrokeFill.SolidColor, StrokeFill.Opacity);
             else
             {
                 FUMGVisualBrushData Brush;
-                ApplyGradientBrushData(Brush, StrokeFill.Gradient);
+                ApplyGradientBrushData(Brush, StrokeFill.Gradient, StrokeFill.Opacity);
                 StrokePaint.Gradient = MoveTemp(Brush.Gradient);
             }
             SourcePaintGeometry.StrokePaint = MoveTemp(StrokePaint);
@@ -834,7 +834,7 @@ namespace VisualMapperFillTransfer
             Widget.Path.StrokeColor = FLinearColor::White;
             Widget.Path.StrokeThickness = Thickness;
             FUMGVisualBrushData StrokeBrush;
-            VisualMapperFillTransfer::ApplyGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient);
+            VisualMapperFillTransfer::ApplyGradientBrushData(StrokeBrush, Node->Visual.Stroke.Fill->Gradient, Node->Visual.Stroke.Fill->Opacity);
             Widget.Path.StrokeGradient = MoveTemp(StrokeBrush.Gradient);
             auto FillGradient = MoveTemp(Widget.Brush.Gradient);
             auto FillImage = MoveTemp(Widget.Brush.Image);
@@ -931,14 +931,14 @@ namespace VisualMapperFillTransfer
                     Layer.Brush.Shader->CaptureInsets = FVector4(-PaintOffset.X, 0, -PaintOffset.X, 0);
             }
             else if (StrokeFill.Type == EDesignFillType::Gradient)
-                VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, StrokeFill.Gradient);
+                VisualMapperFillTransfer::ApplyGradientBrushData(Layer.Brush, StrokeFill.Gradient, StrokeFill.Opacity);
             else if (StrokeFill.Type == EDesignFillType::Image)
             {
                 ImageFillUtils::ApplyImageFillProperties(Layer, StrokeFill.Image);
                 Layer.Brush.Image.TexturePath = StrokeFill.Image.Url;
             }
             else
-                Layer.Brush.BrushColor = FUMGValueParser::ParseColor(StrokeFill.SolidColor);
+                Layer.Brush.BrushColor = FUMGValueParser::ParseColor(StrokeFill.SolidColor, StrokeFill.Opacity);
             Layer.WidgetStyle.WidthOverride = PaintSize.X;
             Layer.WidgetStyle.HeightOverride = PaintSize.Y;
             if (bLine && PaintOffset.X != 0.0f &&

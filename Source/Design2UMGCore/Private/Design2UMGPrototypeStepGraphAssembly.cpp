@@ -6,14 +6,6 @@
 
 namespace Design2UMGPrototypeStepGraphAssembly
 {
-	struct FResolvedPrototypeAction
-	{
-		EUMGPrototypeNavigationAction Kind = EUMGPrototypeNavigationAction::Navigate;
-		FString Payload;
-		FUMGPrototypeTransitionData Transition;
-		bool bResolved = false;
-	};
-
 	FString ResolvePrototypeActionDestinationId(
 		const FDesignPrototypeAction& Action)
 	{
@@ -30,19 +22,19 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return FString();
 	}
 
-	const TCHAR* DescribePrototypeActionKind(const EUMGPrototypeNavigationAction Kind)
+	const TCHAR* DescribePrototypeActionKind(const EUMGPrototypeNavigationStepKind Kind)
 	{
 		switch (Kind)
 		{
-		case EUMGPrototypeNavigationAction::Navigate:
+		case EUMGPrototypeNavigationStepKind::Navigate:
 			return TEXT("navigation");
-		case EUMGPrototypeNavigationAction::Overlay:
+		case EUMGPrototypeNavigationStepKind::Overlay:
 			return TEXT("overlay");
-		case EUMGPrototypeNavigationAction::Back:
+		case EUMGPrototypeNavigationStepKind::Back:
 			return TEXT("back");
-		case EUMGPrototypeNavigationAction::CloseOverlay:
+		case EUMGPrototypeNavigationStepKind::CloseOverlay:
 			return TEXT("close overlay");
-		case EUMGPrototypeNavigationAction::OpenLink:
+		case EUMGPrototypeNavigationStepKind::OpenLink:
 			return TEXT("open link");
 		default:
 			return TEXT("prototype action");
@@ -81,38 +73,9 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		return Transition;
 	}
 
-	EUMGPrototypeNavigationAction MapPrototypeStepKindToBindingAction(
-		const EUMGPrototypeNavigationStepKind Kind)
-	{
-		switch (Kind)
-		{
-		case EUMGPrototypeNavigationStepKind::Navigate:
-			return EUMGPrototypeNavigationAction::Navigate;
-		case EUMGPrototypeNavigationStepKind::Overlay:
-			return EUMGPrototypeNavigationAction::Overlay;
-		case EUMGPrototypeNavigationStepKind::Back:
-			return EUMGPrototypeNavigationAction::Back;
-		case EUMGPrototypeNavigationStepKind::CloseOverlay:
-			return EUMGPrototypeNavigationAction::CloseOverlay;
-		case EUMGPrototypeNavigationStepKind::OpenLink:
-			return EUMGPrototypeNavigationAction::OpenLink;
-		case EUMGPrototypeNavigationStepKind::AnimateWidget:
-			return EUMGPrototypeNavigationAction::AnimateWidget;
-		case EUMGPrototypeNavigationStepKind::SetVariable:
-			return EUMGPrototypeNavigationAction::SetVariable;
-		case EUMGPrototypeNavigationStepKind::SetVariableMode:
-			return EUMGPrototypeNavigationAction::SetVariableMode;
-		case EUMGPrototypeNavigationStepKind::ConditionJump:
-		case EUMGPrototypeNavigationStepKind::Jump:
-			return EUMGPrototypeNavigationAction::Conditional;
-		default:
-			return EUMGPrototypeNavigationAction::Navigate;
-		}
-	}
-
 	bool ResolvePrototypePageTarget(
 		const TSharedPtr<FDesignNode>& Node,
-		const EUMGPrototypeNavigationAction ActionKind,
+		const EUMGPrototypeNavigationStepKind ActionKind,
 		const FString& TargetNodeId,
 		const TMap<FString, FString>& NodeToPageId,
 		const TMap<FString, int32>& PageIdToIndex,
@@ -297,7 +260,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			Step.Kind = EUMGPrototypeNavigationStepKind::Overlay;
 			bMatched = ResolvePrototypePageTarget(
 				Node,
-				EUMGPrototypeNavigationAction::Overlay,
+				EUMGPrototypeNavigationStepKind::Overlay,
 				ResolvedNodeDestinationId,
 				NodeToPageId,
 				PageIdToIndex,
@@ -310,7 +273,7 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			Step.Kind = EUMGPrototypeNavigationStepKind::Navigate;
 			bMatched = ResolvePrototypePageTarget(
 				Node,
-				EUMGPrototypeNavigationAction::Navigate,
+				EUMGPrototypeNavigationStepKind::Navigate,
 				ResolvedNodeDestinationId,
 				NodeToPageId,
 				PageIdToIndex,
@@ -368,62 +331,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 		}
 
 		return TriggerType;
-	}
-
-	bool BuildPrototypeBindingSummary(
-		const TArray<FUMGPrototypeNavigationStep>& Steps,
-		FResolvedPrototypeAction& OutSummary)
-	{
-		if (Steps.Num() == 0)
-		{
-			return false;
-		}
-
-		OutSummary = FResolvedPrototypeAction();
-		for (const FUMGPrototypeNavigationStep& Step : Steps)
-		{
-			switch (Step.Kind)
-			{
-			case EUMGPrototypeNavigationStepKind::Navigate:
-				OutSummary.Kind = EUMGPrototypeNavigationAction::Navigate;
-				OutSummary.Payload = Step.TargetPageId;
-				OutSummary.Transition = Step.Transition;
-				OutSummary.bResolved = true;
-				return true;
-			case EUMGPrototypeNavigationStepKind::Overlay:
-				OutSummary.Kind = EUMGPrototypeNavigationAction::Overlay;
-				OutSummary.Payload = Step.TargetPageId;
-				OutSummary.Transition = Step.Transition;
-				OutSummary.bResolved = true;
-				return true;
-			case EUMGPrototypeNavigationStepKind::CloseOverlay:
-				OutSummary.Kind = EUMGPrototypeNavigationAction::CloseOverlay;
-				OutSummary.Payload.Reset();
-				OutSummary.Transition = Step.Transition;
-				OutSummary.bResolved = true;
-				return true;
-			case EUMGPrototypeNavigationStepKind::Back:
-				OutSummary.Kind = EUMGPrototypeNavigationAction::Back;
-				OutSummary.Payload.Reset();
-				OutSummary.Transition = Step.Transition;
-				OutSummary.bResolved = true;
-				return true;
-			case EUMGPrototypeNavigationStepKind::OpenLink:
-				OutSummary.Kind = EUMGPrototypeNavigationAction::OpenLink;
-				OutSummary.Payload = Step.ExternalUrl;
-				OutSummary.Transition = Step.Transition;
-				OutSummary.bResolved = true;
-				return true;
-			default:
-				break;
-			}
-		}
-
-		const FUMGPrototypeNavigationStep& FirstStep = Steps[0];
-		OutSummary.Kind = MapPrototypeStepKindToBindingAction(FirstStep.Kind);
-		OutSummary.Transition = FirstStep.Transition;
-		OutSummary.bResolved = true;
-		return true;
 	}
 
 	FString BuildPrototypeStepSignature(const FUMGPrototypeNavigationStep& Step)
@@ -552,26 +459,6 @@ namespace Design2UMGPrototypeStepGraphAssembly
 			if (Binding.Steps.Num() == 0)
 			{
 				continue;
-			}
-
-			FResolvedPrototypeAction Summary;
-			if (BuildPrototypeBindingSummary(Binding.Steps, Summary))
-			{
-				Binding.Action = Summary.Kind;
-				Binding.Transition = Summary.Transition;
-				if (Summary.Kind == EUMGPrototypeNavigationAction::Navigate
-					|| Summary.Kind == EUMGPrototypeNavigationAction::Overlay)
-				{
-					Binding.TargetPageId = Summary.Payload;
-					if (const int32* PageIndex = PageIdToIndex.Find(Summary.Payload))
-					{
-						Binding.TargetPageIndex = *PageIndex;
-					}
-				}
-				else if (Summary.Kind == EUMGPrototypeNavigationAction::OpenLink)
-				{
-					Binding.ExternalUrl = Summary.Payload;
-				}
 			}
 
 			const FString StepSignature = FString::JoinBy(

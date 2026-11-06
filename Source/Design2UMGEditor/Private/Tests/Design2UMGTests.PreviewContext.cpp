@@ -63,8 +63,6 @@ namespace
 		Binding.TriggerWidgetId = TEXT("trigger");
 		Binding.TriggerWidgetName = TEXT("trigger");
 		Binding.SourcePageId = TEXT("page_a");
-		Binding.TargetPageId = TEXT("page_b");
-		Binding.TargetPageIndex = 1;
 		auto& Step = Binding.Steps.AddDefaulted_GetRef();
 		Step.TargetPageId = TEXT("page_b");
 		Step.TargetPageIndex = 1;
@@ -150,7 +148,6 @@ bool FPreviewContextStructureTest::RunTest(const FString& Parameters)
 		const auto& Bindings = Result.Data.PrototypeNavigation().ClickBindings;
 		if (TestEqual(TEXT("Binding retained"), Bindings.Num(), 1))
 		{
-			TestEqual(TEXT("Binding page index recomputed"), Bindings[0].TargetPageIndex, 0);
 			TestEqual(TEXT("Step page index recomputed"), Bindings[0].Steps[0].TargetPageIndex, 0);
 		}
 	}
@@ -251,8 +248,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewContextRuntimeAddressRolesTest,
 bool FPreviewContextRuntimeAddressRolesTest::RunTest(const FString& Parameters)
 {
 	FUMGWidgetData Original = PreviewContextFixture();
-	Original.MutablePrototypeNavigation().ClickBindings[0].Transition.Type = TEXT("SMART_ANIMATE");
-	Original.MutablePrototypeNavigation().ClickBindings[0].Transition.DurationSeconds = 0.2f;
+	Original.MutablePrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Type = TEXT("SMART_ANIMATE");
+	Original.MutablePrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.DurationSeconds = 0.2f;
 
 	FUMGWidgetData Edited = Original;
 	FUMGWidgetNode CrossTypeName;
@@ -356,7 +353,7 @@ bool FPreviewContextNestedPageOwnershipTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Only actual hosted pages remain in navigation"), Navigation.PageIds.Num(), 2);
 		TestEqual(TEXT("Trigger belongs to its current host page, not its former page"),
 			Navigation.ClickBindings[0].SourcePageId, FString(TEXT("page_c")));
-		TestEqual(TEXT("Target page index follows current host order"), Navigation.ClickBindings[0].TargetPageIndex, 0);
+		TestEqual(TEXT("Target page index follows current host order"), Navigation.ClickBindings[0].PrimaryStep().TargetPageIndex, 0);
 
 		const FString Folder = TEXT("/Game/Design2UMG/_TestOutput/NestedPreviewPage_") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		ON_SCOPE_EXIT { Design2UMGEditorTests::DeleteGeneratedAssetsAtPath(Folder); };
@@ -407,9 +404,6 @@ bool FPreviewContextOverlayTest::RunTest(const FString& Parameters)
     Navigation.PageIds.Add(TEXT("overlay_page"));
     Navigation.PageWidgetNames.Add(TEXT("overlay_page"), TEXT("overlay_page"));
     auto& Binding = Navigation.ClickBindings[0];
-    Binding.Action = EUMGPrototypeNavigationAction::Overlay;
-    Binding.TargetPageId = TEXT("overlay_page");
-    Binding.TargetPageIndex = 2;
     Binding.Steps[0].Kind = EUMGPrototypeNavigationStepKind::Overlay;
     Binding.Steps[0].TargetPageId = TEXT("overlay_page");
     Binding.Steps[0].TargetPageIndex = 2;
@@ -442,7 +436,6 @@ bool FPreviewContextOverlayTest::RunTest(const FString& Parameters)
 	auto& MirrorNavigation = MirrorOriginal.MutablePrototypeNavigation();
 	MirrorNavigation.OverlayHostWidgetId = TEXT("overlay_host");
 	MirrorNavigation.OverlayHostWidgetName = TEXT("overlay_host");
-	MirrorNavigation.ClickBindings[0].Action = EUMGPrototypeNavigationAction::Overlay;
 	MirrorNavigation.ClickBindings[0].Steps[0].Kind = EUMGPrototypeNavigationStepKind::Overlay;
 
 	Edited = MirrorOriginal;

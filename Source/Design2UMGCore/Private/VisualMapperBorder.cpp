@@ -25,7 +25,7 @@ namespace
 		return PrimaryFill.bEnabled
 			&& PrimaryFill.Type == EDesignFillType::Color
 			&& !PrimaryFill.SolidColor.IsEmpty()
-			&& FUMGValueParser::ParseColor(PrimaryFill.SolidColor).A > KINDA_SMALL_NUMBER;
+			&& FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity).A > KINDA_SMALL_NUMBER;
 	}
 
 	bool HasPlaceholderSurfaceChildren(const TSharedPtr<FDesignNode>& Node)

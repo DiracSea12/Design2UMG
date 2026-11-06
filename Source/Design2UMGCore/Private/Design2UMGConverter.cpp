@@ -6,7 +6,6 @@
 #include "DesignSchemaSourceExtensions.h"
 #include "DesignJsonUtils.h"
 #include "FigmaParser.h"
-#include "FigmaParserStyling.h"
 #include "VisualMapperFillTransfer.h"
 #include "UMGValueParser.h"
 #include "DesignColorUtils.h"
@@ -50,14 +49,6 @@ namespace Design2UMGConverterPrivate
 				TEXT("Node '%s' (%s) has unsupported source type '%s'."),
 				*Node->Name, *Node->Id, *Node->Source().SourceNodeType));
 		}
-		if (Node->Type == EDesignNodeType::Path && Node->Shape.Geometry.IsEmpty()
-			&& !Node->Shape.PaintGeometry.FillPaths.IsSet() && !Node->Shape.PaintGeometry.StrokePaths.IsSet()
-			&& (Node->Visual.Fills.Num() > 0 || Node->Visual.Stroke.HasStroke()))
-		{
-			Warnings.AddUnique(FString::Printf(
-				TEXT("Node '%s' (%s) has no vector geometry; its painted contour cannot be generated."),
-				*Node->Name, *Node->Id));
-		}
 		for (const auto& Child : Node->Children)
 		{
 			AppendSourceNodeWarnings(Child, Warnings);
@@ -84,28 +75,19 @@ namespace Design2UMGConverterPrivate
 
 	bool BuildSurfacePaints(const FDesignNode& Node, TArray<FUMGSurfacePaint>& OutPaints, FString& Error)
 	{
-		const auto Raw = Node.Source().Prototype.AnimationSource;
-		const auto Fills = DesignJsonUtils::GetArray(Raw, TEXT("fills"));
-		if (!Fills) { Error = TEXT("paint source is missing"); return false; }
-		for (const auto& Value : *Fills)
+		for (const FDesignFill& Fill : Node.Visual.Fills)
 		{
-			const auto Paint = Value->AsObject();
-			if (!Paint || !DesignJsonUtils::GetBool(Paint, TEXT("visible"), true)) continue;
-			auto Copy = MakeShared<FJsonObject>();
-			Copy->Values = Paint->Values;
-			Copy->SetNumberField(TEXT("opacity"), 1.0);
-			TArray<TSharedPtr<FJsonValue>> One{MakeShared<FJsonValueObject>(Copy)};
-			const auto Parsed = FigmaParserInternal::ParseFills(One);
-			if (Parsed.Num() != 1 || (Parsed[0].Type != EDesignFillType::Color && Parsed[0].Type != EDesignFillType::Gradient))
+			if (!Fill.bEnabled || Fill.IsNone()) continue;
+			if (!Fill.IsColor() && Fill.Type != EDesignFillType::Gradient)
 			{ Error = TEXT("paint requires a supported solid or gradient fill"); return false; }
 			FUMGSurfacePaint& Out = OutPaints.AddDefaulted_GetRef();
-			Out.Opacity = DesignJsonUtils::GetNumber(Paint, TEXT("opacity"), 1.0);
-			Out.BlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(Parsed[0].BlendMode);
-			if (Parsed[0].Type == EDesignFillType::Color) Out.Color = FUMGValueParser::ParseColor(Parsed[0].SolidColor);
+			Out.Opacity = Fill.Opacity;
+			Out.BlendMode = VisualMapperFillTransfer::CanonicalPaintBlendMode(Fill.BlendMode);
+			if (Fill.IsColor()) Out.Color = FUMGValueParser::ParseColor(Fill.SolidColor);
 			else
 			{
 				FUMGVisualBrushData Brush;
-				VisualMapperFillTransfer::ApplyGradientBrushData(Brush, Parsed[0].Gradient);
+				VisualMapperFillTransfer::ApplyGradientBrushData(Brush, Fill.Gradient);
 				Out.Gradient = MoveTemp(Brush.Gradient);
 			}
 		}
@@ -133,11 +115,11 @@ namespace Design2UMGConverterPrivate
 		if (Node.Visual.Stroke.HasStroke() && Node.Visual.Stroke.Fill.IsSet())
 		{
 			const auto& Fill = Node.Visual.Stroke.Fill.GetValue();
-			if (Fill.Type == EDesignFillType::Color) Stroke.Color = FUMGValueParser::ParseColor(Fill.SolidColor);
+			if (Fill.Type == EDesignFillType::Color) Stroke.Color = FUMGValueParser::ParseColor(Fill.SolidColor, Fill.Opacity);
 			else if (Fill.Type == EDesignFillType::Gradient)
 			{
 				FUMGVisualBrushData Brush;
-				VisualMapperFillTransfer::ApplyGradientBrushData(Brush, Fill.Gradient);
+				VisualMapperFillTransfer::ApplyGradientBrushData(Brush, Fill.Gradient, Fill.Opacity);
 				Stroke.Gradient = MoveTemp(Brush.Gradient); Stroke.Color = FLinearColor::White;
 			}
 			else { Error = TEXT("shared capture own stroke has no supported native paint"); return false; }
@@ -193,7 +175,7 @@ namespace Design2UMGConverterPrivate
 		const auto* Host = Navigation.StateHosts.FindByPredicate(
 			[&](const FUMGPrototypeStateHost& Item) { return Item.InstanceWidgetId == Destination.Id; });
 		const bool bTrigger = Navigation.ClickBindings.ContainsByPredicate([&](const FUMGPrototypeNavigationBinding& Item)
-			{ return Item.TriggerWidgetId == Destination.Id && !Item.Steps.IsEmpty() && Item.Transition.Diagnostic.IsEmpty(); });
+			{ return Item.TriggerWidgetId == Destination.Id && !Item.Steps.IsEmpty() && Item.PrimaryStep().Transition.Diagnostic.IsEmpty(); });
 		if (Host || bTrigger)
 		{
 			const FString Id = Host ? Host->HostWidgetId : Destination.Id;
@@ -223,7 +205,7 @@ namespace Design2UMGConverterPrivate
 		TArray<FAttachment> Attachments;
 		for (auto& Binding : Navigation.ClickBindings)
 		{
-			auto& Transition = Binding.Transition;
+			auto& Transition = Binding.PrimaryStep().Transition;
 			TArray<TPair<TSharedPtr<FDesignNode>, TSharedPtr<FDesignNode>>> Staged;
 			TSet<FString> StagedIds;
 			for (const auto& Layer : Transition.AddedLayers)
@@ -291,7 +273,7 @@ namespace Design2UMGConverterPrivate
 				Warnings.AddUnique(FString::Printf(TEXT("Prototype animation '%s': %s; action not executed"),
 					*Binding.TriggerWidgetId, *Transition.Diagnostic));
 			}
-			if (Binding.Steps.Num() == 1) Binding.Steps[0].Transition = Transition;
+
 		}
 		// Resolve every canonical subtree before inserting any generated presentation children.
 		for (auto& Attachment : Attachments)
@@ -542,6 +524,7 @@ namespace Design2UMGConverterPrivate
 			const TSharedPtr<FDesignNode> VisualNode = Roles.bSurfacePaint || Roles.bSourceContour || Roles.bLocalSurface
 				? BuildSurfaceVisualNode(*LayoutNode, Roles) : LayoutNode;
 			FUMGWidgetNode Widget = CreateBaseWidgetForNode(VisualNode, Context.State);
+			if (Widget.Type.IsEmpty()) return Widget;
 			LogCreatedWidget(Widget, Node);
 			VisualSupport::ApplyBaseVisualProperties(Widget, VisualNode);
 			if (Roles.bSourceContour || Roles.bLocalSurface) Widget.Brush.BrushColor = FLinearColor::Transparent;
@@ -571,16 +554,16 @@ namespace Design2UMGConverterPrivate
 			FSurfaceRoles Roles;
 			Roles.bSharedCapture = Bindings.ContainsByPredicate(
 				[&](const FUMGPrototypeNavigationBinding& Binding)
-				{ return Binding.Transition.SharedCaptures.ContainsByPredicate([&](const FUMGPrototypeSharedCapture& Capture)
+				{ return Binding.PrimaryStep().Transition.SharedCaptures.ContainsByPredicate([&](const FUMGPrototypeSharedCapture& Capture)
 					{ return Capture.NodeId == Node.Id || Capture.DestinationWidgetId == Node.Id; }); });
 			Roles.bLocalSurface = Roles.bSharedCapture || Bindings.ContainsByPredicate(
 				[&](const FUMGPrototypeNavigationBinding& Binding)
-				{ return Binding.Transition.LocalEndpoints.ContainsByPredicate([&](const FUMGPrototypeLocalEndpoint& Endpoint)
+				{ return Binding.PrimaryStep().Transition.LocalEndpoints.ContainsByPredicate([&](const FUMGPrototypeLocalEndpoint& Endpoint)
 					{ return !Endpoint.bText && (Endpoint.NodeId == Node.Id || Endpoint.DestinationWidgetId == Node.Id); }); });
 			Roles.bSurfacePaint = !Roles.bLocalSurface && Node.Type != EDesignNodeType::Text && Bindings.ContainsByPredicate(
 				[&](const FUMGPrototypeNavigationBinding& Binding)
 				{
-					return Binding.Transition.WidgetTargets.ContainsByPredicate([&](const FUMGPrototypeWidgetAnimationTarget& Target)
+					return Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate([&](const FUMGPrototypeWidgetAnimationTarget& Target)
 					{ return Target.bSurfacePaintChange && (Target.NodeId == SurfaceOwnerId || Target.DestinationWidgetId == SurfaceOwnerId); });
 				});
 			Roles.bPathSurfacePaint = Roles.bSurfacePaint && (Node.Type == EDesignNodeType::Path || Node.Type == EDesignNodeType::Polygon)
@@ -842,7 +825,7 @@ namespace Design2UMGConverterPrivate
 						const bool bTargetOnly = Context.State.PrototypeNavigation.ClickBindings.ContainsByPredicate(
 							[&EffectiveChild](const FUMGPrototypeNavigationBinding& Binding)
 							{
-								return Binding.Transition.AddedLayers.ContainsByPredicate(
+								return Binding.PrimaryStep().Transition.AddedLayers.ContainsByPredicate(
 									[&EffectiveChild](const FUMGPrototypeAddedLayer& Layer)
 									{ return !Layer.bReplaceSource && Layer.NodeId == EffectiveChild->Id; });
 							});
@@ -868,7 +851,7 @@ namespace Design2UMGConverterPrivate
 				{
 					if (Context.State.PrototypeNavigation.ClickBindings.ContainsByPredicate([&](const FUMGPrototypeNavigationBinding& Binding)
 					{
-						return Binding.Transition.AddedLayers.ContainsByPredicate([&](const FUMGPrototypeAddedLayer& Layer)
+						return Binding.PrimaryStep().Transition.AddedLayers.ContainsByPredicate([&](const FUMGPrototypeAddedLayer& Layer)
 						{ return !Layer.bReplaceSource && (Child.Id == Layer.NodeId || (Child.Type == UMGWidgetTypes::SizeBox
 							&& Child.Children.Num() == 1 && Child.Children[0].Id == Layer.NodeId)); });
 					})) Child.WidgetStyle.Visibility = TEXT("HitTestInvisible");
@@ -1124,7 +1107,7 @@ namespace Design2UMGConverterPrivate
 					const bool bBehindFlow = Context.State.PrototypeNavigation.ClickBindings.ContainsByPredicate(
 						[&Absolute](const FUMGPrototypeNavigationBinding& Binding)
 						{
-							return Binding.Transition.AddedLayers.ContainsByPredicate(
+							return Binding.PrimaryStep().Transition.AddedLayers.ContainsByPredicate(
 								[&Absolute](const FUMGPrototypeAddedLayer& Layer)
 								{ return Layer.NodeId == Absolute.Id && Layer.bBehindFlow; });
 						});
@@ -1139,7 +1122,7 @@ namespace Design2UMGConverterPrivate
 			const bool bAnimatedTextPaint = Node->Type == EDesignNodeType::Text && Context.State.PrototypeNavigation.ClickBindings.ContainsByPredicate(
 				[&Node](const FUMGPrototypeNavigationBinding& Binding)
 				{
-					return Binding.Transition.WidgetTargets.ContainsByPredicate([&Node](const FUMGPrototypeWidgetAnimationTarget& Target)
+					return Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate([&Node](const FUMGPrototypeWidgetAnimationTarget& Target)
 					{ return Target.bTextPaintChange && (Target.NodeId == Node->Id || Target.DestinationWidgetId == Node->Id); });
 				});
 			const bool bGradientText = Node->Type == EDesignNodeType::Text && Widget.Type == UMGWidgetTypes::TextBlock
@@ -1199,7 +1182,7 @@ namespace Design2UMGConverterPrivate
 				const bool bAnimatedOpacity = Context.State.PrototypeNavigation.ClickBindings.ContainsByPredicate(
 					[&Node](const FUMGPrototypeNavigationBinding& Binding)
 					{
-						return Binding.Transition.WidgetTargets.ContainsByPredicate([&Node](const FUMGPrototypeWidgetAnimationTarget& Target)
+						return Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate([&Node](const FUMGPrototypeWidgetAnimationTarget& Target)
 						{
 							return Target.NodeId == Node->Id && Target.bOpacity;
 						});
@@ -1238,6 +1221,12 @@ namespace Design2UMGConverterPrivate
 			}
 
 			FUMGWidgetNode Widget = MoveTemp(BuildResult.Widget);
+			if (Widget.Type.IsEmpty())
+			{
+				State.ConversionError = FString::Printf(
+					TEXT("Node '%s' (%s) has no drawable vector geometry; its painted contour cannot be generated."), *Node->Name, *Node->Id);
+				return Widget;
+			}
 			Design2UMGNodeWidgetFactory::PopulateWidgetIdentityAndBounds(Widget, Node);
 			return Widget;
 		}
@@ -1279,7 +1268,7 @@ namespace Design2UMGConverterPrivate
 		Keep(Navigation.PageHostWidgetId); Keep(Navigation.OverlayHostWidgetId);
 		for (const auto& Binding : Navigation.ClickBindings)
 		{
-			Keep(Binding.TriggerWidgetId); Keep(Binding.SourcePageId); KeepTransition(Binding.Transition);
+			Keep(Binding.TriggerWidgetId); Keep(Binding.SourcePageId);
 			for (const auto& Step : Binding.Steps) { Keep(Step.TargetPageId); KeepTransition(Step.Transition); }
 		}
 		for (const auto& Host : Navigation.StateHosts)
@@ -1418,8 +1407,8 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 		TSet<FString> AnimatedIds;
 		for (const auto& Binding : State.PrototypeNavigation.ClickBindings)
 		{
-			for (const auto& Target : Binding.Transition.WidgetTargets) AnimatedIds.Append({Target.NodeId, Target.DestinationWidgetId});
-			for (const auto& Target : Binding.Transition.LayoutTargets) AnimatedIds.Append({Target.NodeId, Target.DestinationWidgetId});
+			for (const auto& Target : Binding.PrimaryStep().Transition.WidgetTargets) AnimatedIds.Append({Target.NodeId, Target.DestinationWidgetId});
+			for (const auto& Target : Binding.PrimaryStep().Transition.LayoutTargets) AnimatedIds.Append({Target.NodeId, Target.DestinationWidgetId});
 		}
 		const TFunction<void(const TSharedPtr<FDesignNode>&)> MarkAnimated = [&](const TSharedPtr<FDesignNode>& Node)
 		{
@@ -1430,7 +1419,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 		// A fixed presentation retains a shared owner even when this action changes only its descendants.
 		TSet<FString> SharedOwners;
 		for (const auto& Binding : State.PrototypeNavigation.ClickBindings)
-			for (const auto& Capture : Binding.Transition.SharedCaptures)
+			for (const auto& Capture : Binding.PrimaryStep().Transition.SharedCaptures)
 			{ SharedOwners.Add(Capture.NodeId); SharedOwners.Add(Capture.DestinationWidgetId); }
 		bool bAddedOwner;
 		do
@@ -1438,7 +1427,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			bAddedOwner = false;
 			for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 			{
-				auto& Plan = Binding.Transition;
+				auto& Plan = Binding.PrimaryStep().Transition;
 				if (!Plan.bFixedViewportLayout || !Plan.Diagnostic.IsEmpty()) continue;
 				for (const auto& Layout : Plan.LayoutTargets)
 				{
@@ -1452,14 +1441,14 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 		} while (bAddedOwner);
 		for (const auto& Binding : State.PrototypeNavigation.ClickBindings)
 		{
-			for (const auto& Order : Binding.Transition.LayerOrders)
+			for (const auto& Order : Binding.PrimaryStep().Transition.LayerOrders)
 			{
 				State.IndependentPaintParentIds.Add(Order.ParentNodeId);
-				const auto* Target = Binding.Transition.LayoutTargets.FindByPredicate(
+				const auto* Target = Binding.PrimaryStep().Transition.LayoutTargets.FindByPredicate(
 					[&Order](const FUMGPrototypeLayoutTarget& Item) { return Item.NodeId == Order.ParentNodeId; });
 				if (Target) State.IndependentPaintParentIds.Add(Target->DestinationWidgetId);
 			}
-			for (const auto& Layer : Binding.Transition.AddedLayers)
+			for (const auto& Layer : Binding.PrimaryStep().Transition.AddedLayers)
 				if (!Layer.bReplaceSource) State.AddedLayerPaintRanks.Add(Layer.NodeId, Layer.EndIndex);
 		}
 		TArray<TSharedPtr<FDesignNode>> PrototypeRoots = VisibleChildren;
@@ -1614,7 +1603,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			FUMGWidgetNode Widget = NodeOrchestrator.Convert(*StateRoot);
 			if (Widget.Type.IsEmpty())
 			{
-				State.ConversionError = TEXT("cannot convert reachable state source");
+				State.ConversionError = FString::Printf(TEXT("Cannot convert reachable state '%s': %s"), *Entry.WidgetId, *State.ConversionError);
 				break;
 			}
 			Entry.Visibility = Widget.WidgetStyle.Visibility.Get(TEXT("Visible"));
@@ -1630,7 +1619,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	TSet<FString> ReplacedAnimationLayers;
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		auto& Transition = Binding.Transition;
+		auto& Transition = Binding.PrimaryStep().Transition;
 		if (!Transition.Diagnostic.IsEmpty()) continue;
 		TArray<TPair<FString, FUMGWidgetNode>> StagedReplacements;
 		for (const auto& Layer : Transition.AddedLayers)
@@ -1710,7 +1699,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			Result.Warnings.AddUnique(FString::Printf(TEXT("Prototype animation '%s': %s; action not executed"),
 				*Binding.TriggerWidgetId, *Transition.Diagnostic));
 		}
-		if (Binding.Steps.Num() == 1) Binding.Steps[0].Transition = Transition;
+
 	}
 	const auto FindRenderWidgetById = [&RenderWidgets](const FString& Id) -> FUMGWidgetNode*
 	{
@@ -1733,7 +1722,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	};
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		auto& Plan = Binding.Transition;
+		auto& Plan = Binding.PrimaryStep().Transition;
 		if (!Plan.Diagnostic.IsEmpty()) continue;
 		for (auto& Item : Plan.SharedCaptures)
 		{
@@ -1777,7 +1766,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 						const FString ShadowId = Shadow->Id;
 						Node.Children.RemoveAt(0);
 						if (Node.SourceVisualChildIndex != INDEX_NONE) --Node.SourceVisualChildIndex;
-						for (auto& Binding : State.PrototypeNavigation.ClickBindings) for (auto& Item : Binding.Transition.SharedCaptures)
+						for (auto& Binding : State.PrototypeNavigation.ClickBindings) for (auto& Item : Binding.PrimaryStep().Transition.SharedCaptures)
 							if (Item.ShadowWidgetId == ShadowId) Item.ShadowWidgetId.Reset();
 					}
 				}
@@ -1788,7 +1777,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	}
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		auto& Plan = Binding.Transition;
+		auto& Plan = Binding.PrimaryStep().Transition;
 		if (!Plan.Diagnostic.IsEmpty()) continue;
 		Plan.LocalEndpoints.RemoveAll([&](const FUMGPrototypeLocalEndpoint& Endpoint)
 		{
@@ -1865,7 +1854,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 				else Source->Children.Insert(MoveTemp(Target), Source->Children.Num() - 1);
 			}
 		}
-		if (Binding.Steps.Num() == 1) Binding.Steps[0].Transition = Plan;
+
 	}
 	const auto FindTextRetainer = [&FindRenderWidgetById](const FString& Id) -> FUMGWidgetNode*
 	{
@@ -1882,7 +1871,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	};
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		for (const auto& Target : Binding.Transition.WidgetTargets)
+		for (const auto& Target : Binding.PrimaryStep().Transition.WidgetTargets)
 		{
 			if (Target.bSurfacePaintChange)
 			{
@@ -1890,7 +1879,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 				auto* Destination = FindSurface(Target.DestinationWidgetId);
 				if (!Source || !Destination)
 				{
-					Binding.Transition.Diagnostic = TEXT("surface paint has no unique native Image producer");
+					Binding.PrimaryStep().Transition.Diagnostic = TEXT("surface paint has no unique native Image producer");
 					break;
 				}
 				if (!Source->Effect.SurfacePaintTargets.IsSet()) Source->Effect.SurfacePaintTargets = TArray<FUMGSurfacePaintTarget>();
@@ -1903,9 +1892,9 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			auto* Destination = FindTextRetainer(Target.DestinationWidgetId);
 			if (!Source || !Destination)
 			{
-				Binding.Transition.Diagnostic = TEXT("text paint owner is not uniquely mapped to a native retainer and TextBlock");
+				Binding.PrimaryStep().Transition.Diagnostic = TEXT("text paint owner is not uniquely mapped to a native retainer and TextBlock");
 				Result.Warnings.AddUnique(FString::Printf(TEXT("Prototype animation '%s': %s; action not executed"),
-					*Binding.TriggerWidgetId, *Binding.Transition.Diagnostic));
+					*Binding.TriggerWidgetId, *Binding.PrimaryStep().Transition.Diagnostic));
 				break;
 			}
 			if (!Source->Effect.TextPaintTargets.IsSet()) Source->Effect.TextPaintTargets = TArray<FUMGSurfacePaintTarget>();
@@ -1913,11 +1902,11 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 				{ return Existing.DestinationWidgetId == Target.DestinationWidgetId; }))
 				Source->Effect.TextPaintTargets->Add({Target.DestinationWidgetId, Destination->Effect.TextPaints.GetValue()});
 		}
-		if (Binding.Steps.Num() == 1) Binding.Steps[0].Transition = Binding.Transition;
+
 	}
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		for (const auto& Endpoint : Binding.Transition.LocalEndpoints)
+		for (const auto& Endpoint : Binding.PrimaryStep().Transition.LocalEndpoints)
 		{
 			if (!Endpoint.bText) continue;
 			auto* Source = FindTextRetainer(Endpoint.NodeId);
@@ -1931,7 +1920,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 	}
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		auto& Plan = Binding.Transition;
+		auto& Plan = Binding.PrimaryStep().Transition;
 		if (!Plan.bFixedViewportLayout || !Plan.Diagnostic.IsEmpty()) continue;
 		const FString SourceId = Plan.SourceStateWidgetId.IsEmpty() ? Binding.SourcePageId : Plan.SourceStateWidgetId;
 		// Each trigger owns its presentation sockets; paint endpoints remain shared by source/target identity.
@@ -2055,7 +2044,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 				[&](const FUMGPrototypeStateHost& Item) { return Item.HostWidgetId == OriginalId; });
 			const bool bTrigger = OriginalId != SourceId && OriginalId != Plan.LayoutDestinationWidgetId
 				&& State.PrototypeNavigation.ClickBindings.ContainsByPredicate([&](const FUMGPrototypeNavigationBinding& Item)
-				{ return Item.TriggerWidgetId == OriginalId && !Item.Steps.IsEmpty() && Item.Transition.Diagnostic.IsEmpty(); });
+				{ return Item.TriggerWidgetId == OriginalId && !Item.Steps.IsEmpty() && Item.PrimaryStep().Transition.Diagnostic.IsEmpty(); });
 			if (!bContainsTrigger && (StateHost || bTrigger))
 			{
 				Plan.LivePresentations.Add({OriginalId, OriginalId + TEXT("__live_socket"), Node.Id, FString(), FString(), FString()});
@@ -2155,7 +2144,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 
 	for (auto& Binding : State.PrototypeNavigation.ClickBindings)
 	{
-		auto& Plan = Binding.Transition;
+		auto& Plan = Binding.PrimaryStep().Transition;
 		for (const auto& Live : Plan.LivePresentations)
 		{
 			auto* Widget = FindRenderWidgetById(Live.WidgetId);
@@ -2207,7 +2196,7 @@ FUMGWidgetData FDesign2UMGConverter::Convert(const FDesignDocument& InputDocumen
 			if (auto* Node = FindRenderWidgetById(Added.NodeId)) PrepareProxyInput(*Node);
 		if (!Plan.LivePresentations.IsEmpty() && !Plan.LayoutPresentationWidgetId.IsEmpty())
 			if (auto* Node = FindRenderWidgetById(Plan.LayoutPresentationWidgetId)) PrepareProxyInput(*Node);
-		if (Binding.Steps.Num() == 1) Binding.Steps[0].Transition = Plan;
+
 	}
 	if (State.PrototypeNavigation.IsValid()) Result.MutablePrototypeNavigation() = State.PrototypeNavigation;
 

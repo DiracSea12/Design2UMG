@@ -415,7 +415,7 @@ FUMGWidgetNode VisualMapper::WrapWithBoxShadow(
 	const bool bOpaqueEllipse = Node->Type == EDesignNodeType::Ellipse
 		&& Node->Shape.InnerRadius <= 0.0001f && FMath::Abs(Node->Shape.SweepAngle) >= 359.9999f
 		&& !Node->Visual.Stroke.HasStroke() && PrimaryFill.IsColor() && PrimaryFill.bEnabled
-		&& PrimaryFill.Opacity == 1.0f && FUMGValueParser::ParseColor(PrimaryFill.SolidColor).A == 1.0f;
+		&& PrimaryFill.Opacity == 1.0f && FUMGValueParser::ParseColor(PrimaryFill.SolidColor, PrimaryFill.Opacity).A == 1.0f;
 	// A filled opaque ellipse has an exact analytic silhouette, including shadow spread.
 	const bool bVectorSurface = Node->Type == EDesignNodeType::Path || Node->Type == EDesignNodeType::Line
 		|| Node->Type == EDesignNodeType::Polygon || (Node->Type == EDesignNodeType::Ellipse && !bOpaqueEllipse);

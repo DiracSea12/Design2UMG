@@ -38,8 +38,9 @@ FString DesignTypeMapper::MapNodeTypeToWidget(EDesignNodeType Type, EDesignLayou
 	case EDesignNodeType::Rectangle:
 	case EDesignNodeType::Ellipse:
 	case EDesignNodeType::Polygon:
-	case EDesignNodeType::Path:
 		return UMGWidgetTypes::Border;
+	case EDesignNodeType::Path:
+		return FString();
 
 	case EDesignNodeType::Text:
 	case EDesignNodeType::IconFont:

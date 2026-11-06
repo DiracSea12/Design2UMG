@@ -68,7 +68,7 @@ bool FFigmaParserEmptyPrototypeActionTest::RunTest(const FString&)
 			&& Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::AnimateWidget && Binding.Steps[0].TargetPageId == TEXT("state"); }));
 	TestTrue(TEXT("Close overlay stays distinct from back"), Bindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.UsesKeyDownTrigger()
-			&& Binding.Action == EUMGPrototypeNavigationAction::CloseOverlay && Binding.Steps.Num() == 1
+			&& Binding.PrimaryStep().Kind == EUMGPrototypeNavigationStepKind::CloseOverlay && Binding.Steps.Num() == 1
 			&& Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::CloseOverlay; }));
 	TestTrue(TEXT("Controller key is explicitly rejected"), Warnings.ContainsByPredicate(
 		[](const FString& Warning) { return Warning.Contains(TEXT("XBOX_ONE")) && Warning.Contains(TEXT("action not executed")); }));
@@ -147,7 +147,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Reordered variant parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(Source, Extra), Document))) return false;
 	const auto Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("One state binding"), Data.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& Transition = Data.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& Transition = Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("Both child paint orders are retained"), Transition.LayerOrders.Num(), 2)) return false;
 	TestEqual(TEXT("First child keeps its source identity"), Transition.LayerOrders[0].NodeId, FString(TEXT("source_a")));
 	TestEqual(TEXT("First child maps to destination identity"), Transition.LayerOrders[0].DestinationNodeId, FString(TEXT("instance::target_a")));
@@ -175,7 +175,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Repeated component child names parse"), FFigmaParser::ParseDocument(MakeFigmaDocJson(RepeatedSource, RepeatedExtra), Document))) return false;
 	const auto RepeatedData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Repeated names retain the state interaction"), RepeatedData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& RepeatedTransition = RepeatedData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& RepeatedTransition = RepeatedData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	TestEqual(TEXT("Swapped origin IDs do not reorder equally named sibling positions"), RepeatedTransition.LayerOrders.Num(), 0);
 	if (!TestEqual(TEXT("Both indexed child opacity changes are retained"), RepeatedTransition.WidgetTargets.Num(), 2)) return false;
 	TestTrue(TEXT("First duplicate matches the first destination despite swapped component origin IDs"),
@@ -191,7 +191,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Repeated names with independent IDs parse"), FFigmaParser::ParseDocument(MakeFigmaDocJson(RepeatedSource, IndependentIdsExtra), Document))) return false;
 	const auto IndependentIdsData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Parent index pairs repeated names without component lineage"), IndependentIdsData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& IndependentTransition = IndependentIdsData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& IndependentTransition = IndependentIdsData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("Independent IDs retain both real property changes"), IndependentTransition.WidgetTargets.Num(), 2)) return false;
 	TestTrue(TEXT("Independent child identities follow their original parent positions"),
 		IndependentTransition.WidgetTargets[0].DestinationNodeId.EndsWith(TEXT("unrelated_b"))
@@ -208,7 +208,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Absolute layer variant parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(SourceWithFlow, AbsoluteExtra), Document))) return false;
 	const auto AbsoluteData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Absolute layer state binding"), AbsoluteData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& AbsoluteTransition = AbsoluteData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& AbsoluteTransition = AbsoluteData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("One target-only source subtree"), AbsoluteTransition.AddedLayers.Num(), 1)) return false;
 	const FString AddedId = AbsoluteTransition.AddedLayers[0].NodeId;
 	TestEqual(TEXT("Added layer is scoped to the source instance"), AddedId, AbsoluteTransition.LayerScopeId() + TEXT("::") + AbsoluteTransition.AddedLayers[0].DestinationNodeId);
@@ -234,7 +234,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
     if (!TestTrue(TEXT("Bidirectional layer visibility fixture parses"), FFigmaParser::ParseDocument(MakeFigmaDocJson(PresenceSource, PresenceExtra), Document))) return false;
     const auto PresenceData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
     if (!TestEqual(TEXT("Visibility changes retain their state binding"), PresenceData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-    const auto& Presence = PresenceData.PrototypeNavigation().ClickBindings[0].Transition;
+    const auto& Presence = PresenceData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
     if (!TestEqual(TEXT("Hidden-to-visible creates one native target layer"), Presence.AddedLayers.Num(), 1)) return false;
     TestEqual(TEXT("Incoming layer retains its original duplicate-sibling index"), Presence.AddedLayers[0].DestinationNodeId, FString(TEXT("instance::incoming_target")));
     const auto* PresenceTargetTree = FindPresence(PresenceData.RootWidget, Presence.TargetStateWidgetId);
@@ -261,7 +261,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
     const auto OverriddenData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
     if (!TestEqual(TEXT("Overridden visibility retains the other real changes"), OverriddenData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
     TestEqual(TEXT("A layer hidden by the actual target instance does not become an added widget"),
-        OverriddenData.PrototypeNavigation().ClickBindings[0].Transition.AddedLayers.Num(), 0);
+        OverriddenData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.AddedLayers.Num(), 0);
 
 	TFunction<const FUMGWidgetNode*(const FUMGWidgetNode&, const FString&, int32&)> FindPaintPlacement =
 		[&](const FUMGWidgetNode& Node, const FString& Id, int32& Rank) -> const FUMGWidgetNode*
@@ -292,7 +292,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	const auto ReverseData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Paint reversal converts"), ReverseData.ConversionError, FString())
 		|| !TestEqual(TEXT("Paint reversal retains its source action"), ReverseData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& ReverseOrder = ReverseData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& ReverseOrder = ReverseData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("Both changed source paint ranks are retained"), ReverseOrder.LayerOrders.Num(), 2)) return false;
 	TestTrue(TEXT("Paint rank changes preserve matching identities and fixed viewport layout"), ReverseOrder.bFixedViewportLayout
 		&& ReverseOrder.LayerOrders[0].NodeId == TEXT("source_a") && ReverseOrder.LayerOrders[0].DestinationNodeId == TEXT("instance::target_a")
@@ -333,7 +333,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 		AbsoluteExtra.Replace(*TargetWithAbsolute, *ReverseAbsoluteTarget)), Document))) return false;
 	const auto ReverseAbsoluteData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Reverse absolute addition retains its action"), ReverseAbsoluteData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& ReverseAdded = ReverseAbsoluteData.PrototypeNavigation().ClickBindings[0].Transition.AddedLayers;
+	const auto& ReverseAdded = ReverseAbsoluteData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.AddedLayers;
 	if (!TestEqual(TEXT("One reverse-order added layer is retained"), ReverseAdded.Num(), 1)) return false;
 	TestTrue(TEXT("Added layer keeps destination layout index separate from front paint rank"), ReverseAdded[0].DestinationChildIndex == 0
 		&& ReverseAdded[0].EndIndex == 1 && !ReverseAdded[0].bBehindFlow
@@ -351,7 +351,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	const auto SurfaceData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Solid to layered gradient keeps its action"), SurfaceData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
 	TestTrue(TEXT("Non-text paint uses a surface target rather than a glyph retainer"),
-		SurfaceData.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets.ContainsByPredicate(
+		SurfaceData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
 			[](const FUMGPrototypeWidgetAnimationTarget& Item) { return Item.bSurfacePaintChange && !Item.bTextPaintChange; }));
 	TFunction<bool(const FUMGWidgetNode&)> HasSurfaceProducer = [&](const FUMGWidgetNode& Node)
 	{
@@ -374,7 +374,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	const auto SolidPathData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Same-geometry path colour retains its action"), SolidPathData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
 	TestTrue(TEXT("Baked path colour uses paint parameters instead of multiplying its source colour"),
-		SolidPathData.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets.ContainsByPredicate(
+		SolidPathData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
 			[](const FUMGPrototypeWidgetAnimationTarget& Target) { return Target.NodeId == TEXT("path_a") && Target.bSurfacePaintChange && !Target.bColor; }));
 	TFunction<bool(const FUMGWidgetNode&)> HasPathPaint = [&](const FUMGWidgetNode& Node)
 	{
@@ -401,7 +401,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 		TEXT(",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\"")), Document))) return false;
 	const auto ContourPaintData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Native contour own-paint keeps its action"), ContourPaintData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& ContourTransition = ContourPaintData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& ContourTransition = ContourPaintData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	TestTrue(TEXT("A shared contour changes fill through its material independently of its child capture"),
 		ContourTransition.Diagnostic.IsEmpty() && ContourTransition.SharedCaptures.Num() == 1 && ContourTransition.LocalEndpoints.IsEmpty()
 		&& ContourTransition.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Paint)
@@ -438,11 +438,11 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 	const auto& TwoTriggerBindings = TwoTriggerData.PrototypeNavigation().ClickBindings;
 	if (!TestEqual(TEXT("Both native trigger actions remain"), TwoTriggerBindings.Num(), 2)) return false;
 	TestTrue(TEXT("Both rounded-rectangle size changes require native fixed layout"),
-		TwoTriggerBindings[0].Transition.bFixedViewportLayout && TwoTriggerBindings[1].Transition.bFixedViewportLayout);
+		TwoTriggerBindings[0].PrimaryStep().Transition.bFixedViewportLayout && TwoTriggerBindings[1].PrimaryStep().Transition.bFixedViewportLayout);
 	TestTrue(TEXT("Each trigger owns its fixed presentation without replacing another trigger's content"),
-		!TwoTriggerBindings[0].Transition.LayoutPresentationWidgetId.IsEmpty()
-		&& !TwoTriggerBindings[1].Transition.LayoutPresentationWidgetId.IsEmpty()
-		&& TwoTriggerBindings[0].Transition.LayoutPresentationWidgetId != TwoTriggerBindings[1].Transition.LayoutPresentationWidgetId);
+		!TwoTriggerBindings[0].PrimaryStep().Transition.LayoutPresentationWidgetId.IsEmpty()
+		&& !TwoTriggerBindings[1].PrimaryStep().Transition.LayoutPresentationWidgetId.IsEmpty()
+		&& TwoTriggerBindings[0].PrimaryStep().Transition.LayoutPresentationWidgetId != TwoTriggerBindings[1].PrimaryStep().Transition.LayoutPresentationWidgetId);
 	TFunction<int32(const FUMGWidgetNode&, const FString&)> CountPresentation = [&](const FUMGWidgetNode& Node, const FString& Id)
 	{
 		int32 Count = Node.Id == Id ? 1 : 0;
@@ -450,7 +450,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 		return Count;
 	};
 	for (const auto& Binding : TwoTriggerBindings)
-		for (const auto& Mapping : Binding.Transition.LayoutTargets)
+		for (const auto& Mapping : Binding.PrimaryStep().Transition.LayoutTargets)
 			TestEqual(TEXT("Fixed layout mapping retains one actual native presentation role"),
 				CountPresentation(TwoTriggerData.RootWidget, Mapping.PresentationWidgetId), 1);
 
@@ -480,12 +480,13 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
     const auto AliasSurfaceData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
     TestTrue(TEXT("Resolved fills consume equivalent canonical and plugin paint aliases and derived color/style metadata"),
         AliasSurfaceData.PrototypeNavigation().ClickBindings.Num() == 1
-        && AliasSurfaceData.PrototypeNavigation().ClickBindings[0].Transition.Diagnostic.IsEmpty());
+        && AliasSurfaceData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty());
     if (!TestTrue(TEXT("Conflicting gradient background fixture parses"), FFigmaParser::ParseDocument(
         SurfaceAliasDocument(SurfaceBackground.Replace(TEXT("\"position\":1"), TEXT("\"position\":0.8"))), Document))) return false;
     const auto ConflictingSurfaceData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-    TestTrue(TEXT("Different parsed gradient stops retain the background conflict"), ConflictingSurfaceData.Warnings.ContainsByPredicate(
-        [](const FString& Warning) { return Warning.Contains(TEXT("background")) && Warning.Contains(TEXT("action not executed")); }));
+    TestTrue(TEXT("Unused background stops do not replace the canonical gradient animation"),
+        ConflictingSurfaceData.PrototypeNavigation().ClickBindings.Num() == 1
+        && ConflictingSurfaceData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty());
 	const FString LeftChild = MakeLeafNode(TEXT("left"), TEXT("Surface"), TEXT("RECTANGLE"), 0, 0, 20, 20,
 		Fill + TEXT(",\"size\":{\"x\":20,\"y\":20},\"relativeTransform\":[[1,0,0],[0,1,0]],\"constraints\":{\"vertical\":\"BOTTOM\",\"horizontal\":\"LEFT\"}"));
 	const FString RightChild = MakeLeafNode(TEXT("right"), TEXT("Surface"), TEXT("RECTANGLE"), 0, 0, 20, 20,
@@ -497,7 +498,7 @@ bool FFigmaAnimationLayerOrderContractTest::RunTest(const FString&)
 		MakeFigmaDocJson(PageA + TEXT(",") + PageB, TEXT(",\"design2umgPrototypeDurationUnit\":\"MILLISECONDS\"")), Document))) return false;
 	const auto PageData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Page transition survives differing endpoint constraints"), PageData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& PageTransition = PageData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& PageTransition = PageData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("Target-only absolute page layer survives"), PageTransition.AddedLayers.Num(), 1)) return false;
 	TestTrue(TEXT("Page transition layer has source and target scope"), PageTransition.AddedLayers[0].NodeId == TEXT("page_a::transition::page_b::new_leaf"));
 	TestTrue(TEXT("Page target-only layer is a real converted widget"), [&]()
@@ -542,7 +543,7 @@ bool FFigmaAnimatedTextPaintContractTest::RunTest(const FString&)
 	for (const auto& Warning : Data.Warnings) AddInfo(Warning);
 	if (!TestTrue(TEXT("Animated text converts"), Data.ConversionError.IsEmpty())
 		|| !TestEqual(TEXT("One animated text action"), Data.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& Transition = Data.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& Transition = Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	if (!TestEqual(TEXT("One text target"), Transition.WidgetTargets.Num(), 1)) return false;
 	const auto& Target = Transition.WidgetTargets[0];
 	TestTrue(TEXT("Native text fields and box have distinct tracks"), Target.bFontSize && Target.bLetterSpacing
@@ -577,7 +578,7 @@ bool FFigmaAnimatedTextPaintContractTest::RunTest(const FString&)
 	const auto AppearanceData = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (!TestEqual(TEXT("Local text conversion succeeds"), AppearanceData.ConversionError, FString())
 		|| !TestEqual(TEXT("One local text action"), AppearanceData.PrototypeNavigation().ClickBindings.Num(), 1)) return false;
-	const auto& Appearance = AppearanceData.PrototypeNavigation().ClickBindings[0].Transition;
+	const auto& Appearance = AppearanceData.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 	TestTrue(TEXT("Local glyph endpoints retain SMART layout, size, tracking and paint"), Appearance.Diagnostic.IsEmpty()
 		&& Appearance.Type == TEXT("SMART_ANIMATE") && Appearance.bFixedViewportLayout && Appearance.LocalEndpoints.Num() == 1
 		&& Appearance.WidgetTargets.Num() == 1 && Appearance.WidgetTargets[0].bFontSize
@@ -636,14 +637,14 @@ bool FFigmaStateReplacementContractTest::RunTest(const FString&)
 		const auto Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 		if (!TestEqual(TEXT("Forward and return actions are retained"), Data.PrototypeNavigation().ClickBindings.Num(), 2)
 			|| !TestEqual(TEXT("One state host is used"), Data.PrototypeNavigation().StateHosts.Num(), 1)) return false;
-		const auto& Plan = Data.PrototypeNavigation().ClickBindings[0].Transition;
+		const auto& Plan = Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 		TestEqual(TEXT("Instant state is explicit"), Plan.bStateInstant, !bDissolve);
 		if (!TestEqual(TEXT("State transition retains both roots"), Plan.WidgetTargets.Num(), 2)) return false;
 		const auto& Host = Data.PrototypeNavigation().StateHosts[0];
 		if (!TestEqual(TEXT("State host retains two variants"), Host.States.Num(), 2)) return false;
 		TestEqual(TEXT("Target state is scoped to source instance"), Plan.TargetStateWidgetId, FString(TEXT("instance::target")));
 		TestTrue(TEXT("Target retains the instance text override"), Host.States[1].SourceNodeJson.Contains(TEXT("\"characters\":\"YES\"")));
-		const auto& Reverse = Data.PrototypeNavigation().ClickBindings[1].Transition;
+		const auto& Reverse = Data.PrototypeNavigation().ClickBindings[1].PrimaryStep().Transition;
 		TestEqual(TEXT("Return action belongs to target state"), Reverse.SourceStateId, FString(TEXT("target")));
 		TestEqual(TEXT("Return action reuses initial state root"), Reverse.TargetStateWidgetId, FString(TEXT("instance")));
 		TestEqual(TEXT("Return action reuses same host"), Reverse.StateHostWidgetId, Plan.StateHostWidgetId);
@@ -677,15 +678,15 @@ bool FFigmaStateReplacementContractTest::RunTest(const FString&)
 			&& PageAction->Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate
 			&& PageAction->Steps[0].TargetPageId == TEXT("destination_page")
 			&& PageAction->SourcePageId == TEXT("source_page"));
-		TestTrue(TEXT("Page navigation carries no state transition identity"), PageAction->Transition.StateHostWidgetId.IsEmpty() && PageAction->Transition.InstanceScopeId.IsEmpty()
-			&& PageAction->Transition.SourceStateId.IsEmpty() && PageAction->Transition.TargetStateId.IsEmpty()
-			&& PageAction->Transition.SourceStateWidgetId.IsEmpty() && PageAction->Transition.TargetStateWidgetId.IsEmpty());
+		TestTrue(TEXT("Page navigation carries no state transition identity"), PageAction->PrimaryStep().Transition.StateHostWidgetId.IsEmpty() && PageAction->PrimaryStep().Transition.InstanceScopeId.IsEmpty()
+			&& PageAction->PrimaryStep().Transition.SourceStateId.IsEmpty() && PageAction->PrimaryStep().Transition.TargetStateId.IsEmpty()
+			&& PageAction->PrimaryStep().Transition.SourceStateWidgetId.IsEmpty() && PageAction->PrimaryStep().Transition.TargetStateWidgetId.IsEmpty());
 	}
 	if (TestNotNull(TEXT("Hover state action remains available"), StateAction))
-		TestTrue(TEXT("State action retains its host and variant identities"), !StateAction->Transition.StateHostWidgetId.IsEmpty()
-			&& StateAction->Transition.SourceStateId == TEXT("base") && StateAction->Transition.TargetStateId == TEXT("target")
-			&& StateAction->Transition.SourceStateWidgetId == TEXT("mixed_instance")
-			&& StateAction->Transition.TargetStateWidgetId == TEXT("mixed_instance::target"));
+		TestTrue(TEXT("State action retains its host and variant identities"), !StateAction->PrimaryStep().Transition.StateHostWidgetId.IsEmpty()
+			&& StateAction->PrimaryStep().Transition.SourceStateId == TEXT("base") && StateAction->PrimaryStep().Transition.TargetStateId == TEXT("target")
+			&& StateAction->PrimaryStep().Transition.SourceStateWidgetId == TEXT("mixed_instance")
+			&& StateAction->PrimaryStep().Transition.TargetStateWidgetId == TEXT("mixed_instance::target"));
 	const auto TimedStateAction = [](const TCHAR* Destination)
 	{
 		return FString::Printf(TEXT(",\"interactions\":[{\"trigger\":{\"type\":\"AFTER_TIMEOUT\",\"timeout\":100},\"actions\":[{\"type\":\"NODE\",\"navigation\":\"CHANGE_TO\",\"destinationId\":\"%s\",\"transition\":{\"type\":\"SMART_ANIMATE\",\"duration\":200,\"easing\":{\"type\":\"LINEAR\"}}}]}]"), Destination);
@@ -717,14 +718,14 @@ bool FFigmaStateReplacementContractTest::RunTest(const FString&)
 	if (TestNotNull(TEXT("Nested timer retains its own instance action"), NestedAction)
 		&& TestNotNull(TEXT("Nested target timer retains its return action"), NestedReturn))
 	{
-		TestTrue(TEXT("Nested animation compares the indicator rather than its outer button"), NestedAction->Transition.Diagnostic.IsEmpty()
-			&& NestedAction->Transition.InstanceScopeId == TEXT("outer::nested")
-			&& NestedAction->Transition.SourceStateWidgetId == TEXT("outer::nested")
-			&& NestedAction->Transition.TargetStateWidgetId == TEXT("outer::nested::inner_target"));
-		TestTrue(TEXT("Nested return reuses only the indicator host"), NestedReturn->Transition.Diagnostic.IsEmpty()
-			&& NestedReturn->Transition.StateHostWidgetId == NestedAction->Transition.StateHostWidgetId
-			&& NestedReturn->Transition.SourceStateWidgetId == TEXT("outer::nested::inner_target")
-			&& NestedReturn->Transition.TargetStateWidgetId == TEXT("outer::nested"));
+		TestTrue(TEXT("Nested animation compares the indicator rather than its outer button"), NestedAction->PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& NestedAction->PrimaryStep().Transition.InstanceScopeId == TEXT("outer::nested")
+			&& NestedAction->PrimaryStep().Transition.SourceStateWidgetId == TEXT("outer::nested")
+			&& NestedAction->PrimaryStep().Transition.TargetStateWidgetId == TEXT("outer::nested::inner_target"));
+		TestTrue(TEXT("Nested return reuses only the indicator host"), NestedReturn->PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& NestedReturn->PrimaryStep().Transition.StateHostWidgetId == NestedAction->PrimaryStep().Transition.StateHostWidgetId
+			&& NestedReturn->PrimaryStep().Transition.SourceStateWidgetId == TEXT("outer::nested::inner_target")
+			&& NestedReturn->PrimaryStep().Transition.TargetStateWidgetId == TEXT("outer::nested"));
 		const auto* Host = NestedData.PrototypeNavigation().StateHosts.FindByPredicate([](const FUMGPrototypeStateHost& Item)
 		{ return Item.InstanceWidgetId == TEXT("outer::nested"); });
 		const auto* State = Host ? Host->States.FindByPredicate([](const FUMGPrototypeStateEntry& Item)
@@ -741,7 +742,7 @@ bool FFigmaStateReplacementContractTest::RunTest(const FString&)
 				TestTrue(TEXT("Expanded child layout and target opacity have separate ownership"), Root.Children[0]->Transform.Width.Value == 32
 					&& FMath::IsNearlyEqual(Root.Children[0]->Transform.Opacity, 0.4f));
 		}
-		TestFalse(TEXT("Explicit instance width creates no false size animation"), NestedAction->Transition.WidgetTargets.ContainsByPredicate(
+		TestFalse(TEXT("Explicit instance width creates no false size animation"), NestedAction->PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
 			[](const FUMGPrototypeWidgetAnimationTarget& Item) { return !Item.Scale.Equals(FVector2D(1, 1)); }));
 	}
 	const FString ChangedDefinition = NestedExtra.Replace(*TargetIndicator,
@@ -777,17 +778,17 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	for (const auto& Binding : Bindings)
 	{
 		TestEqual(TEXT("Single-page triggers retain their real top-level source page"), Binding.SourcePageId, FString(TEXT("page")));
-		TestTrue(TEXT("Full source trees are expressible"), Binding.Transition.Diagnostic.IsEmpty());
-		if (!TestEqual(TEXT("One concrete widget, not whole switcher"), Binding.Transition.WidgetTargets.Num(), 1)) return false;
-		const auto& Target = Binding.Transition.WidgetTargets[0];
+		TestTrue(TEXT("Full source trees are expressible"), Binding.PrimaryStep().Transition.Diagnostic.IsEmpty());
+		if (!TestEqual(TEXT("One concrete widget, not whole switcher"), Binding.PrimaryStep().Transition.WidgetTargets.Num(), 1)) return false;
+		const auto& Target = Binding.PrimaryStep().Transition.WidgetTargets[0];
 		TestTrue(TEXT("Instances keep separate source identities"), Target.NodeId == Binding.TriggerWidgetId + TEXT("_surface"));
 		TestTrue(TEXT("Local source sizes produce exact scale"), Target.Scale.Equals(FVector2D(2, 2)));
 		TestTrue(TEXT("Local matrix centers produce exact movement"), Target.Translation.Equals(FVector2D(40, 50)));
 		TestTrue(TEXT("Matrix rotation is converted to native degrees"), FMath::IsNearlyEqual(Target.Rotation, 90.f));
 		TestTrue(TEXT("Opacity and solid color differences retained"), Target.bOpacity && Target.bColor);
 		TestTrue(TEXT("EASE_OUT maps to the exact native weighted curve including zero handle"),
-			Binding.Transition.bCubicBezier && Binding.Transition.CubicBezier.Equals(FVector4(0, 0, 0.58, 1)));
-		TestTrue(TEXT("REST milliseconds consumed once"), FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.4f));
+			Binding.PrimaryStep().Transition.bCubicBezier && Binding.PrimaryStep().Transition.CubicBezier.Equals(FVector4(0, 0, 0.58, 1)));
+		TestTrue(TEXT("REST milliseconds consumed once"), FMath::IsNearlyEqual(Binding.PrimaryStep().Transition.DurationSeconds, 0.4f));
 	}
 	TestTrue(TEXT("Mouse-enter stays distinct from reverting hover"), Bindings[1].UsesMouseEnterTrigger() && !Bindings[1].UsesHoverTrigger());
 	TestTrue(TEXT("AFTER_TIMEOUT milliseconds consumed once"), FMath::IsNearlyEqual(Bindings[2].TriggerDelaySeconds, 0.05f));
@@ -809,9 +810,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Style reference fixture parses"), FFigmaParser::ParseDocument(StyledTarget, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Resolved paint remains animatable when only its style reference identity differs"),
-		Data.PrototypeNavigation().ClickBindings[0].Transition.Diagnostic.IsEmpty()
-		&& Data.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets.Num() == 1
-		&& Data.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets[0].bColor);
+		Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty()
+		&& Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets.Num() == 1
+		&& Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets[0].bColor);
 	TFunction<const FUMGWidgetNode*(const FUMGWidgetNode&, const FString&)> FindEndpoint =
 		[&](const FUMGWidgetNode& Node, const FString& Id) -> const FUMGWidgetNode*
 	{
@@ -844,10 +845,10 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		&& RoundedTarget->Brush.OutlineCornerRadius.Get(0.0f) == 5.0f);
 	TestTrue(TEXT("Native corner endpoints retain original transition and timing"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && Binding.Transition.LocalEndpoints.Num() == 1
-			&& Binding.Transition.bFixedViewportLayout && !Binding.Transition.LayoutTargets.IsEmpty()
-			&& Binding.Transition.Diagnostic.IsEmpty() && FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.4f)
-			&& Binding.Transition.bCubicBezier && Binding.Transition.CubicBezier.Equals(FVector4(0, 0, 0.58, 1)); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && Binding.PrimaryStep().Transition.LocalEndpoints.Num() == 1
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && !Binding.PrimaryStep().Transition.LayoutTargets.IsEmpty()
+			&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && FMath::IsNearlyEqual(Binding.PrimaryStep().Transition.DurationSeconds, 0.4f)
+			&& Binding.PrimaryStep().Transition.bCubicBezier && Binding.PrimaryStep().Transition.CubicBezier.Equals(FVector4(0, 0, 0.58, 1)); }));
 	const FString UnsupportedContour = RadiusChange.Replace(TEXT("\"cornerRadius\":5"),
 		TEXT("\"cornerRadius\":5,\"vectorPaths\":[{\"data\":\"M0 0L80 0L72 40L0 40Z\",\"windingRule\":\"NONZERO\"}]"));
 	if (!TestTrue(TEXT("Unsupported contour beside native corner change parses"), FFigmaParser::ParseDocument(UnsupportedContour, Document))) return false;
@@ -860,14 +861,14 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	const auto* ShadowBinding = Data.PrototypeNavigation().ClickBindings.FindByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0"); });
 	TestTrue(TEXT("Changed leaf shadows retain SMART layout and native local endpoints"), ShadowBinding
-		&& ShadowBinding->Transition.Type == TEXT("SMART_ANIMATE") && ShadowBinding->Transition.SourceTransitionType.IsEmpty()
-		&& ShadowBinding->Transition.DissolveReason.IsEmpty() && ShadowBinding->Transition.Diagnostic.IsEmpty()
-		&& ShadowBinding->Transition.bFixedViewportLayout && !ShadowBinding->Transition.LayoutTargets.IsEmpty()
-		&& !ShadowBinding->Transition.WidgetTargets.IsEmpty() && ShadowBinding->Transition.LocalEndpoints.Num() == 1
-		&& ShadowBinding->Transition.SharedCaptures.IsEmpty());
-	if (ShadowBinding && ShadowBinding->Transition.LocalEndpoints.Num() == 1)
+		&& ShadowBinding->PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && ShadowBinding->PrimaryStep().Transition.SourceTransitionType.IsEmpty()
+		&& ShadowBinding->PrimaryStep().Transition.DissolveReason.IsEmpty() && ShadowBinding->PrimaryStep().Transition.Diagnostic.IsEmpty()
+		&& ShadowBinding->PrimaryStep().Transition.bFixedViewportLayout && !ShadowBinding->PrimaryStep().Transition.LayoutTargets.IsEmpty()
+		&& !ShadowBinding->PrimaryStep().Transition.WidgetTargets.IsEmpty() && ShadowBinding->PrimaryStep().Transition.LocalEndpoints.Num() == 1
+		&& ShadowBinding->PrimaryStep().Transition.SharedCaptures.IsEmpty());
+	if (ShadowBinding && ShadowBinding->PrimaryStep().Transition.LocalEndpoints.Num() == 1)
 	{
-		const auto& Endpoint = ShadowBinding->Transition.LocalEndpoints[0];
+		const auto& Endpoint = ShadowBinding->PrimaryStep().Transition.LocalEndpoints[0];
 		const auto* Owner = FindEndpoint(Data.RootWidget, Endpoint.NodeId);
 		const auto* Destination = FindEndpoint(Data.RootWidget, Endpoint.DestinationWidgetId);
 		const auto* TargetPaint = FindEndpoint(Data.RootWidget, Endpoint.TargetVisualWidgetId);
@@ -939,9 +940,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Stroke presence uses source-timed endpoints after full matching"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && Binding.Transition.LocalEndpoints.Num() == 1
-			&& Binding.Transition.bFixedViewportLayout && Binding.Transition.Diagnostic.IsEmpty()
-			&& FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.2f); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && Binding.PrimaryStep().Transition.LocalEndpoints.Num() == 1
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& FMath::IsNearlyEqual(Binding.PrimaryStep().Transition.DurationSeconds, 0.2f); }));
 	const FString SizedStrokeFields = StrokeFill + TEXT(",\"strokeWeight\":1,\"strokeAlign\":\"INSIDE\",\"strokes\":");
 	const FString SizedStrokeDocument = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("stroke_page_a"), TEXT("Source"), TEXT("FRAME"), 0, 0, 40, 40,
@@ -954,7 +955,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	TestTrue(TEXT("Local surface paint preserves independent endpoint layout and native stroke dimensions"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding)
 		{
-			const auto& Plan = Binding.Transition;
+			const auto& Plan = Binding.PrimaryStep().Transition;
 			return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Plan.Diagnostic.IsEmpty() && Plan.Type == TEXT("SMART_ANIMATE")
 				&& Plan.bFixedViewportLayout && Plan.LocalEndpoints.Num() == 1 && !Plan.LocalEndpoints[0].bText
 				&& Plan.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Item)
@@ -971,7 +972,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
     TestTrue(TEXT("Same-geometry solid-to-linear stroke uses native endpoints and retains source timing"),
         Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
         {
-            const auto& Plan = Binding.Transition;
+            const auto& Plan = Binding.PrimaryStep().Transition;
             return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Plan.Type == TEXT("SMART_ANIMATE")
                 && Plan.LocalEndpoints.Num() == 1 && Plan.bFixedViewportLayout && Plan.Diagnostic.IsEmpty()
                 && FMath::IsNearlyEqual(Plan.DurationSeconds, 0.2f) && !Plan.WidgetTargets.IsEmpty();
@@ -981,9 +982,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
     TestTrue(TEXT("Equivalent vector closure does not block the native stroke dissolve"),
         Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
         {
-            return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.Transition.Type == TEXT("SMART_ANIMATE")
-                && Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.LocalEndpoints.Num() == 1
-                && Binding.Transition.bFixedViewportLayout;
+            return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE")
+                && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.LocalEndpoints.Num() == 1
+                && Binding.PrimaryStep().Transition.bFixedViewportLayout;
         }));
     const FString ChangedVectorContour = StrokeDocument(FString(), false, true).Replace(
         TEXT("M0 0 C20 0 20 20 0 0 L0 0 Z"), TEXT("M0 0 C19 0 20 20 0 0 L0 0 Z"));
@@ -1016,9 +1017,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Equivalent vector centers retain both static physical-width paints and SMART layout"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding)
-		{ return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.Transition.Diagnostic.IsEmpty()
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && Binding.Transition.bFixedViewportLayout
-			&& Binding.Transition.LocalEndpoints.Num() == 1 && Binding.Transition.LocalEndpoints[0].bFixedPaintSize; }));
+		{ return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && Binding.PrimaryStep().Transition.bFixedViewportLayout
+			&& Binding.PrimaryStep().Transition.LocalEndpoints.Num() == 1 && Binding.PrimaryStep().Transition.LocalEndpoints[0].bFixedPaintSize; }));
 	const auto* StaticVectorA = SourceVisual(FindEndpoint(Data.RootWidget, TEXT("vector_a")));
 	const auto* StaticVectorB = SourceVisual(FindEndpoint(Data.RootWidget, TEXT("vector_b")));
 	const auto* VectorOwnerA = FindEndpoint(Data.RootWidget, TEXT("vector_a"));
@@ -1065,9 +1066,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	TestEqual(TEXT("Animation matching retains the original raw identity"), RetainedPlugin->GetStringField(TEXT("id")), FString(TEXT("instance_0_surface")));
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Raw identity and geometry copies plus inactive timeline identity do not reject real color and movement"),
-		Data.PrototypeNavigation().ClickBindings[0].Transition.Diagnostic.IsEmpty()
-		&& Data.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets.Num() == 1
-		&& Data.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets[0].bColor);
+		Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty()
+		&& Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets.Num() == 1
+		&& Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets[0].bColor);
 	const FString AliasFixture = MakePluginFixture(
 		SourcePlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0,\"inferredAutoLayout\":null")),
 		TargetPlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0,\"inferredAutoLayout\":{\"layoutMode\":\"HORIZONTAL\"}")))
@@ -1079,12 +1080,15 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Equivalent background paints and inferred suggestions preserve real color animation"),
 		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
-		{ return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.Transition.Diagnostic.IsEmpty() && !Binding.Transition.WidgetTargets.IsEmpty(); }));
+		{ return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty(); }));
 	const FString ConflictingAlias = AliasFixture.Replace(TEXT("\"background\":[{\"type\":\"SOLID\",\"color\":{\"r\":0,\"g\":0,\"b\":1"),
 		TEXT("\"background\":[{\"type\":\"SOLID\",\"color\":{\"r\":0,\"g\":1,\"b\":1"));
 	if (!TestTrue(TEXT("Conflicting paint alias fixture parses"), FFigmaParser::ParseDocument(ConflictingAlias, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Conflicting background paints remain diagnosed"), Rejected(Data, TEXT("instance_0"), TEXT("background")));
+	TestTrue(TEXT("Ignored background aliases cannot replace the canonical blue fill"),
+		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
+		{ return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
+			[](const FUMGPrototypeWidgetAnimationTarget& Target) { return Target.bColor && Target.EndColor.B == 1 && Target.EndColor.G == 0; }); }));
 
     const FString FrameContours = MakeNativeWidgetAnimationDocument()
         .Replace(TEXT("\"type\":\"RECTANGLE\""), TEXT("\"type\":\"FRAME\""))
@@ -1094,7 +1098,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
     Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
     TestTrue(TEXT("Frame contours follow real bounds without requesting shape replacement"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
         [](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0")
-            && Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.AddedLayers.IsEmpty() && !Binding.Transition.WidgetTargets.IsEmpty(); }));
+            && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.AddedLayers.IsEmpty() && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty(); }));
 	const auto FrameEndpointDocument = [&](FString Content, bool bResize)
 	{
 		const FString SourceFields = StrokeFill + TEXT(",\"size\":{\"x\":40,\"y\":40},\"cornerRadius\":4,\"cornerSmoothing\":0.6,\"fillGeometry\":[{\"path\":\"M4 0H36Q40 0 40 4V36Q40 40 36 40H4Q0 40 0 36V4Q0 0 4 0Z\",\"windingRule\":\"NONZERO\"}]");
@@ -1118,9 +1122,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	if (!TestEqual(TEXT("Native frame endpoints convert"), Data.ConversionError, FString())) return false;
 	TestTrue(TEXT("Different frame corners retain source timing and local native endpoints"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && !Binding.Transition.LocalEndpoints.IsEmpty()
-			&& Binding.Transition.bFixedViewportLayout && Binding.Transition.Diagnostic.IsEmpty()
-			&& FMath::IsNearlyEqual(Binding.Transition.DurationSeconds, 0.2f); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && !Binding.PrimaryStep().Transition.LocalEndpoints.IsEmpty()
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& FMath::IsNearlyEqual(Binding.PrimaryStep().Transition.DurationSeconds, 0.2f); }));
 	const auto* SourceCurve = FindEndpoint(Data.RootWidget, TEXT("stroke_page_a__local_surface__contour_paints"));
 	const auto* TargetCurve = FindEndpoint(Data.RootWidget, TEXT("stroke_page_b__local_surface__contour_paints"));
 	TestTrue(TEXT("Source and target coverage retain their exact exported contours and local canvas"), SourceCurve && TargetCurve
@@ -1143,18 +1147,26 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	if (!TestTrue(TEXT("Contradictory plugin corner mirror parses"), FFigmaParser::ParseDocument(
 		FrameCornerDocument.Replace(TEXT("\"topLeftRadius\":5"), TEXT("\"topLeftRadius\":6")), Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("A contradictory corner mirror cannot be consumed by endpoint dissolve"), Rejected(Data, TEXT("stroke_page_a"), TEXT("corner mirror")));
+	TMap<FString, TSharedPtr<FDesignNode>> CanonicalNodes;
+	Document.BuildReferenceNodeIndex(CanonicalNodes);
+	const auto CornerTarget = CanonicalNodes.FindRef(TEXT("stroke_page_b"));
+	if (!TestTrue(TEXT("The canonical corner target exists"), CornerTarget.IsValid())) return false;
+	TestEqual(TEXT("Ignored corner mirrors do not replace the canonical radius"), CornerTarget->Visual.CornerRadius.Uniform, 5.0f);
+	TestTrue(TEXT("Canonical corner changes retain their native endpoint animation"),
+		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
+		{ return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && !Binding.PrimaryStep().Transition.LocalEndpoints.IsEmpty(); }));
 	if (!TestTrue(TEXT("Corner mirror without canonical owner parses"), FFigmaParser::ParseDocument(
 		FrameCornerDocument.Replace(TEXT(",\"cornerRadius\":5"), TEXT("")), Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("A mirror alone cannot introduce a corner fallback"), Rejected(Data, TEXT("stroke_page_a"), TEXT("corner mirror")));
+	Document.BuildReferenceNodeIndex(CanonicalNodes);
+	TestFalse(TEXT("A mirror alone cannot introduce a parsed corner"), CanonicalNodes.FindChecked(TEXT("stroke_page_b"))->Visual.CornerRadius.HasRadius());
 	if (!TestTrue(TEXT("Fixed rounded frame resize contours parse"), FFigmaParser::ParseDocument(
 		FrameEndpointDocument(StrokeDocument(FString(), false), true), Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Size-derived smooth frame contours use endpoints rather than property interpolation"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && !Binding.Transition.LocalEndpoints.IsEmpty()
-			&& Binding.Transition.bFixedViewportLayout && Binding.Transition.Diagnostic.IsEmpty(); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && !Binding.PrimaryStep().Transition.LocalEndpoints.IsEmpty()
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	if (!TestTrue(TEXT("Frame endpoint with later image change parses"), FFigmaParser::ParseDocument(
 		FrameEndpointDocument(StrokeDocument(FString(), true), false), Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
@@ -1168,8 +1180,8 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Source smoothing endpoints dissolve only after full matching"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && !Binding.Transition.LocalEndpoints.IsEmpty()
-			&& Binding.Transition.bFixedViewportLayout && Binding.Transition.Diagnostic.IsEmpty(); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && !Binding.PrimaryStep().Transition.LocalEndpoints.IsEmpty()
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	const FString CurveClipDocument = FrameCornerDocument.Replace(TEXT("\"id\":\"stroke_page_b\""), TEXT("\"id\":\"stroke_page_b\",\"clipsContent\":true"));
 	if (!TestTrue(TEXT("Source curve clipping endpoint parses"), FFigmaParser::ParseDocument(CurveClipDocument, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
@@ -1189,9 +1201,9 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		&& ClipCapture->Children[0].Children[0].Render.Clipping.Get(FString()) == TEXT("ClipToBounds")
 		&& FindEndpoint(ClipCapture->Children[0].Children[0], TEXT("target_outline")) != nullptr
 		&& Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
-		{ return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.Transition.Type == TEXT("SMART_ANIMATE")
-			&& Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.bFixedViewportLayout
-			&& !Binding.Transition.LayoutTargets.IsEmpty() && Binding.Transition.SharedCaptures.Num() == 1; }));
+		{ return Binding.TriggerWidgetId == TEXT("stroke_page_a") && Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE")
+			&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.bFixedViewportLayout
+			&& !Binding.PrimaryStep().Transition.LayoutTargets.IsEmpty() && Binding.PrimaryStep().Transition.SharedCaptures.Num() == 1; }));
 	const FString EmptyPaintClipDocument = CurveClipDocument.Replace(*StrokeFill, TEXT(",\"fills\":[]"))
 		.Replace(TEXT("\"cornerSmoothing\":0.6"), TEXT("\"cornerSmoothing\":0"));
 	if (!TestTrue(TEXT("Clipped native owner with an empty fill stack parses"), FFigmaParser::ParseDocument(EmptyPaintClipDocument, Document))) return false;
@@ -1200,8 +1212,8 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	const auto* EmptyPaintTarget = FindEndpoint(Data.RootWidget, TEXT("stroke_page_b__shared_capture"));
 	const auto* EmptyPaintBinding = Data.PrototypeNavigation().ClickBindings.FindByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a"); });
-	const auto* EmptyPaintOwner = EmptyPaintBinding && !EmptyPaintBinding->Transition.LayoutOriginalWidgetId.IsEmpty()
-		? FindEndpoint(Data.RootWidget, EmptyPaintBinding->Transition.LayoutOriginalWidgetId) : nullptr;
+	const auto* EmptyPaintOwner = EmptyPaintBinding && !EmptyPaintBinding->PrimaryStep().Transition.LayoutOriginalWidgetId.IsEmpty()
+		? FindEndpoint(Data.RootWidget, EmptyPaintBinding->PrimaryStep().Transition.LayoutOriginalWidgetId) : nullptr;
 	TestTrue(TEXT("Empty own fill preserves both real capture owners and their children"), Data.ConversionError.IsEmpty()
 		&& EmptyPaintSource && EmptyPaintTarget
 		&& FindEndpoint(*EmptyPaintSource, TEXT("source_outline")) && FindEndpoint(*EmptyPaintTarget, TEXT("target_outline"))
@@ -1218,11 +1230,11 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		&& !FindEndpoint(Data.RootWidget, TEXT("stroke_page_b__local_surface")));
 	TestTrue(TEXT("Empty own fill retains the real SMART capture pair without degradation"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && Binding.Transition.Diagnostic.IsEmpty()
-			&& Binding.Transition.SharedCaptures.Num() == 1
-			&& !Binding.Transition.SharedCaptures[0].CaptureWidgetId.IsEmpty()
-			&& !Binding.Transition.SharedCaptures[0].ContentWidgetId.IsEmpty()
-			&& !Binding.Transition.LocalEndpoints.ContainsByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint)
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty()
+			&& Binding.PrimaryStep().Transition.SharedCaptures.Num() == 1
+			&& !Binding.PrimaryStep().Transition.SharedCaptures[0].CaptureWidgetId.IsEmpty()
+			&& !Binding.PrimaryStep().Transition.SharedCaptures[0].ContentWidgetId.IsEmpty()
+			&& !Binding.PrimaryStep().Transition.LocalEndpoints.ContainsByPredicate([](const FUMGPrototypeLocalEndpoint& Endpoint)
 			{ return Endpoint.NodeId == TEXT("stroke_page_a"); }); }));
 	const FString RectangleEndpoints = FrameEndpointDocument(MakeFigmaDocJson(
 		MakeLeafNode(TEXT("stroke_page_a"), TEXT("Source"), TEXT("RECTANGLE"), 0, 0, 40, 40, StrokeAction)
@@ -1232,8 +1244,8 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Native rectangle corner contours use the same local endpoint transition"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Type == TEXT("SMART_ANIMATE") && !Binding.Transition.LocalEndpoints.IsEmpty()
-			&& Binding.Transition.bFixedViewportLayout && Binding.Transition.Diagnostic.IsEmpty(); }));
+			&& Binding.PrimaryStep().Transition.Type == TEXT("SMART_ANIMATE") && !Binding.PrimaryStep().Transition.LocalEndpoints.IsEmpty()
+			&& Binding.PrimaryStep().Transition.bFixedViewportLayout && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	const FString PrimitiveSurface = MakeFigmaDocJson(MakeLeafNode(TEXT("primitive_surface"), TEXT("Rounded surface"),
 		TEXT("RECTANGLE"), 0, 0, 40, 40, TEXT(",\"rectangleCornerRadii\":[8,4,2,0],\"cornerSmoothing\":0.35,\"clipsContent\":true,\"strokeWeight\":1,\"strokeAlign\":\"INSIDE\",\"strokes\":[{\"type\":\"SOLID\",\"color\":{\"r\":0,\"g\":0,\"b\":0,\"a\":1}}]") + StrokeFill));
 	if (!TestTrue(TEXT("Source parameter contour parses without exported paths"), FFigmaParser::ParseDocument(PrimitiveSurface, Document))) return false;
@@ -1267,20 +1279,26 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	if (Data.PrototypeNavigation().ClickBindings.IsEmpty()) for (const auto& Warning : Data.Warnings) AddInfo(Warning);
 	TestTrue(TEXT("Equivalent instance box contours retain native fixed layout mappings"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0")
-			&& Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.AddedLayers.IsEmpty()
-			&& Binding.Transition.LayoutTargets.ContainsByPredicate([](const FUMGPrototypeLayoutTarget& Target)
+			&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.AddedLayers.IsEmpty()
+			&& Binding.PrimaryStep().Transition.LayoutTargets.ContainsByPredicate([](const FUMGPrototypeLayoutTarget& Target)
 				{ return Target.NodeId == TEXT("instance_0_surface"); }); }));
 	const FString ChangedInstanceContour = InstanceBoxContours.Replace(TEXT("M0 0L80 0L80 40L0 40Z"), TEXT("M0 0L80 0L72 40L0 40Z"));
 	if (!TestTrue(TEXT("A non-box instance contour change parses"), FFigmaParser::ParseDocument(ChangedInstanceContour, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Instance box classification cannot hide changed geometry"), Rejected(Data, TEXT("instance_0"), TEXT("geometry")));
-    const FString VectorContours = FrameContours.Replace(TEXT("\"name\":\"Surface\",\"type\":\"FRAME\""), TEXT("\"name\":\"Surface\",\"type\":\"VECTOR\""));
+    FString VectorContours = FrameContours.Replace(TEXT("\"name\":\"Surface\",\"type\":\"FRAME\""), TEXT("\"name\":\"Surface\",\"type\":\"VECTOR\""));
+    for (int32 Index = 1; Index < 4; ++Index)
+    {
+        const FString Identity = FString::Printf(TEXT("\"id\":\"instance_%d_surface\""), Index);
+        VectorContours.ReplaceInline(*Identity, *(Identity + TEXT(",\"fillGeometry\":[{\"path\":\"M0 0L40 0L40 20L0 20Z\",\"windingRule\":\"NONZERO\"}]")));
+    }
     if (!TestTrue(TEXT("Scaled vector contour fixture parses"), FFigmaParser::ParseDocument(VectorContours, Document))) return false;
     Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
+    TestTrue(*FString::Printf(TEXT("Scaled vector conversion: %s"), *Data.ConversionError), Data.ConversionError.IsEmpty());
     TestTrue(TEXT("Same normalized vector contour uses native size animation without shape replacement"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
         [](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0")
-            && Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.AddedLayers.IsEmpty()
-            && Binding.Transition.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Target)
+            && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.AddedLayers.IsEmpty()
+            && Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate([](const FUMGPrototypeWidgetAnimationTarget& Target)
                 { return Target.NodeId == TEXT("instance_0_surface") && Target.Scale.Equals(FVector2D(2, 2)); }); }));
 	const auto NetworkPaintLeaf = [](const TCHAR* Id, const TCHAR* R, const TCHAR* B, const TCHAR* Style)
 	{
@@ -1301,7 +1319,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Unchanged vector geometry consumes only its resolved uniform region paints"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
-			&& Binding.Transition.Diagnostic.IsEmpty() && Binding.Transition.WidgetTargets.ContainsByPredicate(
+			&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
 				[](const FUMGPrototypeWidgetAnimationTarget& Target) { return Target.NodeId == TEXT("network_source")
 					&& Target.bSurfacePaintChange && !Target.bColor; }); }));
 	TFunction<bool(const FUMGWidgetNode&)> HasResolvedNetworkPaint = [&](const FUMGWidgetNode& Node)
@@ -1330,47 +1348,55 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	NetworkMorph = NetworkMorph.Left(VertexOffset) + NetworkMorph.Mid(VertexOffset).Replace(TEXT("\"vertices\":[{\"x\":0"), TEXT("\"vertices\":[{\"x\":1"));
 	if (!TestTrue(TEXT("Changed vector network geometry parses"), FFigmaParser::ParseDocument(NetworkMorph, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Resolved region paints cannot hide vector network geometry changes"), Rejected(Data, TEXT("stroke_page_a"), TEXT("vectorNetwork")));
+	TestTrue(TEXT("Unused plugin network changes cannot replace the canonical vector contour"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
+		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("stroke_page_a")
+			&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
+				[](const FUMGPrototypeWidgetAnimationTarget& Target) { return Target.NodeId == TEXT("network_source") && Target.bSurfacePaintChange; }); }));
     const FString VectorMorphContours = VectorContours.Replace(TEXT("M0 0L80 0L80 40L0 40Z"), TEXT("M0 0L80 0L72 40L0 40Z"));
     if (!TestTrue(TEXT("Genuinely changed vector contour fixture parses"), FFigmaParser::ParseDocument(VectorMorphContours, Document))) return false;
     Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
     TestTrue(TEXT("Vector morph remains rejected by native geometry restrictions"), Rejected(Data, TEXT("instance_0"), TEXT("geometry")));
 	const FString AlignmentFixture = MakePluginFixture(
 		SourcePlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0,\"layoutAlign\":\"MIN\"")),
-		TargetPlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0,\"layoutAlign\":\"MAX\"")));
+		TargetPlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0,\"layoutAlign\":\"MAX\"")))
+		.Replace(TEXT("\"id\":\"instance_0_surface\""), TEXT("\"id\":\"instance_0_surface\",\"layoutAlign\":\"MIN\""))
+		.Replace(TEXT("\"id\":\"target_surface\""), TEXT("\"id\":\"target_surface\",\"layoutAlign\":\"MAX\""));
 	if (!TestTrue(TEXT("Inactive child alignment fixture parses"), FFigmaParser::ParseDocument(AlignmentFixture, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Child alignment under absolute parents does not reject animation"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
-		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.Transition.Diagnostic.IsEmpty(); }));
+		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	const FString ActiveAlignmentFixture = AlignmentFixture.Replace(TEXT("\"componentId\":\"base\""), TEXT("\"componentId\":\"base\",\"layoutMode\":\"HORIZONTAL\""))
 		.Replace(TEXT("\"type\":\"COMPONENT\""), TEXT("\"type\":\"COMPONENT\",\"layoutMode\":\"HORIZONTAL\""));
 	if (!TestTrue(TEXT("Active child alignment fixture parses"), FFigmaParser::ParseDocument(ActiveAlignmentFixture, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Child alignment under flow parents requests measured fixed viewport layout"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
-		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.Transition.bFixedViewportLayout
-			&& !Binding.Transition.LayoutTargets.IsEmpty() && !Binding.Transition.LayoutPresentationWidgetId.IsEmpty(); }));
+		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.bFixedViewportLayout
+			&& !Binding.PrimaryStep().Transition.LayoutTargets.IsEmpty() && !Binding.PrimaryStep().Transition.LayoutPresentationWidgetId.IsEmpty(); }));
 	const FString HugFixture = MakeNativeWidgetAnimationDocument()
 		.Replace(TEXT("\"componentId\":\"base\""), TEXT("\"componentId\":\"base\",\"layoutMode\":\"VERTICAL\",\"primaryAxisSizingMode\":\"AUTO\""))
 		.Replace(TEXT("\"type\":\"COMPONENT\""), TEXT("\"type\":\"COMPONENT\",\"layoutMode\":\"VERTICAL\",\"primaryAxisSizingMode\":\"AUTO\""));
 	if (!TestTrue(TEXT("Unchanged HUG state size fixture parses"), FFigmaParser::ParseDocument(HugFixture, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Unchanged HUG state sizes do not require a scale animation"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
-		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_1") && Binding.Transition.Diagnostic.IsEmpty(); }));
+		[](const FUMGPrototypeNavigationBinding& Binding) { return Binding.TriggerWidgetId == TEXT("instance_1") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	const FString InvisiblePaintFixture = MakeNativeWidgetAnimationDocument().Replace(TEXT("\"type\":\"SOLID\",\"color\":"), TEXT("\"type\":\"SOLID\",\"visible\":false,\"color\":"));
 	if (!TestTrue(TEXT("Invisible endpoint paints fixture parses"), FFigmaParser::ParseDocument(InvisiblePaintFixture, Document))) return false;
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Invisible paint changes retain motion without adding a color track"), Data.PrototypeNavigation().ClickBindings.ContainsByPredicate(
 		[](const FUMGPrototypeNavigationBinding& Binding)
-		{ return Binding.TriggerWidgetId == TEXT("instance_0") && !Binding.Transition.WidgetTargets.IsEmpty()
-			&& !Binding.Transition.WidgetTargets[0].bColor && Binding.Transition.Diagnostic.IsEmpty(); }));
+		{ return Binding.TriggerWidgetId == TEXT("instance_0") && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty()
+			&& !Binding.PrimaryStep().Transition.WidgetTargets[0].bColor && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty(); }));
 	FFigmaParser::ParseDocument(MakePluginFixture(SourcePlugin, TargetPlugin.Replace(TEXT("\"cornerSmoothing\":0"), TEXT("\"cornerSmoothing\":0.5"))), Document);
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Raw-only rendering changes remain unsupported"),
-		Rejected(Data, TEXT("instance_0"), TEXT("cornerSmoothing")));
+	TestTrue(TEXT("Unused plugin smoothing does not reject native animation"),
+		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
+		{ return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty(); }));
 	FFigmaParser::ParseDocument(MakePluginFixture(SourcePlugin, TargetPlugin.Replace(TEXT("\"type\":\"SOLID\""), TEXT("\"type\":\"SOLID\",\"blendMode\":\"MULTIPLY\""))), Document);
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
-	TestTrue(TEXT("Raw solid paints use the same color-only change rule"),
-		Rejected(Data, TEXT("instance_0"), TEXT("solid paint")));
+	TestTrue(TEXT("Unused plugin paints do not reject native color animation"),
+		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
+		{ return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.PrimaryStep().Transition.WidgetTargets.ContainsByPredicate(
+			[](const FUMGPrototypeWidgetAnimationTarget& Target) { return Target.bColor && Target.EndColor.B == 1 && Target.EndColor.G == 0; }); }));
 	FFigmaParser::ParseDocument(PluginFixture.Replace(*TargetMotion, *(EmptyMotion + TEXT("\"timelines\":[{\"id\":\"target-frame\",\"duration\":3}]"))), Document);
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Inactive timeline duration changes are not discarded"),
@@ -1396,7 +1422,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		Data.PrototypeNavigation().ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
 		{
 			return Binding.TriggerWidgetId == TEXT("instance_0") && Binding.UsesPressTrigger()
-				&& Binding.Transition.Diagnostic.IsEmpty() && !Binding.Transition.WidgetTargets.IsEmpty();
+				&& Binding.PrimaryStep().Transition.Diagnostic.IsEmpty() && !Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty();
 		}));
 	const FString Drag = MakeNativeWidgetAnimationDocument().Replace(TEXT("\"ON_CLICK\""), TEXT("\"ON_DRAG\""));
 	if (!TestTrue(TEXT("Single-page drag source parses"), FFigmaParser::ParseDocument(Drag, Document))) return false;
@@ -1408,7 +1434,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 		*DragAnalysis.Data.PageHostWidgetId, DragAnalysis.Data.IsValid()));
 	for (const auto& Item : DragAnalysis.Data.ClickBindings)
 		AddInfo(FString::Printf(TEXT("Drag binding %s trigger=%s valid=%d steps=%d diag=%s"),
-			*Item.TriggerWidgetId, *Item.TriggerType, Item.IsValid(), Item.Steps.Num(), *Item.Transition.Diagnostic));
+			*Item.TriggerWidgetId, *Item.TriggerType, Item.IsValid(), Item.Steps.Num(), *Item.PrimaryStep().Transition.Diagnostic));
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	AddInfo(FString::Printf(TEXT("Drag conversion error: %s"), *Data.ConversionError));
 	for (const FString& Warning : Data.Warnings) AddInfo(Warning);
@@ -1425,7 +1451,7 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	if (TestTrue(TEXT("Spring binding is retained"), !Data.PrototypeNavigation().ClickBindings.IsEmpty()))
 	{
-		const auto& Physical = Data.PrototypeNavigation().ClickBindings[0].Transition;
+		const auto& Physical = Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition;
 		TestTrue(TEXT("Physical spring and missing velocity are identified"), Physical.bSpring && Physical.bSpringVelocityDefaulted);
 		TestEqual(TEXT("Spring stiffness retained"), Physical.SpringStiffness, 300.0f);
 		TestEqual(TEXT("Spring damping retained"), Physical.SpringDamping, 256.0f);
@@ -1443,18 +1469,18 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	const auto* Instant = Data.PrototypeNavigation().ClickBindings.FindByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
 	{ return Binding.TriggerWidgetId == TEXT("instance_0"); });
 	TestTrue(TEXT("Current action is instant and never inherits stale node animation fields"),
-		Instant && Instant->Transition.bStateInstant && Instant->Transition.Type.IsEmpty()
-		&& Instant->Transition.DurationSeconds == 0 && !Instant->Transition.bSpring
-		&& !Instant->Transition.bCubicBezier && Instant->Transition.WidgetTargets.Num() == 2);
+		Instant && Instant->PrimaryStep().Transition.bStateInstant && Instant->PrimaryStep().Transition.Type.IsEmpty()
+		&& Instant->PrimaryStep().Transition.DurationSeconds == 0 && !Instant->PrimaryStep().Transition.bSpring
+		&& !Instant->PrimaryStep().Transition.bCubicBezier && Instant->PrimaryStep().Transition.WidgetTargets.Num() == 2);
 	const FString Summaries = MakeNativeWidgetAnimationDocument()
 		.Replace(TEXT("\"name\":\"On\""), TEXT("\"name\":\"On\",\"transitionNodeID\":\"elsewhere\",\"transitionDuration\":123,\"transitionEasing\":{\"type\":\"LINEAR\"}"))
 		.Replace(TEXT("\"componentId\":\"base\""), TEXT("\"componentId\":\"base\",\"transitionNodeID\":\"other\",\"transitionDuration\":999,\"transitionEasing\":{\"type\":\"CUSTOM_SPRING\"}"));
 	FFigmaParser::ParseDocument(Summaries, Document);
 	Data = FDesign2UMGConverter::Convert(Document, FDesign2UMGConversionSettings::Defaults());
 	TestTrue(TEXT("Non-rendering prototype summaries neither reject nor supply the current action animation"),
-		Data.PrototypeNavigation().ClickBindings[0].Transition.Diagnostic.IsEmpty()
-		&& Data.PrototypeNavigation().ClickBindings[0].Transition.WidgetTargets.Num() == 1
-		&& FMath::IsNearlyEqual(Data.PrototypeNavigation().ClickBindings[0].Transition.DurationSeconds, 0.4f));
+		Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.Diagnostic.IsEmpty()
+		&& Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.WidgetTargets.Num() == 1
+		&& FMath::IsNearlyEqual(Data.PrototypeNavigation().ClickBindings[0].PrimaryStep().Transition.DurationSeconds, 0.4f));
 	const FString OverlayPaint = FString::Printf(TEXT(",\"fills\":[%s]"), *MakeSolidFillJson(0.2, 0.4, 0.6));
 	const FString Overlay = MakeFigmaDocJson(
 		MakeContainerNode(TEXT("A"), TEXT("Screen"), TEXT("FRAME"), 0, 0, 100, 40, FString(),

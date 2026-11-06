@@ -204,7 +204,9 @@ bool FUMGJsonExtensionAndLayoutBoundaryContractTest::RunTest(const FString&)
 	FUMGPrototypeNavigationBinding& Binding = Source.MutablePrototypeNavigation().ClickBindings.AddDefaulted_GetRef();
 	Binding.TriggerWidgetId = TEXT("trigger");
 	Binding.TriggerWidgetName = TEXT("Trigger");
-	Binding.Action = EUMGPrototypeNavigationAction::Back;
+	TestFalse(TEXT("A binding without executable steps is invalid"), Binding.IsValid());
+	Binding.Steps.AddDefaulted_GetRef().Kind = EUMGPrototypeNavigationStepKind::Back;
+	TestTrue(TEXT("The action is carried by its executable step"), Binding.IsValid());
 
 	const FString Json = FUMGJsonSerializer::Serialize(Source);
 	const TSharedPtr<FJsonObject> Serialized = ParseObject(Json);

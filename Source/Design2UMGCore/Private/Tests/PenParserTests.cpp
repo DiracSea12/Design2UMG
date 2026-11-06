@@ -12,6 +12,7 @@
 #include "ImageFillUtils.h"
 #include "VisualMapperFillTransfer.h"
 #include "VisualMapper.h"
+#include "UMGValueParsing.h"
 #include "DesignImportTypes.h"
 #include "RefExpander.h"
 #include "DesignSchema.h"
@@ -876,15 +877,18 @@ bool FPenParserGradientFillsTest::RunTest(const FString&)
 
 	const FDesignFill& SolidFill = OpacityDoc.Children[0]->Visual.TopmostFill();
 	TestTrue(TEXT("Solid paint opacity metadata retained"), FMath::IsNearlyEqual(SolidFill.Opacity, 0.5f));
-	TestEqual(TEXT("Solid paint opacity multiplies authored alpha"),
-		SolidFill.SolidColor, FString(TEXT("#80402040")));
+	TestEqual(TEXT("Solid paint retains authored alpha"), SolidFill.SolidColor, FString(TEXT("#80402080")));
+	TestEqual(TEXT("Mapped solid paint applies opacity once"),
+		FUMGValueParser::ParseColor(SolidFill.SolidColor, SolidFill.Opacity).ToFColor(true).A, uint8(64));
 
 	const FDesignFill& GradientFill = OpacityDoc.Children[1]->Visual.TopmostFill();
 	TestTrue(TEXT("Gradient paint opacity metadata retained"), FMath::IsNearlyEqual(GradientFill.Opacity, 0.25f));
-	TestEqual(TEXT("Gradient paint opacity multiplies stop alpha"),
-		GradientFill.Gradient.Colors[0].Color, FString(TEXT("#58C8E820")));
-	TestEqual(TEXT("Gradient paint opacity multiplies opaque stop alpha"),
-		GradientFill.Gradient.Colors[1].Color, FString(TEXT("#AAF0FA40")));
+	TestEqual(TEXT("Gradient paint retains stop alpha"), GradientFill.Gradient.Colors[0].Color, FString(TEXT("#58C8E880")));
+	TestEqual(TEXT("Gradient paint retains opaque stop alpha"), GradientFill.Gradient.Colors[1].Color, FString(TEXT("#AAF0FA")));
+	FUMGVisualBrushData Brush;
+	VisualMapperFillTransfer::ApplyGradientBrushData(Brush, GradientFill.Gradient, GradientFill.Opacity);
+	TestEqual(TEXT("Mapped gradient applies stop opacity once"), Brush.Gradient.Stops[0].Color.ToFColor(true).A, uint8(32));
+	TestEqual(TEXT("Mapped gradient applies opaque stop opacity once"), Brush.Gradient.Stops[1].Color.ToFColor(true).A, uint8(64));
 
 	return true;
 }

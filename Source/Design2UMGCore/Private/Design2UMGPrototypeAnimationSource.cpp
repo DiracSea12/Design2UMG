@@ -1,3 +1,5 @@
+// Copyright (c) 2026, Diracsea12. SPDX-License-Identifier: MIT
+
 #include "Design2UMGPrototypeAnimationSource.h"
 #include "Design2UMGPrototypeStepGraphAssembly.h"
 #include "DesignSchemaSourceExtensions.h"
@@ -497,14 +499,6 @@ namespace
 		return true;
 	}
 
-	bool HasEquivalentPaintAlias(const TSharedPtr<FJsonObject>& Node, const TCHAR* Field)
-	{
-		const auto Background = DesignJsonUtils::GetArray(Node, Field);
-		const auto Fills = DesignJsonUtils::GetArray(Node, TEXT("fills"));
-		if (!Fills) return false;
-		return !Background ? !Node->HasField(Field) : EquivalentPaintStacks(Background, Fills);
-	}
-
 	bool ResolvedVectorNetworkPaintsEqual(const TSharedPtr<FJsonObject>& Left, const TSharedPtr<FJsonObject>& Right)
 	{
 		const auto A = DesignJsonUtils::GetObject(Left, TEXT("vectorNetwork"));
@@ -620,33 +614,6 @@ namespace
         }
         return FJsonValue::CompareEqual(*A, *B);
     }
-
-	bool VectorStrokeMirrorEqual(const TSharedPtr<FJsonValue>& Canonical, const TSharedPtr<FJsonValue>& Mirror)
-	{
-		if (!Canonical || !Mirror || Canonical->Type != EJson::Array || Mirror->Type != EJson::Array) return false;
-		const auto& Paths = Canonical->AsArray(); const auto& Copies = Mirror->AsArray();
-		if (Paths.Num() != Copies.Num()) return false;
-		for (int32 Index = 0; Index < Paths.Num(); ++Index)
-		{
-			const auto Path = Paths[Index]->AsObject(), Copy = Copies[Index]->AsObject();
-			if (!Path || !Copy) return false;
-			for (const auto& Object : {Path, Copy})
-				if (Object->HasField(TEXT("path")) == Object->HasField(TEXT("data"))
-					|| (Object->HasField(TEXT("windingRule")) && Object->TryGetField(TEXT("windingRule"))->Type != EJson::String)) return false;
-			for (const auto& Object : {Path, Copy})
-				for (const auto& Field : Object->Values)
-					if (Field.Key != TEXT("path") && Field.Key != TEXT("data") && Field.Key != TEXT("windingRule")) return false;
-			const auto ReadPath = [](const TSharedPtr<FJsonObject>& Object)
-			{
-				return DesignJsonUtils::GetString(Object, Object->HasField(TEXT("path")) ? TEXT("path") : TEXT("data"));
-			};
-			const FString Outline = ReadPath(Path);
-			if (Outline.IsEmpty() || Outline != ReadPath(Copy)
-				|| DesignJsonUtils::GetString(Path, TEXT("windingRule")) != DesignJsonUtils::GetString(Copy, TEXT("windingRule"))) return false;
-		}
-		return true;
-	}
-
 
 	bool NormalizedVectorCenterEqual(const TSharedPtr<FJsonObject>& Left, const TSharedPtr<FJsonObject>& Right,
 		const FVector2D& StartSize, const FVector2D& EndSize,
@@ -767,6 +734,8 @@ namespace
 			TEXT("mainComponentKey"), TEXT("componentProperties"), TEXT("variantProperties"), TEXT("overrides"),
 			TEXT("componentPropertyDefinitions"), TEXT("variantGroupProperties"), TEXT("styles"),
 			TEXT("transitionNodeID"), TEXT("transitionDuration"), TEXT("transitionEasing"),
+			TEXT("backgroundColor"), TEXT("background"), TEXT("backgrounds"), TEXT("fillStyleId"), TEXT("backgroundStyleId"),
+			TEXT("topLeftRadius"), TEXT("topRightRadius"), TEXT("bottomRightRadius"), TEXT("bottomLeftRadius"),
 			TEXT("design2umgPluginData"), TEXT("animationStyles"), TEXT("animations"), TEXT("manualKeyframeTracks"), TEXT("timelines") };
 		if (bDestinationPage && bSamePageSize) Excluded.Add(TEXT("constraints"));
 		if (!bSelfAlignmentAffectsLayout) Excluded.Add(TEXT("layoutAlign"));
@@ -800,8 +769,7 @@ namespace
 		// Rectangular surface bounds and corners own their native endpoint contour.
 		const auto HasUnsmoothedCorners = [](const TSharedPtr<FJsonObject>& Node)
 		{
-			return FMath::IsNearlyZero(DesignJsonUtils::GetNumber(Node, TEXT("cornerSmoothing")))
-				&& FMath::IsNearlyZero(DesignJsonUtils::GetNumber(DesignJsonUtils::GetObject(Node, TEXT("design2umgPluginData")), TEXT("cornerSmoothing")));
+			return FMath::IsNearlyZero(DesignJsonUtils::GetNumber(Node, TEXT("cornerSmoothing")));
 		};
 		const bool bRoundedSurfacePair = (Start.Type == EDesignNodeType::Frame || Start.Type == EDesignNodeType::Rectangle) && Start.Type == End.Type;
 		const bool bEmptyGroupCorners = Start.Type == EDesignNodeType::Group && End.Type == EDesignNodeType::Group
@@ -857,47 +825,9 @@ namespace
 				|| bSurfaceCornerChange || bRoundedSurfaceResize || bSmoothingChange || bClipChange);
 		const auto LeftPlugin = DesignJsonUtils::GetObject(Left, TEXT("design2umgPluginData"));
 		const auto RightPlugin = DesignJsonUtils::GetObject(Right, TEXT("design2umgPluginData"));
-		const auto LeftPluginContour = LeftPlugin ? LeftPlugin->TryGetField(TEXT("fillGeometry")) : nullptr;
-		const auto RightPluginContour = RightPlugin ? RightPlugin->TryGetField(TEXT("fillGeometry")) : nullptr;
-		const bool bPluginContourChange = (LeftPluginContour || RightPluginContour)
-			&& (!LeftPluginContour || !RightPluginContour || !FJsonValue::CompareEqual(*LeftPluginContour, *RightPluginContour));
 		const bool bSurfaceEndpointChange = bSurfaceCornerChange || bSmoothingChange || bClipChange
 			|| (bRoundedSurfaceResize && (VisualMapper::RequiresSourceContour(Start, true) || VisualMapper::RequiresSourceContour(End, true)
-				|| FieldDiffers(TEXT("fillGeometry")) || bPluginContourChange));
-		const auto ConsumeCornerMirrors = [&](const TSharedPtr<FJsonObject>& Canonical, const TSharedPtr<FJsonObject>& Fields,
-			const TSharedPtr<FJsonObject>& OtherFields, const FDesignNode& Node, TSet<FString>& Consumed)
-		{
-			if (!bRoundedSurfacePair || !Fields) return true;
-			const auto CanonicalCorners = DesignJsonUtils::GetArray(Canonical, TEXT("rectangleCornerRadii"));
-			double Uniform = 0;
-			const bool bUniform = Canonical->TryGetNumberField(TEXT("cornerRadius"), Uniform);
-			const FVector4 Typed = Node.Visual.CornerRadius.ToVector4();
-			const TCHAR* Names[] = {TEXT("topLeftRadius"), TEXT("topRightRadius"), TEXT("bottomRightRadius"), TEXT("bottomLeftRadius")};
-			for (int32 Index = 0; Index < 4; ++Index)
-			{
-				const auto Value = Fields->TryGetField(Names[Index]);
-				const auto OtherValue = OtherFields ? OtherFields->TryGetField(Names[Index]) : nullptr;
-				if (Value && OtherValue && FJsonValue::CompareEqual(*Value, *OtherValue)) continue;
-				double Mirror = 0, Radius = Uniform;
-				if (!Fields->HasField(Names[Index])) continue;
-				if (!Fields->TryGetNumberField(Names[Index], Mirror))
-				{ Error = FString::Printf(TEXT("invalid rounded surface corner mirror '%s'"), Names[Index]); return false; }
-				const bool bCanonical = CanonicalCorners && CanonicalCorners->Num() == 4
-					? (*CanonicalCorners)[Index]->TryGetNumber(Radius) : bUniform;
-				if (!bCanonical || static_cast<float>(Mirror) != static_cast<float>(Radius)
-					|| static_cast<float>(Radius) != static_cast<float>(Typed[Index]))
-				{ Error = FString::Printf(TEXT("rounded surface corner mirror '%s' has no matching canonical native corner"), Names[Index]); return false; }
-				Consumed.Add(Names[Index]);
-			}
-			return true;
-		};
-		TSet<FString> LeftCornerMirrors, RightCornerMirrors;
-		if (!ConsumeCornerMirrors(Left, Left, Right, Start, LeftCornerMirrors)
-			|| !ConsumeCornerMirrors(Right, Right, Left, End, RightCornerMirrors)) return false;
-		for (const FString& Field : LeftCornerMirrors)
-			if (!Right->HasField(Field) || RightCornerMirrors.Contains(Field)) Excluded.Add(Field);
-		for (const FString& Field : RightCornerMirrors)
-			if (!Left->HasField(Field) || LeftCornerMirrors.Contains(Field)) Excluded.Add(Field);
+				|| FieldDiffers(TEXT("fillGeometry"))));
 		if (bRoundedSurfacePair)
 		{
 			Excluded.Add(TEXT("cornerSmoothing"));
@@ -906,15 +836,6 @@ namespace
 		if (bSurfaceFillContour) Excluded.Add(TEXT("fillGeometry"));
 		if (bSurfaceCornerChange)
 			for (const TCHAR* Field : {TEXT("cornerRadius"), TEXT("rectangleCornerRadii")}) Excluded.Add(Field);
-        const auto ConsumePaintAliases = [](const TSharedPtr<FJsonObject>& A, const TSharedPtr<FJsonObject>& B, TSet<FString>& Consumed)
-        {
-            if (!DesignJsonUtils::GetArray(A, TEXT("fills")) || !DesignJsonUtils::GetArray(B, TEXT("fills"))) return;
-            // Resolved fills own painting; these deprecated color/style fields are not parser inputs.
-            for (const TCHAR* Field : { TEXT("backgroundColor"), TEXT("fillStyleId"), TEXT("backgroundStyleId") }) Consumed.Add(Field);
-            for (const TCHAR* Field : { TEXT("background"), TEXT("backgrounds") })
-                if (HasEquivalentPaintAlias(A, Field) && HasEquivalentPaintAlias(B, Field)) Consumed.Add(Field);
-        };
-        ConsumePaintAliases(Left, Right, Excluded);
 		const bool bSingleSolid = Start.Visual.Fills.Num() == 1 && End.Visual.Fills.Num() == 1
 			&& Start.Visual.Fills[0].IsColor() && End.Visual.Fills[0].IsColor();
 		const bool bText = LeftType == TEXT("TEXT");
@@ -1020,8 +941,7 @@ namespace
 			};
 			return HasNativeStrokePaint(Node, Raw) && Node.Visual.Stroke.Thickness.bUniform
 				&& Node.Visual.Stroke.DashPattern.IsEmpty() && Node.Shape.PaintGeometry.StrokePaths.IsSet()
-				&& !Node.Shape.PaintGeometry.StrokePaths->IsEmpty() && SupportedFields(Raw)
-				&& SupportedFields(DesignJsonUtils::GetObject(Raw, TEXT("design2umgPluginData")));
+				&& !Node.Shape.PaintGeometry.StrokePaths->IsEmpty() && SupportedFields(Raw);
 		};
 		const bool bFixedVectorEndpoint = LeftType == TEXT("VECTOR") && RightType == TEXT("VECTOR") && bResize
 			&& StartSize.X > 0 && StartSize.Y > 0 && EndSize.X > 0 && EndSize.Y > 0
@@ -1061,183 +981,9 @@ namespace
 		if (HasInstanceOverride(Left, Right, InstanceProperties, TEXT("visible"))) Excluded.Add(TEXT("visible"));
 		if (bFillsChanged && EqualObjectExcept(Left, Right, TEXT("boundVariables"), TEXT("fills"))) Excluded.Add(TEXT("boundVariables"));
 		if (!MatchInactiveMotion(Left, Right, Error) || !EqualFields(Left, Right, Excluded, Error)) return false;
-		if (LeftPlugin || RightPlugin)
-		{
-			if (!LeftPlugin || !RightPlugin)
-			{
-				Error = TEXT("missing paired Figma plugin source data");
-				return false;
-			}
-			// Identity, actions and local geometry already have explicit consumers; other raw properties must match.
-			TSet<FString> PluginExcluded = { TEXT("id"), TEXT("name"), TEXT("type"), TEXT("isAsset"), TEXT("locked"), TEXT("reactions"),
-				TEXT("absoluteBoundingBox"), TEXT("absoluteRenderBounds"), TEXT("absoluteTransform"), TEXT("relativeTransform"),
-				TEXT("size"), TEXT("x"), TEXT("y"), TEXT("width"), TEXT("height"), TEXT("rotation"), TEXT("opacity"),
-				TEXT("fills"), TEXT("animationStyles"), TEXT("animations"), TEXT("manualKeyframeTracks"), TEXT("timelines") };
-			// This is a Dev Mode layout suggestion; actual layoutMode and layout fields remain compared.
-			PluginExcluded.Add(TEXT("inferredAutoLayout"));
-			if (!bSelfAlignmentAffectsLayout) PluginExcluded.Add(TEXT("layoutAlign"));
-			ConsumeLayout(LeftPlugin, RightPlugin, PluginExcluded);
-			ConsumeEmptyGroupCorners(LeftPlugin, RightPlugin, PluginExcluded);
-			if (!ConsumeShadowEffects(LeftPlugin, RightPlugin, PluginExcluded)) return false;
-            ConsumePaintAliases(LeftPlugin, RightPlugin, PluginExcluded);
-            if (bSurfaceFillContour) PluginExcluded.Add(TEXT("fillGeometry"));
-			if (bRoundedSurfacePair)
-			{
-				if (static_cast<float>(DesignJsonUtils::GetNumber(LeftPlugin, TEXT("cornerSmoothing"))) == Start.Visual.CornerRadius.Smoothing
-					&& static_cast<float>(DesignJsonUtils::GetNumber(RightPlugin, TEXT("cornerSmoothing"))) == End.Visual.CornerRadius.Smoothing)
-					PluginExcluded.Add(TEXT("cornerSmoothing"));
-				if (DesignJsonUtils::GetBool(LeftPlugin, TEXT("clipsContent"), false) == Start.LayoutData.ExplicitClip.Get(false)
-					&& DesignJsonUtils::GetBool(RightPlugin, TEXT("clipsContent"), false) == End.LayoutData.ExplicitClip.Get(false))
-					PluginExcluded.Add(TEXT("clipsContent"));
-			}
-
-			if (bSurfaceCornerChange)
-				for (const TCHAR* Field : {TEXT("cornerRadius"), TEXT("rectangleCornerRadii")}) PluginExcluded.Add(Field);
-			LeftCornerMirrors.Reset(); RightCornerMirrors.Reset();
-			if (!ConsumeCornerMirrors(Left, LeftPlugin, RightPlugin, Start, LeftCornerMirrors)
-				|| !ConsumeCornerMirrors(Right, RightPlugin, LeftPlugin, End, RightCornerMirrors)) return false;
-			for (const FString& Field : LeftCornerMirrors)
-				if (!RightPlugin->HasField(Field) || RightCornerMirrors.Contains(Field)) PluginExcluded.Add(Field);
-			for (const FString& Field : RightCornerMirrors)
-				if (!LeftPlugin->HasField(Field) || LeftCornerMirrors.Contains(Field)) PluginExcluded.Add(Field);
-
-			if (bDestinationPage && bSamePageSize) PluginExcluded.Add(TEXT("constraints"));
-			if (bText)
-			{
-				for (const TCHAR* Field : { TEXT("fontSize"), TEXT("letterSpacing"), TEXT("fillGeometry"), TEXT("strokeGeometry") }) PluginExcluded.Add(Field);
-				const auto ConsumeTextMirrors = [&](const TSharedPtr<FJsonObject>& Fields, const TSharedPtr<FJsonObject>& Other,
-					const TSharedPtr<FJsonObject>& Canonical, TSet<FString>& Consumed)
-				{
-					for (const TCHAR* Field : {TEXT("fontWeight"), TEXT("textAlignHorizontal"), TEXT("textAlignVertical"), TEXT("fontName"), TEXT("lineHeight")})
-					{
-						const auto Value = Fields->TryGetField(Field), Opposite = Other->TryGetField(Field);
-						if ((!Value && !Opposite) || (Value && Opposite && FJsonValue::CompareEqual(*Value, *Opposite))) continue;
-						if (!Value || !Canonical) { Error = TEXT("missing uniform native text mirror"); return false; }
-						bool bSame = false;
-						if (FCString::Strcmp(Field, TEXT("fontName")) == 0)
-						{
-							const auto Font = Value->AsObject();
-							bSame = Font && DesignJsonUtils::GetString(Font, TEXT("family")) == DesignJsonUtils::GetString(Canonical, TEXT("fontFamily"))
-								&& DesignJsonUtils::GetString(Font, TEXT("style")) == DesignJsonUtils::GetString(Canonical, TEXT("fontStyle"));
-						}
-						else if (FCString::Strcmp(Field, TEXT("lineHeight")) == 0)
-						{
-							const auto Height = Value->AsObject();
-							const FString Unit = DesignJsonUtils::GetString(Height, TEXT("unit"));
-							const FString CanonicalUnit = DesignJsonUtils::GetString(Canonical, TEXT("lineHeightUnit"));
-							bSame = Unit == TEXT("AUTO") ? CanonicalUnit == TEXT("AUTO") || CanonicalUnit == TEXT("INTRINSIC_%")
-								: Unit == TEXT("PIXELS") && CanonicalUnit == TEXT("PIXELS")
-									&& DesignJsonUtils::GetNumber(Height, TEXT("value")) == DesignJsonUtils::GetNumber(Canonical, TEXT("lineHeightPx"));
-						}
-						else
-						{
-							const auto Actual = Canonical->TryGetField(Field);
-							bSame = Actual && FJsonValue::CompareEqual(*Value, *Actual);
-						}
-						if (!bSame) { Error = FString::Printf(TEXT("text mirror '%s' has no canonical native owner"), Field); return false; }
-						Consumed.Add(Field);
-					}
-					return true;
-				};
-				if (bTextAppearanceChange)
-					if (!ConsumeTextMirrors(LeftPlugin, RightPlugin, DesignJsonUtils::GetObject(Left, TEXT("style")), PluginExcluded)
-						|| !ConsumeTextMirrors(RightPlugin, LeftPlugin, DesignJsonUtils::GetObject(Right, TEXT("style")), PluginExcluded)) return false;
-				const auto A = DesignJsonUtils::GetArray(LeftPlugin, TEXT("styledTextSegments"));
-				const auto B = DesignJsonUtils::GetArray(RightPlugin, TEXT("styledTextSegments"));
-				if (A && B && A->Num() == 1 && B->Num() == 1 && (*A)[0]->AsObject() && (*B)[0]->AsObject()
-					&& !FJsonValue::CompareEqual(*LeftPlugin->TryGetField(TEXT("styledTextSegments")), *RightPlugin->TryGetField(TEXT("styledTextSegments"))))
-				{
-					const auto LeftSegment = (*A)[0]->AsObject();
-					const auto RightSegment = (*B)[0]->AsObject();
-					TSet<FString> SegmentExcluded = { TEXT("fontSize"), TEXT("letterSpacing"), TEXT("fills"), TEXT("fillStyleId") };
-					if (bTextAppearanceChange)
-						if (!ConsumeTextMirrors(LeftSegment, RightSegment, DesignJsonUtils::GetObject(Left, TEXT("style")), SegmentExcluded)
-							|| !ConsumeTextMirrors(RightSegment, LeftSegment, DesignJsonUtils::GetObject(Right, TEXT("style")), SegmentExcluded)) return false;
-					if (bTextOverride)
-						for (const TCHAR* Field : { TEXT("characters"), TEXT("start"), TEXT("end") }) SegmentExcluded.Add(Field);
-					if (!EqualFields(LeftSegment, RightSegment, SegmentExcluded, Error)) return false;
-					const auto LeftFills = LeftPlugin->TryGetField(TEXT("fills"));
-					const auto RightFills = RightPlugin->TryGetField(TEXT("fills"));
-					const auto LeftSegmentFills = LeftSegment->TryGetField(TEXT("fills"));
-					const auto RightSegmentFills = RightSegment->TryGetField(TEXT("fills"));
-					if (!LeftFills || !RightFills || !LeftSegmentFills || !RightSegmentFills
-						|| !FJsonValue::CompareEqual(*LeftFills, *LeftSegmentFills)
-						|| !FJsonValue::CompareEqual(*RightFills, *RightSegmentFills))
-					{ Error = TEXT("text segment paints differ from the uniform node paint"); return false; }
-					PluginExcluded.Add(TEXT("styledTextSegments"));
-				}
-			}
-			if (bComponentPair)
-			{
-				for (const TCHAR* Field : { TEXT("documentationLinks"), TEXT("scaleFactor"), TEXT("overrides"),
-					TEXT("componentProperties"), TEXT("key"), TEXT("descriptionMarkdown"), TEXT("description"),
-					TEXT("mainComponent"), TEXT("masterComponent"), TEXT("variantProperties"), TEXT("instances"),
-					TEXT("exposedInstances"), TEXT("remote"), TEXT("componentPropertyReferences"), TEXT("isExposedInstance") })
-					PluginExcluded.Add(Field);
-			}
-			if (LeftType == TEXT("INSTANCE"))
-			{
-				PluginExcluded.Add(TEXT("exposedInstances"));
-				PluginExcluded.Add(TEXT("overrides"));
-			}
-			if (bFixedVectorEndpoint)
-			{
-				for (const auto& Pair : {TPair<TSharedPtr<FJsonObject>, TSharedPtr<FJsonObject>>(Left, LeftPlugin),
-					TPair<TSharedPtr<FJsonObject>, TSharedPtr<FJsonObject>>(Right, RightPlugin)})
-				{
-					const auto Mirror = Pair.Value->TryGetField(TEXT("strokeGeometry"));
-					const auto Canonical = Pair.Key->TryGetField(TEXT("strokeGeometry"));
-					if (Mirror && !VectorStrokeMirrorEqual(Canonical, Mirror))
-					{ Error = TEXT("vector stroke outline mirror differs from its canonical native paint"); return false; }
-				}
-				if (!NormalizedVectorCenterEqual(LeftPlugin, RightPlugin, StartSize, EndSize, Left, Right))
-				{ Error = TEXT("vector plugin center geometry or region paint is not equivalent"); return false; }
-				for (const TCHAR* Field : {TEXT("fillGeometry"), TEXT("vectorPaths"), TEXT("vectorNetwork")}) PluginExcluded.Add(Field);
-			}
-			if (bEquivalentVectorGeometry && NormalizedVectorGeometryEqual(LeftPlugin, RightPlugin, StartSize, EndSize))
-				for (const TCHAR* Field : {TEXT("fillGeometry"), TEXT("strokeGeometry"), TEXT("vectorPaths"), TEXT("vectorNetwork")}) PluginExcluded.Add(Field);
-			if (bGeometryReplacement)
-			{
-				PluginExcluded.Add(TEXT("fillGeometry"));
-				PluginExcluded.Add(TEXT("strokeGeometry"));
-			}
-			if (bEquivalentVectorGeometry && ResolvedVectorNetworkPaintsEqual(LeftPlugin, RightPlugin))
-				PluginExcluded.Add(TEXT("vectorNetwork"));
-			if (bStrokeEndpointChanged)
-			{
-				// ParseStroke consumes canonical paints; these mirrors do not own rendering.
-				PluginExcluded.Add(TEXT("strokes"));
-				PluginExcluded.Add(TEXT("strokeStyleId"));
-			}
-			if (bStrokePresenceChanged || bStrokeSizeEndpoint || bFixedVectorEndpoint)
-			{
-				PluginExcluded.Add(TEXT("strokeGeometry"));
-				for (const TCHAR* Field : {TEXT("strokeWeight"), TEXT("strokeTopWeight"), TEXT("strokeRightWeight"), TEXT("strokeBottomWeight"), TEXT("strokeLeftWeight")})
-				{
-					bool bMatches = true;
-					for (const auto& Pair : {TPair<TSharedPtr<FJsonObject>, TSharedPtr<FJsonObject>>(Left, LeftPlugin),
-						TPair<TSharedPtr<FJsonObject>, TSharedPtr<FJsonObject>>(Right, RightPlugin)})
-					{
-						double Mirror = 0, Canonical = 0;
-						if (Pair.Value->HasField(Field) && (!Pair.Key->TryGetNumberField(TEXT("strokeWeight"), Canonical)
-							|| !Pair.Value->TryGetNumberField(Field, Mirror) || Mirror != Canonical)) bMatches = false;
-					}
-					if (bMatches) PluginExcluded.Add(Field);
-				}
-			}
-			if (bTextOverride)
-			{
-				PluginExcluded.Add(TEXT("characters"));
-				PluginExcluded.Add(TEXT("fillGeometry"));
-				PluginExcluded.Add(TEXT("strokeGeometry"));
-			}
-			if (bFillsChanged && EqualObjectExcept(LeftPlugin, RightPlugin, TEXT("boundVariables"), TEXT("fills"))) PluginExcluded.Add(TEXT("boundVariables"));
-			if (HasInstanceOverride(LeftPlugin, RightPlugin, InstanceProperties, TEXT("visible"))) PluginExcluded.Add(TEXT("visible"));
-			bool bPluginFillsChanged = false;
-			if (!MatchInactiveMotion(LeftPlugin, RightPlugin, Error) || !EqualFields(LeftPlugin, RightPlugin, PluginExcluded, Error)
-				|| !((bText || bSurfacePaint) ? MatchSurfacePaints(LeftPlugin, RightPlugin, bText, bPluginFillsChanged, Error)
-					: MatchFills(LeftPlugin, RightPlugin, bSingleSolid && bFillsChanged, bPluginFillsChanged, Error))) return false;
-		}
+		const auto MotionLeft = LeftPlugin ? LeftPlugin : RightPlugin;
+		const auto MotionRight = RightPlugin ? RightPlugin : LeftPlugin;
+		if (MotionLeft && !MatchInactiveMotion(MotionLeft, MotionRight, Error)) return false;
 		if (bGeometryReplacement)
 		{
 			const auto Same = [&](const TCHAR* Name)
@@ -1378,8 +1124,8 @@ namespace
 		Target.bOpacity = !FMath::IsNearlyEqual(Target.StartOpacity, Target.EndOpacity);
 		if (bFillsChanged && !bText && !bSurfacePaint && !bSurfaceEndpointChange && !bStrokeEndpointChanged)
 		{
-			Target.StartColor = FUMGValueParser::ParseColor(Start.Visual.Fills[0].SolidColor);
-			Target.EndColor = FUMGValueParser::ParseColor(End.Visual.Fills[0].SolidColor);
+			Target.StartColor = FUMGValueParser::ParseColor(Start.Visual.Fills[0].SolidColor, Start.Visual.Fills[0].Opacity);
+			Target.EndColor = FUMGValueParser::ParseColor(End.Visual.Fills[0].SolidColor, End.Visual.Fills[0].Opacity);
 			Target.bColor = true;
 		}
 		if ((bLeaf && bShadowChange) || bSurfaceEndpointChange || bStrokeEndpointChanged || bTextAppearanceChange || bResize || !Target.Translation.IsNearlyZero() || !FMath::IsNearlyZero(Target.Rotation) || Target.bOpacity || Target.bColor || Target.bFontSize || Target.bLetterSpacing || Target.bTextPaintChange || Target.bSurfacePaintChange)
@@ -1847,7 +1593,7 @@ void Design2UMGPrototypeAnimationSource::Resolve(const FDesignDocument& Document
 
 		if (!bState && Transition.Type != TEXT("SMART_ANIMATE"))
 		{
-			Binding.Transition = Transition;
+
 			if (!Transition.Diagnostic.IsEmpty())
 				Warnings.AddUnique(FString::Printf(TEXT("Prototype animation '%s': %s; action not executed"), *Binding.TriggerWidgetId, *Transition.Diagnostic));
 			continue;
@@ -1921,6 +1667,6 @@ void Design2UMGPrototypeAnimationSource::Resolve(const FDesignDocument& Document
 			Warnings.AddUnique(FString::Printf(TEXT("Prototype animation '%s' -> '%s': %s; action not executed"),
 				*Binding.TriggerWidgetId, *Step.TargetPageId, *Transition.Diagnostic));
 		}
-		Binding.Transition = Transition;
+
 	}
 }

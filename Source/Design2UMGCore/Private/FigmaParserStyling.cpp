@@ -87,7 +87,7 @@ namespace
 		if (FillType == TEXT("SOLID"))
 		{
 			Result.Type = EDesignFillType::Color;
-			Result.SolidColor = ColorToHex(GetObject(FillObj, TEXT("color")), FillOpacity);
+			Result.SolidColor = ColorToHex(GetObject(FillObj, TEXT("color")));
 			return Result;
 		}
 
@@ -147,7 +147,7 @@ namespace
 					}
 
 					FDesignGradientStop Stop;
-					Stop.Color = ColorToHex(GetObject(StopObj, TEXT("color")), FillOpacity);
+					Stop.Color = ColorToHex(GetObject(StopObj, TEXT("color")));
 					Stop.Position = GetNumber(StopObj, TEXT("position"));
 					Result.Gradient.Colors.Add(Stop);
 				}

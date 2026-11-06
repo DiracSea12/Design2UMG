@@ -482,14 +482,6 @@ namespace
 				Binding.SourcePageId = *Page;
 			}
 
-			if (Binding.RequiresPageTarget() && !Binding.TargetPageId.IsEmpty()
-				&& !ResolveTarget(
-					Binding.TargetPageId,
-					Binding.TargetPageIndex,
-					Binding.Action == EUMGPrototypeNavigationAction::Overlay))
-			{
-				return false;
-			}
 			for (FUMGPrototypeNavigationStep& Step : Binding.Steps)
 			{
 				if (Step.RequiresPageTarget()

@@ -602,7 +602,7 @@ namespace
 	bool AppendLayerOrders(UEdGraph* Graph, UWidgetBlueprint* WBP, const FEngineFunctions& Functions,
 		const FUMGPrototypeNavigationBinding& Binding, const FResolvedBinding& Resolved, bool bTarget, FChainLayout& Layout)
 	{
-		const auto& Orders = Binding.Transition.LayerOrders;
+		const auto& Orders = Binding.PrimaryStep().Transition.LayerOrders;
 		if (Orders.IsEmpty()) return true;
 		if (Orders.Num() != Resolved.LayerWidgetNames.Num() || Orders.Num() != Resolved.LayerOriginalZOrders.Num()
 			|| !Functions.SlotAsCanvasSlot || !Functions.SetCanvasZOrder) return false;
@@ -673,7 +673,7 @@ namespace
 			|| !AppendLayerOrders(Graph, WBP, Functions, Binding, Resolved, true, Layout)) return false;
 		AppendLivePresentationCall(Graph, WBP, Functions, Resolved, true, Layout);
 		return Resolved.WidgetAnimationName.IsNone()
-			|| AppendReversibleAnimation(Graph, WBP, Resolved, Binding.Transition.DurationSeconds, Layout);
+			|| AppendReversibleAnimation(Graph, WBP, Resolved, Binding.PrimaryStep().Transition.DurationSeconds, Layout);
 	}
 
 	bool AppendStateTransitionStart(UEdGraph* Graph, UWidgetBlueprint* WBP, const FEngineFunctions& Functions,
@@ -683,7 +683,7 @@ namespace
 		if (!Targets.StateHosts.IsValidIndex(Resolved.StateHostIndex) || !Functions.EqualEqual_IntInt) return false;
 		const auto& Host = Targets.StateHosts[Resolved.StateHostIndex];
 		AppendOwnerGate(Graph, WBP, Functions, Host.CurrentStateProperty, Resolved.SourceStateIndex, Layout);
-		const bool bTemporaryDissolve = Resolved.bTemporaryState && Binding.Transition.Type == TEXT("DISSOLVE");
+		const bool bTemporaryDissolve = Resolved.bTemporaryState && Binding.PrimaryStep().Transition.Type == TEXT("DISSOLVE");
 		const bool bTemporaryLive = Resolved.bTemporaryState && !Resolved.LivePresentations.IsEmpty();
 		if (bTemporaryDissolve || bTemporaryLive)
 		{
@@ -691,7 +691,7 @@ namespace
 		}
 		else AppendOwnerGate(Graph, WBP, Functions, Host.TransitionOwnerProperty, 0, Layout);
 		if (!AppendLayerOrders(Graph, WBP, Functions, Binding, Resolved, true, Layout)) return false;
-		if (Binding.Transition.bStateInstant)
+		if (Binding.PrimaryStep().Transition.bStateInstant)
 		{
 			if (Resolved.bTemporaryState)
 			{
@@ -713,10 +713,10 @@ namespace
 				if (!AppendSetVisibilityCall(Graph, WBP, Functions, Property, ESlateVisibility::HitTestInvisible, Layout)) return false;
 				AppendStateTimeoutCall(Graph, WBP, Layout);
 			}
-			return AppendReversibleAnimation(Graph, WBP, Resolved, Binding.Transition.DurationSeconds, Layout);
+			return AppendReversibleAnimation(Graph, WBP, Resolved, Binding.PrimaryStep().Transition.DurationSeconds, Layout);
 		}
 		AppendGeneratedIndexSet(Graph, WBP, Host.TransitionOwnerProperty, Resolved.BindingIndex + 1, Layout);
-		if (Binding.Transition.Type == TEXT("DISSOLVE"))
+		if (Binding.PrimaryStep().Transition.Type == TEXT("DISSOLVE"))
 		{
 			UWidget* Target = Host.StateWidgets.IsValidIndex(Resolved.TargetStateIndex) ? Host.StateWidgets[Resolved.TargetStateIndex] : nullptr;
 			auto* Property = Target ? FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, Target->GetFName()) : nullptr;
@@ -724,7 +724,7 @@ namespace
 		}
 		if (!AppendStopAnimationCall(Graph, WBP, Functions, Resolved.WidgetAnimationName, Layout)) return false;
 		AppendPlayAnimationCall(Graph, WBP, Functions, Resolved.WidgetAnimationName, Layout, false, false, true);
-		AppendAnimationTimer(Graph, Functions, Resolved.StateCompletionEventName, Binding.Transition.DurationSeconds, Layout);
+		AppendAnimationTimer(Graph, Functions, Resolved.StateCompletionEventName, Binding.PrimaryStep().Transition.DurationSeconds, Layout);
 		return true;
 	}
 
@@ -732,7 +732,7 @@ namespace
 		const FBindingGraphTargets& Targets, const FUMGPrototypeNavigationBinding& Binding,
 		const FResolvedBinding& Resolved, FChainLayout& Layout)
 	{
-		const bool bPageTransition = Binding.Transition.Type != TEXT("SMART_ANIMATE");
+		const bool bPageTransition = Binding.PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE");
 		if (bPageTransition)
 		{
 			if (!Targets.TransitionOwnerProperty || !Functions.EqualEqual_IntInt
@@ -747,7 +747,7 @@ namespace
 		if (!AppendLayerOrders(Graph, WBP, Functions, Binding, Resolved, true, Layout)
 			|| !AppendStopAnimationCall(Graph, WBP, Functions, Resolved.WidgetAnimationName, Layout)) return false;
 		AppendPlayAnimationCall(Graph, WBP, Functions, Resolved.WidgetAnimationName, Layout, false, false, true);
-		AppendAnimationTimer(Graph, Functions, Resolved.NavigationEventName, Binding.Transition.DurationSeconds, Layout);
+		AppendAnimationTimer(Graph, Functions, Resolved.NavigationEventName, Binding.PrimaryStep().Transition.DurationSeconds, Layout);
 		return true;
 	}
 
@@ -900,7 +900,7 @@ bool AppendCloseOverlayTail(UEdGraph* Graph, UWidgetBlueprint* WBP, const FEngin
 static bool HasMouseCancellation(const FUMGPrototypeNavigationBinding& Binding, const FResolvedBinding& Resolved)
 {
     return !Resolved.HoverMonitorEventName.IsNone() || !Resolved.MirrorHoverMonitorEventName.IsNone()
-        || !Binding.Transition.LayerOrders.IsEmpty() || Resolved.bTemporaryNavigate
+        || !Binding.PrimaryStep().Transition.LayerOrders.IsEmpty() || Resolved.bTemporaryNavigate
         || (!Resolved.WidgetAnimationName.IsNone() && Resolved.PlaybackTargetPropertyName.IsNone()
             && (Resolved.NavigationEventName.IsNone() || Resolved.bTemporaryNavigate));
 }
@@ -927,7 +927,7 @@ TArray<FName> GetMouseFunctionNames(const FUMGPrototypeNavigationData& Navigatio
         Add(BindingFunctionName(TEXT("cancel_timed"), Binding.BindingIndex));
         Add(Binding.NavigationEventName); Add(Binding.StateCompletionEventName); Add(Binding.PlaybackEventName);
         if (!Binding.bTemporaryNavigate && !Binding.NavigationEventName.IsNone()
-            && Navigation.ClickBindings[Binding.BindingIndex].Transition.Type != TEXT("SMART_ANIMATE"))
+            && Navigation.ClickBindings[Binding.BindingIndex].PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE"))
             Add(BindingFunctionName(TEXT("restore_page"), Binding.BindingIndex));
     }
     for (const auto& Binding : Plan.MouseBindings)
@@ -944,9 +944,9 @@ TArray<FName> GetMouseFunctionNames(const FUMGPrototypeNavigationData& Navigatio
         if (!Binding.MirrorTriggerWidgetName.IsNone()) Add(BindingFunctionName(TEXT("mirror_trigger"), Binding.BindingIndex));
         if (HasMouseCancellation(Source, Binding)) Add(BindingFunctionName(TEXT("cancel_mouse"), Binding.BindingIndex));
         if (!Binding.PlaybackTargetPropertyName.IsNone()) Add(BindingFunctionName(TEXT("restore_animation"), Binding.BindingIndex));
-        if (Binding.bTemporaryState && Source.Transition.bStateInstant) Add(BindingFunctionName(TEXT("restore_instant"), Binding.BindingIndex));
+        if (Binding.bTemporaryState && Source.PrimaryStep().Transition.bStateInstant) Add(BindingFunctionName(TEXT("restore_instant"), Binding.BindingIndex));
         if ((Source.UsesHoverTrigger() || Source.UsesPressTrigger())
-            && (((!Binding.WidgetAnimationName.IsNone() || (Binding.bTemporaryState && Source.Transition.bStateInstant))
+            && (((!Binding.WidgetAnimationName.IsNone() || (Binding.bTemporaryState && Source.PrimaryStep().Transition.bStateInstant))
                 && Source.Steps[0].Kind == EUMGPrototypeNavigationStepKind::AnimateWidget) || Binding.bTemporaryNavigate))
             Add(BindingFunctionName(TEXT("release"), Binding.BindingIndex));
     }
@@ -1009,7 +1009,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 			UEdGraph* Graph = Entry->GetGraph();
 			FChainLayout Chain; Chain.PlaceExec(Entry);
 			auto* Sequence = CreateMarkerNode<UK2Node_ExecutionSequence>(Graph, [](UK2Node_ExecutionSequence*) {});
-			const bool bLocalEndpoints = !NavigationData.ClickBindings[Resolved.BindingIndex].Transition.LocalEndpoints.IsEmpty();
+			const bool bLocalEndpoints = !NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition.LocalEndpoints.IsEmpty();
 			const auto AppendEnvelope = [&](FChainLayout& Envelope)
 			{
 				if (!Resolved.LayoutOriginalWidgetName.IsNone())
@@ -1328,7 +1328,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 					if (!LinkExecChain(Finish.ExecChain)) SkipBinding(OutWarnings, TEXT("temporary page completion could not be wired"));
 					continue;
 				}
-				if (FinishBinding.Transition.Type != TEXT("SMART_ANIMATE"))
+				if (FinishBinding.PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE"))
 				{
 					AppendOwnerGate(CallbackGraph, WBP, Functions, Targets.TransitionOwnerProperty, Resolved.BindingIndex + 1, Finish);
 					AppendStopAnimationCall(CallbackGraph, WBP, Functions, Resolved.WidgetAnimationName, Finish);
@@ -1350,7 +1350,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 				AppendOwnerGate(CallbackGraph, WBP, Functions, StateHost.TransitionOwnerProperty, Resolved.BindingIndex + 1, Finish);
 				AppendOwnerGate(CallbackGraph, WBP, Functions, StateHost.CurrentStateProperty, Resolved.SourceStateIndex, Finish);
 				const auto& StateBinding = NavigationData.ClickBindings[Resolved.BindingIndex];
-				if (Resolved.bTemporaryState && StateBinding.Transition.Type == TEXT("DISSOLVE"))
+				if (Resolved.bTemporaryState && StateBinding.PrimaryStep().Transition.Type == TEXT("DISSOLVE"))
 				{
 					UWidget* Target = StateHost.StateWidgets.IsValidIndex(Resolved.TargetStateIndex) ? StateHost.StateWidgets[Resolved.TargetStateIndex] : nullptr;
 					auto* Property = Target ? FindFProperty<FObjectProperty>(WBP->SkeletonGeneratedClass, Target->GetFName()) : nullptr;
@@ -1473,11 +1473,11 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 		TArray<FResolvedBinding> TimedPageTransitions;
 		for (const auto& Resolved : TimedAnimations)
 			if (!Resolved.bTemporaryNavigate && Resolved.NavigationEventName != NAME_None
-				&& NavigationData.ClickBindings[Resolved.BindingIndex].Transition.Type != TEXT("SMART_ANIMATE"))
+				&& NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE"))
 				TimedPageTransitions.Add(Resolved);
 		for (const auto& Resolved : MouseBindings)
 		{
-			if (Resolved.bTemporaryState && NavigationData.ClickBindings[Resolved.BindingIndex].Transition.bStateInstant)
+			if (Resolved.bTemporaryState && NavigationData.ClickBindings[Resolved.BindingIndex].PrimaryStep().Transition.bStateInstant)
 				TemporaryInstantStates.Add(Resolved);
 			if (!Resolved.bDrag && !Resolved.PlaybackTargetPropertyName.IsNone()) ReversibleAnimations.Add(Resolved);
 		}
@@ -1517,7 +1517,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 					Restore.NextColumn = DragCleanup.NextColumn;
 					bool bValid = true;
 					if (Candidate.Binding->Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate
-						&& Candidate.Binding->Transition.Type != TEXT("SMART_ANIMATE"))
+						&& Candidate.Binding->PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE"))
 						bValid = AppendTemporaryPageVisibility(RestoreGraph, WBP, Functions, Targets, *Candidate.Resolved, false, Restore);
 					if (!bValid || !AppendResetReversibleAnimation(RestoreGraph, WBP, Functions, *Candidate.Resolved, Restore)
 						|| !AppendLayerOrders(RestoreGraph, WBP, Functions, *Candidate.Binding, *Candidate.Resolved, false, Restore)
@@ -1722,7 +1722,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 				Finish.PlaceExec(Event);
 				AppendOwnerGate(Ubergraph, WBP, Functions, Targets.TransitionOwnerProperty, Pair.Key + 1, Finish);
 				bool bValid = true;
-				if (Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate && Binding.Transition.Type != TEXT("SMART_ANIMATE"))
+				if (Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::Navigate && Binding.PrimaryStep().Transition.Type != TEXT("SMART_ANIMATE"))
 					bValid = AppendTemporaryPageVisibility(Ubergraph, WBP, Functions, Targets, Resolved, false, Finish);
 				bValid = bValid && (bCommit
 					? AppendResetReversibleAnimation(Ubergraph, WBP, Functions, Resolved, Finish)
@@ -1815,7 +1815,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 				bChainValid = AppendStateTransitionStart(BodyGraph, WBP, Functions, Targets, Binding, Resolved, Layout);
 			else if (Binding.UsesHoverTrigger() || Binding.UsesPressTrigger())
 				bChainValid = AppendLayerOrders(BodyGraph, WBP, Functions, Binding, Resolved, true, Layout)
-					&& AppendReversibleAnimation(BodyGraph, WBP, Resolved, Binding.Transition.DurationSeconds, Layout);
+					&& AppendReversibleAnimation(BodyGraph, WBP, Resolved, Binding.PrimaryStep().Transition.DurationSeconds, Layout);
 			else
 			{
 				bChainValid = AppendLayerOrders(BodyGraph, WBP, Functions, Binding, Resolved, true, Layout);
@@ -2157,7 +2157,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 		}
 		++WiredCount;
 		if ((Binding.UsesHoverTrigger() || Binding.UsesPressTrigger())
-			&& (((Resolved.WidgetAnimationName != NAME_None || (Resolved.bTemporaryState && Binding.Transition.bStateInstant))
+			&& (((Resolved.WidgetAnimationName != NAME_None || (Resolved.bTemporaryState && Binding.PrimaryStep().Transition.bStateInstant))
 				&& Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::AnimateWidget) || Resolved.bTemporaryNavigate))
 		{
 			const FName Delegate = Binding.UsesHoverTrigger()
@@ -2196,7 +2196,7 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 							SkipBinding(OutWarnings, TEXT("temporary navigation could not reverse"));
 					}
 				}
-				else if (Resolved.bTemporaryState && Binding.Transition.bStateInstant && Targets.StateHosts.IsValidIndex(Resolved.StateHostIndex))
+				else if (Resolved.bTemporaryState && Binding.PrimaryStep().Transition.bStateInstant && Targets.StateHosts.IsValidIndex(Resolved.StateHostIndex))
 				{
 					const auto& Host = Targets.StateHosts[Resolved.StateHostIndex];
 					AppendOwnerGate(BodyGraph, WBP, Functions, Host.TransitionOwnerProperty, Resolved.BindingIndex + 1, Reverse);
@@ -2207,12 +2207,12 @@ int32 WireMouseBindings(UWidgetBlueprint* WBP, UEdGraph* Ubergraph,
 				}
 				else
 				{
-					if (Resolved.bTemporaryState && (Binding.Transition.Type == TEXT("DISSOLVE") || !Resolved.LivePresentations.IsEmpty()))
+					if (Resolved.bTemporaryState && (Binding.PrimaryStep().Transition.Type == TEXT("DISSOLVE") || !Resolved.LivePresentations.IsEmpty()))
 					{
 						const auto& Host = Targets.StateHosts[Resolved.StateHostIndex];
 						AppendOwnerGate(BodyGraph, WBP, Functions, Host.TransitionOwnerProperty, Resolved.BindingIndex + 1, Reverse);
 					}
-					const bool bTemporaryDissolve = Resolved.bTemporaryState && Binding.Transition.Type == TEXT("DISSOLVE");
+					const bool bTemporaryDissolve = Resolved.bTemporaryState && Binding.PrimaryStep().Transition.Type == TEXT("DISSOLVE");
 					const FName Completion = !Resolved.LiveReturnEventName.IsNone() ? Resolved.LiveReturnEventName
 						: (bTemporaryDissolve ? Resolved.StateCompletionEventName : NAME_None);
 					const bool bLayerRestored = AppendLayerOrders(BodyGraph, WBP, Functions, Binding, Resolved, false, Reverse);

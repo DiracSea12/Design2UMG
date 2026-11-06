@@ -9,7 +9,7 @@
 
 namespace FUMGValueParser
 {
-	DESIGN2UMGCORE_API FLinearColor ParseColor(const FString& ColorStr);
+	DESIGN2UMGCORE_API FLinearColor ParseColor(const FString& ColorStr, float Opacity = 1.0f);
 	DESIGN2UMGCORE_API EUMGSlotHorizontalAlignment ParseSlotHorizontalAlignment(const FString& Str);
 	DESIGN2UMGCORE_API EUMGSlotVerticalAlignment ParseSlotVerticalAlignment(const FString& Str);
 	DESIGN2UMGCORE_API EUMGSlotSizeRule ParseSlotSizeRule(const FString& Str);

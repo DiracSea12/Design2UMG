@@ -74,7 +74,7 @@ namespace
 			return Stroke;
 		}
 
-		const FColor StrokeColor = DesignColorUtils::ParseHexColor(Stroke.Fill->SolidColor);
+		const FColor StrokeColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor, Stroke.Fill->Opacity).ToFColor(true);
 		if (StrokeColor.A >= 255)
 		{
 			return Stroke;
@@ -85,7 +85,7 @@ namespace
 		{
 			return Stroke;
 		}
-		const FColor FillColor = DesignColorUtils::ParseHexColor(UnderlayFill.SolidColor);
+		const FColor FillColor = FUMGValueParser::ParseColor(UnderlayFill.SolidColor, UnderlayFill.Opacity).ToFColor(true);
 		if (FillColor.A < 255)
 		{
 			return Stroke;
@@ -101,6 +101,7 @@ namespace
 			Mix(StrokeColor.G, FillColor.G),
 			Mix(StrokeColor.B, FillColor.B),
 			255);
+		Stroke.Fill->Opacity = 1.0f;
 		Stroke.Fill->SolidColor = FString::Printf(
 			TEXT("#%02X%02X%02XFF"), Composited.R, Composited.G, Composited.B);
 		return Stroke;
@@ -377,7 +378,7 @@ void VisualMapper::ApplyStroke(FUMGWidgetNode& Widget, const FDesignStroke& Stro
 
 	if (Stroke.Fill.IsSet() && Stroke.Fill->Type == EDesignFillType::Color)
 	{
-		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor);
+		Widget.Brush.OutlineColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor, Stroke.Fill->Opacity);
 	}
 
 	// Stroke alignment compensation:

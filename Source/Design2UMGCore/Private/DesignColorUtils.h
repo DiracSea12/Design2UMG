@@ -9,6 +9,7 @@ namespace DesignColorUtils
 	// Default shadow color when the design omits one: black at 0x40/0xFF opacity.
 	constexpr TCHAR DefaultShadowColorHex[] = TEXT("#00000040");
 
+	FString ApplyOpacity(const FString& Color, float Opacity);
 	FString FormatLiteral(const FColor& Color);
 	FString NormalizeLiteral(const FString& Value);
 

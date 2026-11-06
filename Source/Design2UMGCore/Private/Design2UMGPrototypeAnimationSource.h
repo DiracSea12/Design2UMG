@@ -1,3 +1,5 @@
+// Copyright (c) 2026, Diracsea12. SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include "DesignSchema.h"

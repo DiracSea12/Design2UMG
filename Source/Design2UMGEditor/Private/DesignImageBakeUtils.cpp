@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026, Diracsea12. All Rights Reserved. SPDX-License-Identifier: MIT
 
 #include "DesignImageBakeUtils.h"
+#include "UMGValueParsing.h"
 #include "DesignRemoteImageImporterInternal.h"
 
 #include "Design2UMGLog.h"
@@ -97,7 +98,7 @@ namespace
 
 			if (Candidate.Type == EDesignFillType::Color && !Candidate.SolidColor.IsEmpty())
 			{
-				OutColor = Candidate.SolidColor;
+				OutColor = TEXT("#") + FUMGValueParser::ParseColor(Candidate.SolidColor, Candidate.Opacity).ToFColor(true).ToHex();
 				return true;
 			}
 		}

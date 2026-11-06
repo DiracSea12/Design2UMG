@@ -5,6 +5,7 @@
 #include "DesignSchema.h"
 #include "DesignSchemaSourceExtensions.h"
 #include "DesignVariableResolver.h"
+#include "DesignJsonUtils.h"
 #include "DesignTreeLimits.h"
 #include "PenParserInternal.h"
 #include "Dom/JsonObject.h"
@@ -235,10 +236,8 @@ bool ParseNodes(const FString& Text, const FString& Scope, const FString& Source
 	struct FPending { TSharedPtr<FJsonValue> Value; FString Path; int32 Depth; bool bNode; };
 	TArray<FPending> Pending;
 	for (int32 I = 0; I < Roots.Num(); ++I) Pending.Add({Roots[I], FString::FromInt(I), 0, true});
-	TMap<FString, FString> Ids;
 	const FString Prefix = TEXT("sc_") + Hash(Scope) + TEXT("_");
 	int32 Count = 0;
-	TArray<TSharedPtr<FJsonObject>> Objects;
 	while (!Pending.IsEmpty())
 	{
 #if UE_VERSION_OLDER_THAN(5, 4, 0)
@@ -246,21 +245,17 @@ bool ParseNodes(const FString& Text, const FString& Scope, const FString& Source
 #else
 		FPending Item = Pending.Pop(EAllowShrinking::No);
 #endif
-		if (++Count > DesignTreeLimits::MaxParsedNodeCount || Item.Depth > DesignTreeLimits::MaxNodeDepth) return Fail(Error, TEXT("Generated script tree exceeds the design tree budget."));
+		if (Item.Depth > DesignTreeLimits::MaxNodeDepth) return Fail(Error, TEXT("Generated script tree exceeds the design tree depth."));
 		if (!Item.Value.IsValid() || Item.Value->Type != EJson::Object) return Fail(Error, TEXT("Script node must be an object."));
 		auto Object = Item.Value->AsObject();
-		Objects.Add(Object);
 		if (Item.bNode)
 		{
-			FString Type, Id;
+			if (++Count > 1000) return Fail(Error, TEXT("Script output cannot exceed 1000 nodes."));
+			if (DesignJsonUtils::GetBool(Object, TEXT("reusable"), false)) return Fail(Error, TEXT("Reusable nodes are not supported in script outputs."));
+			FString Type;
 			if (!Object->TryGetStringField(TEXT("type"), Type) || PenParser::ParseNodeType(Type) == EDesignNodeType::Unknown) return Fail(Error, TEXT("Unknown or missing generated node type: ") + Type);
-			if (Object->HasField(TEXT("id")))
-			{
-				if (!Object->TryGetStringField(TEXT("id"), Id) || Id.IsEmpty() || Id.Contains(TEXT("/")) || Ids.Contains(Id)) return Fail(Error, TEXT("Invalid or duplicate generated node ID."));
-				const FString Scoped = Prefix + TEXT("e_") + Hash(Id);
-				Ids.Add(Id, Scoped); Object->SetStringField(TEXT("id"), Scoped);
-			}
-			else Object->SetStringField(TEXT("id"), Prefix + TEXT("a_") + Hash(Item.Path));
+			if (Type == TEXT("connection")) return Fail(Error, TEXT("Connection nodes are not supported in script outputs."));
+			Object->SetStringField(TEXT("id"), Prefix + Hash(Item.Path));
 		}
 		const auto Children = Object->TryGetField(TEXT("children"));
 		if (Children.IsValid())
@@ -277,24 +272,6 @@ bool ParseNodes(const FString& Text, const FString& Scope, const FString& Source
 				Pending.Add({Pair.Value, Item.Path + TEXT(".descendants.") + Pair.Key, Item.Depth + 1,
 					Pair.Value->AsObject()->HasField(TEXT("type"))});
 			}
-		}
-	}
-	// Rewrite only node/reference semantics; metadata and input strings remain source values.
-	for (int32 I = 0; I < Objects.Num(); ++I)
-	{
-		auto Object = Objects[I]; FString Ref;
-		if (Object->TryGetStringField(TEXT("ref"), Ref)) if (const FString* Scoped = Ids.Find(Ref)) Object->SetStringField(TEXT("ref"), *Scoped);
-		const auto Descendants = Object->TryGetField(TEXT("descendants"));
-		if (Descendants.IsValid() && Descendants->Type == EJson::Object)
-		{
-			auto Renamed = MakeShared<FJsonObject>();
-			for (const auto& Pair : Descendants->AsObject()->Values)
-			{
-				TArray<FString> Segments; FString(*Pair.Key).ParseIntoArray(Segments, TEXT("/"), false);
-				for (FString& Segment : Segments) if (const FString* Scoped = Ids.Find(Segment)) Segment = *Scoped;
-				Renamed->SetField(FString::Join(Segments, TEXT("/")), Pair.Value);
-			}
-			Object->SetObjectField(TEXT("descendants"), Renamed);
 		}
 	}
 	return PenParser::ParseGeneratedNodes(Roots, SourcePath, Resolver, Out, Error);

@@ -241,11 +241,11 @@ void WireSimplePrototypeBindings(
 
 	const bool bNeedsAnimationLifecycle = NavigationData.ClickBindings.ContainsByPredicate([](const FUMGPrototypeNavigationBinding& Binding)
 	{
-		return (!Binding.Transition.WidgetAnimationName.IsEmpty() && Binding.Transition.Diagnostic.IsEmpty())
+		return (!Binding.PrimaryStep().Transition.WidgetAnimationName.IsEmpty() && Binding.PrimaryStep().Transition.Diagnostic.IsEmpty())
 			|| Binding.UsesPageOpenTrigger()
 			|| ((Binding.UsesHoverTrigger() || Binding.UsesPressTrigger()) && Binding.Steps.ContainsByPredicate(
 				[](const FUMGPrototypeNavigationStep& Step) { return Step.Kind == EUMGPrototypeNavigationStepKind::Navigate; }))
-			|| ((Binding.UsesHoverTrigger() || Binding.UsesPressTrigger()) && !Binding.Transition.StateHostWidgetId.IsEmpty())
+			|| ((Binding.UsesHoverTrigger() || Binding.UsesPressTrigger()) && !Binding.PrimaryStep().Transition.StateHostWidgetId.IsEmpty())
 			|| ((Binding.UsesHoverTrigger() || Binding.UsesPressTrigger()) && Binding.HasOverlayAction());
 	});
 	// Refresh after cleanup so removed generated functions no longer reserve their names.

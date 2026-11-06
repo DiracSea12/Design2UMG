@@ -64,7 +64,7 @@ namespace
 			return false;
 		}
 
-		OutColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor);
+		OutColor = FUMGValueParser::ParseColor(Stroke.Fill->SolidColor, Stroke.Fill->Opacity);
 		return true;
 	}
 

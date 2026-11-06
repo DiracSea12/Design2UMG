@@ -295,8 +295,8 @@ namespace
 		TSet<FString> AnimatedIds;
 		for (const auto& Binding : Data.PrototypeNavigation().ClickBindings)
 		{
-			for (const auto& Target : Binding.Transition.WidgetTargets) AnimatedIds.Add(Target.NodeId);
-			for (const auto& Live : Binding.Transition.LivePresentations)
+			for (const auto& Target : Binding.PrimaryStep().Transition.WidgetTargets) AnimatedIds.Add(Target.NodeId);
+			for (const auto& Live : Binding.PrimaryStep().Transition.LivePresentations)
 			{
 				AnimatedIds.Add(Live.WidgetId);
 				AnimatedIds.Add(Live.OriginalSocketWidgetId);
@@ -308,7 +308,7 @@ namespace
 					for (const auto& State : Host->States) AnimatedIds.Add(State.WidgetId);
 				}
 			}
-			for (const auto& Target : Binding.Transition.LayoutTargets)
+			for (const auto& Target : Binding.PrimaryStep().Transition.LayoutTargets)
 			{
 				AnimatedIds.Add(Target.NodeId);
 				AnimatedIds.Add(Target.DestinationWidgetId);

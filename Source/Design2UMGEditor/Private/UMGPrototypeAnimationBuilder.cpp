@@ -295,9 +295,6 @@ namespace
 	FAnimationWidget SurfaceOwner(const FAnimationWidget& Target)
 	{
 		FAnimationWidget Visual = ColorOwner(Target);
-		if (Visual.Node->Type == TEXT("Overlay") && !Visual.Node->Children.IsEmpty()
-			&& Visual.Node->Children[0].Id == Visual.Node->Id + TEXT("__layout_content"))
-			Visual = {CastChecked<UPanelWidget>(Visual.Widget)->GetChildAt(0), &Visual.Node->Children[0]};
 		if (Visual.Node->Type == TEXT("Overlay") && Visual.Node->Children.Num() == 2
 			&& Visual.Node->Children[0].Effect.SurfacePaints.IsSet())
 			return {CastChecked<UPanelWidget>(Visual.Widget)->GetChildAt(0), &Visual.Node->Children[0]};
@@ -1241,7 +1238,7 @@ namespace
 	void GeneratePageAnimation(UWidgetBlueprint* Blueprint, const FUMGWidgetNode& Root, const FSourceWidgets& SourceWidgets,
 		const FUMGPrototypeNavigationData& Navigation, FUMGPrototypeNavigationBinding& Binding, int32 Index)
 	{
-		auto& Transition = Binding.Transition;
+		auto& Transition = Binding.PrimaryStep().Transition;
 		if (Binding.Steps.Num() != 1 || !Transition.IsAnimated() || !Transition.Diagnostic.IsEmpty()) return;
 		const bool bOverlay = Binding.Steps[0].Kind == EUMGPrototypeNavigationStepKind::Overlay;
 		if (!bOverlay && Binding.Steps[0].Kind != EUMGPrototypeNavigationStepKind::Navigate) return;
@@ -1411,9 +1408,9 @@ void ResolvePreparedPlacements(UWidgetBlueprint* Blueprint, const TMap<UWidget*,
 	if (NavigationData)
 		for (auto& Binding : NavigationData->ClickBindings)
 		{
-			if (UWidget* const* Placement = PlacementNames.Find(FName(*Binding.Transition.LayoutOriginalWidgetName)))
-				Binding.Transition.LayoutOriginalWidgetName = (*Placement)->GetName();
-			for (auto& Live : Binding.Transition.LivePresentations)
+			if (UWidget* const* Placement = PlacementNames.Find(FName(*Binding.PrimaryStep().Transition.LayoutOriginalWidgetName)))
+				Binding.PrimaryStep().Transition.LayoutOriginalWidgetName = (*Placement)->GetName();
+			for (auto& Live : Binding.PrimaryStep().Transition.LivePresentations)
 				if (UWidget* const* Placement = PlacementNames.Find(FName(*Live.WidgetName)))
 					Live.WidgetName = (*Placement)->GetName();
 		}
@@ -1463,7 +1460,7 @@ void ResolvePreparedPlacements(UWidgetBlueprint* Blueprint, const TMap<UWidget*,
 	}
 	if (!NavigationData) return;
 	for (auto& Binding : NavigationData->ClickBindings)
-		for (auto& Order : Binding.Transition.LayerOrders)
+		for (auto& Order : Binding.PrimaryStep().Transition.LayerOrders)
 			if (UWidget* const* Placement = PlacementNames.Find(*Order.WidgetName))
 			{
 				Order.WidgetName = (*Placement)->GetName();
@@ -1516,6 +1513,12 @@ void GenerateNavigationAnimations(
 		if (!Node.Id.IsEmpty()) TargetIds.Add(Widget->GetFName(), Node.Id);
 	});
 	Design2UMGAnimationPresets::RecordSourceTargets(WidgetBlueprint, TargetIds);
+	RemoveGeneratedAnimations(WidgetBlueprint);
+
+	if (!NavigationData.IsValid())
+	{
+		return;
+	}
 	const FSourceWidgets SourceWidgets(RootNode, WidgetBlueprint->WidgetTree->RootWidget);
 	const auto ResolveName = [&](const FString& Id, FString& Name)
 	{
@@ -1525,7 +1528,7 @@ void GenerateNavigationAnimations(
 	for (auto& Host : NavigationData.StateHosts)
 		for (auto& State : Host.States) ResolveName(State.WidgetId, State.WidgetName);
 	for (auto& Binding : NavigationData.ClickBindings)
-		for (auto& Live : Binding.Transition.LivePresentations)
+		for (auto& Live : Binding.PrimaryStep().Transition.LivePresentations)
 		{
 			ResolveName(Live.WidgetId, Live.WidgetName);
 			ResolveName(Live.OriginalSocketWidgetId, Live.OriginalSocketWidgetName);
@@ -1535,13 +1538,7 @@ void GenerateNavigationAnimations(
 	// Regeneration replaces generated animations and recomputes their names.
 	for (FUMGPrototypeNavigationBinding& Binding : NavigationData.ClickBindings)
 	{
-		Binding.Transition.WidgetAnimationName.Reset();
-	}
-	RemoveGeneratedAnimations(WidgetBlueprint);
-
-	if (!NavigationData.IsValid())
-	{
-		return;
+		Binding.PrimaryStep().Transition.WidgetAnimationName.Reset();
 	}
 	const auto Drop = [&](FUMGPrototypeTransitionData& Plan, const FString& Error)
 	{
@@ -1561,9 +1558,9 @@ void GenerateNavigationAnimations(
 		{
 			auto& Binding = NavigationData.ClickBindings[Index];
 			if ((Design2UMGPrototypeGraphWiring::IsSimpleMouseActionBinding(Binding) || Binding.UsesPageOpenTrigger())
-				&& Binding.Steps.Num() == 1 && (!Binding.Transition.WidgetTargets.IsEmpty() || !Binding.Transition.LayerOrders.IsEmpty() || Binding.Transition.bFixedViewportLayout))
+				&& Binding.Steps.Num() == 1 && (!Binding.PrimaryStep().Transition.WidgetTargets.IsEmpty() || !Binding.PrimaryStep().Transition.LayerOrders.IsEmpty() || Binding.PrimaryStep().Transition.bFixedViewportLayout))
 			{
-				GenerateWidgetAnimation(WidgetBlueprint, SourceWidgets, Probe, Refresh, Binding.Transition, Index,
+				GenerateWidgetAnimation(WidgetBlueprint, SourceWidgets, Probe, Refresh, Binding.PrimaryStep().Transition, Index,
 					Binding.UsesHoverTrigger() || Binding.UsesPressTrigger(), SharedFrames);
 			}
 		}
@@ -1582,7 +1579,7 @@ void GenerateNavigationAnimations(
 	{
 		const FString Name = Animation->GetName();
 		for (auto& Binding : NavigationData.ClickBindings)
-			if (Binding.Transition.WidgetAnimationName == Name) Drop(Binding.Transition, Error);
+			if (Binding.PrimaryStep().Transition.WidgetAnimationName == Name) Drop(Binding.PrimaryStep().Transition, Error);
 	});
 	for (int32 Index = 0; Index < NavigationData.ClickBindings.Num(); ++Index)
 		GeneratePageAnimation(WidgetBlueprint, RootNode, SourceWidgets, NavigationData, NavigationData.ClickBindings[Index], Index);

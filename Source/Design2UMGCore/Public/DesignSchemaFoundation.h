@@ -302,6 +302,7 @@ struct FDesignFill
 
 	UPROPERTY()
 	bool bEnabled = true;
+	/** Paint opacity is separate from the authored color and gradient-stop alpha. */
 	UPROPERTY()
 	float Opacity = 1.0f;
 	UPROPERTY()

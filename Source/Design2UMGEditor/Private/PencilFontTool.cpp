@@ -175,7 +175,7 @@ namespace
                 Error = FPencilFontToolText().Get(TEXT("FileVerificationFailed"), {{TEXT("File"), RelativePath}}); return false;
             }
         }
-        if (!HashFile(Directory / TEXT("PencilFontWorker.exe"), BinaryHash))
+		if (!(*Files)->GetStringField(TEXT("PencilFontWorker.exe")).Equals(BinaryHash, ESearchCase::IgnoreCase))
         {
             Error = FPencilFontToolText().Get(TEXT("BinaryVerificationFailed")); return false;
         }

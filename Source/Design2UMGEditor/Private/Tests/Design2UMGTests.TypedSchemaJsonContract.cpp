@@ -285,7 +285,7 @@ bool FUMGSchemaSourceExtensionsRemainOptInTest::RunTest(const FString& Parameter
 	FUMGPrototypeNavigationBinding& Binding = Data.MutablePrototypeNavigation().ClickBindings.AddDefaulted_GetRef();
 	Binding.TriggerWidgetId = TEXT("cta_button");
 	Binding.TriggerWidgetName = TEXT("cta_button");
-	Binding.Action = EUMGPrototypeNavigationAction::Back;
+	Binding.Steps.AddDefaulted_GetRef().Kind = EUMGPrototypeNavigationStepKind::Back;
 
 	TestTrue(TEXT("Explicit UMG source document mutation materializes extension"), Data.HasSourceDocumentData());
 	TestTrue(TEXT("Explicit UMG prototype navigation mutation materializes extension"), Data.HasPrototypeNavigationData());

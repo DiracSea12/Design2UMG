@@ -127,9 +127,9 @@ namespace Design2UMGConverterVisualSupport
 		}
 
 		const FDesignFill& PrimaryFill = Node->Visual.TopmostFill();
-		const FString FillColor = MatchesHexColorShape(PrimaryFill.SolidColor) ? PrimaryFill.SolidColor : FString();
+		const FString FillColor = MatchesHexColorShape(PrimaryFill.SolidColor) ? DesignColorUtils::ApplyOpacity(PrimaryFill.SolidColor, PrimaryFill.Opacity) : FString();
 		const FString StrokeColor = (Node->Visual.Stroke.Fill.IsSet() && MatchesHexColorShape(Node->Visual.Stroke.Fill.GetValue().SolidColor))
-			? Node->Visual.Stroke.Fill.GetValue().SolidColor
+			? DesignColorUtils::ApplyOpacity(Node->Visual.Stroke.Fill->SolidColor, Node->Visual.Stroke.Fill->Opacity)
 			: FString();
 		const FString PlaceholderOutlineColor =
 			(!StrokeColor.IsEmpty() && !IsNeutralPlaceholderColor(StrokeColor)) ? StrokeColor : DefaultPlaceholderOutlineColor;

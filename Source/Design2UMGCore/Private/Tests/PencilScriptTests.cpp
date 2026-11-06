@@ -51,14 +51,16 @@ bool FPencilScriptContractTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Only the typed effective reference is collected"), References.Num(), 1);
 	if (References.Num() == 1) TestEqual(TEXT("Override replaces default dependency"), References[0], FString(TEXT("actual")));
 	TArray<TSharedPtr<FDesignNode>> Nodes;
-	const FString JSON = TEXT(R"([{"type":"frame","id":"component","reusable":true,"width":10,"height":10,"children":[{"type":"rectangle","id":"leaf","width":3,"height":4,"fill":"#ff0000"}]},{"type":"ref","ref":"component","descendants":{"leaf":{"opacity":0.5}}},{"type":"text","content":"generated"}])");
+	const FString JSON = TEXT(R"([{"type":"frame","id":"component","width":10,"height":10,"children":[{"type":"rectangle","id":"leaf","width":3,"height":4,"fill":"#ff0000"}]},{"type":"ref","ref":"component","descendants":{"leaf":{"opacity":0.5}}},{"type":"text","content":"generated"}])");
 	TestTrue(TEXT("Generated nodes use production parser"), PencilScript::ParseNodes(JSON, TEXT("scope-one"), FString(), Resolver, Nodes, Error));
 	if (Nodes.Num() != 3) return false;
-	TestEqual(TEXT("Internal ref follows stable component ID"), Nodes[1]->Ref, Nodes[0]->Id);
+	TestEqual(TEXT("External component reference is not rewritten by a matching generated ID"), Nodes[1]->Ref, FString(TEXT("component")));
 	FDesignDocument Generated;
-	Generated.Children = Nodes;
+	if (!TestTrue(TEXT("External components use the source document parser"), FPenParser::ParseDocument(
+		TEXT(R"({"version":"2.11","children":[{"type":"frame","id":"component","reusable":true,"children":[{"type":"rectangle","id":"leaf","width":3,"height":4}]}]})"), Generated))) return false;
+	Generated.Children.Append(Nodes);
 	const FDesignReferenceExpansionResult Expanded = RefExpander::ExpandRef(Nodes[1], Generated);
-	TestTrue(TEXT("Generated internal reference really expands"), Expanded.IsSuccess());
+	TestTrue(TEXT("Generated external reference really expands"), Expanded.IsSuccess());
 	TArray<TSharedPtr<FDesignNode>> Again;
 	TestTrue(TEXT("Stable parse repeated"), PencilScript::ParseNodes(JSON, TEXT("scope-one"), FString(), Resolver, Again, Error));
 	TestEqual(TEXT("Missing ID deterministic"), Again[2]->Id, Nodes[2]->Id);
@@ -66,24 +68,27 @@ bool FPencilScriptContractTest::RunTest(const FString& Parameters)
 	PencilScript::ParseNodes(JSON, TEXT("scope-two"), FString(), Resolver, OtherScope, Error);
 	TestNotEqual(TEXT("Different instance scopes remain distinct"), OtherScope[0]->Id, Nodes[0]->Id);
 	const FString OverridesJSON = TEXT(R"json([
-		{"type":"frame","id":"base","reusable":true,"children":[{"type":"frame","id":"slot"},{"type":"rectangle","id":"remove"}]},
-		{"type":"rectangle","id":"paint","reusable":true,"width":3,"height":4},
 		{"type":"ref","id":"instance","ref":"base","descendants":{
 			"slot":{"children":[{"type":"ref","id":"inserted","ref":"paint","name":"paint","metadata":{"ref":"paint","id":"inserted"}}]},
 			"remove":{"type":"ref","id":"replacement","ref":"paint"}}}
 	])json");
 	if (!TestTrue(TEXT("Override nodes parse through production parser"), PencilScript::ParseNodes(OverridesJSON, TEXT("instance-one"), FString(), Resolver, Nodes, Error))) return false;
-	if (!TestEqual(TEXT("Override fixture roots"), Nodes.Num(), 3)) return false;
-	Generated.Children = Nodes;
-	const auto OverrideExpansion = RefExpander::ExpandRef(Nodes[2], Generated);
+	if (!TestEqual(TEXT("Override fixture roots"), Nodes.Num(), 1)) return false;
+	FDesignDocument Components;
+	if (!TestTrue(TEXT("Override components are defined outside the script"), FPenParser::ParseDocument(TEXT(R"({"version":"2.11","children":[
+		{"type":"frame","id":"base","reusable":true,"children":[{"type":"frame","id":"slot"},{"type":"rectangle","id":"remove"}]},
+		{"type":"rectangle","id":"paint","reusable":true,"width":3,"height":4}]})"), Components))) return false;
+	Generated.Children = Components.Children;
+	Generated.Children.Append(Nodes);
+	const auto OverrideExpansion = RefExpander::ExpandRef(Nodes[0], Generated);
 	if (!TestTrue(TEXT("Scoped descendant paths expand"), OverrideExpansion.IsSuccess())) return false;
 	const auto& Children = OverrideExpansion.ExpandedNode->Children;
 	if (!TestEqual(TEXT("Both descendants survive"), Children.Num(), 2)) return false;
 	if (!TestEqual(TEXT("Patch children survive"), Children[0]->Children.Num(), 1)) return false;
 	const auto Inserted = Children[0]->Children[0];
 	const auto Replacement = Children[1];
-	TestEqual(TEXT("Patch child ref uses local scoped target"), Inserted->Ref, Nodes[1]->Id);
-	TestEqual(TEXT("Replacement ref uses local scoped target"), Replacement->Ref, Nodes[1]->Id);
+	TestEqual(TEXT("Patch child ref retains external component target"), Inserted->Ref, FString(TEXT("paint")));
+	TestEqual(TEXT("Replacement ref retains external component target"), Replacement->Ref, FString(TEXT("paint")));
 	TestNotEqual(TEXT("Inserted ID is scoped"), Inserted->Id, FString(TEXT("inserted")));
 	TestNotEqual(TEXT("Replacement ID is scoped"), Replacement->Id, FString(TEXT("replacement")));
 	TestEqual(TEXT("An ordinary string remains unchanged"), Inserted->Name, FString(TEXT("paint")));
@@ -94,11 +99,21 @@ bool FPencilScriptContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The replacement reference really expands"), RefExpander::ExpandRef(Replacement, Generated).IsSuccess());
 	TArray<TSharedPtr<FDesignNode>> ScopedOverrides;
 	if (!TestTrue(TEXT("Another instance parses"), PencilScript::ParseNodes(OverridesJSON, TEXT("instance-two"), FString(), Resolver, ScopedOverrides, Error))) return false;
-	FDesignDocument OtherDocument; OtherDocument.Children = ScopedOverrides;
-	const auto OtherExpansion = RefExpander::ExpandRef(ScopedOverrides[2], OtherDocument);
+	FDesignDocument OtherDocument; OtherDocument.Children = Components.Children;
+	OtherDocument.Children.Append(ScopedOverrides);
+	const auto OtherExpansion = RefExpander::ExpandRef(ScopedOverrides[0], OtherDocument);
 	if (!TestTrue(TEXT("Other instance expands"), OtherExpansion.IsSuccess())) return false;
 	TestNotEqual(TEXT("Replacement IDs differ across instances"), OtherExpansion.ExpandedNode->Children[1]->Id, Replacement->Id);
 	TestFalse(TEXT("Invalid return is explicit error"), PencilScript::ParseNodes(TEXT("{}"), TEXT("scope"), FString(), Resolver, Again, Error));
+	TestFalse(TEXT("Scripts cannot define reusable components"), PencilScript::ParseNodes(
+		TEXT(R"([{"type":"frame","reusable":true}])"), TEXT("scope"), FString(), Resolver, Again, Error));
+	TestFalse(TEXT("Scripts cannot define connections"), PencilScript::ParseNodes(
+		TEXT(R"([{"type":"connection"}])"), TEXT("scope"), FString(), Resolver, Again, Error));
+	FString Repeated = TEXT("[");
+	for (int32 Index = 0; Index < 1000; ++Index) Repeated += Index ? TEXT(",{\"type\":\"frame\"}") : TEXT("{\"type\":\"frame\"}");
+	TestTrue(TEXT("The script node limit is inclusive"), PencilScript::ParseNodes(Repeated + TEXT("]"), TEXT("scope"), FString(), Resolver, Again, Error));
+	TestFalse(TEXT("Nested children count toward the script node limit"), PencilScript::ParseNodes(
+		TEXT("[{\"type\":\"frame\",\"children\":") + Repeated + TEXT("]}]"), TEXT("scope"), FString(), Resolver, Again, Error));
 	return true;
 }
 

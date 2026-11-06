@@ -93,12 +93,12 @@ namespace Design2UMGPrototypeStepGraph
 		Design2UMGPrototypeAnimationSource::Resolve(Document, Analysis.Data, Warnings);
 		Analysis.Data.ClickBindings.RemoveAll([](const FUMGPrototypeNavigationBinding& Binding)
 		{
-			return !Binding.Transition.Diagnostic.IsEmpty();
+			return !Binding.PrimaryStep().Transition.Diagnostic.IsEmpty();
 		});
 		Analysis.Data.StateHosts.RemoveAll([&Analysis](const FUMGPrototypeStateHost& Host)
 		{
 			return !Analysis.Data.ClickBindings.ContainsByPredicate([&Host](const FUMGPrototypeNavigationBinding& Binding)
-			{ return Binding.Transition.StateHostWidgetId == Host.HostWidgetId; });
+			{ return Binding.PrimaryStep().Transition.StateHostWidgetId == Host.HostWidgetId; });
 		});
 		Analysis.TriggerNodeIds.Reset();
 		for (const FUMGPrototypeNavigationBinding& Binding : Analysis.Data.ClickBindings)

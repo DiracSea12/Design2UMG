@@ -3,6 +3,7 @@
 #include "FigmaParserText.h"
 #include "FigmaParserStyling.h"
 #include "DesignJsonUtils.h"
+#include "DesignColorUtils.h"
 #include "FontResolver.h"
 #include "ParserSharedSemantics.h"
 #include "Containers/StringConv.h"
@@ -133,7 +134,7 @@ using DesignJsonUtils::GetObject;
 					}
 					else if (Fills.Num() == 1 && Fills[0].Type == EDesignFillType::Color)
 					{
-						Run.Color = Fills[0].SolidColor;
+						Run.Color = DesignColorUtils::ApplyOpacity(Fills[0].SolidColor, Fills[0].Opacity);
 					}
 					else
 					{

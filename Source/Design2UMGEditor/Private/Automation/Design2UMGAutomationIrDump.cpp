@@ -284,22 +284,6 @@ namespace
 		}
 	}
 
-	const TCHAR* PrototypeNavigationActionName(const EUMGPrototypeNavigationAction Value)
-	{
-		switch (Value)
-		{
-		case EUMGPrototypeNavigationAction::Navigate: return TEXT("Navigate");
-		case EUMGPrototypeNavigationAction::Overlay: return TEXT("Overlay");
-		case EUMGPrototypeNavigationAction::Back: return TEXT("Back");
-		case EUMGPrototypeNavigationAction::CloseOverlay: return TEXT("CloseOverlay");
-		case EUMGPrototypeNavigationAction::OpenLink: return TEXT("OpenLink");
-		case EUMGPrototypeNavigationAction::SetVariable: return TEXT("SetVariable");
-		case EUMGPrototypeNavigationAction::SetVariableMode: return TEXT("SetVariableMode");
-		case EUMGPrototypeNavigationAction::Conditional: return TEXT("Conditional");
-		default: return TEXT("Unknown");
-		}
-	}
-
 	const TCHAR* PrototypeNavigationStepKindName(const EUMGPrototypeNavigationStepKind Value)
 	{
 		switch (Value)
@@ -759,11 +743,6 @@ namespace
 			}
 			Fields.Add(FJsonField(TEXT("TriggerKeyCodes"), RenderArray(KeyCodes)));
 		}
-		AddString(Fields, TEXT("TargetPageId"), Binding.TargetPageId);
-		AddInt(Fields, TEXT("TargetPageIndex"), Binding.TargetPageIndex);
-		AddString(Fields, TEXT("Action"), PrototypeNavigationActionName(Binding.Action));
-		AddString(Fields, TEXT("ExternalUrl"), Binding.ExternalUrl);
-		Fields.Add(FJsonField(TEXT("Transition"), RenderTransitionData(Binding.Transition)));
 		Fields.Add(FJsonField(
 			TEXT("Steps"),
 			RenderObjectArray<FUMGPrototypeNavigationStep>(

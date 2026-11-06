@@ -277,7 +277,7 @@ bool FNativeAnimationSpringTracksTest::RunTest(const FString&)
 	Binding.TriggerWidgetId = TEXT("trigger"); Binding.TriggerWidgetName = TEXT("MotionButton"); Binding.TriggerType = TEXT("ON_CLICK");
 	auto& Step = Binding.Steps.AddDefaulted_GetRef();
 	Step.Kind = EUMGPrototypeNavigationStepKind::AnimateWidget; Step.TargetPageId = TEXT("state");
-	auto& Transition = Binding.Transition;
+	auto& Transition = Binding.PrimaryStep().Transition;
 	Transition.DurationSeconds = 0.5f;
 	Transition.bSpring = true; Transition.SpringMass = 1; Transition.SpringStiffness = 100; Transition.SpringDamping = 10;
 	auto& Target = Transition.WidgetTargets.AddDefaulted_GetRef();

@@ -47,23 +47,23 @@ namespace
 
 namespace FUMGValueParser
 {
-	FLinearColor ParseColor(const FString& ColorStr)
+	FLinearColor ParseColor(const FString& ColorStr, float Opacity)
 	{
-		FString Trimmed = ColorStr.TrimStartAndEnd();
+		FString Trimmed = DesignColorUtils::ApplyOpacity(ColorStr, Opacity).TrimStartAndEnd();
 
 		if (Trimmed.StartsWith(TEXT("#")))
 		{
 			return DesignColorUtils::ParseHexColor(Trimmed);
 		}
 
-	if (const FLinearColor* Named = DesignColorUtils::GetNamedColors().Find(Trimmed.ToLower()))
-	{
-		return *Named;
-	}
+		if (const FLinearColor* Named = DesignColorUtils::GetNamedColors().Find(Trimmed.ToLower()))
+		{
+			return *Named;
+		}
 
-	UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown color '%s'; defaulting to White."), *ColorStr);
-	return FLinearColor::White;
-}
+		UE_LOG(LogDesign2UMG, Warning, TEXT("Unknown color '%s'; defaulting to White."), *ColorStr);
+		return FLinearColor::White;
+	}
 
 	EUMGSlotHorizontalAlignment ParseSlotHorizontalAlignment(const FString& Str)
 	{
