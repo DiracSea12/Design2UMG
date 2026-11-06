@@ -160,6 +160,15 @@ class EditorProcessEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exit codes"):
             self.summary(result, codes=[17])
 
+    def test_missing_case_retry_retains_primary_driver_numbers(self):
+        states = [{"case": {"name": name}, "spec_paths": [self.root / (name + ".json")],
+                   "steps": {"generation": {"result_json_path": self.root / (name + "-result.json")}}}
+                  for name in ("first", "second")]
+        with patch.object(suite, "run_execution_shard", return_value={"exit_code": 0, "spec_count": 1}) as run:
+            suite.run_execution_cases(states, self.root, "editor", "project", 10, 10, "")
+            suite.rerun_missing_steps(states, self.root, "editor", "project", 10, 10, "", editor_isolation="case")
+        self.assertEqual([call.args[0]["id"] for call in run.call_args_list], [0, 1, 2, 3])
+
     def test_case_report_uses_produced_validity_not_the_nonzero_exit_code(self):
         for crash in (False, True):
             with self.subTest(crash=crash):

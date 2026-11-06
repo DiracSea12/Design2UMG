@@ -595,10 +595,17 @@ namespace VisualMapperFillTransfer
 
         if (VisualMapper::RequiresSourceContour(*Node) && !bHasSourceStrokePaths)
         {
+            FUMGEffectData Contour;
+            FString Error;
+            if (!VisualMapper::BuildSourceContour(*Node, Contour, Error))
+            {
+                UE_LOG(LogDesign2UMG, Error, TEXT("%s"), *Error);
+                return MoveTemp(Widget);
+            }
             FUMGPathData Mask;
-            Mask.CanvasSize = FVector2D(Node->Shape.ViewBox->Z, Node->Shape.ViewBox->W);
-            Mask.ViewBox = Node->Shape.ViewBox;
-            const auto& FillPaths = Node->Shape.PaintGeometry.FillPaths.GetValue();
+            Mask.CanvasSize = Contour.GeometryMaskSize;
+            Mask.ViewBox = FVector4(0, 0, Mask.CanvasSize->X, Mask.CanvasSize->Y);
+            const auto& FillPaths = Contour.GeometryMaskPaths.GetValue();
             FString Geometry;
             for (const auto& Path : FillPaths) Geometry += Path.Path + TEXT(" ");
             Mask.Geometry = MoveTemp(Geometry);
@@ -613,7 +620,6 @@ namespace VisualMapperFillTransfer
             else
             {
                 FDesignGeometryPath Region;
-                FString Error;
                 // BuildSourceContour validates this supported source edge junction before conversion.
                 if (!DesignRoundedContour::BuildInsideStroke(Mask.CanvasSize.GetValue(), Node->Visual.CornerRadius,
                         Node->Visual.Stroke.Thickness, Region, Error))

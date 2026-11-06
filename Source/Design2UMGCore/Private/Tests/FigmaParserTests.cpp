@@ -1258,6 +1258,12 @@ bool FFigmaNativeWidgetAnimationContractTest::RunTest(const FString&)
 	FString CanvasError;
 	TestTrue(TEXT("Measured HUG size transfers to parameter contour"), VisualMapper::BuildSourceContour(MeasuredCanvas, ParameterContour, CanvasError)
 		&& ParameterContour.GeometryMaskSize.Get(FVector2D::ZeroVector).Equals(FVector2D(149, 40)));
+	FUMGWidgetNode ParameterSurface;
+	ParameterSurface.Type = UMGWidgetTypes::Border;
+	const auto ParameterStroke = VisualMapperFillTransfer::WrapWithPaintedStroke(MoveTemp(ParameterSurface), MakeShared<FDesignNode>(MeasuredCanvas));
+	TestTrue(TEXT("Parameter strokes resolve their contour without an exported view box"), !MeasuredCanvas.Shape.ViewBox.IsSet()
+		&& !ParameterStroke.Children.IsEmpty() && ParameterStroke.Children.Last().Path.CanvasSize.Get(FVector2D::ZeroVector).Equals(FVector2D(149, 40))
+		&& ParameterStroke.Children.Last().Path.ViewBox.IsSet() && ParameterStroke.Children.Last().Path.Geometry.IsSet());
 	MeasuredCanvas.Shape.PaintGeometry.FillPaths = TArray<FDesignGeometryPath>{{TEXT("M0 0L40 0L40 40L0 40Z"), TEXT("nonzero")}};
 	FUMGEffectData ExportedContour;
 	TestTrue(TEXT("Exported paths retain their source local canvas"), VisualMapper::BuildSourceContour(MeasuredCanvas, ExportedContour, CanvasError)

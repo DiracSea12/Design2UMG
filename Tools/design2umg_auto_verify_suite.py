@@ -843,12 +843,13 @@ def run_execution_cases(
     idle_timeout_sec: int,
     startup_timeout_sec: int,
     log_cmds: str,
+    start_index: int = 0,
 ) -> list[dict]:
     results = []
     for index, state in enumerate(states):
         case_name = state["case"]["name"]
         case_shard = {
-            "id": index,
+            "id": start_index + index,
             "states": [state],
             "spec_paths": list(state["spec_paths"]),
             "result_paths": [step["result_json_path"] for step in state["steps"].values()],
@@ -1034,6 +1035,7 @@ def rerun_missing_steps(
             idle_timeout_sec,
             startup_timeout_sec,
             log_cmds,
+            start_index=len(states),
         )
         return {
             "shard_id": -1,
