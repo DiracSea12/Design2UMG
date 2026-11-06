@@ -265,15 +265,16 @@ namespace
 
 		void BuildProjectFontAssetIndexIfNeeded()
 		{
+			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+			IAssetRegistry& AR = ARM.Get();
+			AR.WaitForCompletion();
+
 			FScopeLock Lock(&FontIndexMutex);
 
 			if (bProjectFontIndexBuilt)
 				return;
 
 			NormalizedProjectFontAssetIndex.Reset();
-
-			FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-			IAssetRegistry& AR = ARM.Get();
 
 			TArray<FAssetData> FontAssets;
 			AR.GetAssetsByClass(Design2UMGFontAccess::GetAssetClassKey(), FontAssets, true);
